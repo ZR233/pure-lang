@@ -2,10 +2,13 @@ use anyhow::Context;
 
 use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::records::thread_from_record;
-use crate::api::studio::convert::thread_stream::bridge_thread;
+use crate::api::studio::convert::{
+    settings::bridge_settings_snapshot,
+    thread_stream::{bridge_thread, runtime_snapshot},
+};
 use crate::api::studio::types::{
     ArchiveThreadResult, BridgeError, BridgeStudioPromptInput, BridgeThread,
-    StartNewThreadResponse, SubmitPromptResponse,
+    BridgeThreadModelRouteUpdateResponse, StartNewThreadResponse, SubmitPromptResponse,
 };
 use pl_studio_runtime::ThreadModeId;
 
@@ -102,6 +105,37 @@ pub async fn set_thread_mode(thread_id: String, mode: String) -> Result<(), Brid
         .set_thread_mode(&thread_id, thread_mode(mode)?)
         .await?;
     Ok(())
+}
+
+/// Changes a root Thread's durable model route. The active Turn keeps its admitted binding.
+pub async fn set_thread_model_route(
+    thread_id: String,
+    provider_id: String,
+    model: String,
+    effort: Option<String>,
+    expected_thread_revision: u64,
+    expected_settings_revision: u64,
+) -> Result<BridgeThreadModelRouteUpdateResponse, BridgeError> {
+    let bridge = active_bridge().await?;
+    let response = bridge
+        .studio
+        .save_thread_model_route(
+            &thread_id,
+            pl_protocol::studio::SetThreadModelRouteRequest {
+                expected_thread_revision,
+                expected_settings_revision,
+                provider_id,
+                model,
+                effort,
+            },
+        )
+        .await?;
+    Ok(BridgeThreadModelRouteUpdateResponse {
+        runtime: runtime_snapshot(response.runtime),
+        settings: bridge_settings_snapshot(response.settings),
+        mode_default_saved: response.mode_default_saved,
+        warning: response.warning,
+    })
 }
 
 /// Restores an archived session tree with its original identity and history.

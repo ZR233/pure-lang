@@ -5,6 +5,7 @@ use super::runtime::{
     BridgeStudioRecoveryIssueDto, BridgeUninitializedResource, RuntimeSnapshot,
 };
 use super::settings::BridgeStudioSettingsDto;
+use super::thread_stream::BridgeThreadRuntimeSnapshot;
 use super::thread_stream::{BridgeRuntimeCostAmount, BridgeThread};
 use super::updater::BridgeUpdaterStateSnapshot;
 use serde::{Deserialize, Serialize};
@@ -284,6 +285,14 @@ pub enum BridgeSettingsStateSnapshot {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BridgeSettingsStateData {
     pub settings: BridgeStudioSettingsDto,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BridgeThreadModelRouteUpdateResponse {
+    pub runtime: BridgeThreadRuntimeSnapshot,
+    pub settings: BridgeSettingsStateSnapshot,
+    pub mode_default_saved: bool,
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

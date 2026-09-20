@@ -63,7 +63,8 @@ effort = "high"
 标记 unavailable。
 
 主智能体（Main agent）是 root，负责理解需求、制定计划、协调子代理、整合与验证结果。
-它使用 `planner` 模型路由，不是可派发 Profile，不提供启用开关。
+`planner` 只保留为 root 的身份标识；root 的模型 selector 属于各自 Thread，并以当前 Mode 的
+保存值作为新建或切换默认值。主智能体不是可派发 Profile，也不在 Agents 设置页提供独立配置。
 Studio 注册四个系统子代理 Profile：`explorer`、`reviewer` 固定为 unrestricted，
 `executor` 固定为 directory，`worktree_executor` 固定为 worktree。系统 id、名称、用途、指令
 和模式不可编辑；Agents 设置页可以配置其启用状态、provider/model 和模型声明的 effort。
@@ -73,8 +74,9 @@ Studio 注册四个系统子代理 Profile：`explorer`、`reviewer` 固定为 u
 后续等待随订阅取消而释放。该限制仅针对 child，不影响使用同一路由的 root。
 
 每个 child 创建时冻结 Profile id、正文与工作区分配快照，保存初建 provider、model、effort
-与配置 revision。后续配置更新由宿主事件处理：模型绑定在下一 Turn 生效，工具权限和目录按
-热刷新契约更新，不重写创建指令、不偷切物理工作区，也不在每轮回读 SQLite。产品在准备初始
+与配置 revision。后续 Profile 更新只影响未来 child；已有 child 在 provider 配置刷新时仅用
+当前 endpoint、凭据与模型目录重新解析已冻结 selector，不改写 selector、创建指令或物理工作区，
+也不在每轮回读 SQLite。产品在准备初始
 外部资源时接收同一冻结 Profile 快照，不能从父 Agent 配置或非类型化 metadata 猜测权限和
 系统指令。本文保留的是公共功能语义而不是固定 Rust 签名：任何实现 PL host 的产品都必须能
 在外部资源产生副作用之前取得"本次 spawn 已冻结的完整 Profile"，用于按同一 provider、

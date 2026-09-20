@@ -11,9 +11,10 @@ use pl_protocol::ThreadModeId;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, CreateThreadRequest,
     ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest, OpenProjectRequest,
-    RenameThreadRequest, ResolveInteractionRequest, SearchSkillsRequest, SetModelRoleRequest,
-    SetThreadModeRequest, StudioAttachmentAdmissionContext, StudioAttachmentDraftSource,
-    StudioError, StudioSettingsSnapshot, SubmitPromptRequest, ThreadPageQuery,
+    RenameThreadRequest, ResolveInteractionRequest, SearchSkillsRequest, SetModeModelRouteRequest,
+    SetModelRoleRequest, SetThreadModeRequest, SetThreadModelRouteRequest,
+    StudioAttachmentAdmissionContext, StudioAttachmentDraftSource, StudioError,
+    StudioSettingsSnapshot, SubmitPromptRequest, ThreadModelRouteUpdateResponse, ThreadPageQuery,
     UpdateDeepSeekWebSearchSettingsRequest, UpdateGeneralSettingsRequest,
     UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest, UpdatePermissionSettingsRequest,
     UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest, UpdateWebSearchSettingsRequest,
@@ -126,6 +127,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(restore_thread))
         .routes(routes!(rename_thread))
         .routes(routes!(set_thread_mode))
+        .routes(routes!(set_thread_model_route))
         .routes(routes!(list_thread_turns))
         .routes(routes!(submit_prompt))
         .routes(routes!(interrupt_turn))
@@ -146,6 +148,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(save_mcp_settings))
         .routes(routes!(save_general_settings))
         .routes(routes!(save_model_role))
+        .routes(routes!(save_mode_model_route))
         .routes(routes!(read_provider_usage))
         .routes(routes!(check_provider_usage))
         .routes(routes!(read_recovery, retry_recovery))
@@ -747,6 +750,34 @@ async fn save_model_role(
         state
             .runtime
             .save_model_role(request)
+            .map_err(ApiError::from)?,
+    ))
+}
+
+#[utoipa::path(put, path = "/api/v1/settings/mode-route", operation_id = "settings.setModeModelRoute", request_body = SetModeModelRouteRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
+async fn save_mode_model_route(
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<SetModeModelRouteRequest>,
+) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .save_mode_model_route(request)
+            .map_err(ApiError::from)?,
+    ))
+}
+
+#[utoipa::path(put, path = "/api/v1/threads/{thread_id}/model-route", operation_id = "thread.setModelRoute", params(("thread_id" = String, Path)), request_body = SetThreadModelRouteRequest, responses(StudioApiErrors, (status = 200, body = ThreadModelRouteUpdateResponse)))]
+async fn set_thread_model_route(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    ApiJson(request): ApiJson<SetThreadModelRouteRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .save_thread_model_route(&thread_id, request)
+            .await
             .map_err(ApiError::from)?,
     ))
 }

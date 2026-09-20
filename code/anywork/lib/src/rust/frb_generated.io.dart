@@ -387,6 +387,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_box_autoadd_bridge_thread_mode_catalog_snapshot(dynamic raw);
 
   @protected
+  BridgeThreadModelRouteSnapshot
+  dco_decode_box_autoadd_bridge_thread_model_route_snapshot(dynamic raw);
+
+  @protected
   BridgeThreadRuntimeSnapshot
   dco_decode_box_autoadd_bridge_thread_runtime_snapshot(dynamic raw);
 
@@ -811,6 +815,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeMcpStateSnapshot dco_decode_bridge_mcp_state_snapshot(dynamic raw);
 
   @protected
+  BridgeModeModelSettingsDto dco_decode_bridge_mode_model_settings_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeModelCapabilities dco_decode_bridge_model_capabilities(dynamic raw);
 
   @protected
@@ -1158,6 +1167,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeThreadModelRouteSnapshot dco_decode_bridge_thread_model_route_snapshot(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeThreadModelRouteUpdateResponse
+  dco_decode_bridge_thread_model_route_update_response(dynamic raw);
+
+  @protected
   BridgeThreadNotification dco_decode_bridge_thread_notification(dynamic raw);
 
   @protected
@@ -1435,6 +1453,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_list_bridge_mcp_server_settings_dto(dynamic raw);
 
   @protected
+  List<BridgeModeModelSettingsDto>
+  dco_decode_list_bridge_mode_model_settings_dto(dynamic raw);
+
+  @protected
   List<BridgeModelCatalogDescriptor>
   dco_decode_list_bridge_model_catalog_descriptor(dynamic raw);
 
@@ -1574,6 +1596,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<McpServerInput> dco_decode_list_mcp_server_input(dynamic raw);
 
   @protected
+  List<ModeRouteInput> dco_decode_list_mode_route_input(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
@@ -1633,6 +1658,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   McpSettingsInput dco_decode_mcp_settings_input(dynamic raw);
 
   @protected
+  ModeRouteInput dco_decode_mode_route_input(dynamic raw);
+
+  @protected
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
@@ -1661,6 +1689,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeThreadMcpHealthSnapshot?
   dco_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(dynamic raw);
+
+  @protected
+  BridgeThreadModelRouteSnapshot?
+  dco_decode_opt_box_autoadd_bridge_thread_model_route_snapshot(dynamic raw);
 
   @protected
   BridgeThreadRuntimeSnapshot?
@@ -2236,6 +2268,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeThreadModelRouteSnapshot
+  sse_decode_box_autoadd_bridge_thread_model_route_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeThreadRuntimeSnapshot
   sse_decode_box_autoadd_bridge_thread_runtime_snapshot(
     SseDeserializer deserializer,
@@ -2778,6 +2816,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModeModelSettingsDto sse_decode_bridge_mode_model_settings_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeModelCapabilities sse_decode_bridge_model_capabilities(
     SseDeserializer deserializer,
   );
@@ -3203,6 +3246,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeThreadModelRouteSnapshot sse_decode_bridge_thread_model_route_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeThreadModelRouteUpdateResponse
+  sse_decode_bridge_thread_model_route_update_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeThreadNotification sse_decode_bridge_thread_notification(
     SseDeserializer deserializer,
   );
@@ -3554,6 +3608,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   sse_decode_list_bridge_mcp_server_settings_dto(SseDeserializer deserializer);
 
   @protected
+  List<BridgeModeModelSettingsDto>
+  sse_decode_list_bridge_mode_model_settings_dto(SseDeserializer deserializer);
+
+  @protected
   List<BridgeModelCatalogDescriptor>
   sse_decode_list_bridge_model_catalog_descriptor(SseDeserializer deserializer);
 
@@ -3721,6 +3779,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<ModeRouteInput> sse_decode_list_mode_route_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
@@ -3796,6 +3859,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   McpSettingsInput sse_decode_mcp_settings_input(SseDeserializer deserializer);
 
   @protected
+  ModeRouteInput sse_decode_mode_route_input(SseDeserializer deserializer);
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
@@ -3834,6 +3900,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeThreadMcpHealthSnapshot?
   sse_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeThreadModelRouteSnapshot?
+  sse_decode_opt_box_autoadd_bridge_thread_model_route_snapshot(
     SseDeserializer deserializer,
   );
 
@@ -4501,6 +4573,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_thread_model_route_snapshot(
+    BridgeThreadModelRouteSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_thread_runtime_snapshot(
     BridgeThreadRuntimeSnapshot self,
     SseSerializer serializer,
@@ -5146,6 +5224,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_mode_model_settings_dto(
+    BridgeModeModelSettingsDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_model_capabilities(
     BridgeModelCapabilities self,
     SseSerializer serializer,
@@ -5665,6 +5749,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_thread_model_route_snapshot(
+    BridgeThreadModelRouteSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_thread_model_route_update_response(
+    BridgeThreadModelRouteUpdateResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_thread_notification(
     BridgeThreadNotification self,
     SseSerializer serializer,
@@ -6094,6 +6190,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_mode_model_settings_dto(
+    List<BridgeModeModelSettingsDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_model_catalog_descriptor(
     List<BridgeModelCatalogDescriptor> self,
     SseSerializer serializer,
@@ -6292,6 +6394,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_mode_route_input(
+    List<ModeRouteInput> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
     SseSerializer serializer,
@@ -6394,6 +6502,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_mode_route_input(
+    ModeRouteInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
@@ -6435,6 +6549,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
     BridgeThreadMcpHealthSnapshot? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_thread_model_route_snapshot(
+    BridgeThreadModelRouteSnapshot? self,
     SseSerializer serializer,
   );
 

@@ -101,7 +101,8 @@ impl StudioRuntime {
             .attachment_drafts
             .resolve(&attachment_draft_ids)
             .await?;
-        let (route, config) = self.model_binding(&thread_id).await?;
+        let (binding_precondition, binding) = self.model_binding(&thread_id, &thread).await;
+        let (route, config) = binding?;
         self.attachment_drafts
             .validate_for_model(&route.model, &drafts)?;
         let attachments = self
@@ -166,7 +167,8 @@ impl StudioRuntime {
                 attachments: &attachments,
             })?,
         )?;
-        self.queue_thread_model(&thread, &route, &config).await?;
+        self.queue_thread_model(&thread, &route, &config, binding_precondition)
+            .await?;
         if let Some(suggestions) =
             self.thread_factory
                 .skill_suggestions(&thread_id, &prompt, &thread.snapshot())

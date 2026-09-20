@@ -36,6 +36,7 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
     required AgentComposerMode composerMode,
     required PermissionMode permissionMode,
     required List<ProviderSettingsView> providers,
+    @Default(<ModeModelRouteView>[]) List<ModeModelRouteView> modeModelRoutes,
     required List<RoleSettingsView> roles,
     required List<StudioAgentView> agents,
   }) = _AgentWorkspaceView;

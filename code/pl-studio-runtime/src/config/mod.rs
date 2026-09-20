@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::mcp::BuiltinMcpServerState;
 use crate::{PureError, Result};
-use pl_protocol::search::WebSearchConfig;
+use pl_protocol::{ThreadModeId, search::WebSearchConfig};
 use pl_tool::mcp::config::McpServerConfig;
 
 use pl_tool::skill::SkillsConfig;
@@ -45,20 +45,14 @@ pub use pl_model::config::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningE
 pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot, ResolvedAgentProfile};
 pub use store::{ConfigPaths, ConfigRecoveryReport, ConfigStore};
 
-pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 19;
+pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 20;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".anywork";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 
 const DEFAULT_PROVIDER_ID: &str = "deepseek";
 const DEFAULT_MODEL_ID: &str = "deepseek-flash";
 const STUDIO_USER_SKILLS_DIR: &str = "~/.anywork/skills";
-const STUDIO_ROLES: [&str; 5] = [
-    "explorer",
-    "planner",
-    "executor",
-    "worktree_executor",
-    "reviewer",
-];
+const STUDIO_CHILD_ROLES: [&str; 4] = ["explorer", "executor", "worktree_executor", "reviewer"];
 
 /// Studio 产品定义的固定角色；框架层仍通过动态 `AgentRoleId` 接收它们。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -75,6 +69,15 @@ impl StudioRole {
         [
             Self::Explorer,
             Self::Planner,
+            Self::Executor,
+            Self::WorktreeExecutor,
+            Self::Reviewer,
+        ]
+    }
+
+    pub const fn child_roles() -> [Self; 4] {
+        [
+            Self::Explorer,
             Self::Executor,
             Self::WorktreeExecutor,
             Self::Reviewer,
@@ -199,6 +202,8 @@ impl Default for DeepSeekWebSearchConfig {
 pub struct StudioConfig {
     pub schema_version: u32,
     pub models: AgentModelConfig,
+    #[serde(default)]
+    pub mode_model_routes: BTreeMap<ThreadModeId, ModelRouteConfig>,
     /// Rust 内置 Agent 只能在这里禁用；其余字段不可覆盖，也不存在删除语义。
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub disabled_system_agents: BTreeSet<String>,
@@ -230,7 +235,7 @@ impl StudioConfig {
             model: DEFAULT_MODEL_ID.to_string(),
             effort: Some(ReasoningEffort::new("high")),
         };
-        let routes = STUDIO_ROLES
+        let routes = STUDIO_CHILD_ROLES
             .into_iter()
             .map(|role| {
                 (
@@ -250,6 +255,10 @@ impl StudioConfig {
                 providers: BTreeMap::from([(provider_id, provider)]),
                 routes,
             },
+            mode_model_routes: BTreeMap::from([
+                (ThreadModeId::simple(), route.clone()),
+                (ThreadModeId::task(), route),
+            ]),
             disabled_system_agents: BTreeSet::new(),
             web_search: WebSearchConfig::default(),
             deepseek_web_search: DeepSeekWebSearchConfig::default(),
@@ -279,8 +288,33 @@ impl StudioConfig {
                 "disabled_system_agents contains unknown system Agent `{profile_id}`"
             )));
         }
-        for role in STUDIO_ROLES {
+        for role in STUDIO_CHILD_ROLES {
             self.models.resolve(&AgentRoleId::new(role)?)?;
+        }
+        if let Some(role) = self.models.routes.keys().find(|role| {
+            !STUDIO_CHILD_ROLES
+                .iter()
+                .any(|candidate| candidate == &role.as_str())
+        }) {
+            return Err(PureError::ConfigError(format!(
+                "models.routes contains unsupported child role: {role}"
+            )));
+        }
+        if !self.mode_model_routes.contains_key(&ThreadModeId::simple())
+            || !self.mode_model_routes.contains_key(&ThreadModeId::task())
+        {
+            return Err(PureError::ConfigError(
+                "mode_model_routes must define mode.simple and mode.task".to_string(),
+            ));
+        }
+        for (mode, route) in &self.mode_model_routes {
+            self.models
+                .resolve_route(StudioRole::Planner.id(), route)
+                .map_err(|error| {
+                    PureError::ConfigError(format!(
+                        "invalid model route for Thread Mode {mode}: {error}"
+                    ))
+                })?;
         }
         pl_tool::skill::validate_skills_config(&self.skills)?;
         crate::config::mcp::validate_mcp_servers(&self.mcp.servers)?;
@@ -291,6 +325,23 @@ impl StudioConfig {
 
     pub fn resolve_role(&self, role: StudioRole) -> Result<pl_model::config::ResolvedModelRoute> {
         self.models.resolve(&role.id())
+    }
+
+    pub fn mode_model_route(&self, mode: &ThreadModeId) -> Result<&ModelRouteConfig> {
+        self.mode_model_routes
+            .get(mode)
+            .or_else(|| self.mode_model_routes.get(&ThreadModeId::simple()))
+            .ok_or_else(|| {
+                PureError::ConfigError("missing model route for mode.simple".to_string())
+            })
+    }
+
+    pub fn resolve_mode_model_route(
+        &self,
+        mode: &ThreadModeId,
+    ) -> Result<pl_model::config::ResolvedModelRoute> {
+        self.models
+            .resolve_route(StudioRole::Planner.id(), self.mode_model_route(mode)?)
     }
 }
 
@@ -376,6 +427,41 @@ mod tests {
 
         assert!(parsed.deepseek_web_search.enabled);
         assert_eq!(parsed.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn custom_mode_inherits_simple_until_its_route_is_saved() {
+        let mut config = StudioConfig::default_config();
+        let custom = ThreadModeId::new("mode.review").unwrap();
+        let simple = config
+            .mode_model_route(&ThreadModeId::simple())
+            .unwrap()
+            .clone();
+
+        assert_eq!(config.mode_model_route(&custom).unwrap(), &simple);
+
+        let mut task = simple.clone();
+        task.model = "deepseek-v4-pro".into();
+        config
+            .mode_model_routes
+            .insert(ThreadModeId::task(), task.clone());
+        let mut review = simple.clone();
+        review.model = "deepseek-v4-pro".into();
+        review.effort = Some(ReasoningEffort::new("max"));
+        config
+            .mode_model_routes
+            .insert(custom.clone(), review.clone());
+
+        assert_eq!(
+            config.mode_model_route(&ThreadModeId::simple()).unwrap(),
+            &simple
+        );
+        assert_eq!(
+            config.mode_model_route(&ThreadModeId::task()).unwrap(),
+            &task
+        );
+        assert_eq!(config.mode_model_route(&custom).unwrap(), &review);
+        config.validate().unwrap();
     }
 
     #[test]

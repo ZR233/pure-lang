@@ -16,14 +16,71 @@ impl ThreadHandle {
         factory: crate::model::ModelFactory,
         preparation: Option<context_preparation::ContextPreparer>,
     ) -> Result<(), ThreadError> {
+        self.queue_model_update_with_extensions(identity, factory, preparation, Vec::new())
+            .await
+            .map(|_| ())
+    }
+
+    /// Atomically records host-owned application state and queues its matching model binding.
+    /// The admitted Turn keeps its existing binding; the queued binding applies at the next Turn.
+    ///
+    /// # Errors
+    /// Rejects stale extension revisions, empty configuration identities and closed owners without
+    /// applying either the extension mutations or the pending model update.
+    pub async fn queue_model_update_with_extensions(
+        &self,
+        identity: String,
+        factory: crate::model::ModelFactory,
+        preparation: Option<context_preparation::ContextPreparer>,
+        mutations: Vec<extensions::ExtensionMutation>,
+    ) -> Result<ThreadSnapshot, ThreadError> {
+        self.queue_deferred_model_update(
+            super::model_update::DeferredModelUpdate::new(identity, factory, preparation),
+            mutations,
+        )
+        .await
+    }
+
+    /// Atomically records host-owned application state and queues an already frozen model update.
+    ///
+    /// # Errors
+    /// Rejects stale extension revisions, invalid updates and closed owners without partial writes.
+    pub async fn queue_deferred_model_update(
+        &self,
+        update: DeferredModelUpdate,
+        mutations: Vec<extensions::ExtensionMutation>,
+    ) -> Result<ThreadSnapshot, ThreadError> {
+        self.send_deferred_model_update(update, Default::default(), mutations)
+            .await
+    }
+
+    /// Queues one frozen model update only when its host-owned preconditions still match.
+    ///
+    /// # Errors
+    /// Rejects stale journal or extension revisions before applying extension or pending-model
+    /// state.
+    pub async fn queue_deferred_model_update_if_current(
+        &self,
+        update: DeferredModelUpdate,
+        precondition: DeferredModelUpdatePrecondition,
+        mutations: Vec<extensions::ExtensionMutation>,
+    ) -> Result<ThreadSnapshot, ThreadError> {
+        self.send_deferred_model_update(update, precondition, mutations)
+            .await
+    }
+
+    async fn send_deferred_model_update(
+        &self,
+        update: DeferredModelUpdate,
+        precondition: DeferredModelUpdatePrecondition,
+        mutations: Vec<extensions::ExtensionMutation>,
+    ) -> Result<ThreadSnapshot, ThreadError> {
         let (reply, response) = oneshot::channel();
         self.mailbox
             .send(super::mailbox::MailboxCommand::QueueModelUpdate(
-                super::model_update::ModelUpdate {
-                    identity,
-                    factory,
-                    preparation,
-                },
+                update,
+                precondition,
+                mutations,
                 reply,
             ))
             .await
@@ -47,6 +104,26 @@ impl ThreadHandle {
     pub fn restore(
         id: String,
         model: DynModelSession,
+        journal: Vec<Arc<journal::ThreadCommit>>,
+    ) -> Result<Self, ThreadError> {
+        Self::restore_with_model(id, Some(model), journal)
+    }
+
+    /// Restores saved facts while keeping model execution explicitly unavailable.
+    /// A later deferred model update can install a valid binding without rebuilding the owner.
+    ///
+    /// # Errors
+    /// Rejects invalid identity, corrupt journal ordering and inconsistent context relationships.
+    pub fn restore_without_model(
+        id: String,
+        journal: Vec<Arc<journal::ThreadCommit>>,
+    ) -> Result<Self, ThreadError> {
+        Self::restore_with_model(id, None, journal)
+    }
+
+    fn restore_with_model(
+        id: String,
+        model: Option<DynModelSession>,
         journal: Vec<Arc<journal::ThreadCommit>>,
     ) -> Result<Self, ThreadError> {
         if id.is_empty() {
@@ -87,7 +164,7 @@ impl ThreadHandle {
             mailbox: mailbox_receiver,
             task_commands: mailbox.downgrade(),
             id,
-            model: Some(model),
+            model,
             state,
             publish,
             tools,

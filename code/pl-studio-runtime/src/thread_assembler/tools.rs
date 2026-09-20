@@ -620,6 +620,7 @@ mod tests {
                     id: "standard".into(),
                     parent_id: None,
                     route,
+                    model_available: true,
                     history: Vec::new(),
                     initial_context: Vec::new(),
                     initial_extensions: Default::default(),

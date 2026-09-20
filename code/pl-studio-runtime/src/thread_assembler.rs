@@ -62,6 +62,8 @@ pub struct StudioThreadSpec {
     pub id: String,
     pub parent_id: Option<String>,
     pub route: ResolvedModelRoute,
+    /// False publishes the owner without a physical model until a later deferred update succeeds.
+    pub model_available: bool,
     pub hosted_tools: Vec<pl_model::runtime::HostedTool>,
     pub history: Vec<Arc<ThreadCommit>>,
     /// Initial instructions and records for a new Thread only; never used to re-render recovery.
@@ -245,9 +247,7 @@ impl StudioThreadAssembler {
         {
             return Err(ThreadAssemblyError::Identity(spec.id));
         }
-        if !spec.history.is_empty()
-            && (!spec.initial_context.is_empty() || !spec.initial_extensions.is_empty())
-        {
+        if !spec.history.is_empty() && !spec.initial_context.is_empty() {
             return Err(ThreadAssemblyError::InitialContextOnRecovery);
         }
         pl_core::context::ContextSnapshot {
@@ -273,14 +273,18 @@ impl StudioThreadAssembler {
                 spec.tools.extend(self.agent_control_tools()?);
             }
         }
-        let runtime = ModelRuntime::from_route(&spec.route)?;
-        let model = ThreadModel::new(runtime, spec.route.reasoning_config())
-            .with_hosted_tools(spec.hosted_tools);
-        let thread = ThreadHandle::restore(
-            spec.id.clone(),
-            ModelFactory::new(model).open_session().await?,
-            spec.history,
-        )?;
+        let thread = if spec.model_available {
+            let runtime = ModelRuntime::from_route(&spec.route)?;
+            let model = ThreadModel::new(runtime, spec.route.reasoning_config())
+                .with_hosted_tools(spec.hosted_tools);
+            ThreadHandle::restore(
+                spec.id.clone(),
+                ModelFactory::new(model).open_session().await?,
+                spec.history,
+            )?
+        } else {
+            ThreadHandle::restore_without_model(spec.id.clone(), spec.history)?
+        };
         self.0.state().entries.insert(
             spec.id.clone(),
             Entry {
@@ -875,6 +879,7 @@ mod tests {
                 model: pl_model::model::ModelInfo::compatible("assembly-test"),
                 effort: None,
             },
+            model_available: true,
             history: Vec::new(),
             initial_context: Vec::new(),
             initial_extensions: BTreeMap::new(),

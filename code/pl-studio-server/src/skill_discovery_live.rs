@@ -63,7 +63,7 @@ async fn installed_config_agent_api_selects_skills_from_name_and_description() -
     let installed_config = ConfigStore::for_studio_home(&studio_home)
         .load()
         .context("isolated installed Studio config is invalid after schema normalization")?;
-    let route = installed_config.resolve_role(pl_studio_runtime::StudioRole::Planner)?;
+    let route = installed_config.resolve_mode_model_route(&pl_protocol::ThreadModeId::simple())?;
     let base_url = route.endpoint.base_url.to_ascii_lowercase();
     ensure!(
         !["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]

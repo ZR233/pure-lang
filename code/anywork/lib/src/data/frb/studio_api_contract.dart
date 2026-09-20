@@ -1,5 +1,12 @@
 part of 'studio_api.dart';
 
+typedef ThreadModelRouteUpdateResult = ({
+  ThreadRuntimeView runtime,
+  SettingsStateSnapshot settings,
+  bool modeDefaultSaved,
+  String? warning,
+});
+
 abstract class StudioApi {
   Future<RecoveryStateSnapshot> retryRecovery();
   Future<ProviderCatalogView> loadProviderCatalog();
@@ -52,6 +59,21 @@ abstract class StudioApi {
   Future<SettingsStateSnapshot> setModelRole({
     required int expectedSettingsRevision,
     required String roleKey,
+    required String providerId,
+    required String model,
+    String? effort,
+  });
+  Future<SettingsStateSnapshot> setModeModelRoute({
+    required int expectedSettingsRevision,
+    required ThreadModeId mode,
+    required String providerId,
+    required String model,
+    String? effort,
+  });
+  Future<ThreadModelRouteUpdateResult> setThreadModelRoute({
+    required String threadId,
+    required int expectedThreadRevision,
+    required int expectedSettingsRevision,
     required String providerId,
     required String model,
     String? effort,
@@ -688,6 +710,56 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
+  Future<SettingsStateSnapshot> setModeModelRoute({
+    required int expectedSettingsRevision,
+    required ThreadModeId mode,
+    required String providerId,
+    required String model,
+    String? effort,
+  }) async {
+    await _ensureReady();
+    return _settingsStateFromFrb(
+      await _bridgeCall(
+        () => frb.setModeModelRoute(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
+          modeId: mode.id,
+          providerId: providerId,
+          model: model,
+          effort: effort,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<ThreadModelRouteUpdateResult> setThreadModelRoute({
+    required String threadId,
+    required int expectedThreadRevision,
+    required int expectedSettingsRevision,
+    required String providerId,
+    required String model,
+    String? effort,
+  }) async {
+    await _ensureReady();
+    final response = await _bridgeCall(
+      () => frb.setThreadModelRoute(
+        threadId: threadId,
+        providerId: providerId,
+        model: model,
+        effort: effort,
+        expectedThreadRevision: BigInt.from(expectedThreadRevision),
+        expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
+      ),
+    );
+    return (
+      runtime: _threadRuntimeFromFrb(response.runtime),
+      settings: _settingsStateFromFrb(response.settings),
+      modeDefaultSaved: response.modeDefaultSaved,
+      warning: response.warning,
+    );
+  }
+
+  @override
   Future<void> setThreadMode({
     required String threadId,
     required ThreadModeId mode,
@@ -1150,6 +1222,15 @@ class FrbStudioApi implements StudioApi {
                         connectionMode: model.connectionMode,
                       ),
                   ],
+                ),
+            ],
+            modeRoutes: [
+              for (final route in command.modeRoutes)
+                frb.ModeRouteInput(
+                  modeId: route.modeId.id,
+                  provider: route.providerId,
+                  model: route.model,
+                  effort: route.effort,
                 ),
             ],
             roles: [

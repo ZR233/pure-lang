@@ -256,6 +256,7 @@ class ThreadRuntimeView {
     this.turnCompletionTokens = 0,
     this.turnDecodeMillis = 0,
     this.workflow,
+    this.modelRoute,
   });
 
   final String model;
@@ -284,6 +285,7 @@ class ThreadRuntimeView {
   final int turnCompletionTokens;
   final int turnDecodeMillis;
   final WorkflowRuntimeView? workflow;
+  final ThreadModelRouteView? modelRoute;
 
   bool get hasActiveWorkflow => workflow?.isActive ?? false;
   bool get hasUsage =>
@@ -321,7 +323,8 @@ class ThreadRuntimeView {
             prefixChangedReason == other.prefixChangedReason &&
             turnCompletionTokens == other.turnCompletionTokens &&
             turnDecodeMillis == other.turnDecodeMillis &&
-            workflow == other.workflow;
+            workflow == other.workflow &&
+            modelRoute == other.modelRoute;
   }
 
   @override
@@ -352,6 +355,7 @@ class ThreadRuntimeView {
     turnCompletionTokens,
     turnDecodeMillis,
     workflow,
+    modelRoute,
   ]);
 
   ThreadRuntimeView copyWith({
@@ -381,6 +385,7 @@ class ThreadRuntimeView {
     int? turnCompletionTokens,
     int? turnDecodeMillis,
     WorkflowRuntimeView? workflow,
+    ThreadModelRouteView? modelRoute,
   }) {
     return ThreadRuntimeView(
       model: model ?? this.model,
@@ -410,8 +415,47 @@ class ThreadRuntimeView {
       turnCompletionTokens: turnCompletionTokens ?? this.turnCompletionTokens,
       turnDecodeMillis: turnDecodeMillis ?? this.turnDecodeMillis,
       workflow: workflow ?? this.workflow,
+      modelRoute: modelRoute ?? this.modelRoute,
     );
   }
+}
+
+class ThreadModelRouteView {
+  const ThreadModelRouteView({
+    required this.providerId,
+    required this.model,
+    required this.effort,
+    required this.revision,
+    required this.available,
+    this.unavailableReason,
+  });
+
+  final String providerId;
+  final String model;
+  final String? effort;
+  final int revision;
+  final bool available;
+  final String? unavailableReason;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ThreadModelRouteView &&
+      providerId == other.providerId &&
+      model == other.model &&
+      effort == other.effort &&
+      revision == other.revision &&
+      available == other.available &&
+      unavailableReason == other.unavailableReason;
+
+  @override
+  int get hashCode => Object.hash(
+    providerId,
+    model,
+    effort,
+    revision,
+    available,
+    unavailableReason,
+  );
 }
 
 class WorkflowRuntimeView {

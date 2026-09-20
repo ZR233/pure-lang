@@ -7,9 +7,9 @@ use pl_protocol::WebSearchContextSize;
 use pl_protocol::search::WebSearchMode;
 use pl_protocol::studio::{
     StudioCustomModelSettings, StudioDeepSeekWebSearchSettings, StudioGeneralSettings,
-    StudioInstructionsSettings, StudioMcpServerSettings, StudioModelConnectionSettings,
-    StudioProviderSettings, StudioRoleSettings, StudioSettings, StudioSettingsSnapshot,
-    StudioSkillsSettings, StudioWebSearchSettings,
+    StudioInstructionsSettings, StudioMcpServerSettings, StudioModeModelSettings,
+    StudioModelConnectionSettings, StudioProviderSettings, StudioRoleSettings, StudioSettings,
+    StudioSettingsSnapshot, StudioSkillsSettings, StudioWebSearchSettings,
 };
 
 use crate::search::{WebSearchAvailability, WebSearchBackendKind};
@@ -101,7 +101,21 @@ fn settings_view(
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let roles = StudioRole::all()
+    let mode_model_routes = config
+        .mode_model_routes
+        .iter()
+        .map(|(mode, route)| StudioModeModelSettings {
+            mode_id: mode.to_string(),
+            provider_id: route.provider.to_string(),
+            model: route.model.clone(),
+            effort: route
+                .effort
+                .as_ref()
+                .map(|effort| effort.as_str().to_string())
+                .unwrap_or_default(),
+        })
+        .collect();
+    let roles = StudioRole::child_roles()
         .into_iter()
         .map(|role| {
             let route = config
@@ -145,11 +159,11 @@ fn settings_view(
     let (web_search, deepseek_web_search) = search_settings(config, web_search_role)?;
     Ok(StudioSettings {
         default_provider_id: config
-            .models
-            .routes
-            .get(&StudioRole::Planner.id())
+            .mode_model_routes
+            .get(&pl_protocol::ThreadModeId::simple())
             .map(|route| route.provider.to_string()),
         providers,
+        mode_model_routes,
         roles,
         permission_mode: config.runtime.permission_mode.label().to_string(),
         instructions: StudioInstructionsSettings {

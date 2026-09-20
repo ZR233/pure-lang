@@ -1130,44 +1130,6 @@ class StudioController extends _$StudioController {
         .expand((provider) => provider.allModels)
         .where((candidate) => candidate.slug == model)
         .firstOrNull;
-    const activeRole = 'planner';
-    final composer = current.selectedThreadId == null
-        ? current.newThreadComposer
-        : _workspaceUi(current, current.selectedThreadId!).composer;
-    if (roleKey == activeRole && target != null) {
-      final supported = target.inputCapabilities
-          .map((capability) => capability.modality)
-          .toSet();
-      final conflicts = composer.attachments
-          .where(
-            (attachment) => !supported.contains(switch (attachment.modality) {
-              AttachmentModalityView.image => ModelModalityView.image,
-              AttachmentModalityView.video => ModelModalityView.video,
-              AttachmentModalityView.file => ModelModalityView.file,
-            }),
-          )
-          .toList();
-      if (conflicts.isNotEmpty) {
-        final error = StateError(
-          'Cannot switch model: ${conflicts.map((item) => item.filename).join(', ')} is not supported.',
-        );
-        state = AsyncData(
-          current.selectedThreadId == null
-              ? current.copyWith(
-                  newThreadComposerByProject: {
-                    ...current.newThreadComposerByProject,
-                    ?current.selectedProjectId: composer.reportFailure(error),
-                  },
-                )
-              : _withWorkspaceUi(
-                  current,
-                  current.selectedThreadId!,
-                  (ui) => ui.copyWith(composer: composer.reportFailure(error)),
-                ),
-        );
-        return;
-      }
-    }
     final role = current.role(roleKey);
     if (role != null &&
         role.providerId == providerId &&
@@ -1184,6 +1146,148 @@ class StudioController extends _$StudioController {
     );
     final latest = state.value;
     if (latest != null) state = AsyncData(applySettingsState(latest, next));
+  }
+
+  Future<void> setModeModelRoute({
+    required ThreadModeId mode,
+    required String providerId,
+    required String model,
+    String? effort,
+  }) async {
+    final current = state.value;
+    if (current == null || current.newThreadMode != mode) return;
+    final target = _findModel(current, providerId, model);
+    if (target == null ||
+        !_acceptsAttachments(current.newThreadComposer, target)) {
+      return;
+    }
+    final route = current.modeModelRoutes
+        .where((candidate) => candidate.modeId == mode)
+        .firstOrNull;
+    if (route != null &&
+        route.providerId == providerId &&
+        route.model == model &&
+        (effort == null || route.effort == effort)) {
+      return;
+    }
+    final next = await _api.setModeModelRoute(
+      expectedSettingsRevision: current.settingsRevision,
+      mode: mode,
+      providerId: providerId,
+      model: model,
+      effort: effort ?? target.reasoningEfforts.firstOrNull,
+    );
+    final latest = state.value;
+    if (latest != null) state = AsyncData(applySettingsState(latest, next));
+  }
+
+  Future<void> setThreadModelRoute({
+    required String providerId,
+    required String model,
+    String? effort,
+  }) async {
+    final current = state.value;
+    final thread = current?.selectedThread;
+    final workspace = current?.selectedWorkspace;
+    if (current == null ||
+        thread == null ||
+        workspace == null ||
+        !thread.isRoot ||
+        thread.status != ThreadStatusView.idle ||
+        current.runtime.hasActiveWorkflow) {
+      return;
+    }
+    final target = _findModel(current, providerId, model);
+    if (target == null || !_acceptsAttachments(current.composer, target)) {
+      return;
+    }
+    final expectedThreadRevision = workspace.revision;
+    final response = await _api.setThreadModelRoute(
+      threadId: thread.id,
+      expectedThreadRevision: expectedThreadRevision,
+      expectedSettingsRevision: current.settingsRevision,
+      providerId: providerId,
+      model: model,
+      effort: effort ?? target.reasoningEfforts.firstOrNull,
+    );
+    final latest = state.value;
+    if (latest == null) return;
+    var next = applySettingsState(latest, response.settings);
+    final latestWorkspace = next.workspacesByThread[thread.id];
+    if (latestWorkspace != null) {
+      next = next.copyWith(
+        workspacesByThread: {
+          ...next.workspacesByThread,
+          thread.id: latestWorkspace.copyWith(
+            revision: latestWorkspace.revision > expectedThreadRevision
+                ? latestWorkspace.revision
+                : expectedThreadRevision + 1,
+            runtime: response.runtime,
+          ),
+        },
+      );
+    }
+    if (response.warning case final warning?) {
+      next = _withWorkspaceUi(
+        next,
+        thread.id,
+        (ui) => ui.copyWith(
+          composer: ui.composer.reportFailure(StateError(warning)),
+        ),
+      );
+    }
+    state = AsyncData(next);
+  }
+
+  ProviderModelView? _findModel(
+    StudioState current,
+    String providerId,
+    String model,
+  ) {
+    return current.providers
+        .where((provider) => provider.id == providerId)
+        .expand((provider) => provider.allModels)
+        .where((candidate) => candidate.slug == model)
+        .firstOrNull;
+  }
+
+  bool _acceptsAttachments(
+    ComposerThreadState composer,
+    ProviderModelView target,
+  ) {
+    final supported = target.inputCapabilities
+        .map((capability) => capability.modality)
+        .toSet();
+    final conflicts = composer.attachments
+        .where(
+          (attachment) => !supported.contains(switch (attachment.modality) {
+            AttachmentModalityView.image => ModelModalityView.image,
+            AttachmentModalityView.video => ModelModalityView.video,
+            AttachmentModalityView.file => ModelModalityView.file,
+          }),
+        )
+        .toList();
+    if (conflicts.isEmpty) return true;
+    final error = StateError(
+      'Cannot switch model: ${conflicts.map((item) => item.filename).join(', ')} is not supported.',
+    );
+    final current = state.value;
+    if (current == null) return false;
+    state = AsyncData(
+      current.selectedThreadId == null
+          ? current.copyWith(
+              newThreadComposerByProject: {
+                ...current.newThreadComposerByProject,
+                ?current.selectedProjectId: composer.reportFailure(error),
+              },
+            )
+          : _withWorkspaceUi(
+              current,
+              current.selectedThreadId!,
+              (ui) => ui.copyWith(composer: composer.reportFailure(error)),
+            ),
+    );
+    return false;
   }
 
   Future<void> saveProviderSettings(ProviderSettingsCommand command) async {

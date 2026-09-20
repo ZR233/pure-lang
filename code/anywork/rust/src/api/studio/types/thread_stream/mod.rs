@@ -231,6 +231,7 @@ pub struct BridgeTurnBudgetUsage {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeThreadRuntimeSnapshot {
     pub thread_id: String,
+    pub model_route: Option<BridgeThreadModelRouteSnapshot>,
     pub usage: BridgeThreadRuntimeUsage,
     pub turn_completion_tokens: u64,
     pub turn_decode_millis: u64,
@@ -242,6 +243,16 @@ pub struct BridgeThreadRuntimeSnapshot {
     pub mcp_health: Option<BridgeThreadMcpHealthSnapshot>,
     pub workflow: Option<BridgeWorkflowRuntimeSnapshot>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeThreadModelRouteSnapshot {
+    pub provider_id: String,
+    pub model: String,
+    pub effort: Option<String>,
+    pub revision: u64,
+    pub available: bool,
+    pub unavailable_reason: Option<String>,
 }
 
 /// 状态栏所需的 canonical Thread Mode workflow 投影。

@@ -166,7 +166,6 @@ fn system_profiles(config: &StudioConfig, include_disabled: bool) -> Vec<AgentPr
 }
 
 fn system_profile(role: StudioRole, config: &StudioConfig) -> Result<AgentProfileSnapshot> {
-    let route = config.resolve_role(role)?;
     let (description, when_to_use, instructions) = match role {
         StudioRole::Explorer => (
             "只读探索代码、文档和现场事实。",
@@ -194,6 +193,7 @@ fn system_profile(role: StudioRole, config: &StudioConfig) -> Result<AgentProfil
             include_str!("../prompts/reviewer.md"),
         ),
     };
+    let route = config.resolve_role(role)?;
     let snapshot = AgentProfileSnapshot {
         profile_id: role.key().to_string(),
         display_name: role.display_name().to_string(),
@@ -370,7 +370,12 @@ mod tests {
         let home = TempDir::new().unwrap();
         let paths = ConfigPaths::from_home(home.path());
         let config = StudioConfig::default_config();
-        assert!(config.resolve_role(StudioRole::Planner).is_ok());
+        assert!(config.resolve_role(StudioRole::Planner).is_err());
+        assert!(
+            config
+                .resolve_mode_model_route(&pl_protocol::ThreadModeId::simple())
+                .is_ok()
+        );
         assert!(
             AgentProfileCatalog::discover(&paths, &config)
                 .profiles
@@ -381,7 +386,9 @@ mod tests {
             super::super::ConfigRuntime::initialize(super::super::ConfigStore::new(paths.clone()))
                 .unwrap();
         assert!(runtime.resolve_agent_profile("planner").is_err());
-        let route = config.resolve_role(StudioRole::Planner).unwrap();
+        let route = config
+            .resolve_mode_model_route(&pl_protocol::ThreadModeId::simple())
+            .unwrap();
         let profile = UserAgentProfile {
             enabled: true,
             display_name: "User".into(),

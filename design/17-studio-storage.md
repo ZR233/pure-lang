@@ -19,6 +19,12 @@ Workflow 是 Studio 编码的 `studio.workflow` Thread 扩展，不新增 workfl
 `prepared | active | preserved | cleanupRequested | cleaned`、repo/path/branch/base 和
 revision，仅表达物理资源 ownership（生命周期合同见 [12](./12-collaboration.md)）。
 
+root 的 desired 模型 selector 使用 `studio.model-route` Thread 扩展保存，格式固定为
+`pl.studio.model-route`、版本 1，内容只包含 provider、model 与 effort，不保存 endpoint、凭据
+或解析后的模型目录。扩展与下一 Turn pending model update 在同一 owner 操作中提交。冷恢复先
+重放该扩展，再用当前 provider 配置解析同一 selector；旧 Thread 缺失扩展时在恢复发布前从最后
+有效请求回执迁移，无法恢复时使用该 Thread 当前 Mode 的默认 selector。未知或损坏版本明确失败。
+
 lease 载荷还记录归属类型（`session` 会话自身工作区 | `child` 子智能体工作区）与 owner
 Thread id，两类归属共用同一状态机、存储与显式清理入口。Thread 目录事实另外保存会话级
 `workspace_mode`（`local | worktree`）：它是产品事实，lease 是物理资源 ownership，两者职责
@@ -64,7 +70,8 @@ Thread 冷激活先校验目标及待激活祖先的身份、归属与未归档�
 
 ## 17.3 文件配置
 
-主配置位于 `~/.anywork/config.toml`，保存 provider、模型 route 和 `disabled_system_agents`。
+主配置位于 `~/.anywork/config.toml`，保存 provider、子代理模型 route、按 Mode 的 root 默认
+route 和 `disabled_system_agents`。
 用户 Agent Profile 位于 `~/.anywork/agents/*.toml`，一个文件一个稳定 Agent ID；runtime 原子
 保存单文件并单独报告解析诊断；系统 Profile 不写 TOML。Thread Mode 由内存注册表提供，
 不复制到数据库或用户目录；run 只保存 Mode ID 与图 hash（见 [11](./11-thread-mode.md)）。
@@ -161,6 +168,9 @@ receipt 识别已保存的批次前缀；事务失败或确认结果不明时保
 - 配置已实现 18→19 保留式迁移：移除主智能体的旧禁用项，保留路由、其他设置及凭据；
   该迁移失败时保留原文件。其他版本、解析或校验失败仍可能进入既有备份后替换默认配置
   的路径，完整版本化转换仍有缺口；具体配置契约见 [20](./20-config.md)。
+- 配置 19→20 将旧 `planner` 路由复制为 `mode.simple` 与 `mode.task` 的默认 route，并从
+  `models.routes` 删除 `planner`；provider、四个系统子代理 route、用户 Profile、凭据和其他
+  设置保持不变。迁移先备份并完整校验，失败保留原文件并可重试。
 
 ### Turn 协作格式迁移
 

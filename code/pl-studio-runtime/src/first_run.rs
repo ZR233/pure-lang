@@ -13,6 +13,7 @@ use pl_model::config::{
 };
 use pl_model::model::ModelInfo;
 use pl_model::provider::ProviderEndpoint;
+use pl_protocol::ThreadModeId;
 
 /// Studio 使用的动态 provider preset 标识。
 ///
@@ -273,11 +274,15 @@ impl FirstRunConfigDraft {
             schema_version: STUDIO_CONFIG_SCHEMA_VERSION,
             models: AgentModelConfig {
                 providers,
-                routes: StudioRole::all()
+                routes: StudioRole::child_roles()
                     .into_iter()
                     .map(|role| (role.id(), route.clone()))
                     .collect(),
             },
+            mode_model_routes: BTreeMap::from([
+                (ThreadModeId::simple(), route.clone()),
+                (ThreadModeId::task(), route),
+            ]),
             disabled_system_agents: Default::default(),
             web_search: Default::default(),
             deepseek_web_search: Default::default(),
@@ -380,10 +385,6 @@ mod tests {
             .unwrap()
     }
 
-    fn route(config: &StudioConfig, role: StudioRole) -> &ModelRouteConfig {
-        config.models.routes.get(&role.id()).unwrap()
-    }
-
     #[test]
     fn deepseek_draft_builds_valid_composed_config() {
         let mut draft = FirstRunConfigDraft::new_default();
@@ -392,10 +393,20 @@ mod tests {
         let config = draft.to_config().unwrap();
 
         assert_eq!(
-            route(&config, StudioRole::Planner).provider.as_str(),
+            config
+                .mode_model_route(&ThreadModeId::simple())
+                .unwrap()
+                .provider
+                .as_str(),
             "deepseek"
         );
-        assert_eq!(route(&config, StudioRole::Planner).model, "deepseek-flash");
+        assert_eq!(
+            config
+                .mode_model_route(&ThreadModeId::task())
+                .unwrap()
+                .model,
+            "deepseek-flash"
+        );
         assert_eq!(
             provider(&config, "deepseek").bearer_token.as_deref(),
             Some("sk-deepseek")

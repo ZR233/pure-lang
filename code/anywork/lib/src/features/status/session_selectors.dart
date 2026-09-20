@@ -151,45 +151,49 @@ class _WorkspaceModeItem extends StatelessWidget {
   }
 }
 
-/// 所有根模式统一使用 planner 路由；模式差异由已注册的 Thread Mode prompt 提供。
-class ModelRoleSelector extends ConsumerWidget {
+typedef ModelRouteChanged = void Function(
+  String providerId,
+  String model,
+  String? effort,
+);
+
+/// 根会话或新建会话草稿的模型选择器。
+class ModelRoleSelector extends StatelessWidget {
   const ModelRoleSelector({
     required this.providers,
-    required this.roles,
-    required this.mode,
+    required this.providerId,
+    required this.model,
+    required this.effort,
+    required this.onSelected,
+    this.available = true,
     super.key,
   });
 
   final List<ProviderSettingsView> providers;
-  final List<RoleSettingsView> roles;
-  final ThreadModeId mode;
+  final String providerId;
+  final String model;
+  final String? effort;
+  final ModelRouteChanged onSelected;
+  final bool available;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final options = modelOptions(providers);
     if (options.isEmpty) {
       return const SizedBox.shrink();
     }
-    final roleKey = roleKeyForMode(mode);
-    final role = roleByKey(roles, roleKey);
-    final current = modelFor(providers, roles, mode) ?? options.first;
+    final current = modelForRoute(providers, providerId, model);
+    final selectedKey = current?.key;
     return UpwardPopupMenu<String>(
       key: StudioDriverKeys.model,
       tooltip: context.l10n.statusPlannerModel,
-      initialValue: current.key,
+      initialValue: selectedKey,
       onSelected: (key) {
         final option = options.firstWhere((option) => option.key == key);
-        final effort = option.reasoningEfforts.contains(role?.effort)
-            ? role?.effort
+        final nextEffort = option.reasoningEfforts.contains(effort)
+            ? effort
             : option.reasoningEfforts.firstOrNull;
-        ref
-            .read(studioControllerProvider.notifier)
-            .setModelRole(
-              roleKey: roleKey,
-              providerId: option.providerId,
-              model: option.model,
-              effort: effort,
-            );
+        onSelected(option.providerId, option.model, nextEffort);
       },
       itemBuilder: (context) => [
         for (final option in options)
@@ -226,48 +230,45 @@ class ModelRoleSelector extends ConsumerWidget {
             ),
           ),
       ],
-      child: _ControlItem(label: current.model, enabled: true),
+      child: _ControlItem(
+        label: model,
+        enabled: true,
+        warning: !available || current == null,
+      ),
     );
   }
 }
 
-/// 当前模式对应 role 模型的思考强度选择器；写 role 级 Settings 配置。
-class ReasoningEffortSelector extends ConsumerWidget {
+/// 根会话或 Mode 默认路由的思考强度选择器。
+class ReasoningEffortSelector extends StatelessWidget {
   const ReasoningEffortSelector({
     required this.providers,
-    required this.roles,
-    required this.mode,
+    required this.providerId,
+    required this.model,
+    required this.effort,
+    required this.onSelected,
     super.key,
   });
 
   final List<ProviderSettingsView> providers;
-  final List<RoleSettingsView> roles;
-  final ThreadModeId mode;
+  final String providerId;
+  final String model;
+  final String? effort;
+  final ModelRouteChanged onSelected;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final roleKey = roleKeyForMode(mode);
-    final role = roleByKey(roles, roleKey);
-    final currentModel = modelFor(providers, roles, mode);
+  Widget build(BuildContext context) {
+    final currentModel = modelForRoute(providers, providerId, model);
     final efforts = currentModel?.reasoningEfforts ?? const [];
-    if (role == null || currentModel == null || efforts.isEmpty) {
+    if (currentModel == null || efforts.isEmpty) {
       return const SizedBox.shrink();
     }
-    final current = efforts.contains(role.effort) ? role.effort : efforts.first;
+    final current = efforts.contains(effort) ? effort! : efforts.first;
     return UpwardPopupMenu<String>(
       key: StudioDriverKeys.reasoningEffort,
       tooltip: context.l10n.statusReasoningEffort,
       initialValue: current,
-      onSelected: (effort) {
-        ref
-            .read(studioControllerProvider.notifier)
-            .setModelRole(
-              roleKey: roleKey,
-              providerId: role.providerId,
-              model: role.model,
-              effort: effort,
-            );
-      },
+      onSelected: (nextEffort) => onSelected(providerId, model, nextEffort),
       itemBuilder: (context) => [
         for (final effort in efforts)
           PopupMenuItem(
@@ -288,25 +289,37 @@ class ReasoningEffortSelector extends ConsumerWidget {
 }
 
 class _ControlItem extends StatelessWidget {
-  const _ControlItem({required this.label, required this.enabled});
+  const _ControlItem({
+    required this.label,
+    required this.enabled,
+    this.warning = false,
+  });
 
   final String label;
   final bool enabled;
+  final bool warning;
 
   @override
   Widget build(BuildContext context) {
-    return StudioMenuLabel(label: label, enabled: enabled, maxWidth: 140);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (warning) ...[
+          Icon(
+            Icons.warning_amber_outlined,
+            size: 15,
+            color: Theme.of(context).colorScheme.error,
+          ),
+          const SizedBox(width: 4),
+        ],
+        StudioMenuLabel(label: label, enabled: enabled, maxWidth: 140),
+      ],
+    );
   }
 }
 
 IconData sessionModeIcon(ThreadModeId mode) {
   return mode == ThreadModeId.simple ? Icons.flash_on : Icons.route_outlined;
-}
-
-String roleKeyForMode(ThreadModeId mode) => 'planner';
-
-RoleSettingsView? roleByKey(List<RoleSettingsView> roles, String key) {
-  return roles.where((role) => role.key == key).firstOrNull;
 }
 
 class ModelOption {
@@ -330,32 +343,25 @@ class ModelOption {
   String get key => '$providerId::$model';
 }
 
-ModelOption? modelFor(
+ModelOption? modelForRoute(
   List<ProviderSettingsView> providers,
-  List<RoleSettingsView> roles,
-  ThreadModeId mode,
+  String providerId,
+  String model,
 ) {
-  final role = roleByKey(roles, roleKeyForMode(mode));
-  if (role == null) {
-    return null;
-  }
   final options = modelOptions(providers);
-  if (options.isEmpty) {
-    return null;
-  }
-  return options.firstWhere(
-    (option) =>
-        option.providerId == role.providerId && option.model == role.model,
-    orElse: () => options.first,
-  );
+  return options
+      .where(
+        (option) => option.providerId == providerId && option.model == model,
+      )
+      .firstOrNull;
 }
 
-List<String> effortsFor(
-  List<ProviderSettingsView> providers,
-  List<RoleSettingsView> roles,
+ModeModelRouteView? modeRouteFor(
+  List<ModeModelRouteView> routes,
   ThreadModeId mode,
 ) {
-  return modelFor(providers, roles, mode)?.reasoningEfforts ?? const [];
+  return routes.where((route) => route.modeId == mode).firstOrNull ??
+      routes.where((route) => route.modeId == ThreadModeId.simple).firstOrNull;
 }
 
 List<ModelOption> modelOptions(List<ProviderSettingsView> providers) {

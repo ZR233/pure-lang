@@ -7,6 +7,8 @@ import '../../../frb_generated.dart';
 import '../types/attachment.dart';
 import '../types/error.dart';
 import '../types/response.dart';
+import '../types/runtime.dart';
+import '../types/settings.dart';
 import '../types/thread_stream.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -62,6 +64,23 @@ Future<void> setThreadMode({required String threadId, required String mode}) =>
       threadId: threadId,
       mode: mode,
     );
+
+/// Changes a root Thread's durable model route. The active Turn keeps its admitted binding.
+Future<BridgeThreadModelRouteUpdateResponse> setThreadModelRoute({
+  required String threadId,
+  required String providerId,
+  required String model,
+  String? effort,
+  required BigInt expectedThreadRevision,
+  required BigInt expectedSettingsRevision,
+}) => RustLib.instance.api.crateApiStudioHandlersThreadSetThreadModelRoute(
+  threadId: threadId,
+  providerId: providerId,
+  model: model,
+  effort: effort,
+  expectedThreadRevision: expectedThreadRevision,
+  expectedSettingsRevision: expectedSettingsRevision,
+);
 
 /// Restores an archived session tree with its original identity and history.
 Future<BridgeThread> restoreThread({required String threadId}) => RustLib

@@ -19,6 +19,9 @@ recovery、MCP/LSP、provider usage、model performance 与 updater。Thread wor
 Interaction、ThreadRuntimeView 和 workflow 投影；不存在 taskDirectory。Thread 目录条目携带
 会话工作区模式（`local | worktree`）与会话工作区地址 `workspacePath`，只读投影为侧栏与会话
 展示的 canonical 事实，GUI 不推导、不本地改写，也不按模式分别取 Project 路径或工作树路径。
+Settings snapshot 以 `modeModelRoutes` 暴露全局 Mode 默认 selector，并继续以 `roles` 暴露四个
+系统子代理 route；Thread runtime snapshot 另行暴露当前 Thread 的 typed `modelRoute`、revision
+与 available 状态。两者职责不同，GUI 不用 Mode 默认值覆盖已有 Thread 的 route。
 
 Product event 携带完整领域 snapshot 或明确 revision：ProjectDirectoryChanged、
 ThreadDirectoryChanged、AgentDirectoryChanged、ModeCatalogChanged、ThreadRuntimeChanged
@@ -61,7 +64,7 @@ Mode catalog 直接投影 Studio Mode 注册表的内存 snapshot：内置 Mode 
 静态描述注册，既不扫描 Skill，也不读取或复制用户目录资源；未来外部 loader 只能先把文件
 解析为同一拥有所有权的 registration，再调用公开注册接口。Agent Profile catalog 合并
 Rust builtin 与用户 TOML；完整 Agent 配置投影属于 Settings snapshot。系统启停、系统
-route 更新和用户 Profile 保存都携带 `expectedSettingsRevision`；成功后返回最新完整
+route 更新、Mode 默认 route 更新和用户 Profile 保存都携带 `expectedSettingsRevision`；成功后返回最新完整
 canonical snapshot，Flutter 原子替换 Settings 领域，不只修改本地 draft。
 
 ## 18.5 Shutdown

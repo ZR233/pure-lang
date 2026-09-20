@@ -17,6 +17,7 @@ pub fn specification(
         id: id.into(),
         parent_id: None,
         route,
+        model_available: true,
         hosted_tools: vec![],
         history: vec![],
         initial_context: vec![],

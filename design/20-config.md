@@ -39,7 +39,9 @@ Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代�
 损坏配置、备份或提交失败及重启恢复，证明用户选择与凭据可用性得到保留。
 
 启动支持明确的 18→19 迁移：仅从 `disabled_system_agents` 移除 `planner` 并提升版本，
-保留五条模型路由、其他设置和 provider 凭据关联。先校验和备份，再原子替换；迁移失败
+保留五条模型路由、其他设置和 provider 凭据关联。19→20 迁移把旧 `planner` route 复制为
+`mode.simple` 与 `mode.task` 的默认 route，从 `models.routes` 删除 `planner`，并保留四个系统
+子代理 route、provider、其他设置和凭据关联。两步都先校验和备份，再原子替换；迁移失败
 保留原文件，不进入默认配置恢复路径。正常运行不接受禁用主智能体或以该标识保存用户 Profile。
 
 所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整设置状态快照，
@@ -62,21 +64,24 @@ snapshot 的生成。pl-model 只消费已经解析好的 provider 和模型信�
 
 ## 20.3 根路由与系统 Profile
 
-配置不使用 `active_provider`。所有模式的 root Agent 统一使用 `planner` 路由，不再根据
-Simple/Task 切换根角色。模型路由与子代理 Profile 分开：保留五条模型路由，其中四条对应系统子代理：
+配置不使用 `active_provider`。root Agent 的 desired route 属于各自 Thread；主配置以
+`mode_model_routes` 保存各 Mode 的新建/切换默认 selector。`mode.simple` 与 `mode.task`
+必须存在并独立保存 provider/model/effort；合法自定义 Mode ID 可以持久化，尚无条目时继承
+`mode.simple`，首次显式选择后形成自己的条目。Mode 默认值不反向修改其他现有 Thread。
+
+`models.routes` 只保存系统及用户子代理 Profile 的路由；四条内置系统 route 为：
 
 | 配置 key | 中文角色 | 用途 |
 | --- | --- | --- |
 | `explorer` | 探索者 | 代码、文档和上下文探索 |
-| `planner` | 主智能体 | root 专用；理解需求、计划、协调、整合与验证 |
 | `executor` | 执行者 | 实施修改和验证 |
 | `worktree_executor` | Worktree 执行者 | 在独立 Git worktree 实施修改和验证 |
 | `reviewer` | 审查者 | 代码审查和结果检查 |
 
 系统子代理 Profile 由内置结构体启动注册，不生成 TOML；身份、用途、指令和工作区模式
-不可编辑、不可删除，可通过主配置 `disabled_system_agents` 禁用。主智能体的
-provider/model/effort 在 Agents 页独立区域配置，没有启用开关；其余系统 route 在子代理
-区域配置。用户 Profile 的文件名 stem 是 Agent ID。
+不可编辑、不可删除，可通过主配置 `disabled_system_agents` 禁用。主智能体在会话起始页与
+会话状态栏选择模型，不在 Agents 页配置；系统 child route 在子代理区域配置。用户 Profile
+的文件名 stem 是 Agent ID。
 `list_agent_profiles` 只返回启用且路由可解析的 Profile；`spawn_agent` 创建 child 时冻结
 系统指令、provider、model 与 effort，此后文件变化不改变既有 child；设置页另读完整
 catalog，被禁用的用户 Profile 仍可编辑并重新启用。
@@ -93,7 +98,7 @@ catalog，被禁用的用户 Profile 仍可编辑并重新启用。
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。精简示例：
 
 ```toml
-schema_version = 19
+schema_version = 20
 
 disabled_system_agents = []
 
@@ -121,7 +126,17 @@ auto_learn = true
 project_dir = ".agents/skills"
 user_dir = "~/.anywork/skills"
 
-[models.routes.planner]
+[mode_model_routes."mode.simple"]
+provider = "deepseek"
+model = "deepseek-flash"
+effort = "high"
+
+[mode_model_routes."mode.task"]
+provider = "deepseek"
+model = "deepseek-flash"
+effort = "high"
+
+[models.routes.explorer]
 provider = "deepseek"
 model = "deepseek-flash"
 effort = "high"

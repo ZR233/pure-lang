@@ -21,8 +21,10 @@ pub(super) enum MailboxCommand {
         reply: oneshot::Sender<Result<(), ThreadError>>,
     },
     QueueModelUpdate(
-        super::model_update::ModelUpdate,
-        oneshot::Sender<Result<(), ThreadError>>,
+        super::model_update::DeferredModelUpdate,
+        super::model_update::DeferredModelUpdatePrecondition,
+        Vec<extensions::ExtensionMutation>,
+        oneshot::Sender<Result<ThreadSnapshot, ThreadError>>,
     ),
     BeginIdleClose(oneshot::Sender<bool>),
     Reconfigure(
@@ -128,8 +130,8 @@ impl Owner {
                 };
                 let _ = reply.send(result);
             }
-            MailboxCommand::QueueModelUpdate(update, reply) => {
-                let result = self.queue_model_update(update);
+            MailboxCommand::QueueModelUpdate(update, precondition, mutations, reply) => {
+                let result = self.queue_model_update(update, precondition, mutations);
                 let _ = reply.send(result);
             }
             MailboxCommand::BeginIdleClose(reply) => {

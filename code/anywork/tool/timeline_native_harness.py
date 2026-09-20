@@ -181,10 +181,12 @@ def main():
     serving = threading.Thread(target=server.serve_forever, daemon=True)
     serving.start()
     url = f'http://127.0.0.1:{server.server_port}'
-    config = 'schema_version = 19\n[runtime]\npermission_mode = "full-access"\n'
+    config = 'schema_version = 20\n[runtime]\npermission_mode = "full-access"\n'
     config += f'[models.providers.deepseek]\nname = "Timeline scripted provider"\npreset = "deepseek"\nbase_url = "{url}"\n'
     config += '[models.providers.deepseek.catalog]\nsource = "bundled"\ncatalog = "deepseek"\n'
-    for role in ('explorer', 'planner', 'executor', 'worktree_executor', 'reviewer'):
+    for mode in ('mode.simple', 'mode.task'):
+        config += f'[mode_model_routes."{mode}"]\nprovider = "deepseek"\nmodel = "deepseek-flash"\neffort = "high"\n'
+    for role in ('explorer', 'executor', 'worktree_executor', 'reviewer'):
         config += f'[models.routes.{role}]\nprovider = "deepseek"\nmodel = "deepseek-flash"\neffort = "high"\n'
     (home / 'config.toml').write_text(config)
     env = dict(os.environ, ANYWORK_HOME=str(home))

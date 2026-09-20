@@ -29,6 +29,12 @@ idle、无 pending interaction 时可用；旧活动 run 由 runtime 归档，�
 snapshot 恢复 UI。Thread Mode 不出现在普通 Skills 设置和按需调用列表；两个内置模式不可
 删除或覆盖（Mode 体系见 [11](./11-thread-mode.md)）。
 
+起始页的模型与思考强度 selector 读取当前草稿 Mode 的 `modeModelRoutes` 默认值；切换 Mode
+立即展示该 Mode 最后保存的选择。已有 root Thread 的 selector 只读取 Thread runtime 中的
+`modelRoute`，修改时同时更新该 Thread 与其当前 Mode 默认值，不改变其他 Thread。child Thread
+继续只读展示创建时冻结的 Profile route。路由 unavailable 时保留原 selector 并显示错误，
+不得在 Flutter 侧选择另一个 provider 或 model。
+
 起始页 composer 另外提供会话工作区选择：`local`（默认，使用 Project 目录）或 `worktree`
 （从 Project 的 Git 仓库 `HEAD` 新建独立工作树）。该选择属于所在项目的输入草稿，按项目隔离
 保存，并随首个 prompt 提交给创建命令。本地与 SSH 项目都提供 `worktree`：非 Git 项目、
@@ -204,8 +210,9 @@ connection override；自定义模型编辑器必须显式选择协议、支持�
 API key 时空输入表示保留现有 secret；provider key 重命名必须携带 originalId，以便服务端
 保留 secret、headers、catalog metadata 和模型能力。设置页不展示 raw TOML 编辑器。
 
-Agents 标签页展示独立主智能体区域及四个系统子代理 Profile：每个卡片将模型与"思考强度"作为两个独立下拉控件
-展示；模型选项使用 `Provider / Model · Protocol · Connection`，思考强度候选值来自当前模型
+Agents 标签页只展示四个系统子代理 Profile 与用户 Profile，不展示主智能体配置区域。系统
+Profile 卡片将模型与"思考强度"作为两个独立下拉控件展示；模型选项使用
+`Provider / Model · Protocol · Connection`，思考强度候选值来自当前模型
 声明。模型改变时，有候选的模型切换为其声明的默认 effort，没有显式默认时使用首个候选；
 无候选模型保存空选择并禁用强度控件。仅改变思考强度时保持当前 provider 和 model 不变。
 模型、思考强度与启用状态变更都携带 settings revision 即时保存，但 Flutter 不进行持久

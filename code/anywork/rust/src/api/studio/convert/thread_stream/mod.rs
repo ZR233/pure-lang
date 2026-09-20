@@ -587,9 +587,19 @@ fn item_delta(value: ThreadItemDelta) -> BridgeThreadItemDelta {
     }
 }
 
-fn runtime_snapshot(value: ThreadRuntimeSnapshot) -> BridgeThreadRuntimeSnapshot {
+pub(crate) fn runtime_snapshot(value: ThreadRuntimeSnapshot) -> BridgeThreadRuntimeSnapshot {
     BridgeThreadRuntimeSnapshot {
         thread_id: value.thread_id,
+        model_route: value
+            .model_route
+            .map(|route| BridgeThreadModelRouteSnapshot {
+                provider_id: route.provider_id,
+                model: route.model,
+                effort: route.effort,
+                revision: route.revision,
+                available: route.available,
+                unavailable_reason: route.unavailable_reason,
+            }),
         usage: runtime_usage(value.usage),
         turn_completion_tokens: value.turn_completion_tokens,
         turn_decode_millis: value.turn_decode_millis,

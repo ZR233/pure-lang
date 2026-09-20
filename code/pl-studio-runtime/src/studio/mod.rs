@@ -4,6 +4,7 @@ pub(crate) mod entity;
 mod ids;
 mod mappers;
 mod merged_page;
+pub(crate) mod model_route;
 mod paths;
 mod persistence;
 mod product_event_bus;

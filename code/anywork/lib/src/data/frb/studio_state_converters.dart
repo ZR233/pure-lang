@@ -88,6 +88,9 @@ SettingsStateSnapshot _settingsStateFromFrb(
     return SettingsStateData(
       providers: settings.providers.map(_providerSettingsFromFrb).toList(),
       defaultProviderId: settings.defaultProviderId,
+      modeModelRoutes: settings.modeModelRoutes
+          .map(_modeModelRouteFromFrb)
+          .toList(),
       roles: settings.roles.map(_roleSettingsFromFrb).toList(),
       mcpServers: settings.mcpServers.map(_mcpSettingsFromFrb).toList(),
       instructions: _instructionsSettingsFromFrb(settings.instructions),

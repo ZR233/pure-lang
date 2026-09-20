@@ -67,6 +67,17 @@ RoleSettingsView _roleSettingsFromFrb(frb.BridgeRoleSettingsDto value) {
   );
 }
 
+ModeModelRouteView _modeModelRouteFromFrb(
+  frb.BridgeModeModelSettingsDto value,
+) {
+  return ModeModelRouteView(
+    modeId: ThreadModeId.fromId(value.modeId),
+    providerId: value.providerId,
+    model: value.model,
+    effort: value.effort,
+  );
+}
+
 InstructionsSettingsView _instructionsSettingsFromFrb(
   frb.BridgeInstructionsSettingsDto value,
 ) {

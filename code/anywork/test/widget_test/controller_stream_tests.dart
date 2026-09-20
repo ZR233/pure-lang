@@ -89,13 +89,9 @@ void registerControllerStreamTests() {
       '/tmp/conflict.png',
     ], threadId: 'session-1');
 
-    await controller.setModelRole(
-      roleKey: 'planner',
-      providerId: 'zhipu',
-      model: 'glm-5.3',
-    );
+    await controller.setThreadModelRoute(providerId: 'zhipu', model: 'glm-5.3');
 
-    expect(api.roleUpdate, isNull);
+    expect(api.threadModelRouteUpdate, isNull);
     expect(
       container
           .read(studioControllerProvider)
@@ -129,11 +125,11 @@ void registerControllerStreamTests() {
   });
 
   test(
-    'model command response cannot overwrite a newer settings event',
+    'Mode model command response cannot overwrite a newer settings event',
     () async {
       final initial = _stateWithPlannerModels();
       final api = _FakeStudioApi(initial)
-        ..blockedModelRoleSave = Completer<SettingsStateSnapshot>();
+        ..blockedModeRouteSave = Completer<SettingsStateSnapshot>();
       final container = ProviderContainer(
         overrides: [studioApiProvider.overrideWithValue(api)],
       );
@@ -141,8 +137,8 @@ void registerControllerStreamTests() {
       await container.read(studioControllerProvider.future);
       final controller = container.read(studioControllerProvider.notifier);
 
-      final save = controller.setModelRole(
-        roleKey: 'planner',
+      final save = controller.setModeModelRoute(
+        mode: ThreadModeId.simple,
         providerId: 'deepseek',
         model: 'deepseek-flash',
         effort: 'max',
@@ -151,34 +147,34 @@ void registerControllerStreamTests() {
       final eventSettings = _settingsSnapshot(
         initial.settingsState,
         revision: initial.settingsRevision + 2,
-        roles: [
-          for (final role in initial.roles)
-            role.key == 'planner'
-                ? const RoleSettingsView(
-                    key: 'planner',
+        modeModelRoutes: [
+          for (final route in initial.modeModelRoutes)
+            route.modeId == ThreadModeId.simple
+                ? const ModeModelRouteView(
+                    modeId: ThreadModeId.simple,
                     providerId: 'openai',
                     model: 'gpt-5.6',
                     effort: 'high',
                   )
-                : role,
+                : route,
         ],
       );
       api.emitGlobal(_settingsChangedEvent(eventSettings));
       await pumpEventQueue();
-      api.blockedModelRoleSave!.complete(
+      api.blockedModeRouteSave!.complete(
         _settingsSnapshot(
           initial.settingsState,
           revision: initial.settingsRevision + 1,
-          roles: [
-            for (final role in initial.roles)
-              role.key == 'planner'
-                  ? const RoleSettingsView(
-                      key: 'planner',
+          modeModelRoutes: [
+            for (final route in initial.modeModelRoutes)
+              route.modeId == ThreadModeId.simple
+                  ? const ModeModelRouteView(
+                      modeId: ThreadModeId.simple,
                       providerId: 'deepseek',
                       model: 'deepseek-flash',
                       effort: 'max',
                     )
-                  : role,
+                  : route,
           ],
         ),
       );
@@ -186,8 +182,11 @@ void registerControllerStreamTests() {
 
       final state = container.read(studioControllerProvider).requireValue;
       expect(state.settingsRevision, initial.settingsRevision + 2);
-      expect(state.role('planner')?.providerId, 'openai');
-      expect(state.role('planner')?.model, 'gpt-5.6');
+      final route = state.modeModelRoutes
+          .where((route) => route.modeId == ThreadModeId.simple)
+          .first;
+      expect(route.providerId, 'openai');
+      expect(route.model, 'gpt-5.6');
       expect(state.selectedThreadId, initial.selectedThreadId);
       expect(state.selectedWorkspace?.items, initial.selectedWorkspace?.items);
       expect(state.runtime, initial.runtime);

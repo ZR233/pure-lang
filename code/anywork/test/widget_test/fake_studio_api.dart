@@ -79,7 +79,12 @@ class _FakeStudioApi implements StudioApi {
   String? archiveSelectedProjectId;
   ({String threadId, ThreadModeId mode})? modeUpdate;
   _RoleUpdate? roleUpdate;
+  ({ThreadModeId mode, String providerId, String model, String? effort})?
+  modeRouteUpdate;
+  ({String threadId, String providerId, String model, String? effort})?
+  threadModelRouteUpdate;
   Completer<SettingsStateSnapshot>? blockedModelRoleSave;
+  Completer<SettingsStateSnapshot>? blockedModeRouteSave;
 
   /// 测试注入：追加在五个系统 Profile 之后返回的用户 Profile；
   /// 默认保持为空以维持系统 Profile 默认行为。
@@ -602,6 +607,90 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
+  Future<SettingsStateSnapshot> setModeModelRoute({
+    required int expectedSettingsRevision,
+    required ThreadModeId mode,
+    required String providerId,
+    required String model,
+    String? effort,
+  }) async {
+    modeRouteUpdate = (
+      mode: mode,
+      providerId: providerId,
+      model: model,
+      effort: effort,
+    );
+    final settings = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
+      modeModelRoutes: [
+        for (final route in _currentState.modeModelRoutes)
+          if (route.modeId != mode) route,
+        ModeModelRouteView(
+          modeId: mode,
+          providerId: providerId,
+          model: model,
+          effort: effort ?? '',
+        ),
+      ],
+    );
+    _currentState = _currentState.copyWith(settingsState: settings);
+    return blockedModeRouteSave?.future ?? settings;
+  }
+
+  @override
+  Future<ThreadModelRouteUpdateResult> setThreadModelRoute({
+    required String threadId,
+    required int expectedThreadRevision,
+    required int expectedSettingsRevision,
+    required String providerId,
+    required String model,
+    String? effort,
+  }) async {
+    threadModelRouteUpdate = (
+      threadId: threadId,
+      providerId: providerId,
+      model: model,
+      effort: effort,
+    );
+    final workspace = _currentState.workspacesByThread[threadId];
+    if (workspace == null || workspace.revision != expectedThreadRevision) {
+      throw StateError('thread revision conflict');
+    }
+    final settings = await setModeModelRoute(
+      expectedSettingsRevision: expectedSettingsRevision,
+      mode: workspace.thread.mode,
+      providerId: providerId,
+      model: model,
+      effort: effort,
+    );
+    final runtime = workspace.runtime.copyWith(
+      modelRoute: ThreadModelRouteView(
+        providerId: providerId,
+        model: model,
+        effort: effort,
+        revision: (workspace.runtime.modelRoute?.revision ?? 0) + 1,
+        available: true,
+      ),
+    );
+    _currentState = _currentState.copyWith(
+      workspacesByThread: {
+        ..._currentState.workspacesByThread,
+        threadId: workspace.copyWith(
+          revision: expectedThreadRevision + 1,
+          runtime: runtime,
+        ),
+      },
+    );
+    return (
+      runtime: runtime,
+      settings: settings,
+      modeDefaultSaved: true,
+      warning: null,
+    );
+  }
+
+  @override
   Future<void> setThreadMode({
     required String threadId,
     required ThreadModeId mode,
@@ -623,6 +712,13 @@ class _FakeStudioApi implements StudioApi {
     modeUpdate = (threadId: threadId, mode: mode);
     final updated = thread.copyWith(mode: mode, role: 'planner');
     final workspace = _currentState.workspacesByThread[threadId];
+    final route =
+        _currentState.modeModelRoutes
+            .where((candidate) => candidate.modeId == mode)
+            .firstOrNull ??
+        _currentState.modeModelRoutes
+            .where((candidate) => candidate.modeId == ThreadModeId.simple)
+            .firstOrNull;
     _currentState = _currentState.copyWith(
       threadDirectory: _currentState.threadDirectory.copyWith(
         threads: [
@@ -634,7 +730,22 @@ class _FakeStudioApi implements StudioApi {
           ? _currentState.workspacesByThread
           : {
               ..._currentState.workspacesByThread,
-              threadId: workspace.copyWith(thread: updated),
+              threadId: workspace.copyWith(
+                revision: workspace.revision + 1,
+                thread: updated,
+                runtime: route == null
+                    ? workspace.runtime
+                    : workspace.runtime.copyWith(
+                        modelRoute: ThreadModelRouteView(
+                          providerId: route.providerId,
+                          model: route.model,
+                          effort: route.effort,
+                          revision:
+                              (workspace.runtime.modelRoute?.revision ?? 0) + 1,
+                          available: true,
+                        ),
+                      ),
+              ),
             },
     );
   }
@@ -1026,6 +1137,7 @@ class _FakeStudioApi implements StudioApi {
                 .firstOrNull,
           ),
       ],
+      modeModelRoutes: command.modeRoutes,
       roles: [
         for (final role in command.roles)
           RoleSettingsView(
@@ -1265,6 +1377,7 @@ SettingsStateSnapshot _settingsSnapshot(
   required int revision,
   List<ProviderSettingsView>? providers,
   Object? defaultProviderId = _fakeUnset,
+  List<ModeModelRouteView>? modeModelRoutes,
   List<RoleSettingsView>? roles,
   List<McpServerSettingsView>? mcpServers,
   InstructionsSettingsView? instructions,
@@ -1280,6 +1393,7 @@ SettingsStateSnapshot _settingsSnapshot(
     defaultProviderId: identical(defaultProviderId, _fakeUnset)
         ? current.defaultProviderId
         : defaultProviderId as String?,
+    modeModelRoutes: modeModelRoutes ?? current.modeModelRoutes,
     roles: roles ?? current.roles,
     mcpServers: mcpServers ?? current.mcpServers,
     instructions: instructions ?? current.instructions,
@@ -1426,6 +1540,15 @@ Map<String, Object?> _providerSettingsCommandJson(
             for (final model in provider.modelConnectionModes)
               {'slug': model.slug, 'connectionMode': model.connectionMode},
           ],
+        },
+    ],
+    'modeRoutes': [
+      for (final route in command.modeRoutes)
+        {
+          'modeId': route.modeId.id,
+          'provider': route.providerId,
+          'model': route.model,
+          'effort': route.effort,
         },
     ],
     'roles': [

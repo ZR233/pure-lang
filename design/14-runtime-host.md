@@ -16,10 +16,16 @@ workspace/project 绑定创建新实例，不重新创建 worktree 或重演历�
 先激活。
 
 每 Thread 独占模型会话与工具实例；同批声明和 executor 由 core 冻结。配置、Profile 与工作区
-语义由 Studio 解释，不进入 core 类型；服务可按隔离身份共享租约，关闭一个 Thread 不撤销
+语义由 Studio 解释，不进入 core 类型；root 的无凭据模型 selector 作为不透明
+`studio.model-route` 扩展进入 journal，child 使用冻结的 Profile snapshot。服务可按隔离身份共享租约，关闭一个 Thread 不撤销
 其他 Thread 的租约。模型切换由 owner 串行执行：关闭旧会话后清空旧 continuation 与重试计划，
 再创建新会话；工厂失败时 Thread 明确保持模型不可用，保留历史并允许重新装配。执行中的
 Turn 不被参数刷新中途替换，后台工具任务与模型切换互相独立。
+
+路由 selector 与 pending model update 必须由同一 owner mailbox 操作提交：扩展 CAS 失败不改变
+pending update，反之亦然；selector 表示 desired route，实际模型仍在下一 Turn 边界替换。
+provider 设置更新可触发模型和工具刷新，但刷新必须逐 Thread 读取自身 selector 并重新解析，
+不得广播某个全局角色路由。selector 已失效时 Thread 进入明确 unavailable 状态，不猜测 fallback。
 
 ## 14.2 输入受理与驱动
 
@@ -150,7 +156,7 @@ Studio 从通用 interaction/permission snapshot 投影产品问题，并按带 
 continuation 输入在同一 core commit 中提交。重复回答不重复入队或自动驱动。
 
 Mode 切换使用 idle reconfigure：核对水位并拒绝活动 Turn/任务/输入/交互，原子替换业务扩展、
-上下文及工具目录；旧历史正文不按当前 Mode 重新渲染。普通用户提问、Plan 确认和执行许可
+目标 Mode 默认模型 selector、下一 Turn pending model update、上下文及工具目录；旧历史正文不按当前 Mode 重新渲染。普通用户提问、Plan 确认和执行许可
 共用 Studio 类型化交互路由：路由从 core snapshot 读取事实，不建立另一套可写交互状态；
 用户回答作为一次原子响应与隐藏续接输入提交，模型只接收保存时确定的内容。对外交互 ID
 包含 Thread 与 core 本地交互身份的无歧义编码，客户端只透传不透明 ID，provider 在不同

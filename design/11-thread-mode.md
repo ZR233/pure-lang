@@ -59,7 +59,9 @@ workflow，也不接受模型输入；模型没有定义、编译、patch 或 su
 root Turn 在调用 provider 前捕获一个 Mode 快照；本 Turn 的 Prompt、工具、图和状态校验全部
 使用该快照，注册更新从下一个 root Turn 生效。child Thread 使用冻结的 Agent Profile，不创建、
 继承或推进 root workflow。模式切换要求 root idle 且没有 pending interaction，runtime 负责归档
-旧活动 run。
+旧活动 run。切换同时从配置中的目标 Mode 默认 selector 解析模型，将 `studio.mode`、
+`studio.model-route`、instructions、workflow、context、tools 与下一 Turn 的 pending model update
+作为一次 idle reconfiguration 提交；失败时保持原 Mode 与原路由。
 
 带工作流的 Mode 要求当前 root route 支持 function calling；Turn 准备阶段在 provider 请求前
 显式拒绝不具备该能力的模型，不能为了迁就 hosted Web Search 的 exclusive 路径而静默卸载
@@ -80,6 +82,11 @@ Mode 不可用错误，不得静默回退。
 按需通过工具读取。Prompt 不进入 Studio 数据库或 workflow working state。持久化结构变化
 遵循 [17](./17-studio-storage.md) 的迁移契约；Mode/Workflow 历史形状在迁移边界转换，
 运行时只使用当前结构。
+
+配置按完整 `ThreadModeId` 保存每个 Mode 最后一次选择的 provider、model 与 effort。内置
+`mode.simple`、`mode.task` 独立保存；合法但当前未注册的自定义 Mode 条目仍保留。某个自定义
+Mode 尚无记录时临时继承 `mode.simple`，首次显式选择后写入独立条目。Mode 默认值只影响新建
+Thread 与显式切换 Mode，不反向改写当前仍处于该 Mode 的其他 Thread。
 
 ## 11.4 持久化与上下文投影
 

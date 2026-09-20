@@ -20,6 +20,7 @@ pub enum StudioOperation {
     ArchiveThread,
     RenameThread,
     SetThreadMode,
+    SetThreadModelRoute,
     ListThreadTurns,
     SubmitPrompt,
     InterruptTurn,
@@ -41,6 +42,7 @@ pub enum StudioOperation {
     SaveMcpSettings,
     SaveGeneralSettings,
     SetModelRole,
+    SetModeModelRoute,
     ReadProviderUsage,
     CheckProviderUsage,
     ReadSkills,
@@ -62,7 +64,7 @@ pub enum StudioOperation {
 }
 
 impl StudioOperation {
-    pub const ALL: [Self; 52] = [
+    pub const ALL: [Self; 54] = [
         Self::ReadState,
         Self::OpenProject,
         Self::RenameProject,
@@ -76,6 +78,7 @@ impl StudioOperation {
         Self::ArchiveThread,
         Self::RenameThread,
         Self::SetThreadMode,
+        Self::SetThreadModelRoute,
         Self::ListThreadTurns,
         Self::SubmitPrompt,
         Self::InterruptTurn,
@@ -97,6 +100,7 @@ impl StudioOperation {
         Self::SaveMcpSettings,
         Self::SaveGeneralSettings,
         Self::SetModelRole,
+        Self::SetModeModelRoute,
         Self::ReadProviderUsage,
         Self::CheckProviderUsage,
         Self::ReadSkills,
@@ -132,6 +136,7 @@ impl StudioOperation {
             Self::ArchiveThread => "thread.archive",
             Self::RenameThread => "thread.rename",
             Self::SetThreadMode => "thread.setMode",
+            Self::SetThreadModelRoute => "thread.setModelRoute",
             Self::ListThreadTurns => "thread.listTurns",
             Self::SubmitPrompt => "prompt.submit",
             Self::InterruptTurn => "turn.interrupt",
@@ -153,6 +158,7 @@ impl StudioOperation {
             Self::SaveMcpSettings => "settings.saveMcp",
             Self::SaveGeneralSettings => "settings.saveGeneral",
             Self::SetModelRole => "settings.setModelRole",
+            Self::SetModeModelRoute => "settings.setModeModelRoute",
             Self::ReadProviderUsage => "providerUsage.read",
             Self::CheckProviderUsage => "providerUsage.check",
             Self::ReadSkills => "skills.read",

@@ -258,6 +258,8 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Task'), findsOneWidget);
+    expect(find.text('deepseek-v4-pro'), findsOneWidget);
+    expect(find.text('max'), findsOneWidget);
     expect(find.byTooltip('Main agent model'), findsOneWidget);
     expect(api.createdThreadProjectId, isNull);
 
@@ -1075,6 +1077,13 @@ void registerShellSettingsTests() {
         _stateWithPlannerModels(),
         const ThreadRuntimeView(
           model: 'planner/local',
+          modelRoute: ThreadModelRouteView(
+            providerId: 'deepseek',
+            model: 'deepseek-flash',
+            effort: 'high',
+            revision: 1,
+            available: true,
+          ),
           contextTokens: 42,
           contextWindow: 100,
           totalTokens: 128,
@@ -1086,6 +1095,7 @@ void registerShellSettingsTests() {
         ),
       ),
     );
+    api.publishSnapshotOnSubscribe = true;
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
@@ -1160,15 +1170,17 @@ void registerShellSettingsTests() {
       hasLength(2),
     );
     expect(find.text('Task'), findsOneWidget);
+    expect(find.text('deepseek-v4-pro'), findsOneWidget);
+    expect(find.text('max'), findsOneWidget);
     expect(find.byTooltip('Main agent model'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Main agent model'));
     await tester.pumpAndSettle();
     await tester.tap(find.textContaining('V4 Pro').last);
     await tester.pumpAndSettle();
-    expect(api.roleUpdate?.roleKey, 'planner');
-    expect(api.roleUpdate?.providerId, 'deepseek');
-    expect(api.roleUpdate?.model, 'deepseek-v4-pro');
+    expect(api.threadModelRouteUpdate?.threadId, 'session-1');
+    expect(api.threadModelRouteUpdate?.providerId, 'deepseek');
+    expect(api.threadModelRouteUpdate?.model, 'deepseek-v4-pro');
 
     api.emitGlobal(
       _threadDirectoryChangedEvent(
@@ -1191,10 +1203,10 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('max').last);
     await tester.pumpAndSettle();
-    expect(api.roleUpdate?.roleKey, 'planner');
-    expect(api.roleUpdate?.providerId, 'deepseek');
-    expect(api.roleUpdate?.model, 'deepseek-v4-pro');
-    expect(api.roleUpdate?.effort, 'max');
+    expect(api.threadModelRouteUpdate?.threadId, 'session-1');
+    expect(api.threadModelRouteUpdate?.providerId, 'deepseek');
+    expect(api.threadModelRouteUpdate?.model, 'deepseek-v4-pro');
+    expect(api.threadModelRouteUpdate?.effort, 'max');
   });
 
   testWidgets('header shows session cost only and selected agent throughput', (
@@ -1865,7 +1877,8 @@ void registerShellSettingsTests() {
       find.byKey(StudioDriverKeys.modelOption('deepseek', 'deepseek-v4-pro')),
     );
     await tester.pumpAndSettle();
-    expect(api.roleUpdate?.model, 'deepseek-v4-pro');
+    expect(api.threadModelRouteUpdate?.threadId, 'session-1');
+    expect(api.threadModelRouteUpdate?.model, 'deepseek-v4-pro');
 
     await tester.tap(find.byKey(StudioDriverKeys.reasoningEffort));
     await tester.pumpAndSettle();
@@ -3278,6 +3291,14 @@ void registerShellSettingsTests() {
       api.savedProviderSettings?['defaultProviderId'],
       'zhipu-coding-plan',
     );
+    final modeRoutes =
+        api.savedProviderSettings!['modeRoutes'] as List<Object?>;
+    final simple = modeRoutes.cast<Map<String, Object?>>().singleWhere(
+      (route) => route['modeId'] == 'mode.simple',
+    );
+    expect(simple['provider'], 'zhipu-coding-plan');
+    expect(simple['model'], 'glm-5.2');
+    expect(simple['effort'], isEmpty);
   });
 
   testWidgets('provider list shows compact DeepSeek and ordered Zhipu usage', (
@@ -3821,7 +3842,6 @@ void registerShellSettingsTests() {
       await tester.tap(find.text('Agents'));
       await tester.pumpAndSettle();
       for (final role in const [
-        'planner',
         'explorer',
         'executor',
         'worktree_executor',
@@ -3843,20 +3863,20 @@ void registerShellSettingsTests() {
       }
 
       await tester.scrollUntilVisible(
-        find.byKey(StudioDriverKeys.settingsRoleModel('planner')),
+        find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
         -300,
         scrollable: _settingsPaneScrollable(),
       );
       await tester.ensureVisible(
-        find.byKey(StudioDriverKeys.settingsRoleModel('planner')),
+        find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
       );
       await tester.tap(
-        find.byKey(StudioDriverKeys.settingsRoleModel('planner')),
+        find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
       );
       await tester.pumpAndSettle();
       final flashOption = find.byKey(
         StudioDriverKeys.settingsRoleModelOption(
-          'planner',
+          'explorer',
           'deepseek',
           'deepseek-flash',
         ),
@@ -3872,7 +3892,7 @@ void registerShellSettingsTests() {
       );
       final proOption = find.byKey(
         StudioDriverKeys.settingsRoleModelOption(
-          'planner',
+          'explorer',
           'deepseek',
           'deepseek-v4-pro',
         ),
@@ -3889,24 +3909,26 @@ void registerShellSettingsTests() {
       expect(proOption.hitTestable(), findsOneWidget);
       await tester.tap(proOption);
       await tester.pumpAndSettle();
-      expect(api.roleUpdate?.roleKey, 'planner');
+      expect(api.roleUpdate?.roleKey, 'explorer');
       expect(api.roleUpdate?.model, 'deepseek-v4-pro');
 
       await tester.tap(
-        find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
+        find.byKey(StudioDriverKeys.settingsRoleEffort('explorer')),
       );
       await tester.pumpAndSettle();
       expect(
         find
-            .byKey(StudioDriverKeys.settingsRoleEffortOption('planner', 'max'))
+            .byKey(StudioDriverKeys.settingsRoleEffortOption('explorer', 'max'))
             .hitTestable(),
         findsOneWidget,
       );
       await tester.tap(
-        find.byKey(StudioDriverKeys.settingsRoleEffortOption('planner', 'max')),
+        find.byKey(
+          StudioDriverKeys.settingsRoleEffortOption('explorer', 'max'),
+        ),
       );
       await tester.pumpAndSettle();
-      expect(api.roleUpdate?.roleKey, 'planner');
+      expect(api.roleUpdate?.roleKey, 'explorer');
       expect(api.roleUpdate?.providerId, 'deepseek');
       expect(api.roleUpdate?.model, 'deepseek-v4-pro');
       expect(api.roleUpdate?.effort, 'max');
@@ -4257,149 +4279,152 @@ void registerShellSettingsTests() {
       expect(find.text('API Key (optional)'), findsNothing);
     },
   );
-  testWidgets(
-    'Agents page separates the main agent from fixed system modes and typed user profile controls',
-    (tester) async {
-      tester.view.physicalSize = const Size(760, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final api = _FakeStudioApi(_stateWithPlannerModels());
-      await _pumpSettingsPage(tester, api);
+  testWidgets('Agents page contains only child system and user profiles', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(760, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await _pumpSettingsPage(tester, api);
 
-      await tester.tap(find.text('Agents'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Agents'));
+    await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('main-agent-card')), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('system-agent-enabled-planner')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const ValueKey('agent-profile-card-planner')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(StudioDriverKeys.settingsRoleModel('planner')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
-        findsOneWidget,
-      );
+    expect(find.byKey(const ValueKey('main-agent-card')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('system-agent-enabled-planner')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('agent-profile-card-planner')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.settingsRoleModel('planner')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('agent-profile-card-explorer')),
+      findsOneWidget,
+    );
 
-      await tester.tap(find.byKey(const ValueKey('agent-profile-add')));
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('agent-profile-provider')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('agent-profile-model-deepseek')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(
-          const ValueKey('agent-profile-effort-deepseek-deepseek-flash'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('agent-profile-workspace-mode')),
-        findsOneWidget,
-      );
-      expect(find.text('Agent Profiles'), findsOneWidget);
-      expect(find.text('Add user profile'), findsOneWidget);
-      expect(_dialogText('Add user agent profile'), findsOneWidget);
-      expect(_dialogText('Agent ID'), findsOneWidget);
-      expect(_dialogText('Display name'), findsOneWidget);
-      expect(_dialogText('Description'), findsOneWidget);
-      expect(_dialogText('Best for'), findsOneWidget);
-      expect(_dialogText('System instructions'), findsOneWidget);
-      expect(_dialogText('Provider'), findsOneWidget);
-      expect(_dialogText('Model'), findsOneWidget);
-      expect(_dialogText('Reasoning effort'), findsOneWidget);
-      expect(_dialogText('Workspace mode'), findsOneWidget);
-      expect(_dialogText('Enabled'), findsOneWidget);
-      expect(
-        _dialogText(
-          'Directory mode limits built-in file writes to the project only; '
-          'it is not an OS sandbox, and shell, Git, and MCP can still '
-          'bypass it.',
-        ),
-        findsOneWidget,
-      );
-      expect(_dialogText('Cancel'), findsOneWidget);
-      expect(_dialogText('Save TOML atomically'), findsOneWidget);
-      final effortField = find.byKey(
+    await tester.tap(find.byKey(const ValueKey('agent-profile-add')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('agent-profile-provider')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('agent-profile-model-deepseek')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
         const ValueKey('agent-profile-effort-deepseek-deepseek-flash'),
-      );
-      await tester.ensureVisible(effortField);
-      await tester.pumpAndSettle();
-      await tester.tap(effortField);
-      await tester.pumpAndSettle();
-      expect(find.text('Use model default'), findsOneWidget);
-      await tester.tapAt(const Offset(10, 10));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('agent-profile-workspace-mode')),
+      findsOneWidget,
+    );
+    expect(find.text('Agent Profiles'), findsOneWidget);
+    expect(find.text('Add user profile'), findsOneWidget);
+    expect(_dialogText('Add user agent profile'), findsOneWidget);
+    expect(_dialogText('Agent ID'), findsOneWidget);
+    expect(_dialogText('Display name'), findsOneWidget);
+    expect(_dialogText('Description'), findsOneWidget);
+    expect(_dialogText('Best for'), findsOneWidget);
+    expect(_dialogText('System instructions'), findsOneWidget);
+    expect(_dialogText('Provider'), findsOneWidget);
+    expect(_dialogText('Model'), findsOneWidget);
+    expect(_dialogText('Reasoning effort'), findsOneWidget);
+    expect(_dialogText('Workspace mode'), findsOneWidget);
+    expect(_dialogText('Enabled'), findsOneWidget);
+    expect(
+      _dialogText(
+        'Directory mode limits built-in file writes to the project only; '
+        'it is not an OS sandbox, and shell, Git, and MCP can still '
+        'bypass it.',
+      ),
+      findsOneWidget,
+    );
+    expect(_dialogText('Cancel'), findsOneWidget);
+    expect(_dialogText('Save TOML atomically'), findsOneWidget);
+    final effortField = find.byKey(
+      const ValueKey('agent-profile-effort-deepseek-deepseek-flash'),
+    );
+    await tester.ensureVisible(effortField);
+    await tester.pumpAndSettle();
+    await tester.tap(effortField);
+    await tester.pumpAndSettle();
+    expect(find.text('Use model default'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
 
-      for (final role in const [
-        'explorer',
-        'executor',
-        'worktree_executor',
-        'reviewer',
-      ]) {
-        await tester.scrollUntilVisible(
-          find.byKey(ValueKey('system-agent-workspace-$role')),
-          300,
-          scrollable: find.byType(Scrollable).first,
-        );
-        expect(
-          find.byKey(ValueKey('system-agent-workspace-$role')),
-          findsOneWidget,
-        );
-        expect(
-          find.byKey(StudioDriverKeys.settingsRoleModel(role)),
-          findsOneWidget,
-        );
-        expect(
-          find.byKey(StudioDriverKeys.settingsRoleEffort(role)),
-          findsOneWidget,
-        );
-      }
+    for (final role in const [
+      'explorer',
+      'executor',
+      'worktree_executor',
+      'reviewer',
+    ]) {
       await tester.scrollUntilVisible(
-        find.byKey(const ValueKey('system-agent-workspace-executor')),
-        -300,
-        scrollable: find.byType(Scrollable).first,
-      );
-      expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('system-agent-workspace-executor')),
-          matchRoot: true,
-          matching: find.text('Directory'),
-        ),
-        findsOneWidget,
-      );
-      await tester.scrollUntilVisible(
-        find.byKey(const ValueKey('system-agent-workspace-worktree_executor')),
+        find.byKey(ValueKey('system-agent-workspace-$role')),
         300,
         scrollable: find.byType(Scrollable).first,
       );
       expect(
-        find.descendant(
-          of: find.byKey(
-            const ValueKey('system-agent-workspace-worktree_executor'),
-          ),
-          matchRoot: true,
-          matching: find.text('Worktree'),
-        ),
+        find.byKey(ValueKey('system-agent-workspace-$role')),
         findsOneWidget,
       );
+      expect(
+        find.byKey(StudioDriverKeys.settingsRoleModel(role)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.settingsRoleEffort(role)),
+        findsOneWidget,
+      );
+    }
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('system-agent-workspace-executor')),
+      -300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('system-agent-workspace-executor')),
+        matchRoot: true,
+        matching: find.text('Directory'),
+      ),
+      findsOneWidget,
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('system-agent-workspace-worktree_executor')),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(
+          const ValueKey('system-agent-workspace-worktree_executor'),
+        ),
+        matchRoot: true,
+        matching: find.text('Worktree'),
+      ),
+      findsOneWidget,
+    );
 
-      expect(tester.takeException(), isNull);
-    },
-  );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'en locale projects system profile cards without leaking runtime Chinese',
@@ -4414,11 +4439,6 @@ void registerShellSettingsTests() {
 
       const enCardCopy = <(String, String, String)>[
         ('explorer', 'Explorer', 'Explore code and collect context.'),
-        (
-          'planner',
-          'Main agent',
-          'Understand requests, plan work, coordinate subagents, integrate and verify results.',
-        ),
         ('executor', 'Executor', 'Apply edits and run tools.'),
         (
           'worktree_executor',
@@ -4440,11 +4460,7 @@ void registerShellSettingsTests() {
         '检查实现',
       ];
       for (final (role, name, description) in enCardCopy) {
-        final card = find.byKey(
-          ValueKey(
-            role == 'planner' ? 'main-agent-card' : 'agent-profile-card-$role',
-          ),
-        );
+        final card = find.byKey(ValueKey('agent-profile-card-$role'));
         await _dragUntilBuilt(tester, card);
         expect(
           find.descendant(of: card, matching: find.text(name)),
@@ -4499,7 +4515,6 @@ void registerShellSettingsTests() {
 
       const zhCardCopy = <(String, String, String)>[
         ('explorer', '探索者', '探索代码并收集上下文'),
-        ('planner', '主智能体', '理解需求、制定计划、协调子代理、整合与验证结果。'),
         ('executor', '执行者', '落实修改并运行工具'),
         ('worktree_executor', '工作树执行者', '在隔离的 Git 工作树中落实修改并运行工具'),
         ('reviewer', '审查者', '审查结果并验证风险'),
@@ -4512,11 +4527,7 @@ void registerShellSettingsTests() {
         '检查实现',
       ];
       for (final (role, name, description) in zhCardCopy) {
-        final card = find.byKey(
-          ValueKey(
-            role == 'planner' ? 'main-agent-card' : 'agent-profile-card-$role',
-          ),
-        );
+        final card = find.byKey(ValueKey('agent-profile-card-$role'));
         await _dragUntilBuilt(tester, card);
         expect(
           find.descendant(of: card, matching: find.text(name)),
@@ -4994,73 +5005,23 @@ void registerShellSettingsTests() {
     },
   );
 
-  testWidgets(
-    'zh system agent route shows an unresolvable canonical route as unavailable',
-    (tester) async {
-      _configureSettingsTestView(tester);
-      final api = _FakeStudioApi(
-        _withSettingsFixture(
-          _stateWithPlannerModels(),
-          roles: const [
-            RoleSettingsView(
-              key: 'planner',
-              providerId: 'ghost',
-              model: 'ghost-model',
-              effort: 'high',
-            ),
-          ],
-        ),
-      );
-      await _pumpSettingsPage(
-        tester,
-        api,
-        locale: const Locale.fromSubtags(
-          languageCode: 'zh',
-          scriptCode: 'Hans',
-        ),
-      );
+  testWidgets('Agents page never exposes the main agent route', (tester) async {
+    _configureSettingsTestView(tester);
+    await _pumpSettingsPage(tester, _FakeStudioApi(_stateWithPlannerModels()));
 
-      await tester.tap(find.text('智能体'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Agents'));
+    await tester.pumpAndSettle();
 
-      final modelSelector = find.byKey(
-        StudioDriverKeys.settingsRoleModel('planner'),
-      );
-      await tester.scrollUntilVisible(
-        modelSelector,
-        300,
-        scrollable: _settingsPaneScrollable(),
-      );
-      expect(
-        find.descendant(
-          of: modelSelector,
-          matching: find.text('ghost / ghost-model（不可用）'),
-        ),
-        findsOneWidget,
-      );
-      // 不得显示 options.first（deepseek）。
-      expect(
-        find.descendant(
-          of: modelSelector,
-          matching: find.textContaining('DeepSeek'),
-        ),
-        findsNothing,
-      );
-      // 未知模型无法提供 effort：控件不可用，不会改写 provider/model。
-      expect(
-        tester
-            .widget<InputDecorator>(
-              find.descendant(
-                of: find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
-                matching: find.byType(InputDecorator),
-              ),
-            )
-            .decoration
-            .enabled,
-        isFalse,
-      );
-    },
-  );
+    expect(find.byKey(const ValueKey('main-agent-card')), findsNothing);
+    expect(
+      find.byKey(StudioDriverKeys.settingsRoleModel('planner')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
+      findsNothing,
+    );
+  });
 
   testWidgets('en recovery card renders full head line when head is null', (
     tester,

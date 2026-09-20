@@ -1,5 +1,6 @@
 import 'provider_models.dart';
 import 'settings_models.dart';
+import 'studio_enums.dart';
 
 enum ProviderSecretAction { preserve, replace, clear }
 
@@ -88,28 +89,97 @@ class ProviderSettingsCommand {
   const ProviderSettingsCommand({
     required this.defaultProviderId,
     required this.providers,
+    this.modeRoutes = const [],
     required this.roles,
   });
 
   final String defaultProviderId;
   final List<ProviderCommand> providers;
+  final List<ModeModelRouteView> modeRoutes;
   final List<RoleSettingsCommand> roles;
 }
 
 abstract final class ProviderSettingsCommandBuilder {
   static ProviderSettingsCommand build({
     required List<ProviderSettingsView> providers,
+    required List<ModeModelRouteView> modeRoutes,
     required List<RoleSettingsView> roles,
     String? selectedProviderId,
     String? renamedFrom,
     String? renamedTo,
     String? removedProviderId,
+    bool setSimpleModeDefault = false,
   }) {
     final normalized = providers.map(normalizeProvider).toList();
     final fallback = normalized.isEmpty ? null : normalized.first;
     final providerIds = normalized.map((provider) => provider.id).toSet();
     final commands = <RoleSettingsCommand>[];
+    final modeCommands = <ModeModelRouteView>[];
+    final selectedDefaultProvider = selectedProviderId == null
+        ? null
+        : _providerById(normalized, selectedProviderId);
     if (fallback != null) {
+      for (final route in modeRoutes) {
+        var providerId = route.providerId;
+        if (renamedFrom != null && providerId == renamedFrom) {
+          providerId = renamedTo ?? providerId;
+        }
+        if (removedProviderId != null && providerId == removedProviderId) {
+          providerId = fallback.id;
+        }
+        final selectAsSimpleDefault =
+            setSimpleModeDefault &&
+            route.modeId == ThreadModeId.simple &&
+            selectedDefaultProvider != null;
+        if (selectAsSimpleDefault) {
+          providerId = selectedDefaultProvider.id;
+        }
+        final provider = _providerById(normalized, providerId);
+        final safeProvider =
+            providerIds.contains(providerId) && provider != null
+            ? provider
+            : fallback;
+        final model = selectAsSimpleDefault
+            ? safeProvider.defaultModel
+            : safeProvider.allModels.any(
+                (candidate) => candidate.slug == route.model,
+              )
+            ? route.model
+            : safeProvider.defaultModel;
+        final selectedModel = _modelBySlug(safeProvider.allModels, model);
+        final effort =
+            selectedModel?.reasoningEfforts.contains(route.effort) == true
+            ? route.effort
+            : selectedModel?.defaultReasoningEffort.isNotEmpty == true
+            ? selectedModel!.defaultReasoningEffort
+            : selectedModel?.reasoningEfforts.firstOrNull ?? '';
+        modeCommands.add(
+          ModeModelRouteView(
+            modeId: route.modeId,
+            providerId: safeProvider.id,
+            model: model,
+            effort: effort,
+          ),
+        );
+      }
+      if (setSimpleModeDefault &&
+          selectedDefaultProvider != null &&
+          !modeCommands.any((route) => route.modeId == ThreadModeId.simple)) {
+        final model = _modelBySlug(
+          selectedDefaultProvider.allModels,
+          selectedDefaultProvider.defaultModel,
+        );
+        modeCommands.add(
+          ModeModelRouteView(
+            modeId: ThreadModeId.simple,
+            providerId: selectedDefaultProvider.id,
+            model: selectedDefaultProvider.defaultModel,
+            effort: model?.defaultReasoningEffort.isNotEmpty == true
+                ? model!.defaultReasoningEffort
+                : model?.reasoningEfforts.firstOrNull ?? '',
+          ),
+        );
+      }
       for (final role in roles) {
         var providerId = role.providerId;
         if (renamedFrom != null && providerId == renamedFrom) {
@@ -183,6 +253,7 @@ abstract final class ProviderSettingsCommandBuilder {
             ],
           ),
       ],
+      modeRoutes: modeCommands,
       roles: commands,
     );
   }

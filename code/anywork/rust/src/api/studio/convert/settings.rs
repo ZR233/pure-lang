@@ -1,11 +1,12 @@
 use crate::api::studio::types::{
     BridgeCustomModelSettingsDto, BridgeDeepSeekWebSearchSettingsDto, BridgeGeneralSettingsDto,
     BridgeInstructionsSettingsDto, BridgeMcpServerConfiguration, BridgeMcpServerSettingsDto,
-    BridgeModelConnectionSettingsDto, BridgeProviderSettingsDto, BridgeProviderUsageData,
-    BridgeProviderUsageState, BridgeRoleSettingsDto, BridgeSettingsStateSnapshot,
-    BridgeSkillsSettingsDto, BridgeStudioSettingsDto, BridgeWebSearchSettingsDto,
-    DeepSeekBalanceDto, DeepSeekBalanceInfoDto, ProviderSecretInput, ProviderSettingsInput,
-    ProviderUsageDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    BridgeModeModelSettingsDto, BridgeModelConnectionSettingsDto, BridgeProviderSettingsDto,
+    BridgeProviderUsageData, BridgeProviderUsageState, BridgeRoleSettingsDto,
+    BridgeSettingsStateSnapshot, BridgeSkillsSettingsDto, BridgeStudioSettingsDto,
+    BridgeWebSearchSettingsDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto, ProviderSecretInput,
+    ProviderSettingsInput, ProviderUsageDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
+    ZhipuToolUsageDetailDto,
 };
 use pl_studio_runtime::{ProviderUsageData, ProviderUsageState, ZhipuQuotaWindow};
 
@@ -56,6 +57,16 @@ pub(crate) fn bridge_settings(
                     })
                     .collect(),
                 catalog_id: provider.catalog_id,
+            })
+            .collect(),
+        mode_model_routes: settings
+            .mode_model_routes
+            .into_iter()
+            .map(|route| BridgeModeModelSettingsDto {
+                mode_id: route.mode_id,
+                provider_id: route.provider_id,
+                model: route.model,
+                effort: route.effort,
             })
             .collect(),
         roles: settings
@@ -214,6 +225,16 @@ pub(crate) fn provider_settings_request(
                         connection_mode: mode.connection_mode,
                     })
                     .collect(),
+            })
+            .collect(),
+        mode_routes: input
+            .mode_routes
+            .into_iter()
+            .map(|route| pl_protocol::studio::ModeRouteSettingsUpdate {
+                mode_id: route.mode_id,
+                provider: route.provider,
+                model: route.model,
+                effort: route.effort,
             })
             .collect(),
         roles: input

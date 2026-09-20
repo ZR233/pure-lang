@@ -20,6 +20,7 @@ abstract final class StudioDriverState {
   static ComposerThreadState _newThreadComposer =
       const ComposerThreadState.idle();
   static int _settingsRevision = 0;
+  static List<ModeModelRouteView> _modeModelRoutes = const [];
   static List<RoleSettingsView> _roles = const [];
   static List<ProviderSettingsView> _providers = const [];
   static PersistenceStateSnapshot _persistenceState =
@@ -35,6 +36,7 @@ abstract final class StudioDriverState {
     _newThreadWorkspaceMode = state.newThreadWorkspaceMode;
     _newThreadComposer = state.newThreadComposer;
     _settingsRevision = state.settingsRevision;
+    _modeModelRoutes = List.unmodifiable(state.modeModelRoutes);
     _providers = List.unmodifiable(state.providers);
     _roles = List.unmodifiable([
       for (final role in state.roles)
@@ -176,6 +178,15 @@ abstract final class StudioDriverState {
               'effort': role.effort,
             },
         ],
+        'modeModelRoutes': [
+          for (final route in _modeModelRoutes)
+            {
+              'modeId': route.modeId.id,
+              'providerId': route.providerId,
+              'model': route.model,
+              'effort': route.effort,
+            },
+        ],
       },
       'persistence': {
         'revision': _persistenceState.revision,
@@ -206,6 +217,17 @@ abstract final class StudioDriverState {
               'threadStatus': workspace.thread.status.name,
               'isBusy': workspace.isBusy,
               'model': workspace.runtime.model,
+              'modelRoute': workspace.runtime.modelRoute == null
+                  ? null
+                  : {
+                      'providerId': workspace.runtime.modelRoute!.providerId,
+                      'model': workspace.runtime.modelRoute!.model,
+                      'effort': workspace.runtime.modelRoute!.effort,
+                      'revision': workspace.runtime.modelRoute!.revision,
+                      'available': workspace.runtime.modelRoute!.available,
+                      'unavailableReason':
+                          workspace.runtime.modelRoute!.unavailableReason,
+                    },
               'usage': {
                 'inputTokens': workspace.runtime.promptTokens,
                 'outputTokens': workspace.runtime.completionTokens,

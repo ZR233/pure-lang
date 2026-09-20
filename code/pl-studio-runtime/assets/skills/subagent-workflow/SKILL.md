@@ -11,8 +11,8 @@ category: agents
 ## 选择 Profile
 
 尚不清楚合适的 Profile 时，先调用 `list_agent_profiles`，再将选定的稳定 `profileId` 传给
-`spawn_agent`。子代理创建时冻结创建指令和物理工作区；宿主可在下一 Turn 边界应用当前的
-provider、model 和 effort 配置。禁用或不可用的 Profile 不能派发。
+`spawn_agent`。子代理创建时冻结创建指令、provider、model、effort 和物理工作区；后续
+Profile 修改只影响未来创建的子代理。禁用或不可用的 Profile 不能派发。
 
 首次调用就使用工具 schema 的 camelCase 字段。标准形状如下：
 
@@ -30,9 +30,9 @@ provider、model 和 effort 配置。禁用或不可用的 Profile 不能派发�
 拒绝记为 `expected_rejection`，不得重试或通过 shell、Git、MCP 绕过。
 
 内置子代理 Profile 为 `explorer`、`executor`、`worktree_executor` 和 `reviewer`，不可修改，
-可以禁用。`planner` 是主代理路由，不是子代理 Profile，不能派发或禁用；历史 planner 子代理
-仅可读取，不可续跑。用户 Profile 按每个 Profile 一个 TOML 文件加载。按能力选择 Profile，
-不能假定某个工作流阶段必然对应某个 Profile。
+可以禁用。`planner` 只表示根代理身份，不是子代理 Profile 或全局模型路由，不能派发或禁用；
+历史 planner 子代理仅可读取，不可续跑。用户 Profile 按每个 Profile 一个 TOML 文件加载。
+按能力选择 Profile，不能假定某个工作流阶段必然对应某个 Profile。
 
 子代理不继承主 Thread Mode 的工作流工具或运行时状态。主代理只能查询及推进宿主已注册
 的图；主代理和子代理都不能编译工作流定义。

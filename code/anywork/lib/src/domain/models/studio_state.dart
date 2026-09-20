@@ -97,6 +97,7 @@ class StudioState {
       providerWithCatalogMetadata(provider, providerCatalog),
   ];
   String? get defaultProviderId => settingsState.defaultProviderId;
+  List<ModeModelRouteView> get modeModelRoutes => settingsState.modeModelRoutes;
   List<ProviderUsageView> get providerUsages => providerUsageState.usages;
   SessionCostView? get selectedSessionCost =>
       modelPerformance.sessionCost(selectedRootThread?.id);
@@ -279,6 +280,7 @@ class StudioState {
           : AgentComposerMode.editable,
       permissionMode: permissionMode,
       providers: providers,
+      modeModelRoutes: modeModelRoutes,
       roles: roles,
       agents: selectedAgents,
     );

@@ -1,15 +1,17 @@
 //! Studio Settings 命令层：把各类设置更新请求写入配置 runtime 并发布 canonical snapshot。
 
 use anyhow::{Context, Result, bail};
+use pl_protocol::ThreadModeId;
 use pl_protocol::studio::{
-    SetModelRoleRequest, StudioSettingsSnapshot, UpdateDeepSeekWebSearchSettingsRequest,
+    SetModeModelRouteRequest, SetModelRoleRequest, SetThreadModelRouteRequest,
+    StudioSettingsSnapshot, ThreadModelRouteUpdateResponse, UpdateDeepSeekWebSearchSettingsRequest,
     UpdateGeneralSettingsRequest, UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest,
     UpdatePermissionSettingsRequest, UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest,
     UpdateWebSearchSettingsRequest,
 };
 
 use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort};
-use crate::{PermissionMode, ProviderSettingsEdit, RoleEdit, StudioRole};
+use crate::{ModeRouteEdit, PermissionMode, ProviderSettingsEdit, RoleEdit, StudioRole};
 
 use super::StudioRuntime;
 
@@ -234,6 +236,11 @@ impl StudioRuntime {
                 .into_iter()
                 .map(|provider| provider_edit::provider_edit(provider, &current.config))
                 .collect::<Result<Vec<_>>>()?,
+            mode_routes: request
+                .mode_routes
+                .into_iter()
+                .map(ModeRouteEdit::from)
+                .collect(),
             roles: request.roles.into_iter().map(RoleEdit::from).collect(),
         };
         let next = edit.to_config(&current.config)?;
@@ -249,6 +256,10 @@ impl StudioRuntime {
     pub fn save_model_role(&self, request: SetModelRoleRequest) -> Result<StudioSettingsSnapshot> {
         let role = StudioRole::from_key(request.role.trim())
             .ok_or_else(|| invalid_settings_argument("Unsupported model role"))?;
+        anyhow::ensure!(
+            role != StudioRole::Planner,
+            "planner is a root identity, not a configurable child model role"
+        );
         let state = self.set_model_role(
             request.expected_revision,
             role,
@@ -260,6 +271,166 @@ impl StudioRuntime {
         settings_snapshot(state)
     }
 
+    pub fn save_mode_model_route(
+        &self,
+        request: SetModeModelRouteRequest,
+    ) -> Result<StudioSettingsSnapshot> {
+        let mode = ThreadModeId::new(request.mode_id.trim().to_string())
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        let state = self.set_mode_model_route(
+            request.expected_revision,
+            mode,
+            &request.provider_id,
+            &request.model,
+            request.effort.as_deref(),
+        )?;
+        self.publish_settings_state(state.clone())?;
+        settings_snapshot(state)
+    }
+
+    pub async fn save_thread_model_route(
+        &self,
+        thread_id: &str,
+        request: SetThreadModelRouteRequest,
+    ) -> Result<ThreadModelRouteUpdateResponse> {
+        let _guard = self.lifecycle_lock.lock().await;
+        let record = self.read_owned_thread(thread_id).await?;
+        anyhow::ensure!(
+            record.parent_thread_id.is_none(),
+            "child Thread model routes are frozen by their Agent Profile"
+        );
+        let thread = self.ensure_thread_owner(thread_id).await?;
+        let state = thread.snapshot();
+        let settings = self.config_runtime.read()?;
+        if settings.revision != request.expected_settings_revision {
+            return Err(crate::ConfigRuntimeError::StaleRevision {
+                expected: request.expected_settings_revision,
+                actual: settings.revision,
+            }
+            .into());
+        }
+        let mode = crate::studio::thread_projection::saved_mode(&state)?
+            .unwrap_or_else(|| record.mode.clone());
+        let mode_definition = self
+            .thread_modes
+            .snapshot()
+            .mode(&mode)
+            .context("current Thread Mode is unavailable")?;
+        let selector = validated_route(
+            &settings.config,
+            &format!("Thread {thread_id}"),
+            &request.provider_id,
+            &request.model,
+            request.effort.as_deref(),
+        )?;
+        let route = settings
+            .config
+            .models
+            .resolve_route(StudioRole::Planner.id(), &selector)?;
+        crate::mode::validate_thread_mode_model(Some(&mode_definition), &route.model)?;
+        let previous = state
+            .extensions
+            .get(crate::studio::model_route::MODEL_ROUTE_EXTENSION)
+            .context("Thread has no saved model route")?;
+        thread
+            .queue_deferred_model_update_if_current(
+                Self::deferred_model_update(&route, &settings.config)?,
+                pl_core::thread::DeferredModelUpdatePrecondition::commit_sequence(
+                    request.expected_thread_revision,
+                ),
+                vec![pl_core::thread::extensions::ExtensionMutation::Put {
+                    id: crate::studio::model_route::MODEL_ROUTE_EXTENSION.into(),
+                    expected_revision: Some(previous.revision),
+                    payload: crate::studio::model_route::encode(&selector)?,
+                }],
+            )
+            .await?;
+        self.tool_catalog_updates.notify_one();
+
+        let mut mode_default_saved = false;
+        let mut warning = None;
+        for _ in 0..3 {
+            let latest = self.config_runtime.read()?;
+            let mut config = latest.config;
+            let candidate = match validated_route(
+                &config,
+                &format!("Thread Mode {mode}"),
+                &request.provider_id,
+                &request.model,
+                request.effort.as_deref(),
+            ) {
+                Ok(candidate) => candidate,
+                Err(error) => {
+                    warning = Some(format!(
+                        "current Thread was updated, but its Mode default was not saved: {error}"
+                    ));
+                    break;
+                }
+            };
+            config.mode_model_routes.insert(mode.clone(), candidate);
+            match self.config_runtime.replace(latest.revision, config) {
+                Ok(updated) => {
+                    if let Err(error) = self.publish_settings_state(updated) {
+                        warning = Some(format!(
+                            "current Thread and Mode default were saved, but the Settings event was not published: {error}"
+                        ));
+                    }
+                    mode_default_saved = true;
+                    break;
+                }
+                Err(crate::ConfigRuntimeError::StaleRevision { .. }) => continue,
+                Err(error) => {
+                    warning = Some(format!(
+                        "current Thread was updated, but its Mode default was not saved: {error}"
+                    ));
+                    break;
+                }
+            }
+        }
+        if !mode_default_saved && warning.is_none() {
+            warning = Some(
+                "current Thread was updated, but its Mode default conflicted repeatedly".into(),
+            );
+        }
+        let snapshot = self.thread_snapshot(thread_id).await?;
+        let runtime = snapshot
+            .runtime
+            .context("Thread runtime snapshot is unavailable")?;
+        Ok(ThreadModelRouteUpdateResponse {
+            runtime,
+            settings: self.read_settings()?,
+            mode_default_saved,
+            warning,
+        })
+    }
+
+    pub fn set_mode_model_route(
+        &self,
+        expected_settings_revision: u64,
+        mode: ThreadModeId,
+        provider_id: &str,
+        model_slug: &str,
+        effort: Option<&str>,
+    ) -> Result<crate::ConfigRuntimeSnapshot> {
+        let current = self.config_runtime.read()?;
+        anyhow::ensure!(
+            current.revision == expected_settings_revision,
+            "settings revision conflict: expected {expected_settings_revision}, actual {}",
+            current.revision
+        );
+        let mut config = current.config;
+        let next_route = validated_route(
+            &config,
+            &format!("Thread Mode {mode}"),
+            provider_id,
+            model_slug,
+            effort,
+        )?;
+        config.mode_model_routes.insert(mode, next_route);
+        config.validate()?;
+        Ok(self.config_runtime.replace(current.revision, config)?)
+    }
+
     pub fn set_model_role(
         &self,
         expected_settings_revision: u64,
@@ -268,8 +439,10 @@ impl StudioRuntime {
         model_slug: &str,
         effort: Option<&str>,
     ) -> Result<crate::ConfigRuntimeSnapshot> {
-        let provider_id = provider_id.trim();
-        let model_slug = model_slug.trim();
+        anyhow::ensure!(
+            StudioRole::child_roles().contains(&role),
+            "planner is a root identity, not a configurable child model role"
+        );
         let current = self.config_runtime.read()?;
         anyhow::ensure!(
             current.revision == expected_settings_revision,
@@ -277,53 +450,59 @@ impl StudioRuntime {
             current.revision
         );
         let mut config = current.config;
-        let provider_key = ProviderId::new(provider_id)?;
-        let resolved_effort = {
-            let provider = config
-                .models
-                .providers
-                .get(&provider_key)
-                .with_context(|| {
-                    format!(
-                        "role {} references missing provider: {provider_id}",
-                        role.key()
-                    )
-                })?;
-            let models = provider.effective_models()?;
-            let model = models
-                .iter()
-                .find(|model| model.slug == model_slug)
-                .with_context(|| {
-                    format!(
-                        "role {} references missing model: {provider_id}.{model_slug}",
-                        role.key()
-                    )
-                })?;
-            match effort.map(str::trim).filter(|value| !value.is_empty()) {
-                Some(value) => {
-                    if !model
-                        .supported_efforts()
-                        .iter()
-                        .any(|candidate| candidate == value)
-                    {
-                        bail!(
-                            "role {} uses unsupported effort '{}' for model {provider_id}.{model_slug}",
-                            role.key(),
-                            value
-                        );
-                    }
-                    Some(value.to_string())
-                }
-                None => model.default_effort(),
-            }
-        };
-        let next_route = ModelRouteConfig {
-            provider: provider_key,
-            model: model_slug.to_string(),
-            effort: resolved_effort.map(ReasoningEffort::new),
-        };
+        let next_route = validated_route(
+            &config,
+            &format!("role {}", role.key()),
+            provider_id,
+            model_slug,
+            effort,
+        )?;
         config.models.routes.insert(role.id(), next_route);
         config.validate()?;
         Ok(self.config_runtime.replace(current.revision, config)?)
     }
+}
+
+fn validated_route(
+    config: &crate::StudioConfig,
+    subject: &str,
+    provider_id: &str,
+    model_slug: &str,
+    effort: Option<&str>,
+) -> Result<ModelRouteConfig> {
+    let provider_id = provider_id.trim();
+    let model_slug = model_slug.trim();
+    let provider_key = ProviderId::new(provider_id)?;
+    let provider = config
+        .models
+        .providers
+        .get(&provider_key)
+        .with_context(|| format!("{subject} references missing provider: {provider_id}"))?;
+    let models = provider.effective_models()?;
+    let model = models
+        .iter()
+        .find(|model| model.slug == model_slug)
+        .with_context(|| {
+            format!("{subject} references missing model: {provider_id}.{model_slug}")
+        })?;
+    let resolved_effort = match effort.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => {
+            if !model
+                .supported_efforts()
+                .iter()
+                .any(|candidate| candidate == value)
+            {
+                bail!(
+                    "{subject} uses unsupported effort '{value}' for model {provider_id}.{model_slug}"
+                );
+            }
+            Some(value.to_string())
+        }
+        None => model.default_effort(),
+    };
+    Ok(ModelRouteConfig {
+        provider: provider_key,
+        model: model_slug.to_string(),
+        effort: resolved_effort.map(ReasoningEffort::new),
+    })
 }

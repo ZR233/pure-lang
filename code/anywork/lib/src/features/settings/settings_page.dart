@@ -104,6 +104,7 @@ class _SettingsScaffold extends StatelessWidget {
         providers: state.providers,
         providerCatalog: state.providerCatalog,
         defaultProviderId: state.defaultProviderId,
+        modeRoutes: state.modeModelRoutes,
         roles: state.roles,
       ),
       InstructionsTab(settings: state.instructions),

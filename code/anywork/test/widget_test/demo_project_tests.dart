@@ -24,7 +24,9 @@ void registerDemoProjectTests() {
   test('Demo subagent route edits preserve the main agent route', () async {
     final api = DemoStudioApi();
     final before = await api.readStudioState();
-    final main = before.role('planner')!;
+    final main = before.modeModelRoutes
+        .where((route) => route.modeId == ThreadModeId.simple)
+        .first;
     final provider = before.providers.first;
     final model = provider.allModels.first;
     final effort = model.reasoningEfforts.firstWhere(
@@ -40,12 +42,35 @@ void registerDemoProjectTests() {
     final after = await api.readStudioState();
     expect(after.role('worktree_executor')?.model, model.slug);
     expect(after.role('worktree_executor')?.effort, effort);
-    expect(after.role('planner')?.model, main.model);
-    expect(after.role('planner')?.effort, main.effort);
+    final afterMain = after.modeModelRoutes
+        .where((route) => route.modeId == ThreadModeId.simple)
+        .first;
+    expect(afterMain.model, main.model);
+    expect(afterMain.effort, main.effort);
   });
 
   test('Demo mode update changes only the addressed root Thread', () async {
     final api = DemoStudioApi();
+    final before = await api.readStudioState();
+    final provider = before.providers.first;
+    final currentTask = before.modeModelRoutes
+        .where((route) => route.modeId == ThreadModeId.task)
+        .single;
+    final target = provider.allModels.firstWhere(
+      (model) => model.slug != currentTask.model,
+      orElse: () => provider.allModels.first,
+    );
+    final effort = target.reasoningEfforts.lastOrNull;
+    final altRoute =
+        before.workspacesByThread['thread-alt']!.runtime.modelRoute;
+    final mainRevision = before.workspacesByThread['thread-main']!.revision;
+    await api.setModeModelRoute(
+      expectedSettingsRevision: before.settingsRevision,
+      mode: ThreadModeId.task,
+      providerId: provider.id,
+      model: target.slug,
+      effort: effort,
+    );
 
     await api.setThreadMode(threadId: 'thread-main', mode: ThreadModeId.task);
     final state = await api.readStudioState();
@@ -57,6 +82,59 @@ void registerDemoProjectTests() {
     expect(state.threads[2].mode, ThreadModeId.simple);
     expect(state.threads[2].role, 'reviewer');
     expect(state.workspacesByThread['thread-main']!.thread, state.threads[0]);
+    expect(
+      state.workspacesByThread['thread-main']!.runtime.modelRoute?.model,
+      target.slug,
+    );
+    expect(
+      state.workspacesByThread['thread-main']!.runtime.modelRoute?.effort,
+      effort,
+    );
+    expect(state.workspacesByThread['thread-main']!.revision, mainRevision + 1);
+    expect(
+      state.workspacesByThread['thread-alt']!.runtime.modelRoute,
+      altRoute,
+    );
+  });
+
+  test('Demo root model update does not rewrite another root Thread', () async {
+    final api = DemoStudioApi();
+    final before = await api.readStudioState();
+    final first = before.workspacesByThread['thread-main']!;
+    final secondRoute =
+        before.workspacesByThread['thread-alt']!.runtime.modelRoute;
+    final provider = before.providers.first;
+    final target = provider.allModels.firstWhere(
+      (model) => model.slug != first.runtime.modelRoute?.model,
+      orElse: () => provider.allModels.first,
+    );
+    final effort = target.reasoningEfforts.lastOrNull;
+
+    await api.setThreadModelRoute(
+      threadId: 'thread-main',
+      expectedThreadRevision: first.revision,
+      expectedSettingsRevision: before.settingsRevision,
+      providerId: provider.id,
+      model: target.slug,
+      effort: effort,
+    );
+    final after = await api.readStudioState();
+
+    expect(
+      after.workspacesByThread['thread-main']!.runtime.modelRoute?.model,
+      target.slug,
+    );
+    expect(
+      after.workspacesByThread['thread-alt']!.runtime.modelRoute,
+      secondRoute,
+    );
+    expect(
+      after.modeModelRoutes
+          .where((route) => route.modeId == ThreadModeId.simple)
+          .single
+          .model,
+      target.slug,
+    );
   });
 
   test('Demo mode update rejects a child Thread', () async {

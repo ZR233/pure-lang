@@ -83,6 +83,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
         final profiles = (snapshot.data ?? const <AgentProfileView>[]).where((
           profile,
         ) {
+          if (profile.id == 'planner') return false;
           final name = profile.system
               ? context.roleLabel(profile.id)
               : profile.displayName;
@@ -118,24 +119,6 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                       WorktreeRecoverySection(issue: issue),
                   ],
                 ),
-              SettingsSectionPanel(
-                title: context.l10n.rolePlanner,
-                children: [
-                  SettingsResourceRow(
-                    key: const ValueKey('main-agent-card'),
-                    icon: Icons.account_tree_outlined,
-                    title: context.l10n.rolePlanner,
-                    subtitle: context.l10n.settingsRolePlannerDescription,
-                    children: [
-                      AgentRouteControls(
-                        role: 'planner',
-                        providers: widget.providers,
-                        roles: widget.roles,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
               for (final system in [true, false])
                 SettingsSectionPanel(
                   title: system

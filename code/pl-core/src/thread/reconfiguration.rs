@@ -7,6 +7,8 @@ pub struct IdleReconfiguration {
     pub expected_sequence: u64,
     pub application: extensions::ApplicationUpdate,
     pub context: Option<ReplaceContext>,
+    pub model_update: Option<DeferredModelUpdate>,
+    pub replace_tools: bool,
     pub remove_tools: Vec<String>,
     pub tools: Vec<crate::tool::opaque::Registration>,
 }
@@ -61,6 +63,10 @@ impl Owner {
             return Err(ThreadError::PendingInteraction);
         }
         let mut candidate = self.state.clone();
+        let pending_model_update = update
+            .model_update
+            .map(|update| self.pending_model_update(update))
+            .transpose()?;
         extensions::stage_extensions(&mut candidate, update.application.mutations)?;
         facts::stage_facts(&mut candidate, update.application.facts)?;
         if let Some(mut replacement) = update.context {
@@ -74,9 +80,16 @@ impl Owner {
             replacement.expected_revision = candidate.context.revision;
             replacement::stage_replacement(&mut candidate, replacement)?;
         }
-        self.tools.patch(&update.remove_tools, update.tools)?;
+        if update.replace_tools {
+            self.tools.replace(update.tools)?;
+        } else {
+            self.tools.patch(&update.remove_tools, update.tools)?;
+        }
         candidate.discovered_tools = self.tools.discovery();
         self.state = candidate;
+        if let Some(pending_model_update) = pending_model_update {
+            self.pending_model_update = pending_model_update;
+        }
         self.retry_plan = None;
         self.publish();
         Ok(self.state.clone())
@@ -149,6 +162,8 @@ mod tests {
                 facts: vec![],
             },
             context: None,
+            model_update: None,
+            replace_tools: false,
             remove_tools: vec![],
             tools,
         }

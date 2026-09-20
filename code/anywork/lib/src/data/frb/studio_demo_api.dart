@@ -51,6 +51,7 @@ class DemoStudioApi implements StudioApi {
   int get directoryPageFillCount => 0;
 
   List<ProviderSettingsView>? _providers;
+  List<ModeModelRouteView>? _modeRoutes;
   List<RoleSettingsView>? _roles;
   InstructionsSettingsView _instructions = const InstructionsSettingsView();
   SkillsSettingsView _skills = const SkillsSettingsView();
@@ -164,6 +165,17 @@ class DemoStudioApi implements StudioApi {
                   ?.reasoningEfforts
                   .firstOrNull ??
               '';
+    final modeRoutes =
+        _modeRoutes ??
+        [
+          for (final mode in [ThreadModeId.simple, ThreadModeId.task])
+            ModeModelRouteView(
+              modeId: mode,
+              providerId: defaultProvider.id,
+              model: defaultProvider.defaultModel,
+              effort: resolvedDefaultEffort,
+            ),
+        ];
     if (_archivedProjectIds.contains(project.id)) {
       return StudioState(
         projectDirectory: ProjectDirectoryState(
@@ -176,6 +188,7 @@ class DemoStudioApi implements StudioApi {
         ),
         settingsState: _settingsSnapshot(
           providers: _providers ?? [defaultProvider],
+          modeRoutes: modeRoutes,
           roles: _roles ?? const [],
         ),
         recoveryState: RecoveryStateSnapshot.fromState(
@@ -232,11 +245,11 @@ class DemoStudioApi implements StudioApi {
       ),
       settingsState: _settingsSnapshot(
         providers: _providers ?? [defaultProvider],
+        modeRoutes: modeRoutes,
         roles:
             _roles ??
             [
               for (final key in const [
-                'planner',
                 'explorer',
                 'executor',
                 'worktree_executor',
@@ -292,6 +305,7 @@ class DemoStudioApi implements StudioApi {
 
   SettingsStateSnapshot _settingsSnapshot({
     required List<ProviderSettingsView> providers,
+    required List<ModeModelRouteView> modeRoutes,
     required List<RoleSettingsView> roles,
   }) {
     return SettingsStateSnapshot.fromState(
@@ -300,6 +314,7 @@ class DemoStudioApi implements StudioApi {
         SettingsStateData(
           providers: providers,
           defaultProviderId: providers.firstOrNull?.id,
+          modeModelRoutes: modeRoutes,
           roles: roles,
           instructions: _instructions,
           skills: _skills,
@@ -309,6 +324,30 @@ class DemoStudioApi implements StudioApi {
           permissionMode: _permissionMode,
         ),
       ),
+    );
+  }
+
+  ModeModelRouteView _demoModeRoute(ThreadModeId mode) {
+    final saved =
+        _modeRoutes?.where((route) => route.modeId == mode).firstOrNull ??
+        _modeRoutes
+            ?.where((route) => route.modeId == ThreadModeId.simple)
+            .firstOrNull;
+    if (saved != null) return saved;
+    final preset = _providerCatalog.presets.first;
+    final models = _providerCatalog.modelsFor(preset.modelCatalogId);
+    final model =
+        models
+            .where((candidate) => candidate.slug == preset.suggestedModel)
+            .firstOrNull ??
+        models.first;
+    return ModeModelRouteView(
+      modeId: mode,
+      providerId: preset.id,
+      model: model.slug,
+      effort: model.defaultReasoningEffort.isNotEmpty
+          ? model.defaultReasoningEffort
+          : model.reasoningEfforts.firstOrNull ?? '',
     );
   }
 
@@ -627,6 +666,7 @@ class DemoStudioApi implements StudioApi {
   }
 
   ThreadWorkspace _rootWorkspace(StudioThread thread, DateTime now) {
+    final route = _demoModeRoute(thread.mode);
     final userCreatedAt = now.subtract(const Duration(minutes: 9));
     final agentCreatedAt = now.subtract(const Duration(minutes: 8));
     return ThreadWorkspace(
@@ -697,8 +737,15 @@ class DemoStudioApi implements StudioApi {
         ),
       ],
       interactions: const [],
-      runtime: const ThreadRuntimeView(
+      runtime: ThreadRuntimeView(
         model: 'planner/local-responses',
+        modelRoute: ThreadModelRouteView(
+          providerId: route.providerId,
+          model: route.model,
+          effort: route.effort,
+          revision: 1,
+          available: true,
+        ),
         contextTokens: 18342,
         contextWindow: 128000,
         totalTokens: 26320,
@@ -753,6 +800,13 @@ class DemoStudioApi implements StudioApi {
       interactions: const [],
       runtime: ThreadRuntimeView(
         model: model,
+        modelRoute: ThreadModelRouteView(
+          providerId: _demoModeRoute(thread.mode).providerId,
+          model: model,
+          effort: null,
+          revision: 1,
+          available: true,
+        ),
         contextTokens: 320,
         contextWindow: 128000,
         totalTokens: 512,
@@ -1222,6 +1276,88 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
+  Future<SettingsStateSnapshot> setModeModelRoute({
+    required int expectedSettingsRevision,
+    required ThreadModeId mode,
+    required String providerId,
+    required String model,
+    String? effort,
+  }) async {
+    _checkSettingsRevision(expectedSettingsRevision);
+    final current = await readStudioState();
+    final selected = current.providers
+        .firstWhere((provider) => provider.id == providerId)
+        .allModels
+        .firstWhere((candidate) => candidate.slug == model);
+    final selectedEffort = selected.reasoningEfforts.contains(effort)
+        ? effort
+        : selected.reasoningEfforts.firstOrNull ?? '';
+    _modeRoutes = [
+      for (final route in current.modeModelRoutes)
+        if (route.modeId != mode) route,
+      ModeModelRouteView(
+        modeId: mode,
+        providerId: providerId,
+        model: model,
+        effort: selectedEffort ?? '',
+      ),
+    ];
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
+  }
+
+  @override
+  Future<ThreadModelRouteUpdateResult> setThreadModelRoute({
+    required String threadId,
+    required int expectedThreadRevision,
+    required int expectedSettingsRevision,
+    required String providerId,
+    required String model,
+    String? effort,
+  }) async {
+    final current = await readStudioState();
+    final thread = current.threads
+        .where((candidate) => candidate.id == threadId)
+        .firstOrNull;
+    final workspace = _workspaces[threadId];
+    if (thread == null || !thread.isRoot || workspace == null) {
+      throw StateError('unknown root demo thread $threadId');
+    }
+    if (workspace.revision != expectedThreadRevision) {
+      throw StateError('thread revision conflict');
+    }
+    final settings = await setModeModelRoute(
+      expectedSettingsRevision: expectedSettingsRevision,
+      mode: thread.mode,
+      providerId: providerId,
+      model: model,
+      effort: effort,
+    );
+    final saved = settings.modeModelRoutes
+        .where((route) => route.modeId == thread.mode)
+        .first;
+    final runtime = workspace.runtime.copyWith(
+      modelRoute: ThreadModelRouteView(
+        providerId: saved.providerId,
+        model: saved.model,
+        effort: saved.effort,
+        revision: (workspace.runtime.modelRoute?.revision ?? 0) + 1,
+        available: true,
+      ),
+    );
+    _workspaces[threadId] = workspace.copyWith(
+      revision: expectedThreadRevision + 1,
+      runtime: runtime,
+    );
+    return (
+      runtime: runtime,
+      settings: settings,
+      modeDefaultSaved: true,
+      warning: null,
+    );
+  }
+
+  @override
   Future<void> setThreadMode({
     required String threadId,
     required ThreadModeId mode,
@@ -1248,12 +1384,32 @@ class DemoStudioApi implements StudioApi {
     _threadModes[threadId] = mode;
     final workspace = _workspaces[threadId];
     if (workspace != null) {
+      final settings = current.settingsState;
+      final route =
+          settings.modeModelRoutes
+              .where((candidate) => candidate.modeId == mode)
+              .firstOrNull ??
+          settings.modeModelRoutes
+              .where((candidate) => candidate.modeId == ThreadModeId.simple)
+              .firstOrNull;
       final thread = workspace.thread;
       _workspaces[threadId] = workspace.copyWith(
+        revision: workspace.revision + 1,
         thread: thread.copyWith(
           mode: mode,
           role: thread.isRoot ? 'planner' : thread.role,
         ),
+        runtime: route == null
+            ? workspace.runtime
+            : workspace.runtime.copyWith(
+                modelRoute: ThreadModelRouteView(
+                  providerId: route.providerId,
+                  model: route.model,
+                  effort: route.effort,
+                  revision: (workspace.runtime.modelRoute?.revision ?? 0) + 1,
+                  available: true,
+                ),
+              ),
       );
     }
   }
@@ -1932,6 +2088,7 @@ class DemoStudioApi implements StudioApi {
       catalog: _providerCatalog,
     );
     _roles = _rolesFromSettingsCommand(command);
+    _modeRoutes = command.modeRoutes;
     _settingsRevision += 1;
     return (await readStudioState()).settingsState;
   }

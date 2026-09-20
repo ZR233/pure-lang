@@ -334,7 +334,13 @@ def validate_config(config_path):
     provider = config.get('models', {}).get('providers', {}).get('deepseek')
     if not isinstance(provider, dict):
         raise RuntimeError('current config has no DeepSeek provider')
-    for role in ('executor', 'explorer', 'planner', 'reviewer', 'worktree_executor'):
+    for mode in ('mode.simple', 'mode.task'):
+        route = config.get('mode_model_routes', {}).get(mode, {})
+        if route.get('provider') != 'deepseek' or route.get('model') != 'deepseek-flash':
+            raise RuntimeError(
+                f'current config mode route {mode} is not deepseek/deepseek-flash'
+            )
+    for role in ('executor', 'explorer', 'reviewer', 'worktree_executor'):
         route = config.get('models', {}).get('routes', {}).get(role, {})
         if route.get('provider') != 'deepseek' or route.get('model') != 'deepseek-flash':
             raise RuntimeError(

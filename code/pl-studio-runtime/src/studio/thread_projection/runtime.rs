@@ -138,8 +138,23 @@ pub(super) fn project_runtime(
         .collect::<Result<std::collections::BTreeSet<_>, _>>()?
         .into_iter()
         .collect();
+    let child = state
+        .extensions
+        .contains_key(crate::studio::model_route::AGENT_PROFILE_EXTENSION);
+    let model_route = crate::studio::model_route::route_record(state, child)
+        .map_err(|error| ProjectionError::UnsupportedOutput(error.to_string()))?
+        .map(|(record, route)| pl_protocol::ThreadModelRouteSnapshot {
+            provider_id: route.provider.into_string(),
+            model: route.model,
+            effort: route.effort.map(|effort| effort.as_str().to_owned()),
+            revision: record.revision,
+            available: state.model_available,
+            unavailable_reason: (!state.model_available)
+                .then(|| "the selected model binding is unavailable".to_string()),
+        });
     Ok(ThreadRuntimeSnapshot {
         thread_id: thread_id.into(),
+        model_route,
         usage,
         turn_completion_tokens,
         turn_decode_millis,

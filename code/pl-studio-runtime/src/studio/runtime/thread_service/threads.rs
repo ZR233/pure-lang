@@ -2,7 +2,6 @@
 
 use anyhow::{Context, Result, bail};
 
-use crate::config::StudioRole;
 use crate::studio::records::ThreadRecord;
 use crate::studio::store::directory::DirectoryDelta;
 
@@ -63,7 +62,7 @@ impl StudioRuntime {
             .resolve(&request.input.attachment_draft_ids)
             .await?;
         let config = self.config_runtime.read()?;
-        let route = config.config.models.resolve(&StudioRole::Planner.id())?;
+        let route = config.config.resolve_mode_model_route(&request.mode)?;
         self.attachment_drafts
             .validate_for_model(&route.model, &drafts)?;
         // 校验走内存目录 owner：open_project 的落库是异步跟随的。
@@ -1300,6 +1299,314 @@ mod tests {
             .await
             .unwrap();
         (home, workspace, runtime, thread.id)
+    }
+
+    #[tokio::test]
+    async fn root_model_routes_are_isolated_and_recovered_per_thread() {
+        let (home, _workspace, runtime, first_id) =
+            runtime_with_thread_without_optional_tools().await;
+        let project_id = runtime
+            .read_owned_thread(&first_id)
+            .await
+            .unwrap()
+            .project_id;
+        let second_id = runtime
+            .create_thread(&project_id, "Second")
+            .await
+            .unwrap()
+            .id;
+        let first_before = runtime.thread_snapshot(&first_id).await.unwrap();
+        let second_before = runtime.thread_snapshot(&second_id).await.unwrap();
+        assert_eq!(
+            first_before
+                .runtime
+                .as_ref()
+                .unwrap()
+                .model_route
+                .as_ref()
+                .unwrap()
+                .model,
+            "deepseek-flash"
+        );
+        assert_eq!(
+            second_before
+                .runtime
+                .as_ref()
+                .unwrap()
+                .model_route
+                .as_ref()
+                .unwrap()
+                .model,
+            "deepseek-flash"
+        );
+
+        let settings = runtime.read_settings().unwrap();
+        let updated = runtime
+            .save_thread_model_route(
+                &first_id,
+                pl_protocol::studio::SetThreadModelRouteRequest {
+                    expected_thread_revision: first_before.revision,
+                    expected_settings_revision: settings.revision,
+                    provider_id: "deepseek".into(),
+                    model: "deepseek-v4-pro".into(),
+                    effort: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(updated.mode_default_saved);
+        assert_eq!(updated.warning, None);
+        assert_eq!(
+            updated.runtime.model_route.as_ref().unwrap().model,
+            "deepseek-v4-pro"
+        );
+        assert_eq!(
+            runtime
+                .thread_snapshot(&second_id)
+                .await
+                .unwrap()
+                .runtime
+                .unwrap()
+                .model_route
+                .unwrap()
+                .model,
+            "deepseek-flash",
+            "updating one root Thread must not rewrite another Thread in the same Mode"
+        );
+        assert_eq!(
+            updated
+                .settings
+                .settings
+                .mode_model_routes
+                .iter()
+                .find(|route| route.mode_id == pl_protocol::ThreadModeId::simple().as_str())
+                .unwrap()
+                .model,
+            "deepseek-v4-pro"
+        );
+
+        let third_id = runtime
+            .create_thread(&project_id, "Third")
+            .await
+            .unwrap()
+            .id;
+        assert_eq!(
+            runtime
+                .thread_snapshot(&third_id)
+                .await
+                .unwrap()
+                .runtime
+                .unwrap()
+                .model_route
+                .unwrap()
+                .model,
+            "deepseek-v4-pro",
+            "new root Threads use the current Mode default"
+        );
+
+        runtime.shutdown_runtime().await.unwrap();
+        drop(runtime);
+        let reopened = StudioRuntime::with_options(StudioRuntimeOptions {
+            studio_home: Some(home.path().to_path_buf()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        reopened.start_runtime().await.unwrap();
+        for (thread_id, expected_model) in [
+            (&first_id, "deepseek-v4-pro"),
+            (&second_id, "deepseek-flash"),
+            (&third_id, "deepseek-v4-pro"),
+        ] {
+            let route = reopened
+                .thread_snapshot(thread_id)
+                .await
+                .unwrap()
+                .runtime
+                .unwrap()
+                .model_route
+                .unwrap();
+            assert_eq!(route.model, expected_model);
+            assert!(route.available);
+        }
+        reopened.shutdown_runtime().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn root_recovery_bootstraps_missing_route_from_the_mode_default() {
+        use pl_core::thread::extensions::ExtensionMutation;
+
+        let (home, _workspace, runtime, thread_id) =
+            runtime_with_thread_without_optional_tools().await;
+        let settings = runtime.read_settings().unwrap();
+        runtime
+            .save_mode_model_route(pl_protocol::studio::SetModeModelRouteRequest {
+                expected_revision: settings.revision,
+                mode_id: pl_protocol::ThreadModeId::simple().to_string(),
+                provider_id: "deepseek".into(),
+                model: "deepseek-v4-pro".into(),
+                effort: None,
+            })
+            .unwrap();
+        let owner = runtime.ensure_thread_owner(&thread_id).await.unwrap();
+        let saved =
+            owner.snapshot().extensions[crate::studio::model_route::MODEL_ROUTE_EXTENSION].clone();
+        owner
+            .mutate_extensions(vec![ExtensionMutation::Delete {
+                id: crate::studio::model_route::MODEL_ROUTE_EXTENSION.into(),
+                expected_revision: saved.revision,
+            }])
+            .await
+            .unwrap();
+        runtime.shutdown_runtime().await.unwrap();
+        drop(runtime);
+
+        let reopened = StudioRuntime::with_options(StudioRuntimeOptions {
+            studio_home: Some(home.path().to_path_buf()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        reopened.start_runtime().await.unwrap();
+        reopened.ensure_thread_owner(&thread_id).await.unwrap();
+        let route = reopened
+            .thread_snapshot(&thread_id)
+            .await
+            .unwrap()
+            .runtime
+            .unwrap()
+            .model_route
+            .unwrap();
+        assert_eq!(route.model, "deepseek-v4-pro");
+        assert!(route.available);
+        reopened.shutdown_runtime().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn root_recovery_rejects_a_corrupt_saved_model_route() {
+        use pl_core::thread::extensions::ExtensionMutation;
+
+        let (home, _workspace, runtime, thread_id) =
+            runtime_with_thread_without_optional_tools().await;
+        let owner = runtime.ensure_thread_owner(&thread_id).await.unwrap();
+        let saved =
+            owner.snapshot().extensions[crate::studio::model_route::MODEL_ROUTE_EXTENSION].clone();
+        owner
+            .mutate_extensions(vec![ExtensionMutation::Put {
+                id: crate::studio::model_route::MODEL_ROUTE_EXTENSION.into(),
+                expected_revision: Some(saved.revision),
+                payload: OpaquePayload::new("future.model-route", 99, "{}").unwrap(),
+            }])
+            .await
+            .unwrap();
+        runtime.shutdown_runtime().await.unwrap();
+        drop(runtime);
+
+        let reopened = StudioRuntime::with_options(StudioRuntimeOptions {
+            studio_home: Some(home.path().to_path_buf()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        reopened.start_runtime().await.unwrap();
+        let error = reopened.ensure_thread_owner(&thread_id).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("unsupported saved model route codec"),
+            "unexpected recovery failure: {error:#}"
+        );
+        reopened.shutdown_runtime().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn root_recovery_preserves_an_unavailable_saved_route_after_provider_removal() {
+        use pl_model::config::{
+            ModelCatalogId, ModelRouteConfig, ProviderConfig, ProviderId, ReasoningEffort,
+        };
+        use pl_model::provider::ProviderEndpoint;
+        use std::collections::BTreeMap;
+
+        let (home, _workspace, runtime, thread_id) =
+            runtime_with_thread_without_optional_tools().await;
+        let before = runtime
+            .thread_snapshot(&thread_id)
+            .await
+            .unwrap()
+            .runtime
+            .unwrap()
+            .model_route
+            .unwrap();
+        assert_eq!(before.provider_id, "deepseek");
+        assert!(before.available);
+
+        let current = runtime.config_runtime.read().unwrap();
+        let updated = runtime
+            .config_runtime
+            .update(current.revision, |config| {
+                let mut next = config.clone();
+                let provider_id = ProviderId::new("openai").unwrap();
+                next.models.providers = BTreeMap::from([(
+                    provider_id.clone(),
+                    ProviderConfig::from_bundled_catalog(
+                        ProviderEndpoint::openai(None),
+                        ModelCatalogId::new("openai").unwrap(),
+                        Vec::new(),
+                    ),
+                )]);
+                let route = ModelRouteConfig {
+                    provider: provider_id,
+                    model: "gpt-5.6-sol".into(),
+                    effort: Some(ReasoningEffort::new("high")),
+                };
+                next.models
+                    .routes
+                    .values_mut()
+                    .for_each(|saved| *saved = route.clone());
+                next.mode_model_routes
+                    .values_mut()
+                    .for_each(|saved| *saved = route.clone());
+                Ok(next)
+            })
+            .unwrap();
+        runtime.publish_settings_state(updated).unwrap();
+        runtime.shutdown_runtime().await.unwrap();
+        drop(runtime);
+
+        let reopened = StudioRuntime::with_options(StudioRuntimeOptions {
+            studio_home: Some(home.path().to_path_buf()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        reopened.start_runtime().await.unwrap();
+        reopened.ensure_thread_owner(&thread_id).await.unwrap();
+        let route = reopened
+            .thread_snapshot(&thread_id)
+            .await
+            .unwrap()
+            .runtime
+            .unwrap()
+            .model_route
+            .unwrap();
+        assert_eq!(route.provider_id, "deepseek");
+        assert_eq!(route.model, "deepseek-flash");
+        assert!(!route.available);
+        assert!(
+            route
+                .unavailable_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("missing provider: deepseek")),
+            "unexpected unavailable reason: {:?}",
+            route.unavailable_reason
+        );
+        let settings = reopened.read_settings().unwrap();
+        assert!(
+            settings
+                .settings
+                .mode_model_routes
+                .iter()
+                .all(|route| { route.provider_id == "openai" && route.model == "gpt-5.6-sol" })
+        );
+        reopened.shutdown_runtime().await.unwrap();
     }
 
     #[tokio::test]

@@ -277,9 +277,10 @@ mod tests {
             .keep();
         let store = ConfigStore::new(ConfigPaths::from_home(home));
         std::fs::create_dir_all(store.paths().config_dir()).unwrap();
+        let current_schema = format!("schema_version = {}", crate::STUDIO_CONFIG_SCHEMA_VERSION);
         let legacy = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .replace("schema_version = 19", "schema_version = 14");
+            .replace(&current_schema, "schema_version = 14");
         std::fs::write(store.paths().config_file(), legacy).unwrap();
 
         let runtime = ConfigRuntime::initialize(store).unwrap();

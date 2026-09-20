@@ -6,7 +6,17 @@ use serde::{Deserialize, Serialize};
 pub struct ProviderSettingsInput {
     pub default_provider_id: String,
     pub providers: Vec<ProviderInput>,
+    pub mode_routes: Vec<ModeRouteInput>,
     pub roles: Vec<RoleInput>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModeRouteInput {
+    pub mode_id: String,
+    pub provider: String,
+    pub model: String,
+    pub effort: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -187,6 +197,7 @@ pub struct BridgeDeepSeekWebSearchSettingsDto {
 pub struct BridgeStudioSettingsDto {
     pub default_provider_id: Option<String>,
     pub providers: Vec<BridgeProviderSettingsDto>,
+    pub mode_model_routes: Vec<BridgeModeModelSettingsDto>,
     pub roles: Vec<BridgeRoleSettingsDto>,
     pub permission_mode: String,
     pub instructions: BridgeInstructionsSettingsDto,
@@ -195,6 +206,16 @@ pub struct BridgeStudioSettingsDto {
     pub general: BridgeGeneralSettingsDto,
     pub web_search: BridgeWebSearchSettingsDto,
     pub deepseek_web_search: BridgeDeepSeekWebSearchSettingsDto,
+}
+
+/// Thread Mode 到默认 provider/model/effort 的 canonical 路由。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeModeModelSettingsDto {
+    pub mode_id: String,
+    pub provider_id: String,
+    pub model: String,
+    pub effort: String,
 }
 
 /// 不含 secret 的 Provider canonical 设置视图。

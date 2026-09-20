@@ -38,6 +38,7 @@ pub use reconfiguration::IdleReconfiguration;
 mod mailbox;
 mod model_step;
 mod model_update;
+pub use model_update::{DeferredModelUpdate, DeferredModelUpdatePrecondition};
 mod replacement;
 mod tool_execution;
 mod types;

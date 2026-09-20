@@ -3188,7 +3188,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsAgentsSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Configure the main agent model and reasoning effort. Enable and configure subagents by purpose; directory mode restricts built-in file writes, not OS access.'**
+  /// **'Enable and configure subagents by purpose; directory mode restricts built-in file writes, not OS access.'**
   String get settingsAgentsSubtitle;
 
   /// No description provided for @settingsAgentsAddUserProfile.

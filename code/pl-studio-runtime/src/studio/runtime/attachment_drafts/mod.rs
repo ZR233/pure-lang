@@ -42,19 +42,29 @@ impl StudioRuntime {
         &self,
         context: &StudioAttachmentAdmissionContext,
     ) -> Result<ModelInfo> {
-        let role = match context {
+        let config = self.config_runtime.read()?;
+        let route = match context {
             StudioAttachmentAdmissionContext::ExistingThread { thread_id } => {
                 let thread = self.read_owned_thread(thread_id).await?;
-                StudioRole::from_key(&thread.role).context("Thread has an invalid model role")?
+                let (state, _) = self.read_thread_facts(thread_id).await?;
+                let (_, selector) = crate::studio::model_route::route_record(
+                    &state,
+                    thread.parent_thread_id.is_some(),
+                )?
+                .context("Thread has no saved model route")?;
+                let role = if thread.parent_thread_id.is_some() {
+                    pl_protocol::AgentRoleId::new(thread.role)?
+                } else {
+                    StudioRole::Planner.id()
+                };
+                config.config.models.resolve_route(role, &selector)?
             }
             StudioAttachmentAdmissionContext::NewThread { mode } => {
-                pl_protocol::ThreadModeId::from_label(mode)
+                let mode = pl_protocol::ThreadModeId::from_label(mode)
                     .map_err(|_| anyhow::anyhow!("mode must be an available mode.* id"))?;
-                StudioRole::Planner
+                config.config.resolve_mode_model_route(&mode)?
             }
         };
-        let config = self.config_runtime.read()?;
-        let route = config.config.models.resolve(&role.id())?;
         Ok(route.model)
     }
 

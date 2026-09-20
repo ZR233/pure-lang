@@ -153,12 +153,12 @@ Future<void> main(List<String> arguments) async {
     await driver.tap(find.byValueKey('model-${provider['id']}-local-coder'));
     await _until(
       driver,
-      (snapshot) => (snapshot['settings']['roles'] as List).any(
-        (role) =>
-            role['key'] == 'planner' &&
-            role['providerId'] == provider['id'] &&
-            role['model'] == 'local-coder' &&
-            (role['effort'] == null || role['effort'] == ''),
+      (snapshot) => (snapshot['settings']['modeModelRoutes'] as List).any(
+        (route) =>
+            route['modeId'] == 'mode.simple' &&
+            route['providerId'] == provider['id'] &&
+            route['model'] == 'local-coder' &&
+            (route['effort'] == null || route['effort'] == ''),
       ),
     );
     await driver.waitUntilNoTransientCallbacks();

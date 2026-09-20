@@ -1696,7 +1696,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsAgentsSubtitle =>
-      '主智能体始终可用，可配置模型与思考强度。子代理可按用途配置和启用；目录模式仅限制内置工具的文件写入，不是操作系统沙箱。';
+      '子代理可按用途配置和启用；目录模式仅限制内置工具的文件写入，不是操作系统沙箱。';
 
   @override
   String get settingsAgentsAddUserProfile => '添加用户智能体配置';

@@ -60,8 +60,9 @@ impl StudioThreadSubscription {
             live.journal.extend(page);
         }
         let thread = self.runtime.read_protocol_thread(&self.thread_id).await?;
-        let snapshot =
+        let mut snapshot =
             crate::studio::thread_projection::project_snapshot(thread, &state, &live.journal)?;
+        self.runtime.annotate_model_route(&mut snapshot)?;
         self.runtime
             .index_timeline(&self.thread_id, &state, &snapshot.items)
             .await;
@@ -104,9 +105,10 @@ impl StudioRuntime {
     pub async fn thread_snapshot(&self, thread_id: &str) -> Result<pl_protocol::ThreadSnapshot> {
         let thread = self.read_protocol_thread(thread_id).await?;
         let (state, journal) = self.read_thread_facts(thread_id).await?;
-        Ok(crate::studio::thread_projection::project_snapshot(
-            thread, &state, &journal,
-        )?)
+        let mut snapshot =
+            crate::studio::thread_projection::project_snapshot(thread, &state, &journal)?;
+        self.annotate_model_route(&mut snapshot)?;
+        Ok(snapshot)
     }
 
     pub(in crate::studio) async fn read_thread_facts(
@@ -129,5 +131,53 @@ impl StudioRuntime {
         let journal = self.store.sessions().read_thread_journal(thread_id).await?;
         let state = pl_core::thread::journal::replay(&journal)?;
         Ok((state, journal))
+    }
+
+    fn annotate_model_route(&self, snapshot: &mut pl_protocol::ThreadSnapshot) -> Result<()> {
+        let Some(route) = snapshot
+            .runtime
+            .as_mut()
+            .and_then(|runtime| runtime.model_route.as_mut())
+        else {
+            return Ok(());
+        };
+        let selector = pl_model::config::ModelRouteConfig {
+            provider: pl_model::config::ProviderId::new(route.provider_id.clone())?,
+            model: route.model.clone(),
+            effort: route
+                .effort
+                .clone()
+                .map(pl_model::config::ReasoningEffort::new),
+        };
+        let config = self.config_runtime.read()?.config;
+        let role = if snapshot.thread.parent_thread_id.is_none() {
+            crate::config::StudioRole::Planner.id()
+        } else {
+            pl_protocol::AgentRoleId::new(snapshot.thread.role.clone())?
+        };
+        let resolved = config
+            .models
+            .resolve_route(role, &selector)
+            .and_then(|resolved| {
+                if snapshot.thread.parent_thread_id.is_none() {
+                    let mode = self.thread_modes.snapshot().mode(&snapshot.thread.mode);
+                    crate::mode::validate_thread_mode_model(
+                        mode.as_ref().map(|mode| mode.as_ref()),
+                        &resolved.model,
+                    )?;
+                }
+                Ok(resolved)
+            });
+        match resolved {
+            Ok(_) => {
+                route.available = true;
+                route.unavailable_reason = None;
+            }
+            Err(error) => {
+                route.available = false;
+                route.unavailable_reason = Some(error.to_string());
+            }
+        }
+        Ok(())
     }
 }

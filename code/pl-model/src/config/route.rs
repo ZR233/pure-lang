@@ -94,6 +94,15 @@ impl AgentModelConfig {
         let route = self.routes.get(role).ok_or_else(|| {
             PureError::ConfigError(format!("missing model route for role: {role}"))
         })?;
+        self.resolve_route(role.clone(), route)
+    }
+
+    /// 解析调用方持有的 route selector，并以给定角色标识装配运行时路由。
+    pub fn resolve_route(
+        &self,
+        role: AgentRoleId,
+        route: &ModelRouteConfig,
+    ) -> Result<ResolvedModelRoute> {
         if route.model.trim().is_empty() {
             return Err(PureError::ConfigError(format!(
                 "role {role} has empty model"
@@ -146,7 +155,7 @@ impl AgentModelConfig {
         }
         Ok(ResolvedModelRoute {
             pricing_mode: provider.pricing_mode,
-            role: role.clone(),
+            role,
             provider_id: route.provider.clone(),
             endpoint: provider.to_endpoint()?,
             model,

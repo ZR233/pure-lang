@@ -172,6 +172,7 @@ class SettingsStateData {
   const SettingsStateData({
     this.providers = const [],
     this.defaultProviderId,
+    this.modeModelRoutes = const [],
     this.roles = const [],
     this.mcpServers = const [],
     this.instructions = const InstructionsSettingsView(),
@@ -183,6 +184,7 @@ class SettingsStateData {
   });
   final List<ProviderSettingsView> providers;
   final String? defaultProviderId;
+  final List<ModeModelRouteView> modeModelRoutes;
   final List<RoleSettingsView> roles;
   final List<McpServerSettingsView> mcpServers;
   final InstructionsSettingsView instructions;
@@ -197,6 +199,7 @@ class SettingsStateSnapshot extends ObservedStateSnapshot<SettingsStateData> {
   SettingsStateSnapshot({
     List<ProviderSettingsView> providers = const [],
     String? defaultProviderId,
+    List<ModeModelRouteView> modeModelRoutes = const [],
     List<RoleSettingsView> roles = const [],
     List<McpServerSettingsView> mcpServers = const [],
     InstructionsSettingsView instructions = const InstructionsSettingsView(),
@@ -214,6 +217,7 @@ class SettingsStateSnapshot extends ObservedStateSnapshot<SettingsStateData> {
          value: SettingsStateData(
            providers: providers,
            defaultProviderId: defaultProviderId,
+           modeModelRoutes: modeModelRoutes,
            roles: roles,
            mcpServers: mcpServers,
            instructions: instructions,
@@ -232,6 +236,7 @@ class SettingsStateSnapshot extends ObservedStateSnapshot<SettingsStateData> {
   SettingsStateData get _data => state.value ?? const SettingsStateData();
   List<ProviderSettingsView> get providers => _data.providers;
   String? get defaultProviderId => _data.defaultProviderId;
+  List<ModeModelRouteView> get modeModelRoutes => _data.modeModelRoutes;
   List<RoleSettingsView> get roles => _data.roles;
   List<McpServerSettingsView> get mcpServers => _data.mcpServers;
   InstructionsSettingsView get instructions => _data.instructions;

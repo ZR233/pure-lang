@@ -23,12 +23,11 @@ impl StudioRuntime {
             .snapshot()
             .mode(&mode_id)
             .context("selected Thread Mode is unavailable")?;
-        let route = self
-            .config_runtime
-            .read()?
-            .config
+        let config = self.config_runtime.read()?.config;
+        let route_selector = config.mode_model_route(&mode_id)?.clone();
+        let route = config
             .models
-            .resolve(&crate::config::StudioRole::Planner.id())?;
+            .resolve_route(crate::config::StudioRole::Planner.id(), &route_selector)?;
         crate::mode::validate_thread_mode_model(Some(&mode), &route.model)?;
         let thread = self.ensure_thread_owner(thread_id).await?;
         let state = thread.snapshot();
@@ -78,11 +77,23 @@ impl StudioRuntime {
         let workflow =
             crate::mode::reconcile_workflow_for_turn(previous_workflow, &mode, thread_id, now)?;
         let mode_record = state.extensions.get("studio.mode");
+        let route_record = state
+            .extensions
+            .get(crate::studio::model_route::MODEL_ROUTE_EXTENSION)
+            .context("Thread has no saved model route")?;
+        let mode_payload =
+            OpaquePayload::new("pl.studio.mode", 1, serde_json::to_string(&mode_id)?)?;
+        let route_payload = crate::studio::model_route::encode(&route_selector)?;
         let mut mutations = vec![
             ExtensionMutation::Put {
                 id: "studio.mode".into(),
                 expected_revision: mode_record.map(|record| record.revision),
-                payload: OpaquePayload::new("pl.studio.mode", 1, serde_json::to_string(&mode_id)?)?,
+                payload: mode_payload.clone(),
+            },
+            ExtensionMutation::Put {
+                id: crate::studio::model_route::MODEL_ROUTE_EXTENSION.into(),
+                expected_revision: Some(route_record.revision),
+                payload: route_payload.clone(),
             },
             ExtensionMutation::Put {
                 id: "studio.instructions".into(),
@@ -115,6 +126,33 @@ impl StudioRuntime {
                 });
             }
         }
+        let mut candidate = state.clone();
+        candidate.extensions.insert(
+            "studio.mode".into(),
+            pl_core::thread::extensions::ExtensionRecord {
+                revision: state.extension_sequence.saturating_add(1),
+                payload: mode_payload,
+            },
+        );
+        candidate.extensions.insert(
+            crate::studio::model_route::MODEL_ROUTE_EXTENSION.into(),
+            pl_core::thread::extensions::ExtensionRecord {
+                revision: state.extension_sequence.saturating_add(2),
+                payload: route_payload,
+            },
+        );
+        let (tools, exposure, binding) = self
+            .thread_factory
+            .refresh_thread_tools(
+                thread_id,
+                &candidate,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await?;
+        let mut registrations = tools.into_registrations();
+        if exposure == crate::thread_assembler::AgentControlExposure::Enabled {
+            registrations.extend(self.threads.agent_control_tools()?);
+        }
         thread
             .reconfigure(IdleReconfiguration {
                 expected_sequence: state.commit_sequence,
@@ -124,20 +162,14 @@ impl StudioRuntime {
                     reason: ContextReplacementReason::Rebuild,
                     records,
                 }),
-                remove_tools: [
-                    crate::workflow_tool::TOOL_WORKFLOW_CURRENT,
-                    crate::workflow_tool::TOOL_WORKFLOW_GRAPH,
-                    crate::workflow_tool::TOOL_WORKFLOW_HISTORY,
-                    crate::workflow_tool::TOOL_WORKFLOW_NEXT,
-                    crate::workflow_tool::TOOL_WORKFLOW_RESTART,
-                    crate::workflow_tool::TOOL_WORKFLOW_TRANSITION,
-                ]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
-                tools: crate::workflow_tool::workflow_registrations(mode)?,
+                model_update: Some(Self::deferred_model_update(&route, &config)?),
+                replace_tools: true,
+                remove_tools: Vec::new(),
+                tools: registrations,
             })
             .await?;
+        self.thread_factory
+            .commit_refreshed_binding(thread_id, binding)?;
         let mut directory = pl_protocol::Thread::from(record);
         directory.mode = mode_id;
         directory.updated_at = now;

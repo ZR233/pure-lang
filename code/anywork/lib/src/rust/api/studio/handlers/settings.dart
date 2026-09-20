@@ -110,3 +110,17 @@ Future<BridgeSettingsStateSnapshot> setModelRole({
   model: model,
   effort: effort,
 );
+
+Future<BridgeSettingsStateSnapshot> setModeModelRoute({
+  required BigInt expectedSettingsRevision,
+  required String modeId,
+  required String providerId,
+  required String model,
+  String? effort,
+}) => RustLib.instance.api.crateApiStudioHandlersSettingsSetModeModelRoute(
+  expectedSettingsRevision: expectedSettingsRevision,
+  modeId: modeId,
+  providerId: providerId,
+  model: model,
+  effort: effort,
+);

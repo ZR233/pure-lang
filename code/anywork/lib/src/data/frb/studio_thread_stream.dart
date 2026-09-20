@@ -607,6 +607,16 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
   final costLabel = formatRuntimeCosts(estimatedCosts);
   return ThreadRuntimeView(
     model: usage.model,
+    modelRoute: value.modelRoute == null
+        ? null
+        : ThreadModelRouteView(
+            providerId: value.modelRoute!.providerId,
+            model: value.modelRoute!.model,
+            effort: value.modelRoute!.effort,
+            revision: value.modelRoute!.revision.toInt(),
+            available: value.modelRoute!.available,
+            unavailableReason: value.modelRoute!.unavailableReason,
+          ),
     contextTokens: usage.latestContextTokens.toInt(),
     contextWindow: usage.contextWindow?.toInt() ?? 0,
     totalTokens: usage.totalTokens.toInt(),

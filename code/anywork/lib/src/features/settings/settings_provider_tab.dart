@@ -16,12 +16,14 @@ class ProvidersTab extends ConsumerStatefulWidget {
     required this.providers,
     required this.providerCatalog,
     required this.defaultProviderId,
+    required this.modeRoutes,
     required this.roles,
   });
 
   final List<ProviderSettingsView> providers;
   final ProviderCatalogView providerCatalog;
   final String? defaultProviderId;
+  final List<ModeModelRouteView> modeRoutes;
   final List<RoleSettingsView> roles;
 
   @override
@@ -335,6 +337,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       await _saveProviders(
         providers,
         selectedProviderId: _defaultProviderIdAfterDraftSave(current, provider),
+        setSimpleModeDefault: current.mode == ProviderDraftMode.create,
         renamedFrom: current.originalId == provider.id
             ? null
             : current.originalId,
@@ -393,7 +396,11 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
 
   Future<void> _setDefaultProvider(ProviderSettingsView provider) async {
     setState(() => _selectedProviderId = provider.id);
-    await _saveProviders(widget.providers, selectedProviderId: provider.id);
+    await _saveProviders(
+      widget.providers,
+      selectedProviderId: provider.id,
+      setSimpleModeDefault: true,
+    );
     await _refreshUsages(providerId: provider.id);
   }
 
@@ -427,17 +434,20 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
     String? renamedFrom,
     String? renamedTo,
     String? removedProviderId,
+    bool setSimpleModeDefault = false,
   }) async {
     await ref
         .read(studioControllerProvider.notifier)
         .saveProviderSettings(
           ProviderSettingsCommandBuilder.build(
             providers: providers,
+            modeRoutes: widget.modeRoutes,
             roles: widget.roles,
             selectedProviderId: selectedProviderId,
             renamedFrom: renamedFrom,
             renamedTo: renamedTo,
             removedProviderId: removedProviderId,
+            setSimpleModeDefault: setSimpleModeDefault,
           ),
         );
   }

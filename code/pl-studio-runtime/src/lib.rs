@@ -38,7 +38,8 @@ pub use config::{
     WebSearchContextSize, WebSearchLocation, WebSearchMode,
 };
 pub use config_editor::{
-    ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, provider_template_kind,
+    ModeRouteEdit, ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit,
+    provider_template_kind,
 };
 pub use error_mapping::studio_error_from_anyhow;
 pub use first_run::{

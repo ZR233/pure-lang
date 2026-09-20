@@ -21,8 +21,9 @@ pub use self::handlers::{
     save_deepseek_web_search_settings, save_general_settings, save_instructions_settings,
     save_mcp_settings, save_provider_settings, save_runtime_permission_mode, save_skills_settings,
     save_ssh_server, save_user_agent_profile, save_web_search_settings, search_skills,
-    set_model_role, set_system_agent_enabled, set_thread_mode, shutdown_runtime, start_new_thread,
-    start_studio_runtime, submit_prompt, test_ssh_connection,
+    set_mode_model_route, set_model_role, set_system_agent_enabled, set_thread_mode,
+    set_thread_model_route, shutdown_runtime, start_new_thread, start_studio_runtime,
+    submit_prompt, test_ssh_connection,
 };
 pub use self::subscription::{
     BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeThreadStreamEnvelope,
@@ -63,6 +64,7 @@ mod tests {
             ArchiveThread => archive_thread,
             RenameThread => rename_thread,
             SetThreadMode => set_thread_mode,
+            SetThreadModelRoute => set_thread_model_route,
             ListThreadTurns => list_thread_turns,
             SubmitPrompt => submit_prompt,
             InterruptTurn => interrupt_turn,
@@ -84,6 +86,7 @@ mod tests {
             SaveMcpSettings => save_mcp_settings,
             SaveGeneralSettings => save_general_settings,
             SetModelRole => set_model_role,
+            SetModeModelRoute => set_mode_model_route,
             ReadProviderUsage => read_provider_usage_state,
             CheckProviderUsage => check_provider_usage,
             ReadSkills => read_skills_state,

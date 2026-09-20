@@ -149,6 +149,8 @@ impl ThreadSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadRuntimeSnapshot {
     pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_route: Option<ThreadModelRouteSnapshot>,
     pub usage: ThreadRuntimeUsage,
     #[serde(default)]
     pub turn_completion_tokens: u64,
@@ -169,6 +171,19 @@ pub struct ThreadRuntimeSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<crate::WorkflowRuntimeSnapshot>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadModelRouteSnapshot {
+    pub provider_id: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    pub revision: u64,
+    pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

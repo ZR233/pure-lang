@@ -32,7 +32,7 @@ typedef StartPageView = ({
   ThreadModeId mode,
   ThreadWorkspaceMode workspaceMode,
   List<ProviderSettingsView> providers,
-  List<RoleSettingsView> roles,
+  List<ModeModelRouteView> modeModelRoutes,
 });
 
 @riverpod
@@ -140,7 +140,7 @@ AsyncValue<StartPageView> startPage(Ref ref) {
           mode: state.newThreadMode,
           workspaceMode: state.newThreadWorkspaceMode,
           providers: state.providers,
-          roles: state.roles,
+          modeModelRoutes: state.modeModelRoutes,
         );
       }),
     ),

@@ -652,7 +652,7 @@
     }
   },
   "settingsAgentsTitle": "智能体配置",
-  "settingsAgentsSubtitle": "主智能体始终可用，可配置模型与思考强度。子代理可按用途配置和启用；目录模式仅限制内置工具的文件写入，不是操作系统沙箱。",
+  "settingsAgentsSubtitle": "子代理可按用途配置和启用；目录模式仅限制内置工具的文件写入，不是操作系统沙箱。",
   "settingsAgentsAddUserProfile": "添加用户智能体配置",
   "settingsAgentsEditTooltip": "编辑",
   "settingsAgentsRecoveryTitle": "恢复",

@@ -1771,7 +1771,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsAgentsSubtitle =>
-      'Configure the main agent model and reasoning effort. Enable and configure subagents by purpose; directory mode restricts built-in file writes, not OS access.';
+      'Enable and configure subagents by purpose; directory mode restricts built-in file writes, not OS access.';
 
   @override
   String get settingsAgentsAddUserProfile => 'Add user profile';

@@ -1001,7 +1001,7 @@
     }
   },
   "settingsAgentsTitle": "Agent Profiles",
-  "settingsAgentsSubtitle": "Configure the main agent model and reasoning effort. Enable and configure subagents by purpose; directory mode restricts built-in file writes, not OS access.",
+  "settingsAgentsSubtitle": "Enable and configure subagents by purpose; directory mode restricts built-in file writes, not OS access.",
   "settingsAgentsAddUserProfile": "Add user profile",
   "settingsAgentsEditTooltip": "Edit",
   "settingsAgentsRecoveryTitle": "Recovery",

@@ -88,10 +88,11 @@ pub use provider_catalog::{
 };
 pub use thread::mode::{ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId};
 pub use thread::{
-    CacheUsageSummary, THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition, ThreadNotification,
-    ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot,
-    ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTurnHistory,
-    ThreadTurnPage, ThreadWorkspaceMode, TimelinePage, TimelineQuery, TimelineTurn,
+    CacheUsageSummary, THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition,
+    ThreadModelRouteSnapshot, ThreadNotification, ThreadNotificationEnvelope,
+    ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot, ThreadStatus,
+    ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTurnHistory, ThreadTurnPage,
+    ThreadWorkspaceMode, TimelinePage, TimelineQuery, TimelineTurn,
 };
 mod session_entry;
 pub use session_entry::SessionEntry;

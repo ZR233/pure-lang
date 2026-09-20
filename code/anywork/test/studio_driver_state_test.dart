@@ -26,6 +26,7 @@ void main() {
     expect(snapshot['settings'], {
       'revision': 37,
       'providers': [],
+      'modeModelRoutes': [],
       'roles': [
         {
           'key': 'executor',

@@ -237,8 +237,6 @@ impl StudioThreadFactory {
                 ));
             }
         }
-        let config_runtime = self.services.config_runtime.clone();
-        let role = thread.role.clone();
         let child = thread.parent_thread_id.is_some();
         let assignment = snapshot
             .extensions
@@ -250,29 +248,37 @@ impl StudioThreadFactory {
             })
             .transpose()
             .map_err(|error| resource_error("decode workspace binding", error))?;
-        let (config, route) =
-            tokio::task::spawn_blocking(move || -> Result<_, ThreadAssemblyError> {
-                if child {
-                    let profile = config_runtime.resolve_agent_profile(&role)?;
-                    if assignment
-                        .as_ref()
-                        .is_some_and(|assignment| assignment.mode != profile.profile.workspace_mode)
-                    {
-                        return Err(ThreadAssemblyError::Identity(
-                            "child Profile workspace policy changed; reactivate this Thread".into(),
-                        ));
-                    }
-                    Ok((profile.config, profile.route))
-                } else {
-                    let config = config_runtime.read()?.config;
-                    let route = config
-                        .models
-                        .resolve(&crate::config::StudioRole::Planner.id())?;
-                    Ok((config, route))
-                }
-            })
-            .await
-            .map_err(|error| resource_error("resolve refreshed tool configuration", error))??;
+        let config = self.services.config_runtime.read()?.config;
+        let (_, selector) = crate::studio::model_route::route_record(snapshot, child)
+            .map_err(|error| resource_error("decode saved model route", error))?
+            .ok_or_else(|| {
+                ThreadAssemblyError::Identity(
+                    "Thread has no saved model route; reactivate this Thread".into(),
+                )
+            })?;
+        if child {
+            let (profile, _) = crate::studio::model_route::saved_profile(snapshot)
+                .map_err(|error| resource_error("decode saved child Agent Profile", error))?
+                .ok_or_else(|| {
+                    ThreadAssemblyError::Identity(
+                        "child has no frozen Agent Profile; reactivate this Thread".into(),
+                    )
+                })?;
+            if assignment
+                .as_ref()
+                .is_some_and(|assignment| assignment.mode != profile.workspace_mode)
+            {
+                return Err(ThreadAssemblyError::Identity(
+                    "saved child Profile conflicts with its workspace assignment".into(),
+                ));
+            }
+        }
+        let role = if child {
+            pl_protocol::AgentRoleId::new(thread.role.clone())?
+        } else {
+            crate::config::StudioRole::Planner.id()
+        };
+        let route = config.models.resolve_route(role, &selector)?;
         let resources = crate::resource_store::FileResourceStore::new(
             self.services
                 .store

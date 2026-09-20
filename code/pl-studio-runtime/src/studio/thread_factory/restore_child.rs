@@ -7,8 +7,9 @@ use crate::{
     thread_assembler::{StudioThreadSpec, ThreadAssemblyError, ThreadPreparation},
 };
 use pl_core::context::{OpaquePayload, ResourceAccess};
+use pl_model::config::{AgentRoleId, ModelRouteConfig};
 use pl_tool::workspace::{AgentWorkspace, ToolWorkspace};
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 impl StudioThreadFactory {
     pub(super) async fn prepare_restored_child(
@@ -22,12 +23,11 @@ impl StudioThreadFactory {
         {
             return Err(ThreadAssemblyError::Identity(id.clone()));
         }
-        let config = self.services.config_runtime.clone();
-        let profile_id = thread.role.clone();
-        let profile =
-            tokio::task::spawn_blocking(move || config.resolve_agent_profile(&profile_id))
-                .await??;
-
+        if thread.role == crate::config::StudioRole::Planner.key() {
+            return Err(ThreadAssemblyError::Identity(
+                "child role is retired: planner".into(),
+            ));
+        }
         let project = self.project_record(&thread.project_id).await?;
         let history = super::recovery::recover_journal(&self.services.store, id)
             .await
@@ -43,6 +43,57 @@ impl StudioThreadFactory {
         })?;
         let assignment: pl_protocol::AgentWorkspaceAssignmentSnapshot =
             decode(&saved.payload, "pl.studio.workspace")?;
+        let saved_profile = crate::studio::model_route::saved_profile(&restored)
+            .map_err(|error| resource_error("decode saved child Agent Profile", error))?;
+        let bootstrap_profile = saved_profile.is_none();
+        let current_profile = if bootstrap_profile {
+            let config = self.services.config_runtime.clone();
+            let profile_id = thread.role.clone();
+            tokio::task::spawn_blocking(move || config.resolve_agent_profile(&profile_id))
+                .await?
+                .ok()
+        } else {
+            None
+        };
+        let config = current_profile.as_ref().map_or_else(
+            || {
+                self.services
+                    .config_runtime
+                    .read()
+                    .map(|snapshot| snapshot.config)
+            },
+            |profile| Ok(profile.config.clone()),
+        )?;
+        let role = AgentRoleId::new(thread.role.clone())?;
+        let receipt_route = crate::studio::model_route::latest_request_route(&restored)
+            .filter(|route| config.models.resolve_route(role.clone(), route).is_ok());
+        let profile = match saved_profile {
+            Some((profile, _)) => profile,
+            None => migrate_profile(
+                &thread.role,
+                assignment.mode,
+                current_profile.map(|profile| profile.profile),
+                receipt_route,
+            )?,
+        };
+        if profile.profile_id != thread.role {
+            return Err(ThreadAssemblyError::Identity(
+                "saved child Agent Profile identity does not match its directory role".into(),
+            ));
+        }
+        let route_selector = crate::studio::model_route::profile_route(&profile)
+            .map_err(|error| resource_error("read saved child model route", error))?;
+        let resolved = config.models.resolve_route(role.clone(), &route_selector);
+        let (route, model_available) = match resolved {
+            Ok(route) => (route, true),
+            Err(error) => {
+                tracing::warn!(thread_id = id, %error, "saved child model route is unavailable");
+                let fallback = config
+                    .models
+                    .resolve_route(role, config.mode_model_route(&thread.mode)?)?;
+                (fallback, false)
+            }
+        };
         let saved_project = restored.extensions.get("studio.project").ok_or_else(|| {
             ThreadAssemblyError::Identity(format!("child {id} has no project binding"))
         })?;
@@ -123,9 +174,9 @@ impl StudioThreadFactory {
                 ));
             }
         };
-        if profile.profile.workspace_mode != assignment.mode {
+        if profile.workspace_mode != assignment.mode {
             return Err(ThreadAssemblyError::Identity(
-                "child Profile workspace policy changed".into(),
+                "saved child Profile conflicts with its workspace assignment".into(),
             ));
         }
 
@@ -139,8 +190,8 @@ impl StudioThreadFactory {
             .prepare_thread_tools(ThreadToolAssembly {
                 thread_id: id,
                 cancellation: &request.cancellation,
-                config: &profile.config,
-                route: &profile.route,
+                config: &config,
+                route: &route,
                 project: &project,
                 root_thread_id: &thread.root_thread_id,
                 workspace: ToolWorkspace::new(workspace)
@@ -151,10 +202,19 @@ impl StudioThreadFactory {
         if request.cancellation.is_cancelled() {
             return Err(ThreadAssemblyError::Closed);
         }
+        let mut initial_extensions = BTreeMap::new();
+        if bootstrap_profile {
+            initial_extensions.insert(
+                crate::studio::model_route::AGENT_PROFILE_EXTENSION.into(),
+                crate::studio::model_route::encode_profile(&profile).map_err(|error| {
+                    resource_error("freeze migrated child Agent Profile", error)
+                })?,
+            );
+        }
         let spec = StudioThreadSpec {
             context_preparation: crate::compaction::preparer(
-                &profile.route,
-                profile.config.runtime.openai_compaction_mode,
+                &route,
+                config.runtime.openai_compaction_mode,
             )?,
             agent_controls: crate::thread_assembler::AgentControlExposure::Disabled,
             execution: pl_core::thread::input::InputDriverOptions {
@@ -162,11 +222,12 @@ impl StudioThreadFactory {
             },
             id: id.clone(),
             parent_id: thread.parent_thread_id,
-            route: profile.route,
+            route,
+            model_available,
             hosted_tools: prepared.hosted,
             history,
             initial_context: Vec::new(),
-            initial_extensions: Default::default(),
+            initial_extensions,
             tools: Vec::new(),
             resources: ResourceAccess::new(resources),
             capacity: Default::default(),
@@ -235,4 +296,130 @@ fn decode<T: serde::de::DeserializeOwned>(
     }
     serde_json::from_str(payload.content())
         .map_err(|error| resource_error("decode saved workspace binding", error))
+}
+
+fn migrate_profile(
+    profile_id: &str,
+    workspace_mode: pl_protocol::AgentWorkspaceMode,
+    current: Option<pl_protocol::AgentProfileSnapshot>,
+    receipt_route: Option<ModelRouteConfig>,
+) -> Result<pl_protocol::AgentProfileSnapshot, ThreadAssemblyError> {
+    let mut profile = match current {
+        Some(profile) => profile,
+        None => {
+            let route = receipt_route.as_ref().ok_or_else(|| {
+                ThreadAssemblyError::Identity(format!(
+                    "child {profile_id} has no saved Agent Profile or valid model receipt"
+                ))
+            })?;
+            pl_protocol::AgentProfileSnapshot {
+                profile_id: profile_id.into(),
+                display_name: profile_id.into(),
+                description: String::new(),
+                when_to_use: String::new(),
+                system_instructions: String::new(),
+                provider_id: route.provider.as_str().into(),
+                model: route.model.clone(),
+                effort: route
+                    .effort
+                    .as_ref()
+                    .map(|effort| effort.as_str().to_owned()),
+                source: "legacy-journal".into(),
+                revision: "1".into(),
+                content_hash: String::new(),
+                system: crate::config::StudioRole::from_key(profile_id).is_some(),
+                enabled: true,
+                workspace_mode,
+            }
+        }
+    };
+    if let Some(route) = receipt_route {
+        profile.provider_id = route.provider.into_string();
+        profile.model = route.model;
+        profile.effort = route.effort.map(|effort| effort.as_str().to_owned());
+    }
+    let mut hashable = profile.clone();
+    hashable.content_hash.clear();
+    profile.content_hash = crate::canonical_content_hash(
+        &serde_json::to_vec(&hashable)
+            .map_err(|error| resource_error("encode migrated child Agent Profile", error))?,
+    );
+    Ok(profile)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pl_model::config::{ProviderId, ReasoningEffort};
+    use pl_protocol::{AgentProfileSnapshot, AgentWorkspaceMode};
+
+    fn profile(model: &str) -> AgentProfileSnapshot {
+        AgentProfileSnapshot {
+            profile_id: "executor".into(),
+            display_name: "Executor".into(),
+            description: "fixture".into(),
+            when_to_use: "fixture".into(),
+            system_instructions: "frozen instructions".into(),
+            provider_id: "deepseek".into(),
+            model: model.into(),
+            effort: Some("high".into()),
+            source: "system".into(),
+            revision: "1".into(),
+            content_hash: String::new(),
+            system: true,
+            enabled: true,
+            workspace_mode: AgentWorkspaceMode::Directory,
+        }
+    }
+
+    fn route(model: &str, effort: &str) -> ModelRouteConfig {
+        ModelRouteConfig {
+            provider: ProviderId::new("deepseek").unwrap(),
+            model: model.into(),
+            effort: Some(ReasoningEffort::new(effort)),
+        }
+    }
+
+    #[test]
+    fn legacy_child_migration_prefers_the_frozen_request_receipt_route() {
+        let migrated = migrate_profile(
+            "executor",
+            AgentWorkspaceMode::Directory,
+            Some(profile("deepseek-flash")),
+            Some(route("deepseek-v4-pro", "max")),
+        )
+        .unwrap();
+
+        assert_eq!(migrated.model, "deepseek-v4-pro");
+        assert_eq!(migrated.effort.as_deref(), Some("max"));
+        assert_eq!(migrated.system_instructions, "frozen instructions");
+        assert!(!migrated.content_hash.is_empty());
+    }
+
+    #[test]
+    fn legacy_child_migration_uses_the_profile_only_without_a_valid_receipt() {
+        let migrated = migrate_profile(
+            "executor",
+            AgentWorkspaceMode::Directory,
+            Some(profile("deepseek-flash")),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(migrated.model, "deepseek-flash");
+        assert_eq!(migrated.effort.as_deref(), Some("high"));
+        assert!(!migrated.content_hash.is_empty());
+    }
+
+    #[test]
+    fn legacy_child_migration_requires_a_profile_or_valid_receipt() {
+        let error =
+            migrate_profile("executor", AgentWorkspaceMode::Directory, None, None).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("has no saved Agent Profile or valid model receipt")
+        );
+    }
 }

@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use super::settings::{StudioGeneralSettings, StudioInstructionsSettings, StudioSkillsSettings};
+use super::settings::{
+    StudioGeneralSettings, StudioInstructionsSettings, StudioSettingsSnapshot, StudioSkillsSettings,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -66,6 +68,37 @@ pub struct SetModelRoleRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetModeModelRouteRequest {
+    pub expected_revision: u64,
+    pub mode_id: String,
+    pub provider_id: String,
+    pub model: String,
+    pub effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetThreadModelRouteRequest {
+    pub expected_thread_revision: u64,
+    pub expected_settings_revision: u64,
+    pub provider_id: String,
+    pub model: String,
+    pub effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ThreadModelRouteUpdateResponse {
+    #[schema(value_type = Object)]
+    pub runtime: crate::ThreadRuntimeSnapshot,
+    pub settings: StudioSettingsSnapshot,
+    pub mode_default_saved: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateMcpSettingsRequest {
     pub expected_revision: u64,
     pub servers: Vec<McpServerUpdate>,
@@ -86,7 +119,18 @@ pub struct UpdateProviderSettingsRequest {
     pub expected_revision: u64,
     pub default_provider_id: String,
     pub providers: Vec<ProviderSettingsUpdate>,
+    #[serde(default)]
+    pub mode_routes: Vec<ModeRouteSettingsUpdate>,
     pub roles: Vec<RoleSettingsUpdate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModeRouteSettingsUpdate {
+    pub mode_id: String,
+    pub provider: String,
+    pub model: String,
+    pub effort: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]

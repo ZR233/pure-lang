@@ -58,21 +58,20 @@ class ThreadStatusBar extends ConsumerWidget {
                 final showModel = constraints.maxWidth >= 610;
                 final showCapabilities = constraints.maxWidth >= 840;
                 final showLspActivity = constraints.maxWidth >= 850;
+                final route = runtime.modelRoute;
+                final routeModel = route == null
+                    ? null
+                    : modelForRoute(
+                        workspace.providers,
+                        route.providerId,
+                        route.model,
+                      );
                 final hasOverflow =
                     (thread.isRoot &&
-                        effortsFor(
-                          workspace.providers,
-                          workspace.roles,
-                          thread.mode,
-                        ).isNotEmpty) ||
+                        (routeModel?.reasoningEfforts.isNotEmpty ?? false)) ||
                     (!showCapabilities && capabilityLabel.isNotEmpty) ||
                     (!showLspActivity && lspActiveServers.isNotEmpty);
-                final rootEffort = thread.isRoot
-                    ? roleByKey(
-                        workspace.roles,
-                        roleKeyForMode(thread.mode),
-                      )?.effort.trim()
-                    : null;
+                final rootEffort = thread.isRoot ? route?.effort?.trim() : null;
                 return Row(
                   children: [
                     if (showTodo)
@@ -105,11 +104,16 @@ class ThreadStatusBar extends ConsumerWidget {
                           : '${thread.title} · ${context.threadStatusLabel(thread.status)}',
                       maxWidth: 96,
                     ),
-                    if (showModel && thread.isAgent && runtime.model.isNotEmpty)
+                    if (showModel &&
+                        thread.isAgent &&
+                        (route?.model.isNotEmpty ?? runtime.model.isNotEmpty))
                       _StatusReadout(
                         icon: Icons.smart_toy_outlined,
-                        label: runtime.model,
-                        tooltip: runtime.model,
+                        label: route?.model ?? runtime.model,
+                        tooltip:
+                            route?.unavailableReason ??
+                            route?.model ??
+                            runtime.model,
                         maxWidth: 140,
                       ),
                     if (runtime.workflow?.currentRun case final run?)

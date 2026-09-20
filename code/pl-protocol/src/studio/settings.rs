@@ -17,6 +17,7 @@ pub struct StudioSettingsSnapshot {
 pub struct StudioSettings {
     pub default_provider_id: Option<String>,
     pub providers: Vec<StudioProviderSettings>,
+    pub mode_model_routes: Vec<StudioModeModelSettings>,
     pub roles: Vec<StudioRoleSettings>,
     pub permission_mode: String,
     pub instructions: StudioInstructionsSettings,
@@ -74,6 +75,15 @@ pub struct StudioModelConnectionSettings {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudioRoleSettings {
     pub key: String,
+    pub provider_id: String,
+    pub model: String,
+    pub effort: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudioModeModelSettings {
+    pub mode_id: String,
     pub provider_id: String,
     pub model: String,
     pub effort: String,

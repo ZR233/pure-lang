@@ -10,7 +10,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'settings.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `bridge_input_source`, `bridge_modality`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Provider 配置中由用户定义的模型，不复制内置 catalog 元数据。
 class BridgeCustomModelSettingsDto {
@@ -219,6 +219,35 @@ class BridgeMcpServerSettingsDto {
           configuration == other.configuration &&
           sourceKind == other.sourceKind &&
           mutationPolicy == other.mutationPolicy;
+}
+
+/// Thread Mode 到默认 provider/model/effort 的 canonical 路由。
+class BridgeModeModelSettingsDto {
+  final String modeId;
+  final String providerId;
+  final String model;
+  final String effort;
+
+  const BridgeModeModelSettingsDto({
+    required this.modeId,
+    required this.providerId,
+    required this.model,
+    required this.effort,
+  });
+
+  @override
+  int get hashCode =>
+      modeId.hashCode ^ providerId.hashCode ^ model.hashCode ^ effort.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModeModelSettingsDto &&
+          runtimeType == other.runtimeType &&
+          modeId == other.modeId &&
+          providerId == other.providerId &&
+          model == other.model &&
+          effort == other.effort;
 }
 
 class BridgeModelCapabilities {
@@ -851,6 +880,7 @@ class BridgeSkillsSettingsDto {
 class BridgeStudioSettingsDto {
   final String? defaultProviderId;
   final List<BridgeProviderSettingsDto> providers;
+  final List<BridgeModeModelSettingsDto> modeModelRoutes;
   final List<BridgeRoleSettingsDto> roles;
   final String permissionMode;
   final BridgeInstructionsSettingsDto instructions;
@@ -863,6 +893,7 @@ class BridgeStudioSettingsDto {
   const BridgeStudioSettingsDto({
     this.defaultProviderId,
     required this.providers,
+    required this.modeModelRoutes,
     required this.roles,
     required this.permissionMode,
     required this.instructions,
@@ -877,6 +908,7 @@ class BridgeStudioSettingsDto {
   int get hashCode =>
       defaultProviderId.hashCode ^
       providers.hashCode ^
+      modeModelRoutes.hashCode ^
       roles.hashCode ^
       permissionMode.hashCode ^
       instructions.hashCode ^
@@ -893,6 +925,7 @@ class BridgeStudioSettingsDto {
           runtimeType == other.runtimeType &&
           defaultProviderId == other.defaultProviderId &&
           providers == other.providers &&
+          modeModelRoutes == other.modeModelRoutes &&
           roles == other.roles &&
           permissionMode == other.permissionMode &&
           instructions == other.instructions &&
@@ -1145,6 +1178,34 @@ class McpSettingsInput {
           servers == other.servers;
 }
 
+class ModeRouteInput {
+  final String modeId;
+  final String provider;
+  final String model;
+  final String effort;
+
+  const ModeRouteInput({
+    required this.modeId,
+    required this.provider,
+    required this.model,
+    required this.effort,
+  });
+
+  @override
+  int get hashCode =>
+      modeId.hashCode ^ provider.hashCode ^ model.hashCode ^ effort.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ModeRouteInput &&
+          runtimeType == other.runtimeType &&
+          modeId == other.modeId &&
+          provider == other.provider &&
+          model == other.model &&
+          effort == other.effort;
+}
+
 class ProviderInput {
   final String id;
   final String? originalId;
@@ -1269,17 +1330,22 @@ sealed class ProviderSecretInput with _$ProviderSecretInput {
 class ProviderSettingsInput {
   final String defaultProviderId;
   final List<ProviderInput> providers;
+  final List<ModeRouteInput> modeRoutes;
   final List<RoleInput> roles;
 
   const ProviderSettingsInput({
     required this.defaultProviderId,
     required this.providers,
+    required this.modeRoutes,
     required this.roles,
   });
 
   @override
   int get hashCode =>
-      defaultProviderId.hashCode ^ providers.hashCode ^ roles.hashCode;
+      defaultProviderId.hashCode ^
+      providers.hashCode ^
+      modeRoutes.hashCode ^
+      roles.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1288,6 +1354,7 @@ class ProviderSettingsInput {
           runtimeType == other.runtimeType &&
           defaultProviderId == other.defaultProviderId &&
           providers == other.providers &&
+          modeRoutes == other.modeRoutes &&
           roles == other.roles;
 }
 

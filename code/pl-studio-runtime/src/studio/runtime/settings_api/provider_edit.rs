@@ -5,11 +5,12 @@ use pl_model::provider::{ProviderConnectionMode, ProviderWireProtocol};
 use pl_protocol::WebSearchContextSize;
 use pl_protocol::search::WebSearchMode;
 use pl_protocol::studio::{
-    ProviderModelConnectionUpdate, ProviderModelUpdate, ProviderSecretUpdate,
-    ProviderSettingsUpdate, RoleSettingsUpdate, StudioError, UpdateWebSearchSettingsRequest,
+    ModeRouteSettingsUpdate, ProviderModelConnectionUpdate, ProviderModelUpdate,
+    ProviderSecretUpdate, ProviderSettingsUpdate, RoleSettingsUpdate, StudioError,
+    UpdateWebSearchSettingsRequest,
 };
 
-use crate::{ProviderEdit, ProviderModelEdit, RoleEdit};
+use crate::{ModeRouteEdit, ProviderEdit, ProviderModelEdit, RoleEdit};
 use pl_model::config::ProviderPresetId;
 
 use super::view::{normalized_optional, normalized_string_list};
@@ -123,6 +124,17 @@ impl From<RoleSettingsUpdate> for RoleEdit {
     fn from(input: RoleSettingsUpdate) -> Self {
         Self {
             key: input.key,
+            provider: input.provider,
+            model: input.model,
+            effort: input.effort,
+        }
+    }
+}
+
+impl From<ModeRouteSettingsUpdate> for ModeRouteEdit {
+    fn from(input: ModeRouteSettingsUpdate) -> Self {
+        Self {
+            mode_id: input.mode_id,
             provider: input.provider,
             model: input.model,
             effort: input.effort,

@@ -1,3 +1,5 @@
+import 'studio_enums.dart';
+
 class RoleSettingsView {
   const RoleSettingsView({
     required this.key,
@@ -7,6 +9,20 @@ class RoleSettingsView {
   });
 
   final String key;
+  final String providerId;
+  final String model;
+  final String effort;
+}
+
+class ModeModelRouteView {
+  const ModeModelRouteView({
+    required this.modeId,
+    required this.providerId,
+    required this.model,
+    required this.effort,
+  });
+
+  final ThreadModeId modeId;
   final String providerId;
   final String model;
   final String effort;

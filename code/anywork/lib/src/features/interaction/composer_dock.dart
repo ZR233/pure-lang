@@ -79,7 +79,10 @@ class StartPageComposerDock extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(studioControllerProvider.notifier);
-    final model = modelFor(view.providers, view.roles, view.mode);
+    final route = modeRouteFor(view.modeModelRoutes, view.mode);
+    final model = route == null
+        ? null
+        : modelForRoute(view.providers, route.providerId, route.model);
     return SafeArea(
       top: false,
       child: Padding(
@@ -109,16 +112,34 @@ class StartPageComposerDock extends ConsumerWidget {
                     mode: view.workspaceMode,
                     onSelected: controller.setNewThreadWorkspaceMode,
                   ),
-                  ModelRoleSelector(
-                    providers: view.providers,
-                    roles: view.roles,
-                    mode: view.mode,
-                  ),
-                  ReasoningEffortSelector(
-                    providers: view.providers,
-                    roles: view.roles,
-                    mode: view.mode,
-                  ),
+                  if (route != null) ...[
+                    ModelRoleSelector(
+                      providers: view.providers,
+                      providerId: route.providerId,
+                      model: route.model,
+                      effort: route.effort,
+                      onSelected: (providerId, model, effort) =>
+                          controller.setModeModelRoute(
+                            mode: view.mode,
+                            providerId: providerId,
+                            model: model,
+                            effort: effort,
+                          ),
+                    ),
+                    ReasoningEffortSelector(
+                      providers: view.providers,
+                      providerId: route.providerId,
+                      model: route.model,
+                      effort: route.effort,
+                      onSelected: (providerId, model, effort) =>
+                          controller.setModeModelRoute(
+                            mode: view.mode,
+                            providerId: providerId,
+                            model: model,
+                            effort: effort,
+                          ),
+                    ),
+                  ],
                 ],
               ),
               onChanged: controller.updateNewThreadComposer,
@@ -180,11 +201,10 @@ class _PromptComposer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(studioControllerProvider.notifier);
-    final model = modelFor(
-      workspace.providers,
-      workspace.roles,
-      workspace.rootThread.mode,
-    );
+    final route = workspace.runtime.modelRoute;
+    final model = route == null
+        ? null
+        : modelForRoute(workspace.providers, route.providerId, route.model);
     return _PromptComposerPanel(
       composer: workspace.composer,
       permissionMode: workspace.permissionMode,
@@ -205,16 +225,33 @@ class _PromptComposer extends ConsumerWidget {
                       workspace.activeInteraction == null,
                   onSelected: controller.setThreadMode,
                 ),
-                ModelRoleSelector(
-                  providers: workspace.providers,
-                  roles: workspace.roles,
-                  mode: workspace.thread.mode,
-                ),
-                ReasoningEffortSelector(
-                  providers: workspace.providers,
-                  roles: workspace.roles,
-                  mode: workspace.thread.mode,
-                ),
+                if (route != null) ...[
+                  ModelRoleSelector(
+                    providers: workspace.providers,
+                    providerId: route.providerId,
+                    model: route.model,
+                    effort: route.effort,
+                    available: route.available,
+                    onSelected: (providerId, model, effort) =>
+                        controller.setThreadModelRoute(
+                          providerId: providerId,
+                          model: model,
+                          effort: effort,
+                        ),
+                  ),
+                  ReasoningEffortSelector(
+                    providers: workspace.providers,
+                    providerId: route.providerId,
+                    model: route.model,
+                    effort: route.effort,
+                    onSelected: (providerId, model, effort) =>
+                        controller.setThreadModelRoute(
+                          providerId: providerId,
+                          model: model,
+                          effort: effort,
+                        ),
+                  ),
+                ],
               ],
             )
           : null,

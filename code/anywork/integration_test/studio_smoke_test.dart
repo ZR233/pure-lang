@@ -217,8 +217,8 @@ void main() {
         find.byKey(StudioDriverKeys.modelOption(provider.id, 'local-coder')),
       );
       await tester.pumpAndSettle();
-      final selected = (await api.readStudioState()).roles.firstWhere(
-        (role) => role.key == 'planner',
+      final selected = (await api.readStudioState()).modeModelRoutes.firstWhere(
+        (route) => route.modeId == ThreadModeId.simple,
       );
       expect(selected.providerId, provider.id);
       expect(selected.model, 'local-coder');

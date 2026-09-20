@@ -3,10 +3,10 @@ use super::{
     StudioRuntime,
     background_task::{self, BackgroundTask},
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use pl_core::{
     model::{DynModelSession, Model, ModelError, ModelFactory, ModelFailureKind},
-    thread::ThreadHandle,
+    thread::{DeferredModelUpdate, DeferredModelUpdatePrecondition, ThreadHandle},
 };
 use pl_model::{
     config::ResolvedModelRoute,
@@ -18,24 +18,53 @@ impl StudioRuntime {
     pub(super) async fn model_binding(
         &self,
         thread_id: &str,
-    ) -> Result<(ResolvedModelRoute, crate::config::StudioConfig)> {
-        let record = self.read_owned_thread(thread_id).await?;
-        let config = self.config_runtime.clone();
-        tokio::task::spawn_blocking(move || -> Result<_> {
-            if record.parent_thread_id.is_none() {
-                let config = config.read()?.config;
-                Ok((
-                    config
-                        .models
-                        .resolve(&crate::config::StudioRole::Planner.id())?,
-                    config,
-                ))
+        thread: &ThreadHandle,
+    ) -> (
+        DeferredModelUpdatePrecondition,
+        Result<(ResolvedModelRoute, crate::config::StudioConfig)>,
+    ) {
+        let state = thread.snapshot();
+        let extension_id = if state
+            .extensions
+            .contains_key(crate::studio::model_route::AGENT_PROFILE_EXTENSION)
+        {
+            crate::studio::model_route::AGENT_PROFILE_EXTENSION
+        } else {
+            crate::studio::model_route::MODEL_ROUTE_EXTENSION
+        };
+        let precondition = DeferredModelUpdatePrecondition::extension(
+            extension_id,
+            state
+                .extensions
+                .get(extension_id)
+                .map(|record| record.revision),
+        );
+        let binding = async {
+            let record = self.read_owned_thread(thread_id).await?;
+            let is_child = record.parent_thread_id.is_some();
+            let config = self.config_runtime.read()?.config;
+            let (_, selector) = crate::studio::model_route::route_record(&state, is_child)?
+                .context("Thread has no saved model route")?;
+            let role = if is_child {
+                pl_protocol::AgentRoleId::new(record.role)?
             } else {
-                let profile = config.resolve_agent_profile(&record.role)?;
-                Ok((profile.route, profile.config))
+                crate::config::StudioRole::Planner.id()
+            };
+            let route = config.models.resolve_route(role, &selector)?;
+            if !is_child {
+                let mode_id =
+                    crate::studio::thread_projection::saved_mode(&state)?.unwrap_or(record.mode);
+                let mode = self
+                    .thread_modes
+                    .snapshot()
+                    .mode(&mode_id)
+                    .context("current Thread Mode is unavailable")?;
+                crate::mode::validate_thread_mode_model(Some(&mode), &route.model)?;
             }
-        })
-        .await?
+            Ok((route, config))
+        }
+        .await;
+        (precondition, binding)
     }
 
     pub(super) async fn queue_thread_model(
@@ -43,7 +72,22 @@ impl StudioRuntime {
         thread: &ThreadHandle,
         route: &ResolvedModelRoute,
         config: &crate::config::StudioConfig,
+        precondition: DeferredModelUpdatePrecondition,
     ) -> Result<()> {
+        thread
+            .queue_deferred_model_update_if_current(
+                Self::deferred_model_update(route, config)?,
+                precondition,
+                Vec::new(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub(super) fn deferred_model_update(
+        route: &ResolvedModelRoute,
+        config: &crate::config::StudioConfig,
+    ) -> Result<DeferredModelUpdate> {
         let search = crate::search::plan_web_searches(
             &config.models,
             route,
@@ -68,14 +112,11 @@ impl StudioRuntime {
             ThreadModel::new(ModelRuntime::from_route(route)?, route.reasoning_config())
                 .with_hosted_tools(hosted),
         );
-        thread
-            .queue_model_update(
-                key,
-                factory,
-                crate::compaction::preparer(route, config.runtime.openai_compaction_mode)?,
-            )
-            .await?;
-        Ok(())
+        Ok(DeferredModelUpdate::new(
+            key,
+            factory,
+            crate::compaction::preparer(route, config.runtime.openai_compaction_mode)?,
+        ))
     }
 
     pub(in crate::studio::runtime) async fn start_model_refresh(&self) {
@@ -89,20 +130,31 @@ impl StudioRuntime {
             while updates.changed().await.is_ok() {
                 let revision = updates.borrow_and_update().revision;
                 for (id, thread) in runtime.threads.observed_threads() {
-                    let result = match runtime.model_binding(&id).await {
+                    let (precondition, binding) = runtime.model_binding(&id, &thread).await;
+                    let result = match binding {
                         Ok((route, config)) => {
-                            runtime.queue_thread_model(&thread, &route, &config).await
+                            runtime
+                                .queue_thread_model(&thread, &route, &config, precondition.clone())
+                                .await
                         }
                         Err(error) => Err(error),
                     };
                     if let Err(error) = result {
                         // Invalid current bindings become an explicit failure on the next Turn,
                         // never silent reuse of an old provider or disabled Profile.
-                        let factory = ModelFactory::new(UnavailableBinding(Arc::from(
-                            error.into_boxed_dyn_error(),
-                        )));
+                        let update = DeferredModelUpdate::new(
+                            format!("unavailable:{revision}"),
+                            ModelFactory::new(UnavailableBinding(Arc::from(
+                                error.into_boxed_dyn_error(),
+                            ))),
+                            None,
+                        );
                         let _ = thread
-                            .queue_model_update(format!("unavailable:{revision}"), factory, None)
+                            .queue_deferred_model_update_if_current(
+                                update,
+                                precondition,
+                                Vec::new(),
+                            )
                             .await;
                     }
                 }

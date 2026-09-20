@@ -219,3 +219,24 @@ pub async fn set_model_role(
         },
     )?))
 }
+
+pub async fn set_mode_model_route(
+    expected_settings_revision: u64,
+    mode_id: String,
+    provider_id: String,
+    model: String,
+    effort: Option<String>,
+) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge_settings_snapshot(
+        bridge
+            .studio
+            .save_mode_model_route(pl_protocol::studio::SetModeModelRouteRequest {
+                expected_revision: expected_settings_revision,
+                mode_id,
+                provider_id,
+                model,
+                effort,
+            })?,
+    ))
+}

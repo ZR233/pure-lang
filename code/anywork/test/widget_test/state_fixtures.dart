@@ -347,7 +347,7 @@ StudioState _stateWithPlannerModels() {
   return state.copyWith(
     settingsState: SettingsStateSnapshot.fromState(
       state: _testReady(
-        const SettingsStateData(
+        SettingsStateData(
           providers: [
             ProviderSettingsView(
               id: 'deepseek',
@@ -355,13 +355,33 @@ StudioState _stateWithPlannerModels() {
               name: 'DeepSeek',
               baseUrl: 'https://api.deepseek.com',
               defaultModel: 'deepseek-flash',
-              models: [],
+              models: _testProviderCatalog.modelCatalogs['deepseek']!,
               status: 'ready',
               usageLabel: '2 models',
               promptCacheDialect: 'implicit_prefix',
             ),
           ],
+          modeModelRoutes: [
+            ModeModelRouteView(
+              modeId: ThreadModeId.simple,
+              providerId: 'deepseek',
+              model: 'deepseek-flash',
+              effort: 'high',
+            ),
+            ModeModelRouteView(
+              modeId: ThreadModeId.task,
+              providerId: 'deepseek',
+              model: 'deepseek-v4-pro',
+              effort: 'max',
+            ),
+          ],
           roles: [
+            RoleSettingsView(
+              key: 'explorer',
+              providerId: 'deepseek',
+              model: 'deepseek-flash',
+              effort: 'high',
+            ),
             RoleSettingsView(
               key: 'executor',
               providerId: 'deepseek',
@@ -369,7 +389,13 @@ StudioState _stateWithPlannerModels() {
               effort: 'high',
             ),
             RoleSettingsView(
-              key: 'planner',
+              key: 'worktree_executor',
+              providerId: 'deepseek',
+              model: 'deepseek-flash',
+              effort: 'high',
+            ),
+            RoleSettingsView(
+              key: 'reviewer',
               providerId: 'deepseek',
               model: 'deepseek-flash',
               effort: 'high',
@@ -380,7 +406,16 @@ StudioState _stateWithPlannerModels() {
     ),
     workspacesByThread: {
       state.selectedThreadId!: state.selectedWorkspace!.copyWith(
-        runtime: state.runtime.copyWith(model: 'deepseek-flash'),
+        runtime: state.runtime.copyWith(
+          model: 'deepseek-flash',
+          modelRoute: const ThreadModelRouteView(
+            providerId: 'deepseek',
+            model: 'deepseek-flash',
+            effort: 'high',
+            revision: 1,
+            available: true,
+          ),
+        ),
       ),
     },
   );
@@ -452,15 +487,23 @@ StudioState _stateWithAttachmentModels({bool visualModel = true}) {
               usageLabel: '2 models',
             ),
           ],
-          roles: [
-            RoleSettingsView(
-              key: 'executor',
+          modeModelRoutes: [
+            ModeModelRouteView(
+              modeId: ThreadModeId.simple,
               providerId: 'zhipu',
               model: selectedModel,
               effort: 'high',
             ),
+            ModeModelRouteView(
+              modeId: ThreadModeId.task,
+              providerId: 'zhipu',
+              model: 'glm-5.3-flash',
+              effort: 'high',
+            ),
+          ],
+          roles: [
             RoleSettingsView(
-              key: 'planner',
+              key: 'executor',
               providerId: 'zhipu',
               model: selectedModel,
               effort: 'high',
@@ -471,7 +514,16 @@ StudioState _stateWithAttachmentModels({bool visualModel = true}) {
     ),
     workspacesByThread: {
       state.selectedThreadId!: state.selectedWorkspace!.copyWith(
-        runtime: state.runtime.copyWith(model: selectedModel),
+        runtime: state.runtime.copyWith(
+          model: selectedModel,
+          modelRoute: ThreadModelRouteView(
+            providerId: 'zhipu',
+            model: selectedModel,
+            effort: 'high',
+            revision: 1,
+            available: true,
+          ),
+        ),
       ),
     },
   );
@@ -484,6 +536,7 @@ StudioState _studioStateFixture({
   List<StudioRecoveryIssue> recoveryIssues = const [],
   List<ProviderSettingsView> providers = const [],
   String? defaultProviderId,
+  List<ModeModelRouteView> modeModelRoutes = const [],
   List<RoleSettingsView> roles = const [],
   List<McpServerSettingsView> mcpServers = const [],
   InstructionsSettingsView instructions = const InstructionsSettingsView(),
@@ -512,6 +565,7 @@ StudioState _studioStateFixture({
         SettingsStateData(
           providers: providers,
           defaultProviderId: defaultProviderId,
+          modeModelRoutes: modeModelRoutes,
           roles: roles,
           mcpServers: mcpServers,
           instructions: instructions,
@@ -579,6 +633,7 @@ StudioState _withSettingsFixture(
   StudioState state, {
   List<ProviderSettingsView>? providers,
   Object? defaultProviderId = _fixtureUnset,
+  List<ModeModelRouteView>? modeModelRoutes,
   List<RoleSettingsView>? roles,
   List<McpServerSettingsView>? mcpServers,
   SkillsSettingsView? skills,
@@ -595,6 +650,7 @@ StudioState _withSettingsFixture(
           defaultProviderId: identical(defaultProviderId, _fixtureUnset)
               ? current.defaultProviderId
               : defaultProviderId as String?,
+          modeModelRoutes: modeModelRoutes ?? current.modeModelRoutes,
           roles: roles ?? current.roles,
           mcpServers: mcpServers ?? current.mcpServers,
           instructions: current.instructions,

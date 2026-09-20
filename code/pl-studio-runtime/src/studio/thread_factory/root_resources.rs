@@ -25,9 +25,6 @@ impl StudioThreadFactory {
         }
         let project = self.project_record(&thread.project_id).await?;
         let config = self.services.config_runtime.read()?.config;
-        let route = config
-            .models
-            .resolve(&crate::config::StudioRole::Planner.id())?;
         let history = super::recovery::recover_journal(&self.services.store, id)
             .await
             .map_err(|error| resource_error("recover Thread journal", error))?;
@@ -41,7 +38,41 @@ impl StudioThreadFactory {
             .snapshot()
             .mode(&selected_mode)
             .ok_or_else(|| ThreadAssemblyError::Identity(thread.mode.to_string()))?;
-        crate::mode::validate_thread_mode_model(Some(&mode), &route.model)?;
+        let saved_route = crate::studio::model_route::saved(&saved)
+            .map_err(|error| resource_error("decode saved model route", error))?;
+        let has_saved_route = saved_route.is_some();
+        let default_route = config.mode_model_route(&selected_mode)?.clone();
+        let route_selector = saved_route.map(|saved| saved.route).unwrap_or_else(|| {
+            crate::studio::model_route::latest_request_route(&saved)
+                .filter(|route| {
+                    config
+                        .models
+                        .resolve_route(crate::config::StudioRole::Planner.id(), route)
+                        .and_then(|resolved| {
+                            crate::mode::validate_thread_mode_model(Some(&mode), &resolved.model)?;
+                            Ok(resolved)
+                        })
+                        .is_ok()
+                })
+                .unwrap_or_else(|| default_route.clone())
+        });
+        let resolved_route = config
+            .models
+            .resolve_route(crate::config::StudioRole::Planner.id(), &route_selector)
+            .and_then(|resolved| {
+                crate::mode::validate_thread_mode_model(Some(&mode), &resolved.model)?;
+                Ok(resolved)
+            });
+        let (route, model_available) = match resolved_route {
+            Ok(route) => (route, true),
+            Err(error) if has_saved_route => {
+                tracing::warn!(thread_id = id, %error, "saved Thread model route is unavailable");
+                let fallback = config.resolve_mode_model_route(&selected_mode)?;
+                crate::mode::validate_thread_mode_model(Some(&mode), &fallback.model)?;
+                (fallback, false)
+            }
+            Err(error) => return Err(error.into()),
+        };
         // 会话工作区只能由 canonical workspace_mode 与 durable lease 解析；
         // `worktree` 缺失、身份不符或已清理都显式失败，绝不回落到主工作区。
         let workspace_mode = thread.workspace_mode;
@@ -101,6 +132,13 @@ impl StudioThreadFactory {
         }
         let mut initial_context = Vec::new();
         let mut initial_extensions = BTreeMap::new();
+        if !has_saved_route {
+            initial_extensions.insert(
+                crate::studio::model_route::MODEL_ROUTE_EXTENSION.into(),
+                crate::studio::model_route::encode(&route_selector)
+                    .map_err(|error| resource_error("freeze initial model route", error))?,
+            );
+        }
         if history.is_empty() {
             let (context, sources) = thread_seed::capture(ThreadInstructionSeed {
                 thread_id: id,
@@ -200,6 +238,7 @@ impl StudioThreadFactory {
             id: id.into(),
             parent_id: None,
             route,
+            model_available,
             hosted_tools: prepared.hosted,
             history,
             initial_context,

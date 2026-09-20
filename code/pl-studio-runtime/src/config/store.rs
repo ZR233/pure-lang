@@ -9,7 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::{PureError, Result};
 
 use super::credential::{CredentialStore, MemoryCredentialStore, SystemCredentialStore};
-use super::{STUDIO_CONFIG_DIR_NAME, STUDIO_CONFIG_FILE_NAME, StudioConfig};
+use super::{STUDIO_CONFIG_DIR_NAME, STUDIO_CONFIG_FILE_NAME, StudioConfig, StudioRole};
+use pl_protocol::ThreadModeId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigPaths {
@@ -179,12 +180,13 @@ impl ConfigStore {
         struct Version {
             schema_version: u32,
         }
-        if std::str::from_utf8(&content)
+        if let Some(version) = std::str::from_utf8(&content)
             .ok()
             .and_then(|text| toml::from_str::<Version>(text).ok())
-            .is_some_and(|version| version.schema_version == 18)
+            .map(|version| version.schema_version)
+            .filter(|version| matches!(version, 18 | 19))
         {
-            return self.migrate_schema_18_for_startup(&content);
+            return self.migrate_legacy_config_for_startup(&content, version);
         }
         match parse_startup_config(&content) {
             Ok(mut config) => {
@@ -198,30 +200,56 @@ impl ConfigStore {
         }
     }
 
-    fn migrate_schema_18_for_startup(&self, original: &[u8]) -> Result<StartupConfigLoad> {
-        self.migrate_schema_18_for_startup_with(original, |path, content| {
+    fn migrate_legacy_config_for_startup(
+        &self,
+        original: &[u8],
+        source_version: u32,
+    ) -> Result<StartupConfigLoad> {
+        self.migrate_legacy_config_for_startup_with(original, source_version, |path, content| {
             pl_tool::workspace::write_file_atomically(path, content).map_err(Into::into)
         })
     }
 
-    fn migrate_schema_18_for_startup_with(
+    fn migrate_legacy_config_for_startup_with(
         &self,
         original: &[u8],
+        source_version: u32,
         replace: impl FnOnce(&Path, &[u8]) -> Result<()>,
     ) -> Result<StartupConfigLoad> {
-        let text = std::str::from_utf8(original)
-            .map_err(|error| PureError::ConfigError(format!("invalid schema 18 UTF-8: {error}")))?;
+        let text = std::str::from_utf8(original).map_err(|error| {
+            PureError::ConfigError(format!("invalid schema {source_version} UTF-8: {error}"))
+        })?;
         let mut config = parse_typed_config(text).map_err(IncompatibleConfig::into_error)?;
         reject_inline_credentials(&config).map_err(IncompatibleConfig::into_error)?;
+        if source_version == 18 {
+            config.disabled_system_agents.remove("planner");
+        }
+        let planner_route = config
+            .models
+            .routes
+            .remove(&StudioRole::Planner.id())
+            .ok_or_else(|| {
+                PureError::ConfigError(format!(
+                    "schema {source_version} config is missing planner model route"
+                ))
+            })?;
+        config.mode_model_routes = std::collections::BTreeMap::from([
+            (ThreadModeId::simple(), planner_route.clone()),
+            (ThreadModeId::task(), planner_route),
+        ]);
         config.schema_version = super::STUDIO_CONFIG_SCHEMA_VERSION;
-        config.disabled_system_agents.remove("planner");
         config.validate()?;
         let persisted = serialize_persisted_config(&config)?;
         // Provider identities do not change. Read credentials before committing; never rewrite them.
         self.hydrate_credentials(&mut config)?;
         let backup = write_config_backup(self.paths.config_file(), original, "migrated")?;
         replace(self.paths.config_file(), persisted.as_bytes())?;
-        tracing::info!(backup_path = %backup.display(), "migrated Studio config from schema 18 to 19");
+        tracing::info!(
+            backup_path = %backup.display(),
+            source_version,
+            target_version = super::STUDIO_CONFIG_SCHEMA_VERSION,
+            "migrated Studio config"
+        );
         Ok(StartupConfigLoad {
             config,
             recovery: None,
@@ -528,6 +556,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::config::{ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION};
 
     fn temp_home(name: &str) -> PathBuf {
         tempfile::Builder::new()
@@ -590,64 +619,90 @@ mod tests {
         toml::to_string_pretty(&config).unwrap()
     }
 
-    #[test]
-    fn schema_18_migration_preserves_routes_credentials_and_other_settings() {
-        let store = test_store("main-agent-migration");
-        let mut old = StudioConfig::default_config();
-        old.schema_version = 18;
-        old.ui.follow_active_turn = false;
-        old.models
-            .routes
-            .get_mut(&super::super::StudioRole::Planner.id())
-            .unwrap()
-            .effort = Some(super::super::ReasoningEffort::new("max"));
-        old.models.providers.values_mut().next().unwrap().name = "My provider".into();
-        old.instructions.developer = "Keep my preferences".into();
-        old.disabled_system_agents = ["planner".into(), "explorer".into()].into();
-        let provider_id = old
-            .models
-            .providers
-            .keys()
-            .next()
-            .unwrap()
-            .as_str()
-            .to_string();
-        store
-            .credentials
-            .save(&provider_id, "migration-test-secret")
+    fn main_agent_config(schema_version: u32) -> StudioConfig {
+        let mut config = StudioConfig::default_config();
+        config.schema_version = schema_version;
+        let planner_route = config
+            .mode_model_routes
+            .remove(&ThreadModeId::simple())
             .unwrap();
-        let original = toml::to_string_pretty(&old).unwrap();
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        fs::write(store.paths().config_file(), &original).unwrap();
-        let mut expected = old;
-        expected.schema_version = 19;
-        expected.disabled_system_agents.remove("planner");
-        store.hydrate_credentials(&mut expected).unwrap();
-        let loaded = store.load_for_startup().unwrap();
-        assert!(loaded.recovery.is_none());
-        assert_eq!(loaded.config, expected);
-        assert_eq!(store.load().unwrap(), expected);
-        let backups: Vec<_> = fs::read_dir(store.paths().config_dir())
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| path.to_string_lossy().contains(".migrated."))
-            .collect();
-        assert_eq!(backups.len(), 1);
-        assert_eq!(fs::read_to_string(&backups[0]).unwrap(), original);
-        let persisted = fs::read(store.paths().config_file()).unwrap();
-        assert_eq!(store.load_for_startup().unwrap().config, expected);
-        assert_eq!(fs::read(store.paths().config_file()).unwrap(), persisted);
-        assert_eq!(
-            store.credentials.load(&provider_id).unwrap().as_deref(),
-            Some("migration-test-secret")
-        );
+        config.mode_model_routes.clear();
+        config
+            .models
+            .routes
+            .insert(StudioRole::Planner.id(), planner_route);
+        config
+    }
+
+    #[test]
+    fn schema_18_and_19_migration_preserves_routes_credentials_and_other_settings() {
+        for source_version in [18, 19] {
+            let store = test_store(&format!("main-agent-migration-{source_version}"));
+            let mut old = main_agent_config(source_version);
+            old.ui.follow_active_turn = false;
+            old.models
+                .routes
+                .get_mut(&StudioRole::Planner.id())
+                .unwrap()
+                .effort = Some(ReasoningEffort::new("max"));
+            old.models.providers.values_mut().next().unwrap().name = "My provider".into();
+            old.instructions.developer = "Keep my preferences".into();
+            if source_version == 18 {
+                old.disabled_system_agents = ["planner".into(), "explorer".into()].into();
+            }
+            let provider_id = old
+                .models
+                .providers
+                .keys()
+                .next()
+                .unwrap()
+                .as_str()
+                .to_string();
+            store
+                .credentials
+                .save(&provider_id, "migration-test-secret")
+                .unwrap();
+            let original = toml::to_string_pretty(&old).unwrap();
+            fs::create_dir_all(store.paths().config_dir()).unwrap();
+            fs::write(store.paths().config_file(), &original).unwrap();
+            let mut expected = old;
+            expected.schema_version = STUDIO_CONFIG_SCHEMA_VERSION;
+            expected.disabled_system_agents.remove("planner");
+            let planner_route = expected
+                .models
+                .routes
+                .remove(&StudioRole::Planner.id())
+                .unwrap();
+            expected.mode_model_routes = BTreeMap::from([
+                (ThreadModeId::simple(), planner_route.clone()),
+                (ThreadModeId::task(), planner_route),
+            ]);
+            store.hydrate_credentials(&mut expected).unwrap();
+            let loaded = store.load_for_startup().unwrap();
+            assert!(loaded.recovery.is_none());
+            assert_eq!(loaded.config, expected);
+            assert_eq!(store.load().unwrap(), expected);
+            let backups: Vec<_> = fs::read_dir(store.paths().config_dir())
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.to_string_lossy().contains(".migrated."))
+                .collect();
+            assert_eq!(backups.len(), 1);
+            assert_eq!(fs::read_to_string(&backups[0]).unwrap(), original);
+            let persisted = fs::read(store.paths().config_file()).unwrap();
+            assert_eq!(store.load_for_startup().unwrap().config, expected);
+            assert_eq!(fs::read(store.paths().config_file()).unwrap(), persisted);
+            assert_eq!(
+                store.credentials.load(&provider_id).unwrap().as_deref(),
+                Some("migration-test-secret")
+            );
+        }
     }
 
     #[test]
     fn schema_18_migration_failures_preserve_original_and_can_retry() {
         let store = test_store("main-agent-migration-failure");
-        let mut old = StudioConfig::default_config();
-        old.schema_version = 18;
+        let mut old = main_agent_config(18);
         old.disabled_system_agents.insert("planner".into());
         old.disabled_system_agents.insert("unknown".into());
         fs::create_dir_all(store.paths().config_dir()).unwrap();
@@ -664,7 +719,7 @@ mod tests {
         let original = toml::to_string_pretty(&old).unwrap();
         fs::write(store.paths().config_file(), &original).unwrap();
         let error = store
-            .migrate_schema_18_for_startup_with(original.as_bytes(), |_, _| {
+            .migrate_legacy_config_for_startup_with(original.as_bytes(), 18, |_, _| {
                 Err(std::io::Error::other("injected atomic replace failure").into())
             })
             .unwrap_err();
@@ -763,7 +818,7 @@ mod tests {
         fs::create_dir_all(store.paths().config_dir()).unwrap();
         let future = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .replace("schema_version = 19", "schema_version = 4294967295");
+            .replace("schema_version = 20", "schema_version = 4294967295");
         fs::write(store.paths().config_file(), &future).unwrap();
 
         let startup = store.load_for_startup().unwrap();
@@ -1027,6 +1082,9 @@ mod tests {
         provider.bearer_token = Some(secret.to_string());
         let provider_id = super::super::ProviderId::new(provider_id).unwrap();
         for route in config.models.routes.values_mut() {
+            route.provider = provider_id.clone();
+        }
+        for route in config.mode_model_routes.values_mut() {
             route.provider = provider_id.clone();
         }
         config.models.providers.insert(provider_id, provider);

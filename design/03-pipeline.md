@@ -22,8 +22,10 @@ mailbox 特例：visible 是省省略时的默认值；hidden 消息仍是 canon
 正文或工具名猜测来源；旧记录缺失时按 user 恢复。
 
 Turn 从同一 Thread 事实装配：统一 root 指令、项目 AGENTS.md、当前 Thread Mode 快照、可选的
-workflow 投影、普通 Skill、工具快照与 provider route。Simple/Task 等 Mode 不选择不同的模型循环；
-root 一律继承统一 planner route。
+workflow 投影、普通 Skill、工具快照与 provider route。每个 root Thread 通过版本化
+`studio.model-route` 扩展保存独立的 provider、model 与 effort selector；正在执行的 Turn 冻结
+当前绑定，路由更新从下一 Turn 生效。Mode 不改变模型循环，但为新建 Thread 与 Mode 切换提供
+各自保存的默认 selector，不能用其他 Thread 的选择或全局 `planner` 路由覆盖既有 Thread。
 
 ## 3.2 模型循环与工具批处理
 

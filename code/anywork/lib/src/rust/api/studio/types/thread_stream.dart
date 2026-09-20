@@ -13,7 +13,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'thread_stream/item.dart';
 part 'thread_stream.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// FRB mirror of the canonical prompt cache effective-usage summary.
 class BridgeCacheUsageSummary {
@@ -358,6 +358,45 @@ class BridgeThreadMcpServerDescriptor {
           builtIn == other.builtIn;
 }
 
+class BridgeThreadModelRouteSnapshot {
+  final String providerId;
+  final String model;
+  final String? effort;
+  final BigInt revision;
+  final bool available;
+  final String? unavailableReason;
+
+  const BridgeThreadModelRouteSnapshot({
+    required this.providerId,
+    required this.model,
+    this.effort,
+    required this.revision,
+    required this.available,
+    this.unavailableReason,
+  });
+
+  @override
+  int get hashCode =>
+      providerId.hashCode ^
+      model.hashCode ^
+      effort.hashCode ^
+      revision.hashCode ^
+      available.hashCode ^
+      unavailableReason.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeThreadModelRouteSnapshot &&
+          runtimeType == other.runtimeType &&
+          providerId == other.providerId &&
+          model == other.model &&
+          effort == other.effort &&
+          revision == other.revision &&
+          available == other.available &&
+          unavailableReason == other.unavailableReason;
+}
+
 @freezed
 sealed class BridgeThreadNotification with _$BridgeThreadNotification {
   const BridgeThreadNotification._();
@@ -425,6 +464,7 @@ enum BridgeThreadRuntimeAvailability { active, inactive }
 
 class BridgeThreadRuntimeSnapshot {
   final String threadId;
+  final BridgeThreadModelRouteSnapshot? modelRoute;
   final BridgeThreadRuntimeUsage usage;
   final BigInt turnCompletionTokens;
   final BigInt turnDecodeMillis;
@@ -439,6 +479,7 @@ class BridgeThreadRuntimeSnapshot {
 
   const BridgeThreadRuntimeSnapshot({
     required this.threadId,
+    this.modelRoute,
     required this.usage,
     required this.turnCompletionTokens,
     required this.turnDecodeMillis,
@@ -455,6 +496,7 @@ class BridgeThreadRuntimeSnapshot {
   @override
   int get hashCode =>
       threadId.hashCode ^
+      modelRoute.hashCode ^
       usage.hashCode ^
       turnCompletionTokens.hashCode ^
       turnDecodeMillis.hashCode ^
@@ -473,6 +515,7 @@ class BridgeThreadRuntimeSnapshot {
       other is BridgeThreadRuntimeSnapshot &&
           runtimeType == other.runtimeType &&
           threadId == other.threadId &&
+          modelRoute == other.modelRoute &&
           usage == other.usage &&
           turnCompletionTokens == other.turnCompletionTokens &&
           turnDecodeMillis == other.turnDecodeMillis &&

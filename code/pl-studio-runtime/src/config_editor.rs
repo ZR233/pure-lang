@@ -14,6 +14,7 @@ use pl_model::config::{
 };
 use pl_model::model::{ModelInfo, ModelTransportProfile};
 use pl_model::provider::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProtocol};
+use pl_protocol::ThreadModeId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderModelEdit {
@@ -42,7 +43,16 @@ pub struct ProviderEdit {
 pub struct ProviderSettingsEdit {
     pub default_provider: Option<String>,
     pub providers: Vec<ProviderEdit>,
+    pub mode_routes: Vec<ModeRouteEdit>,
     pub roles: Vec<RoleEdit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModeRouteEdit {
+    pub mode_id: String,
+    pub provider: String,
+    pub model: String,
+    pub effort: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -247,9 +257,8 @@ impl ProviderSettingsEdit {
             .filter(|key| providers.contains_key(key))
             .or_else(|| {
                 current
-                    .models
-                    .routes
-                    .get(&StudioRole::Planner.id())
+                    .mode_model_routes
+                    .get(&ThreadModeId::simple())
                     .map(|route| route.provider.clone())
                     .filter(|provider| providers.contains_key(provider))
             })
@@ -259,7 +268,7 @@ impl ProviderSettingsEdit {
             })?;
 
         let routes = if self.roles.is_empty() {
-            StudioRole::all()
+            StudioRole::child_roles()
                 .into_iter()
                 .map(|role| {
                     let route = current.models.routes.get(&role.id());
@@ -272,9 +281,29 @@ impl ProviderSettingsEdit {
         } else {
             role_edits_to_routes(&self.roles, &providers, &default_models)?
         };
+        let mode_model_routes = if self.mode_routes.is_empty() {
+            current
+                .mode_model_routes
+                .iter()
+                .map(|(mode, route)| {
+                    Ok((
+                        mode.clone(),
+                        reconciled_route(
+                            Some(route),
+                            &providers,
+                            &default_models,
+                            &fallback_provider,
+                        )?,
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>>>()?
+        } else {
+            mode_route_edits_to_routes(&self.mode_routes, &providers)?
+        };
         let mut config = StudioConfig {
             schema_version: STUDIO_CONFIG_SCHEMA_VERSION,
             models: AgentModelConfig { providers, routes },
+            mode_model_routes,
             disabled_system_agents: current.disabled_system_agents.clone(),
             web_search: current.web_search.clone(),
             deepseek_web_search: current.deepseek_web_search.clone(),
@@ -302,7 +331,7 @@ fn role_edits_to_routes(
         .ok_or_else(|| PureError::ConfigError("at least one provider is required".to_string()))?
         .clone();
     let fallback_route = route_for_provider_default(providers, default_models, &fallback_provider)?;
-    let mut routes = StudioRole::all()
+    let mut routes = StudioRole::child_roles()
         .into_iter()
         .map(|role| (role.id(), fallback_route.clone()))
         .collect::<BTreeMap<_, _>>();
@@ -313,6 +342,11 @@ fn role_edits_to_routes(
             let key = &edit.key;
             PureError::ConfigError(format!("unsupported model role: {key}"))
         })?;
+        if role == StudioRole::Planner {
+            return Err(PureError::ConfigError(
+                "planner is a root identity, not a child model route".to_string(),
+            ));
+        }
         if !seen.insert(role) {
             return Err(PureError::ConfigError(format!(
                 "duplicate model role: {}",
@@ -325,31 +359,70 @@ fn role_edits_to_routes(
     Ok(routes)
 }
 
+fn mode_route_edits_to_routes(
+    edits: &[ModeRouteEdit],
+    providers: &BTreeMap<ProviderId, ProviderConfig>,
+) -> Result<BTreeMap<ThreadModeId, ModelRouteConfig>> {
+    let mut routes = BTreeMap::new();
+    for edit in edits {
+        let mode = ThreadModeId::new(edit.mode_id.trim().to_string())
+            .map_err(|error| PureError::ConfigError(error.to_string()))?;
+        if routes.contains_key(&mode) {
+            return Err(PureError::ConfigError(format!(
+                "duplicate Thread Mode model route: {mode}"
+            )));
+        }
+        let route = route_values_to_route(
+            &edit.provider,
+            &edit.model,
+            &edit.effort,
+            providers,
+            &format!("Thread Mode {mode}"),
+        )?;
+        routes.insert(mode, route);
+    }
+    Ok(routes)
+}
+
 fn role_edit_to_route(
     edit: &RoleEdit,
     providers: &BTreeMap<ProviderId, ProviderConfig>,
     role: StudioRole,
 ) -> Result<ModelRouteConfig> {
-    let provider_key = non_empty_trimmed(&edit.provider, "role provider")?;
+    route_values_to_route(
+        &edit.provider,
+        &edit.model,
+        &edit.effort,
+        providers,
+        &format!("role {}", role.key()),
+    )
+}
+
+fn route_values_to_route(
+    provider_value: &str,
+    model_value: &str,
+    effort_value: &str,
+    providers: &BTreeMap<ProviderId, ProviderConfig>,
+    subject: &str,
+) -> Result<ModelRouteConfig> {
+    let provider_key = non_empty_trimmed(provider_value, "route provider")?;
     let provider_id = ProviderId::new(provider_key.clone())?;
     let provider = providers.get(&provider_id).ok_or_else(|| {
-        let role_key = role.key();
         PureError::ConfigError(format!(
-            "role {role_key} references missing provider: {provider_key}"
+            "{subject} references missing provider: {provider_key}"
         ))
     })?;
-    let model_slug = non_empty_trimmed(&edit.model, "role model")?;
+    let model_slug = non_empty_trimmed(model_value, "route model")?;
     let models = provider.effective_models()?;
     let model = models
         .iter()
         .find(|model| model.slug == model_slug)
         .ok_or_else(|| {
-            let role_key = role.key();
             PureError::ConfigError(format!(
-                "role {role_key} references missing model: {provider_key}.{model_slug}"
+                "{subject} references missing model: {provider_key}.{model_slug}"
             ))
         })?;
-    let effort = edit.effort.trim();
+    let effort = effort_value.trim();
     let effort = if effort.is_empty() {
         model.default_effort()
     } else if model
@@ -360,9 +433,7 @@ fn role_edit_to_route(
         Some(effort.to_string())
     } else {
         return Err(PureError::ConfigError(format!(
-            "role {} uses unsupported effort '{}' for model {provider_key}.{model_slug}",
-            role.key(),
-            effort
+            "{subject} uses unsupported effort '{effort}' for model {provider_key}.{model_slug}"
         )));
     };
 
@@ -517,18 +588,36 @@ mod tests {
     }
 
     #[test]
-    fn removing_provider_repoints_every_studio_role() {
+    fn removing_provider_repoints_child_roles_and_mode_defaults() {
+        let mut current = StudioConfig::default_config();
+        current.mode_model_routes.insert(
+            ThreadModeId::new("mode.review").unwrap(),
+            current
+                .mode_model_route(&ThreadModeId::simple())
+                .unwrap()
+                .clone(),
+        );
         let config = ProviderSettingsEdit {
             default_provider: Some("openai".to_string()),
             providers: vec![openai_edit()],
+            mode_routes: Vec::new(),
             roles: Vec::new(),
         }
-        .to_config(&StudioConfig::default_config())
+        .to_config(&current)
         .unwrap();
 
-        for role in StudioRole::all() {
+        for role in StudioRole::child_roles() {
             assert_eq!(route(&config, role).provider.as_str(), "openai");
             assert_eq!(route(&config, role).model, "gpt-5.6-sol");
         }
+        for route in config.mode_model_routes.values() {
+            assert_eq!(route.provider.as_str(), "openai");
+            assert_eq!(route.model, "gpt-5.6-sol");
+        }
+        assert!(
+            config
+                .mode_model_routes
+                .contains_key(&ThreadModeId::new("mode.review").unwrap())
+        );
     }
 }

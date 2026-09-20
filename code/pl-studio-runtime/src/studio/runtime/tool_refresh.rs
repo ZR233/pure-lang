@@ -378,6 +378,8 @@ fn catalog_fingerprint(
         "sources": sources.0,
         "skillMutation": mutation,
         "mode": snapshot.extensions.get("studio.mode"),
+        "modelRoute": snapshot.extensions.get(crate::studio::model_route::MODEL_ROUTE_EXTENSION),
+        "agentProfile": snapshot.extensions.get(crate::studio::model_route::AGENT_PROFILE_EXTENSION),
     }))
 }
 
@@ -1026,7 +1028,7 @@ mod tests {
     }
 
     #[test]
-    fn mode_identity_changes_catalog_fingerprint_but_unrelated_progress_does_not() {
+    fn route_identity_changes_catalog_fingerprint_but_unrelated_progress_does_not() {
         use pl_core::{context::OpaquePayload, thread::extensions::ExtensionRecord};
         let sources = CatalogSources::default();
         let mut snapshot = pl_core::thread::ThreadSnapshot::default();
@@ -1041,13 +1043,27 @@ mod tests {
         let task = catalog_fingerprint(&sources, &snapshot);
         assert_ne!(initial, task);
         snapshot.extensions.insert(
-            "studio.progress".into(),
+            crate::studio::model_route::MODEL_ROUTE_EXTENSION.into(),
             ExtensionRecord {
                 revision: 2,
+                payload: OpaquePayload::new(
+                    crate::studio::model_route::MODEL_ROUTE_FORMAT,
+                    1,
+                    r#"{"provider":"deepseek","model":"deepseek-flash","effort":"high"}"#,
+                )
+                .unwrap(),
+            },
+        );
+        let routed = catalog_fingerprint(&sources, &snapshot);
+        assert_ne!(task, routed);
+        snapshot.extensions.insert(
+            "studio.progress".into(),
+            ExtensionRecord {
+                revision: 3,
                 payload: OpaquePayload::text("progress"),
             },
         );
-        assert_eq!(catalog_fingerprint(&sources, &snapshot), task);
+        assert_eq!(catalog_fingerprint(&sources, &snapshot), routed);
     }
 
     #[test]

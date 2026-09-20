@@ -139,6 +139,11 @@ impl StudioChildResources for StudioThreadFactory {
                 OpaquePayload::new("pl.studio.workspace", 1, receipt.clone())
                     .map_err(|error| resource_error("freeze child workspace receipt", error))?,
             ),
+            (
+                crate::studio::model_route::AGENT_PROFILE_EXTENSION.into(),
+                crate::studio::model_route::encode_profile(&profile.profile)
+                    .map_err(|error| resource_error("freeze child Agent Profile", error))?,
+            ),
             ("studio.creation-metadata".into(), request.metadata.clone()),
         ]);
         self.services
@@ -177,6 +182,7 @@ impl StudioChildResources for StudioThreadFactory {
             id: request.id.clone(),
             parent_id: Some(request.caller.clone()),
             route: profile.route.clone(),
+            model_available: true,
             hosted_tools: prepared_tools.hosted,
             history: Vec::new(),
             tools: Vec::new(),
