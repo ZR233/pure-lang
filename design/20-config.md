@@ -21,7 +21,7 @@ Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代�
 按钮才写入，取消则丢弃草稿。
 
 配置版本演进必须满足以下迁移契约；当前实现缺口集中见
-[17.6](./17-studio-storage.md#176-迁移契约的实现缺口)，不能据此假定已实现自动迁移。
+[17.6](./17-studio-storage.md#176-已实现迁移与剩余边界)，不能据此假定已实现自动迁移。
 
 - 启动时在产品发布前识别配置版本，使用明确的版本转换路径将 anywork 历史配置与用户
   Agent Profile 转为当前结构，支持跨版本升级；保留用户选择、provider 身份与凭据关联。
@@ -37,6 +37,10 @@ Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代�
 
 迁移验证应覆盖版本跳跃、字段重命名、路由与 Profile 关联、凭据标识变化、未知版本、
 损坏配置、备份或提交失败及重启恢复，证明用户选择与凭据可用性得到保留。
+
+启动支持明确的 18→19 迁移：仅从 `disabled_system_agents` 移除 `planner` 并提升版本，
+保留五条模型路由、其他设置和 provider 凭据关联。先校验和备份，再原子替换；迁移失败
+保留原文件，不进入默认配置恢复路径。正常运行不接受禁用主智能体或以该标识保存用户 Profile。
 
 所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整设置状态快照，
 由 Flutter 原子替换 Settings 领域；不得返回聚合状态、raw JSON 或 raw map。CAS 或校验失败
@@ -59,19 +63,20 @@ snapshot 的生成。pl-model 只消费已经解析好的 provider 和模型信�
 ## 20.3 根路由与系统 Profile
 
 配置不使用 `active_provider`。所有模式的 root Agent 统一使用 `planner` 路由，不再根据
-Simple/Task 切换根角色。Studio 注册五个系统 Agent Profile：
+Simple/Task 切换根角色。模型路由与子代理 Profile 分开：保留五条模型路由，其中四条对应系统子代理：
 
 | 配置 key | 中文角色 | 用途 |
 | --- | --- | --- |
 | `explorer` | 探索者 | 代码、文档和上下文探索 |
-| `planner` | 计划者 | 形成计划和约束；普通对话默认路由 |
+| `planner` | 主智能体 | root 专用；理解需求、计划、协调、整合与验证 |
 | `executor` | 执行者 | 实施修改和验证 |
 | `worktree_executor` | Worktree 执行者 | 在独立 Git worktree 实施修改和验证 |
 | `reviewer` | 审查者 | 代码审查和结果检查 |
 
-系统 Profile 由内置结构体启动注册，不生成 TOML；全部字段不可编辑、不可删除，只能通过主
-配置 `disabled_system_agents` 禁用。系统 route 的 provider/model/effort 在 Agents 页统一
-配置；禁用 planner 不影响 root 使用 planner 路由。用户 Profile 的文件名 stem 是 Agent ID。
+系统子代理 Profile 由内置结构体启动注册，不生成 TOML；身份、用途、指令和工作区模式
+不可编辑、不可删除，可通过主配置 `disabled_system_agents` 禁用。主智能体的
+provider/model/effort 在 Agents 页独立区域配置，没有启用开关；其余系统 route 在子代理
+区域配置。用户 Profile 的文件名 stem 是 Agent ID。
 `list_agent_profiles` 只返回启用且路由可解析的 Profile；`spawn_agent` 创建 child 时冻结
 系统指令、provider、model 与 effort，此后文件变化不改变既有 child；设置页另读完整
 catalog，被禁用的用户 Profile 仍可编辑并重新启用。
@@ -88,7 +93,7 @@ catalog，被禁用的用户 Profile 仍可编辑并重新启用。
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。精简示例：
 
 ```toml
-schema_version = 18
+schema_version = 19
 
 disabled_system_agents = []
 

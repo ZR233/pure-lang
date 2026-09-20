@@ -22,6 +22,12 @@ impl StudioThreadFactory {
         {
             return Err(ThreadAssemblyError::Identity(id.clone()));
         }
+        let config = self.services.config_runtime.clone();
+        let profile_id = thread.role.clone();
+        let profile =
+            tokio::task::spawn_blocking(move || config.resolve_agent_profile(&profile_id))
+                .await??;
+
         let project = self.project_record(&thread.project_id).await?;
         let history = super::recovery::recover_journal(&self.services.store, id)
             .await
@@ -117,11 +123,6 @@ impl StudioThreadFactory {
                 ));
             }
         };
-        let config = self.services.config_runtime.clone();
-        let profile_id = thread.role.clone();
-        let profile =
-            tokio::task::spawn_blocking(move || config.resolve_agent_profile(&profile_id))
-                .await??;
         if profile.profile.workspace_mode != assignment.mode {
             return Err(ThreadAssemblyError::Identity(
                 "child Profile workspace policy changed".into(),

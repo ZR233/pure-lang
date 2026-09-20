@@ -112,7 +112,7 @@ StudioState _agentWorkspacePreviewState({
   final root = StudioThread(
     id: 'preview-root',
     projectId: project.id,
-    title: 'Planner workspace',
+    title: 'Main agent workspace',
     mode: ThreadModeId.task,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -147,7 +147,7 @@ StudioState _agentWorkspacePreviewState({
       channel: ThreadTextChannel.finalAnswer,
       text: selectChild
           ? 'Reviewer is checking the workspace boundary.'
-          : 'Planner owns this root workspace and its editable composer.',
+          : 'Main agent owns this root workspace and its editable composer.',
       attachments: const [],
       lifecycle: CompletedThreadContentView(timestamp),
     ),
@@ -193,7 +193,7 @@ StudioState _agentWorkspacePreviewState({
               models: [
                 ProviderModelView(
                   slug: 'planner/model',
-                  displayName: 'Planner Model',
+                  displayName: 'Main agent model',
                   reasoningEfforts: ['high'],
                   wireProtocol: 'responses',
                   supportedConnectionModes: ['web_socket', 'http'],

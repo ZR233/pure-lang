@@ -173,6 +173,19 @@ impl ConfigStore {
             });
         }
         let content = fs::read(self.paths.config_file())?;
+        // Version dispatch precedes the legacy recovery path: a failed supported migration
+        // must preserve the source config and credentials instead of resetting them.
+        #[derive(serde::Deserialize)]
+        struct Version {
+            schema_version: u32,
+        }
+        if std::str::from_utf8(&content)
+            .ok()
+            .and_then(|text| toml::from_str::<Version>(text).ok())
+            .is_some_and(|version| version.schema_version == 18)
+        {
+            return self.migrate_schema_18_for_startup(&content);
+        }
         match parse_startup_config(&content) {
             Ok(mut config) => {
                 self.hydrate_credentials(&mut config)?;
@@ -183,6 +196,36 @@ impl ConfigStore {
             }
             Err(incompatible) => self.replace_incompatible_for_startup(&content, incompatible),
         }
+    }
+
+    fn migrate_schema_18_for_startup(&self, original: &[u8]) -> Result<StartupConfigLoad> {
+        self.migrate_schema_18_for_startup_with(original, |path, content| {
+            pl_tool::workspace::write_file_atomically(path, content).map_err(Into::into)
+        })
+    }
+
+    fn migrate_schema_18_for_startup_with(
+        &self,
+        original: &[u8],
+        replace: impl FnOnce(&Path, &[u8]) -> Result<()>,
+    ) -> Result<StartupConfigLoad> {
+        let text = std::str::from_utf8(original)
+            .map_err(|error| PureError::ConfigError(format!("invalid schema 18 UTF-8: {error}")))?;
+        let mut config = parse_typed_config(text).map_err(IncompatibleConfig::into_error)?;
+        reject_inline_credentials(&config).map_err(IncompatibleConfig::into_error)?;
+        config.schema_version = super::STUDIO_CONFIG_SCHEMA_VERSION;
+        config.disabled_system_agents.remove("planner");
+        config.validate()?;
+        let persisted = serialize_persisted_config(&config)?;
+        // Provider identities do not change. Read credentials before committing; never rewrite them.
+        self.hydrate_credentials(&mut config)?;
+        let backup = write_config_backup(self.paths.config_file(), original, "migrated")?;
+        replace(self.paths.config_file(), persisted.as_bytes())?;
+        tracing::info!(backup_path = %backup.display(), "migrated Studio config from schema 18 to 19");
+        Ok(StartupConfigLoad {
+            config,
+            recovery: None,
+        })
     }
 
     pub fn load(&self) -> Result<StudioConfig> {
@@ -379,7 +422,7 @@ fn reject_inline_credentials(config: &StudioConfig) -> std::result::Result<(), I
         return Err(IncompatibleConfig::new(
             ConfigIncompatibilityKind::InlineCredential,
             PureError::ConfigError(
-                "schema 18 forbids inline provider bearer_token; use the Studio credential store"
+                "current schema forbids inline provider bearer_token; use the Studio credential store"
                     .to_string(),
             ),
         ));
@@ -548,6 +591,104 @@ mod tests {
     }
 
     #[test]
+    fn schema_18_migration_preserves_routes_credentials_and_other_settings() {
+        let store = test_store("main-agent-migration");
+        let mut old = StudioConfig::default_config();
+        old.schema_version = 18;
+        old.ui.follow_active_turn = false;
+        old.models
+            .routes
+            .get_mut(&super::super::StudioRole::Planner.id())
+            .unwrap()
+            .effort = Some(super::super::ReasoningEffort::new("max"));
+        old.models.providers.values_mut().next().unwrap().name = "My provider".into();
+        old.instructions.developer = "Keep my preferences".into();
+        old.disabled_system_agents = ["planner".into(), "explorer".into()].into();
+        let provider_id = old
+            .models
+            .providers
+            .keys()
+            .next()
+            .unwrap()
+            .as_str()
+            .to_string();
+        store
+            .credentials
+            .save(&provider_id, "migration-test-secret")
+            .unwrap();
+        let original = toml::to_string_pretty(&old).unwrap();
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        fs::write(store.paths().config_file(), &original).unwrap();
+        let mut expected = old;
+        expected.schema_version = 19;
+        expected.disabled_system_agents.remove("planner");
+        store.hydrate_credentials(&mut expected).unwrap();
+        let loaded = store.load_for_startup().unwrap();
+        assert!(loaded.recovery.is_none());
+        assert_eq!(loaded.config, expected);
+        assert_eq!(store.load().unwrap(), expected);
+        let backups: Vec<_> = fs::read_dir(store.paths().config_dir())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.to_string_lossy().contains(".migrated."))
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(fs::read_to_string(&backups[0]).unwrap(), original);
+        let persisted = fs::read(store.paths().config_file()).unwrap();
+        assert_eq!(store.load_for_startup().unwrap().config, expected);
+        assert_eq!(fs::read(store.paths().config_file()).unwrap(), persisted);
+        assert_eq!(
+            store.credentials.load(&provider_id).unwrap().as_deref(),
+            Some("migration-test-secret")
+        );
+    }
+
+    #[test]
+    fn schema_18_migration_failures_preserve_original_and_can_retry() {
+        let store = test_store("main-agent-migration-failure");
+        let mut old = StudioConfig::default_config();
+        old.schema_version = 18;
+        old.disabled_system_agents.insert("planner".into());
+        old.disabled_system_agents.insert("unknown".into());
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        let invalid = toml::to_string_pretty(&old).unwrap();
+        fs::write(store.paths().config_file(), &invalid).unwrap();
+        assert!(store.load_for_startup().is_err());
+        assert_eq!(
+            fs::read_to_string(store.paths().config_file()).unwrap(),
+            invalid
+        );
+        assert!(rejected_backups(&store).is_empty());
+
+        old.disabled_system_agents.remove("unknown");
+        let original = toml::to_string_pretty(&old).unwrap();
+        fs::write(store.paths().config_file(), &original).unwrap();
+        let error = store
+            .migrate_schema_18_for_startup_with(original.as_bytes(), |_, _| {
+                Err(std::io::Error::other("injected atomic replace failure").into())
+            })
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("injected atomic replace failure")
+        );
+        assert_eq!(
+            fs::read_to_string(store.paths().config_file()).unwrap(),
+            original
+        );
+        assert!(store.load().is_err()); // Explicit reload never migrates.
+        assert!(store.load_for_startup().unwrap().recovery.is_none());
+        assert!(
+            !store
+                .load()
+                .unwrap()
+                .disabled_system_agents
+                .contains("planner")
+        );
+    }
+
+    #[test]
     fn obsolete_theme_preference_does_not_reset_or_change_other_settings() {
         for preference in [None, Some(true), Some(false)] {
             let store = test_store("obsolete-theme");
@@ -622,7 +763,7 @@ mod tests {
         fs::create_dir_all(store.paths().config_dir()).unwrap();
         let future = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .replace("schema_version = 18", "schema_version = 4294967295");
+            .replace("schema_version = 19", "schema_version = 4294967295");
         fs::write(store.paths().config_file(), &future).unwrap();
 
         let startup = store.load_for_startup().unwrap();

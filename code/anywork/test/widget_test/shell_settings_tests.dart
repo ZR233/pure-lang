@@ -249,7 +249,7 @@ void registerShellSettingsTests() {
     expect(find.byKey(StudioDriverKeys.model), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.reasoningEffort), findsOneWidget);
     expect(find.text('Simple'), findsOneWidget);
-    expect(find.byTooltip('Planner model'), findsOneWidget);
+    expect(find.byTooltip('Main agent model'), findsOneWidget);
 
     await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
     await tester.pumpAndSettle();
@@ -258,7 +258,7 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Task'), findsOneWidget);
-    expect(find.byTooltip('Planner model'), findsOneWidget);
+    expect(find.byTooltip('Main agent model'), findsOneWidget);
     expect(api.createdThreadProjectId, isNull);
 
     await tester.enterText(
@@ -1097,7 +1097,7 @@ void registerShellSettingsTests() {
     expect(find.byTooltip('Session mode'), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
     expect(find.text('Simple'), findsOneWidget);
-    expect(find.byTooltip('Planner model'), findsOneWidget);
+    expect(find.byTooltip('Main agent model'), findsOneWidget);
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.reasoningEffort), findsOneWidget);
     expect(find.byType(StatusBarItem), findsWidgets);
@@ -1160,9 +1160,9 @@ void registerShellSettingsTests() {
       hasLength(2),
     );
     expect(find.text('Task'), findsOneWidget);
-    expect(find.byTooltip('Planner model'), findsOneWidget);
+    expect(find.byTooltip('Main agent model'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Planner model'));
+    await tester.tap(find.byTooltip('Main agent model'));
     await tester.pumpAndSettle();
     await tester.tap(find.textContaining('V4 Pro').last);
     await tester.pumpAndSettle();
@@ -1823,7 +1823,7 @@ void registerShellSettingsTests() {
 
     await _expectMenuOpensAboveTrigger(
       tester: tester,
-      triggerTooltip: 'Planner model',
+      triggerTooltip: 'Main agent model',
       menuText: 'DeepSeek / DeepSeek V4.1 Flash',
     );
     await _expectMenuOpensAboveTrigger(
@@ -3821,8 +3821,8 @@ void registerShellSettingsTests() {
       await tester.tap(find.text('Agents'));
       await tester.pumpAndSettle();
       for (final role in const [
-        'explorer',
         'planner',
+        'explorer',
         'executor',
         'worktree_executor',
         'reviewer',
@@ -3843,20 +3843,20 @@ void registerShellSettingsTests() {
       }
 
       await tester.scrollUntilVisible(
-        find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
+        find.byKey(StudioDriverKeys.settingsRoleModel('planner')),
         -300,
         scrollable: _settingsPaneScrollable(),
       );
       await tester.ensureVisible(
-        find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
+        find.byKey(StudioDriverKeys.settingsRoleModel('planner')),
       );
       await tester.tap(
-        find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
+        find.byKey(StudioDriverKeys.settingsRoleModel('planner')),
       );
       await tester.pumpAndSettle();
       final flashOption = find.byKey(
         StudioDriverKeys.settingsRoleModelOption(
-          'explorer',
+          'planner',
           'deepseek',
           'deepseek-flash',
         ),
@@ -3872,7 +3872,7 @@ void registerShellSettingsTests() {
       );
       final proOption = find.byKey(
         StudioDriverKeys.settingsRoleModelOption(
-          'explorer',
+          'planner',
           'deepseek',
           'deepseek-v4-pro',
         ),
@@ -3889,7 +3889,7 @@ void registerShellSettingsTests() {
       expect(proOption.hitTestable(), findsOneWidget);
       await tester.tap(proOption);
       await tester.pumpAndSettle();
-      expect(api.roleUpdate?.roleKey, 'explorer');
+      expect(api.roleUpdate?.roleKey, 'planner');
       expect(api.roleUpdate?.model, 'deepseek-v4-pro');
 
       await tester.tap(
@@ -3908,7 +3908,7 @@ void registerShellSettingsTests() {
       await tester.pumpAndSettle();
       expect(api.roleUpdate?.roleKey, 'planner');
       expect(api.roleUpdate?.providerId, 'deepseek');
-      expect(api.roleUpdate?.model, 'deepseek-flash');
+      expect(api.roleUpdate?.model, 'deepseek-v4-pro');
       expect(api.roleUpdate?.effort, 'max');
 
       await tester.tap(find.text('Skills'));
@@ -4258,7 +4258,7 @@ void registerShellSettingsTests() {
     },
   );
   testWidgets(
-    'Agents page renders five fixed system modes and typed user profile controls',
+    'Agents page separates the main agent from fixed system modes and typed user profile controls',
     (tester) async {
       tester.view.physicalSize = const Size(760, 900);
       tester.view.devicePixelRatio = 1;
@@ -4269,6 +4269,24 @@ void registerShellSettingsTests() {
 
       await tester.tap(find.text('Agents'));
       await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('main-agent-card')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('system-agent-enabled-planner')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('agent-profile-card-planner')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.settingsRoleModel('planner')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
+        findsOneWidget,
+      );
 
       await tester.tap(find.byKey(const ValueKey('agent-profile-add')));
       await tester.pumpAndSettle();
@@ -4328,7 +4346,6 @@ void registerShellSettingsTests() {
 
       for (final role in const [
         'explorer',
-        'planner',
         'executor',
         'worktree_executor',
         'reviewer',
@@ -4397,7 +4414,11 @@ void registerShellSettingsTests() {
 
       const enCardCopy = <(String, String, String)>[
         ('explorer', 'Explorer', 'Explore code and collect context.'),
-        ('planner', 'Planner', 'Draft plans and structure intent.'),
+        (
+          'planner',
+          'Main agent',
+          'Understand requests, plan work, coordinate subagents, integrate and verify results.',
+        ),
         ('executor', 'Executor', 'Apply edits and run tools.'),
         (
           'worktree_executor',
@@ -4419,7 +4440,11 @@ void registerShellSettingsTests() {
         '检查实现',
       ];
       for (final (role, name, description) in enCardCopy) {
-        final card = find.byKey(ValueKey('agent-profile-card-$role'));
+        final card = find.byKey(
+          ValueKey(
+            role == 'planner' ? 'main-agent-card' : 'agent-profile-card-$role',
+          ),
+        );
         await _dragUntilBuilt(tester, card);
         expect(
           find.descendant(of: card, matching: find.text(name)),
@@ -4474,7 +4499,7 @@ void registerShellSettingsTests() {
 
       const zhCardCopy = <(String, String, String)>[
         ('explorer', '探索者', '探索代码并收集上下文'),
-        ('planner', '计划者', '拟定计划并梳理任务意图'),
+        ('planner', '主智能体', '理解需求、制定计划、协调子代理、整合与验证结果。'),
         ('executor', '执行者', '落实修改并运行工具'),
         ('worktree_executor', '工作树执行者', '在隔离的 Git 工作树中落实修改并运行工具'),
         ('reviewer', '审查者', '审查结果并验证风险'),
@@ -4487,7 +4512,11 @@ void registerShellSettingsTests() {
         '检查实现',
       ];
       for (final (role, name, description) in zhCardCopy) {
-        final card = find.byKey(ValueKey('agent-profile-card-$role'));
+        final card = find.byKey(
+          ValueKey(
+            role == 'planner' ? 'main-agent-card' : 'agent-profile-card-$role',
+          ),
+        );
         await _dragUntilBuilt(tester, card);
         expect(
           find.descendant(of: card, matching: find.text(name)),

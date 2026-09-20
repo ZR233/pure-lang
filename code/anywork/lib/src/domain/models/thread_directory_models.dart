@@ -78,6 +78,9 @@ class StudioThread {
 
   bool get isAgent => parentThreadId != null;
 
+  /// The former planner child role is retained for history, never execution.
+  bool get isRetiredAgent => isAgent && role == 'planner';
+
   String get effectiveRootThreadId => rootThreadId.isEmpty ? id : rootThreadId;
 
   DateTime get effectiveCreatedAt => createdAt ?? updatedAt;

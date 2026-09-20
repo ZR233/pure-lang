@@ -31,7 +31,7 @@ void main() {
   ) async {
     final context = await pumpContext(tester, const Locale('zh'));
     expect(context.roleLabel('explorer'), '探索者');
-    expect(context.roleLabel('planner'), '计划者');
+    expect(context.roleLabel('planner'), '主智能体');
     expect(context.roleLabel('executor'), '执行者');
     expect(context.roleLabel('reviewer'), '审查者');
     expect(context.roleLabel(''), '智能体');
@@ -40,7 +40,7 @@ void main() {
 
     final englishContext = await pumpContext(tester, const Locale('en'));
     expect(englishContext.roleLabel('explorer'), 'Explorer');
-    expect(englishContext.roleLabel('planner'), 'Planner');
+    expect(englishContext.roleLabel('planner'), 'Main agent');
     expect(englishContext.roleLabel('executor'), 'Executor');
     expect(englishContext.roleLabel('reviewer'), 'Reviewer');
     expect(englishContext.roleLabel(''), 'Agent');

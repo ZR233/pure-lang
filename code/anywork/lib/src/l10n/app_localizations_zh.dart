@@ -416,7 +416,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get composerWorkspaceModeWorktree => '新建工作树';
 
   @override
-  String get statusPlannerModel => '计划者模型';
+  String get statusPlannerModel => '主智能体模型';
 
   @override
   String get statusExecutorModel => '执行者模型';
@@ -1321,7 +1321,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsRoleExplorerDescription => '探索代码并收集上下文。';
 
   @override
-  String get settingsRolePlannerDescription => '拟定计划并梳理任务意图。';
+  String get settingsRolePlannerDescription => '理解需求、制定计划、协调子代理、整合与验证结果。';
 
   @override
   String get settingsRoleExecutorDescription => '落实修改并运行工具。';
@@ -1687,7 +1687,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsAgentsSubtitle =>
-      '系统智能体的用途与工作区模式固定；其启用状态和模型路由可统一配置。目录模式只约束项目内由内置工具执行的文件写入；命令行操作、Git 和 MCP 仍可能绕过此限制。';
+      '主智能体始终可用，可配置模型与思考强度。子代理可按用途配置和启用；目录模式仅限制内置工具的文件写入，不是操作系统沙箱。';
 
   @override
   String get settingsAgentsAddUserProfile => '添加用户智能体配置';
@@ -1845,7 +1845,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get roleExplorer => '探索者';
 
   @override
-  String get rolePlanner => '计划者';
+  String get rolePlanner => '主智能体';
 
   @override
   String get roleExecutor => '执行者';
@@ -1890,10 +1890,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusReportedUsageOnly => '仅显示已报告用量';
 
   @override
-  String get settingsSystemAgentsGroup => '系统智能体';
+  String get settingsSystemAgentsGroup => '系统子代理';
 
   @override
-  String get settingsUserAgentsGroup => '用户智能体';
+  String get settingsUserAgentsGroup => '用户子代理';
 
   @override
   String get settingsAppearanceGroup => '界面与会话';
@@ -2215,4 +2215,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get recoveryCheckFailed => '历史会话和工作区检查未完成';
+
+  @override
+  String get agentRoleRetired => '该子代理角色已停用，仅可查看历史记录。';
 }

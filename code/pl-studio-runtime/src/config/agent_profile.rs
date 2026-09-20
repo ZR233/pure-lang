@@ -10,13 +10,7 @@ use crate::{PureError, Result};
 use super::{ConfigPaths, ModelRouteConfig, ProviderId, ReasoningEffort, StudioConfig, StudioRole};
 
 const SYSTEM_PROFILE_REVISION: &str = "studio-system-agent-v2";
-const SYSTEM_PROFILE_IDS: [&str; 5] = [
-    "explorer",
-    "planner",
-    "executor",
-    "worktree_executor",
-    "reviewer",
-];
+const SYSTEM_PROFILE_IDS: [&str; 4] = ["explorer", "executor", "worktree_executor", "reviewer"];
 
 /// 单个用户 Agent TOML 的 canonical 格式。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,7 +126,7 @@ pub fn save_user_agent_profile(
     config: &StudioConfig,
 ) -> Result<PathBuf> {
     validate_profile_id(profile_id)?;
-    if is_system_profile_id(profile_id) {
+    if StudioRole::from_key(profile_id).is_some() {
         return Err(PureError::ConfigError(format!(
             "system Agent Profile `{profile_id}` is immutable"
         )));
@@ -157,6 +151,7 @@ pub fn is_system_profile_id(profile_id: &str) -> bool {
 fn system_profiles(config: &StudioConfig, include_disabled: bool) -> Vec<AgentProfileSnapshot> {
     StudioRole::all()
         .into_iter()
+        .filter(|role| is_system_profile_id(role.key()))
         .filter(|role| {
             include_disabled || !config.disabled_system_agents.contains(role.key())
         })
@@ -178,11 +173,11 @@ fn system_profile(role: StudioRole, config: &StudioConfig) -> Result<AgentProfil
             "需要快速定位边界、依赖、实现入口或验证事实时。",
             include_str!("../prompts/explorer.md"),
         ),
-        StudioRole::Planner => (
-            "分析目标并形成可执行方案。",
-            "需要独立梳理复杂方案、风险或阶段设计时。",
-            include_str!("../prompts/planner.md"),
-        ),
+        StudioRole::Planner => {
+            return Err(PureError::ConfigError(
+                "planner is the main agent route, not a child Profile".into(),
+            ));
+        }
         StudioRole::Executor => (
             "实施明确、边界清楚的工程任务。",
             "已有目标和范围，需要修改与验证代码时。",
@@ -234,7 +229,7 @@ fn load_user_profile(
         .and_then(|value| value.to_str())
         .ok_or_else(|| PureError::ConfigError("Agent Profile filename is not UTF-8".to_string()))?;
     validate_profile_id(profile_id)?;
-    if is_system_profile_id(profile_id) {
+    if StudioRole::from_key(profile_id).is_some() {
         return Err(PureError::ConfigError(format!(
             "user Agent Profile cannot replace immutable system profile `{profile_id}`"
         )));
@@ -346,7 +341,7 @@ mod tests {
 
         let catalog = AgentProfileCatalog::discover(&paths, &StudioConfig::default());
 
-        assert_eq!(catalog.profiles.len(), 5);
+        assert_eq!(catalog.profiles.len(), 4);
         assert_eq!(catalog.diagnostics.len(), 1);
     }
 
@@ -364,10 +359,55 @@ mod tests {
             .collect::<std::collections::BTreeMap<_, _>>();
 
         assert_eq!(modes["explorer"], AgentWorkspaceMode::Unrestricted);
-        assert_eq!(modes["planner"], AgentWorkspaceMode::Unrestricted);
+        assert!(!modes.contains_key("planner"));
         assert_eq!(modes["reviewer"], AgentWorkspaceMode::Unrestricted);
         assert_eq!(modes["executor"], AgentWorkspaceMode::Directory);
         assert_eq!(modes["worktree_executor"], AgentWorkspaceMode::Worktree);
+    }
+
+    #[test]
+    fn main_agent_route_is_not_a_spawnable_or_user_profile() {
+        let home = TempDir::new().unwrap();
+        let paths = ConfigPaths::from_home(home.path());
+        let config = StudioConfig::default_config();
+        assert!(config.resolve_role(StudioRole::Planner).is_ok());
+        assert!(
+            AgentProfileCatalog::discover(&paths, &config)
+                .profiles
+                .iter()
+                .all(|profile| profile.profile_id != "planner")
+        );
+        let runtime =
+            super::super::ConfigRuntime::initialize(super::super::ConfigStore::new(paths.clone()))
+                .unwrap();
+        assert!(runtime.resolve_agent_profile("planner").is_err());
+        let route = config.resolve_role(StudioRole::Planner).unwrap();
+        let profile = UserAgentProfile {
+            enabled: true,
+            display_name: "User".into(),
+            description: "Custom".into(),
+            when_to_use: "Inspect".into(),
+            system_instructions: "Inspect".into(),
+            provider: route.provider_id,
+            model: route.model.slug,
+            effort: route.effort,
+            workspace_mode: AgentWorkspaceMode::Unrestricted,
+        };
+        assert!(save_user_agent_profile(&paths, "planner", &profile, &config).is_err());
+        fs::create_dir_all(paths.agents_dir()).unwrap();
+        fs::write(
+            paths.agents_dir().join("planner.toml"),
+            toml::to_string(&profile).unwrap(),
+        )
+        .unwrap();
+        let catalog = AgentProfileCatalog::discover(&paths, &config);
+        assert!(
+            catalog
+                .profiles
+                .iter()
+                .all(|profile| profile.profile_id != "planner")
+        );
+        assert_eq!(catalog.diagnostics.len(), 1);
     }
 
     #[test]

@@ -45,7 +45,7 @@ pub use pl_model::config::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningE
 pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot, ResolvedAgentProfile};
 pub use store::{ConfigPaths, ConfigRecoveryReport, ConfigStore};
 
-pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 18;
+pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 19;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".anywork";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 
@@ -105,7 +105,7 @@ impl StudioRole {
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Explorer => "探索者",
-            Self::Planner => "计划者",
+            Self::Planner => "主智能体",
             Self::Executor => "执行者",
             Self::WorktreeExecutor => "Worktree 执行者",
             Self::Reviewer => "审查者",

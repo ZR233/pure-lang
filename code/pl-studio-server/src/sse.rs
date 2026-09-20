@@ -139,6 +139,7 @@ pub(crate) async fn thread_events(
         loop {
             tokio::select! {
                 _ = shutdown.cancelled() => break,
+                _ = sender.closed() => break,
                 update = events.recv() => {
                     let update = match update {
                         Ok(Some(update)) => update,

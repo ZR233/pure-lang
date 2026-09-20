@@ -62,10 +62,15 @@ effort = "high"
 并以脱敏 warning 暴露。合法但 provider/model 当前不可解析的 Profile 保留在 Settings 中并
 标记 unavailable。
 
-Studio 注册五个系统 Profile：`explorer`、`planner`、`reviewer` 固定为 unrestricted，
+主智能体（Main agent）是 root，负责理解需求、制定计划、协调子代理、整合与验证结果。
+它使用 `planner` 模型路由，不是可派发 Profile，不提供启用开关。
+Studio 注册四个系统子代理 Profile：`explorer`、`reviewer` 固定为 unrestricted，
 `executor` 固定为 directory，`worktree_executor` 固定为 worktree。系统 id、名称、用途、指令
-和模式不可编辑，但 Agents 设置页可以配置启用状态、provider/model 和由模型声明驱动的
-effort。禁用 `planner` 只从子代理目录排除它，不影响 root 继续使用 planner route。
+和模式不可编辑；Agents 设置页可以配置其启用状态、provider/model 和模型声明的 effort。
+`planner` 是保留标识，用户 Profile 不可占用；目录查询和 spawn 均不接受它。
+历史 planner child 保留身份、消息和执行记录，仅供查看；恢复或续跑在资源创建前拒绝，
+界面显示“该子代理角色已停用”。历史订阅直接重放日志并发布只读快照，不装配运行资源；
+后续等待随订阅取消而释放。该限制仅针对 child，不影响使用同一路由的 root。
 
 每个 child 创建时冻结 Profile id、正文与工作区分配快照，保存初建 provider、model、effort
 与配置 revision。后续配置更新由宿主事件处理：模型绑定在下一 Turn 生效，工具权限和目录按
@@ -126,7 +131,7 @@ full-access 而关闭。读取不受 `writablePaths` 限制，项目外路径仍
 ### 任务消息与依赖
 
 Task root 先建立依赖图、文件所有权与验证边界。跨目录检索、历史核验和相互独立的事实收集
-优先拆成多个 `explorer` 并行执行；复杂方案比较可以使用 `planner`。这两类 child 默认使用
+优先拆成多个 `explorer` 并行执行；主智能体综合事实、比较方案并决定计划。探索 child 默认使用
 fresh context，父消息必须自包含，explorer 返回 `file:line`、符号名、必要原文和不确定项；
 root 负责综合结论和亲自维护 `design/**`，child 不替代 root 编译或转换 workflow。
 

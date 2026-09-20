@@ -328,7 +328,9 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                         ),
                         if (thread.role.trim().isNotEmpty)
                           Text(
-                            context.roleLabel(thread.role),
+                            thread.isRetiredAgent
+                                ? context.l10n.agentRoleRetired
+                                : context.roleLabel(thread.role),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.labelSmall
@@ -506,6 +508,7 @@ String _agentDisplayName(BuildContext context, StudioThread thread) {
   if (!thread.isRoot && thread.title.trim().isNotEmpty) {
     return thread.title.trim();
   }
+  if (thread.isRetiredAgent) return thread.id;
   final role = thread.role.trim();
   if (role.isEmpty) {
     return thread.isRoot ? context.l10n.roleEmpty : thread.id;

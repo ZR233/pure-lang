@@ -122,6 +122,54 @@ void registerAgentWorkspaceTests() {
     expect(find.text('reviewer/model'), findsWidgets);
   });
 
+  testWidgets(
+    'retired planner child keeps history without continuation controls',
+    (tester) async {
+      final base = _rootAndChildState();
+      final retired = base.threads
+          .singleWhere((thread) => thread.id == 'child-1')
+          .copyWith(role: 'planner');
+      final initial = base.copyWith(
+        selectedThreadId: retired.id,
+        threadDirectory: ThreadDirectoryWindow(
+          threads: [
+            base.threads.firstWhere((thread) => thread.isRoot),
+            retired,
+          ],
+        ),
+        workspacesByThread: {
+          ...base.workspacesByThread,
+          retired.id: base.workspacesByThread[retired.id]!.copyWith(
+            thread: retired,
+          ),
+        },
+      );
+      final api = _FakeStudioApi(initial);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(
+            home: const Scaffold(body: AgentWorkspacePane()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('child timeline'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('retired-agent-notice')),
+        findsOneWidget,
+      );
+      expect(find.text('Main agent'), findsNothing);
+      expect(find.text('Disabled'), findsOneWidget);
+      expect(find.byKey(StudioDriverKeys.composerInput), findsNothing);
+      expect(find.byKey(StudioDriverKeys.userInputSubmit), findsNothing);
+      expect(
+        base.threads.firstWhere((thread) => thread.isRoot).isRetiredAgent,
+        isFalse,
+      );
+    },
+  );
+
   testWidgets('large interaction dock stays within a short window', (
     tester,
   ) async {

@@ -4,15 +4,25 @@ use anyhow::Result;
 use pl_core::thread::{ThreadHandle, ThreadSnapshot, ThreadSubscription, journal::ThreadCommit};
 use std::{num::NonZeroUsize, sync::Arc};
 
-/// Snapshot stream backed by the canonical Thread owner. Dropping it stops only observation.
+/// Snapshot stream backed by the canonical owner or immutable retired-child history.
+/// Dropping it stops only observation.
 /// Intermediate watch updates may coalesce; every emitted snapshot is authoritative.
 pub struct StudioThreadSubscription {
     runtime: StudioRuntime,
     thread_id: String,
+    source: SubscriptionSource,
+    _residency_pin: super::residency::ThreadResidencyPins,
+}
+
+enum SubscriptionSource {
+    Live(Box<LiveSubscription>),
+    Retired(Option<Box<pl_protocol::ThreadSnapshot>>),
+}
+
+struct LiveSubscription {
     handle: ThreadHandle,
     observations: ThreadSubscription,
     journal: Vec<Arc<ThreadCommit>>,
-    _residency_pin: super::residency::ThreadResidencyPins,
 }
 
 impl StudioThreadSubscription {
@@ -21,12 +31,25 @@ impl StudioThreadSubscription {
     /// # Errors
     /// Returns malformed historical content or missing committed facts; no partial snapshot is emitted.
     pub async fn recv(&mut self) -> Result<Option<pl_protocol::ThreadSubscriptionUpdate>> {
-        let Some(state) = self.observations.next().await else {
+        let live = match &mut self.source {
+            SubscriptionSource::Live(live) => live,
+            SubscriptionSource::Retired(snapshot) => {
+                if let Some(snapshot) = snapshot.take() {
+                    return Ok(Some(pl_protocol::ThreadSubscriptionUpdate::Snapshot {
+                        snapshot,
+                    }));
+                }
+                // Immutable history has no producer. The transport cancels/drops this wait
+                // when the client leaves; ending it would trigger GUI reconnect loops.
+                return std::future::pending().await;
+            }
+        };
+        let Some(state) = live.observations.next().await else {
             return Ok(None);
         };
-        while self.journal.last().map_or(0, |commit| commit.sequence) < state.commit_sequence {
-            let after = self.journal.last().map_or(0, |commit| commit.sequence);
-            let page = self
+        while live.journal.last().map_or(0, |commit| commit.sequence) < state.commit_sequence {
+            let after = live.journal.last().map_or(0, |commit| commit.sequence);
+            let page = live
                 .handle
                 .journal_page(after, NonZeroUsize::new(256).expect("positive page limit"))
                 .await?;
@@ -34,11 +57,11 @@ impl StudioThreadSubscription {
                 !page.is_empty(),
                 "Thread snapshot references missing commits"
             );
-            self.journal.extend(page);
+            live.journal.extend(page);
         }
         let thread = self.runtime.read_protocol_thread(&self.thread_id).await?;
         let snapshot =
-            crate::studio::thread_projection::project_snapshot(thread, &state, &self.journal)?;
+            crate::studio::thread_projection::project_snapshot(thread, &state, &live.journal)?;
         self.runtime
             .index_timeline(&self.thread_id, &state, &snapshot.items)
             .await;
@@ -49,20 +72,30 @@ impl StudioThreadSubscription {
 }
 
 impl StudioRuntime {
-    /// Activates a Thread and observes its canonical facts through Studio's typed projection.
+    /// Observes canonical facts; retired child history never activates an execution owner.
     pub async fn subscribe_thread(
         &self,
         request: pl_protocol::ThreadSubscriptionRequest,
     ) -> Result<StudioThreadSubscription> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let residency_pin = self.residency.pin_many([request.thread_id.clone()]);
-        let handle = self.ensure_thread_owner(&request.thread_id).await?;
+        let thread = self.read_protocol_thread(&request.thread_id).await?;
+        let source = if thread.parent_thread_id.is_some() && thread.role == "planner" {
+            SubscriptionSource::Retired(Some(Box::new(
+                self.thread_snapshot(&request.thread_id).await?,
+            )))
+        } else {
+            let handle = self.ensure_thread_owner(&request.thread_id).await?;
+            SubscriptionSource::Live(Box::new(LiveSubscription {
+                observations: handle.subscribe(),
+                handle,
+                journal: Vec::new(),
+            }))
+        };
         Ok(StudioThreadSubscription {
-            observations: handle.subscribe(),
-            handle,
+            source,
             runtime: self.clone(),
             thread_id: request.thread_id,
-            journal: Vec::new(),
             _residency_pin: residency_pin,
         })
     }

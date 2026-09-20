@@ -102,6 +102,17 @@ Future<String> _handleDriverData(String? message) async {
       _container.invalidate(studioControllerProvider);
       await _container.read(studioControllerProvider.future);
       return jsonEncode({'prepared': true});
+    case 'prepare-retired-planner-demo':
+      final api = _container.read(studioApiProvider);
+      if (api is! DriverDemoStudioApi) {
+        return jsonEncode({
+          'error': 'retired planner scenario requires demo mode',
+        });
+      }
+      api.prepareRetiredPlannerScenario();
+      _container.invalidate(studioControllerProvider);
+      await _container.read(studioControllerProvider.future);
+      return jsonEncode({'prepared': true});
     case 'prepare-session-lifecycle-demo':
       final api = _container.read(studioApiProvider);
       if (api is! DriverDemoStudioApi) {

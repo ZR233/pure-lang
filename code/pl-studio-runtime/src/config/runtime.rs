@@ -113,6 +113,11 @@ impl ConfigRuntime {
         &self,
         profile_id: &str,
     ) -> ConfigRuntimeResult<ResolvedAgentProfile> {
+        if profile_id == super::StudioRole::Planner.key() {
+            return Err(PureError::ConfigError(
+                "planner is reserved for the main agent; this child role is retired and cannot resume".into(),
+            ).into());
+        }
         let snapshot = self.read()?;
         let catalog = super::AgentProfileCatalog::discover(self.store.paths(), &snapshot.config);
         let profile = catalog
@@ -274,7 +279,7 @@ mod tests {
         std::fs::create_dir_all(store.paths().config_dir()).unwrap();
         let legacy = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .replace("schema_version = 18", "schema_version = 14");
+            .replace("schema_version = 19", "schema_version = 14");
         std::fs::write(store.paths().config_file(), legacy).unwrap();
 
         let runtime = ConfigRuntime::initialize(store).unwrap();

@@ -97,9 +97,12 @@ class ThreadStatusBar extends ConsumerWidget {
                       ),
                     _StatusReadout(
                       icon: Icons.account_tree_outlined,
-                      label: context.roleLabel(thread.role),
-                      tooltip:
-                          '${thread.title} · ${context.threadStatusLabel(thread.status)}',
+                      label: thread.isRetiredAgent
+                          ? context.l10n.settingsStateDisabled
+                          : context.roleLabel(thread.role),
+                      tooltip: thread.isRetiredAgent
+                          ? context.l10n.agentRoleRetired
+                          : '${thread.title} · ${context.threadStatusLabel(thread.status)}',
                       maxWidth: 96,
                     ),
                     if (showModel && thread.isAgent && runtime.model.isNotEmpty)

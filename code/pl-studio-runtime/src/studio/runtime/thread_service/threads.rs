@@ -909,10 +909,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn archiving_cold_history_does_not_require_child_activation() {
+    async fn retired_planner_child_keeps_history_but_cannot_activate() {
         use crate::studio::store::directory::RegisteredChildThread;
         let (_home, _workspace, runtime, root_id) =
             runtime_with_thread_without_optional_tools().await;
+        let settings = runtime.config_runtime.read().unwrap();
+        assert!(
+            runtime
+                .set_system_agent_enabled(settings.revision, "planner", false)
+                .is_err()
+        );
+        assert!(
+            runtime
+                .set_system_agent_enabled(settings.revision, "planner", true)
+                .is_err()
+        );
+        assert_eq!(runtime.config_runtime.read().unwrap(), settings);
         let root = runtime.read_owned_thread(&root_id).await.unwrap();
         let child_id = format!("{root_id}-historical-child");
         runtime
@@ -927,7 +939,7 @@ mod tests {
                 mode: root.mode,
                 workspace_mode: root.workspace_mode,
                 workspace_path: root.workspace_path,
-                role: "retired-profile".into(),
+                role: "planner".into(),
                 title: "Historical child".into(),
             })
             .await
@@ -955,6 +967,30 @@ mod tests {
         let writer = runtime.persistence_repository().await.unwrap();
         writer.flush().await.unwrap();
         assert!(runtime.threads.thread(&child_id).is_none());
+        let expected_snapshot = runtime.thread_snapshot(&child_id).await.unwrap();
+        let mut subscription = runtime
+            .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+                thread_id: child_id.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            subscription.recv().await.unwrap(),
+            Some(pl_protocol::ThreadSubscriptionUpdate::Snapshot {
+                snapshot: Box::new(expected_snapshot),
+            })
+        );
+        assert!(futures::poll!(Box::pin(subscription.recv())).is_pending());
+        drop(subscription);
+        assert!(runtime.threads.thread(&child_id).is_none());
+        let error = runtime.ensure_thread_owner(&child_id).await.err().unwrap();
+        assert!(
+            format!("{error:#}").contains("child role is retired"),
+            "{error:#}"
+        );
+        assert!(runtime.threads.thread(&child_id).is_none());
+        assert_eq!(runtime.read_thread(&root_id).await.unwrap().role, "planner");
+        assert!(runtime.ensure_thread_owner(&root_id).await.is_ok());
 
         let archived = runtime
             .archive_thread(root_id.clone())

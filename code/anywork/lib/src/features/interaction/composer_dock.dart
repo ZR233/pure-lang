@@ -48,7 +48,12 @@ class ComposerDock extends ConsumerWidget {
             constraints: const BoxConstraints(
               maxWidth: StudioLayout.conversationWidth,
             ),
-            child: interaction == null
+            child: workspace.thread.isRetiredAgent
+                ? Text(
+                    context.l10n.agentRoleRetired,
+                    key: const ValueKey('retired-agent-notice'),
+                  )
+                : interaction == null
                 ? workspace.composerMode == AgentComposerMode.runtimeDriven
                       ? _RuntimeDrivenAgentDock(workspace: workspace)
                       : _PromptComposer(workspace: workspace, enabled: true)

@@ -431,7 +431,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get composerWorkspaceModeWorktree => 'New worktree';
 
   @override
-  String get statusPlannerModel => 'Planner model';
+  String get statusPlannerModel => 'Main agent model';
 
   @override
   String get statusExecutorModel => 'Executor model';
@@ -1379,7 +1379,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsRolePlannerDescription =>
-      'Draft plans and structure intent.';
+      'Understand requests, plan work, coordinate subagents, integrate and verify results.';
 
   @override
   String get settingsRoleExecutorDescription => 'Apply edits and run tools.';
@@ -1760,7 +1760,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsAgentsSubtitle =>
-      'System agent profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory mode limits built-in file writes to the project only; shell, Git, and MCP can still bypass it.';
+      'Configure the main agent model and reasoning effort. Enable and configure subagents by purpose; directory mode restricts built-in file writes, not OS access.';
 
   @override
   String get settingsAgentsAddUserProfile => 'Add user profile';
@@ -1919,7 +1919,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get roleExplorer => 'Explorer';
 
   @override
-  String get rolePlanner => 'Planner';
+  String get rolePlanner => 'Main agent';
 
   @override
   String get roleExecutor => 'Executor';
@@ -1965,10 +1965,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusReportedUsageOnly => 'reported';
 
   @override
-  String get settingsSystemAgentsGroup => 'System agents';
+  String get settingsSystemAgentsGroup => 'System subagents';
 
   @override
-  String get settingsUserAgentsGroup => 'User agents';
+  String get settingsUserAgentsGroup => 'User subagents';
 
   @override
   String get settingsAppearanceGroup => 'Appearance & conversation';
@@ -2298,4 +2298,8 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get recoveryCheckFailed =>
       'Conversation and workspace check did not complete';
+
+  @override
+  String get agentRoleRetired =>
+      'This subagent role has been retired. History is read-only.';
 }

@@ -182,7 +182,6 @@ class _FakeStudioApi implements StudioApi {
   Future<List<AgentProfileView>> readAgentProfiles() async => [
     for (final role in const [
       'explorer',
-      'planner',
       'executor',
       'worktree_executor',
       'reviewer',
@@ -193,7 +192,6 @@ class _FakeStudioApi implements StudioApi {
         // 不会把 runtime 原文泄漏到 Agents 卡片。
         displayName: switch (role) {
           'explorer' => '探索者',
-          'planner' => '计划者',
           'executor' => '执行者',
           'worktree_executor' => 'Worktree 执行者',
           'reviewer' => '审查者',
@@ -201,7 +199,6 @@ class _FakeStudioApi implements StudioApi {
         },
         description: switch (role) {
           'explorer' => '只读探索代码、文档和现场事实。',
-          'planner' => '分析目标并形成可执行方案。',
           'executor' => '实施明确、边界清楚的工程任务。',
           'worktree_executor' => '在独立 Git worktree 中实施明确任务。',
           'reviewer' => '检查实现、测试、错误路径和需求一致性。',

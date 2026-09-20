@@ -21,6 +21,29 @@ void registerDemoProjectTests() {
     );
   });
 
+  test('Demo subagent route edits preserve the main agent route', () async {
+    final api = DemoStudioApi();
+    final before = await api.readStudioState();
+    final main = before.role('planner')!;
+    final provider = before.providers.first;
+    final model = provider.allModels.first;
+    final effort = model.reasoningEfforts.firstWhere(
+      (effort) => effort != main.effort,
+    );
+    await api.setModelRole(
+      expectedSettingsRevision: before.settingsRevision,
+      roleKey: 'worktree_executor',
+      providerId: provider.id,
+      model: model.slug,
+      effort: effort,
+    );
+    final after = await api.readStudioState();
+    expect(after.role('worktree_executor')?.model, model.slug);
+    expect(after.role('worktree_executor')?.effort, effort);
+    expect(after.role('planner')?.model, main.model);
+    expect(after.role('planner')?.effort, main.effort);
+  });
+
   test('Demo mode update changes only the addressed root Thread', () async {
     final api = DemoStudioApi();
 

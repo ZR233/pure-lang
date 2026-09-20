@@ -18,7 +18,7 @@ boundary. Disabled or unavailable profiles cannot be spawned.
 
 Use the tool schema's camelCase names on the first call. Canonical shapes are:
 
-- unrestricted explorer/planner/reviewer: `{"profileId":"explorer","forkTurns":"none","taskSummary":"Inspect the assigned component","message":"..."}`
+- unrestricted explorer/reviewer: `{"profileId":"explorer","forkTurns":"none","taskSummary":"Inspect the assigned component","message":"..."}`
   （按角色替换 `profileId`）；
 - directory executor: `{"profileId":"executor","forkTurns":"none","writablePaths":["src/module"],"taskSummary":"Implement the assigned module","message":"..."}`;
 - worktree executor: `{"profileId":"worktree_executor","forkTurns":"none","taskSummary":"Inspect the assigned component","message":"..."}`.
@@ -31,8 +31,8 @@ mode, and narrow paths before the first invocation. If a call returns a typed ar
 the schema once instead of repeating the same arguments. Treat an intentional directory-boundary
 denial as `expected_rejection`: do not retry it or bypass it through shell, Git, or MCP.
 
-The built-in profiles are `explorer`, `planner`, `executor`, `worktree_executor`, and `reviewer`. They are immutable and
-may be disabled. User profiles are loaded from one TOML file per profile. Select by capability,
+The built-in profiles are `explorer`, `executor`, `worktree_executor`, and `reviewer`. They are immutable and
+may be disabled. `planner` is the main agent route, never a child profile; it cannot be spawned or disabled. Historical planner children are read-only and cannot resume. User profiles are loaded from one TOML file per profile. Select by capability,
 not by assuming that a workflow stage requires a particular profile.
 
 Children never receive the root Thread Mode's workflow tools or runtime state. The root Agent may

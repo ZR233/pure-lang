@@ -27,21 +27,21 @@ Product metadata lives in `<home>/studio/studio.sqlite`; Thread history lives in
 
 ## Format Rules
 
-- TOML with snake_case keys; the current runtime accepts `schema_version = 18`. Changing the version number alone does not migrate a configuration.
+- TOML with snake_case keys; the current runtime accepts `schema_version = 19`. Changing the version number alone does not migrate a configuration.
 - A missing file means in-memory defaults shown in Settings; nothing is written until you save.
-- Version upgrades must preserve anywork user settings and credential associations through migration; backup followed by a reset is not a migration. Implementation is incomplete: the current startup path still backs up incompatible files and replaces them with defaults. Do not rely on restart to migrate an old or invalid file; preserve the original and report the gap instead.
+- Version upgrades must preserve anywork user settings and credential associations through migration; backup followed by a reset is not a migration. Startup migrates schema 18 to 19 by removing only `planner` from `disabled_system_agents`, preserving routes, settings and credential associations; migration failures preserve the original. Other migration paths remain incomplete: incompatible files still use the legacy backup/reset path. Do not rely on restart to migrate an old or invalid file; preserve the original and report the gap instead.
 - Explicit reload while Studio is running remains strict: it reports the invalid file instead of replacing it.
 - Saving from Settings writes atomically. External file edits are not picked up automatically; use explicit reload after editing a valid current-schema file.
 
 ## Common Sections
 
 - `[models.providers.<id>]` — provider endpoint, preset, credential reference, model catalog.
-- `[models.routes.<role>]` — model route per role: `explorer`, `planner`, `executor`, `worktree_executor`, `reviewer`. All five must resolve.
+- `[models.routes.<role>]` — model route per role: `explorer`, `planner`, `executor`, `worktree_executor`, `reviewer`. All five must resolve. `planner` configures the main agent only, not a spawnable or disableable child profile.
 - `[runtime]` — `permission_mode` (`request-approval` | `auto-review` | `full-access`), tool capabilities, active skills and MCP servers.
 - `[skills]` — enable/disable, auto-learn, project/user/external skill directories, disabled skills. The default writable project directory is `.agents/skills`; explicit `project_dir` values remain unchanged. In addition to configured `user_dir`, 糊来帮 always discovers the read-only user compatibility directory at `$HOME/.agents/skills` on Linux and `%USERPROFILE%\.agents\skills` on Windows.
 - `[mcp]` — custom servers under `[mcp.servers.<id>]` plus builtin server states.
 - `[lsp.servers.<id>]` — command-based LSP servers outside the bundled catalog.
-- `[ui]` — `follow_active_turn`, `compact_timeline`. Studio always uses its fixed light theme. The obsolete `follow_system_theme` key is ignored when reading existing schema 18 files and omitted on the next normal save; no configuration reset is needed.
+- `[ui]` — `follow_active_turn`, `compact_timeline`. Studio always uses its fixed light theme. The obsolete `follow_system_theme` key is ignored when reading current-schema files and omitted on the next normal save; no configuration reset is needed.
 - `[web_search]` — search mode, context size, allowed domains, location.
 - `[deepseek_web_search]` — DeepSeek native hosted search toggle. The section and `enabled` field both default to `true`; it deliberately has no OpenAI-specific mode, domain, location, or context options.
 - `[instructions]` — base override, developer/user instructions, project doc limits.
@@ -59,7 +59,7 @@ Tokens never live in `config.toml`. Saving from Settings clears any inline token
 Every provider needs `name`, `base_url`, and a `catalog` section; every role needs a route. `effort` is optional and must match the model's supported effort candidates.
 
 ```toml
-schema_version = 18
+schema_version = 19
 
 [deepseek_web_search]
 enabled = true

@@ -51,8 +51,9 @@ composer dock 只响应 `UserInput` 与 `ToolApproval`。任务计划由 `plan_s
 
 ## 19.4 Agents 设置
 
-Agents 页是唯一 Agent 配置中心，不再保留重复 Roles 页。系统项名称、用途、指令和固定
-workspace mode 只读，无删除入口；可配置 enabled、provider/model 与模型声明驱动的 effort。
+Agents 页是唯一 Agent 配置中心。顶部独立展示“主智能体 / Main agent”的用途和模型、
+思考强度配置，不提供启用开关；下方分别展示系统子代理与用户子代理。系统项名称、用途、指令和固定
+workspace mode 只读，无删除入口；系统子代理可配置 enabled、provider/model 与模型声明驱动的 effort。
 用户项按单 TOML 文件原子创建、保存或删除，并可选择三种 workspace mode。无效文件以独立
 诊断展示，不阻断页面其余项。preserved worktree 显示 revision、branch、base/head、
 dirty/changed-files preview 与显式 cleanup。运行中 Agent 目录与 Profile 设置目录明确分区；
@@ -203,7 +204,7 @@ connection override；自定义模型编辑器必须显式选择协议、支持�
 API key 时空输入表示保留现有 secret；provider key 重命名必须携带 originalId，以便服务端
 保留 secret、headers、catalog metadata 和模型能力。设置页不展示 raw TOML 编辑器。
 
-Agents 标签页展示五个系统 Profile：每个系统卡片将模型与"思考强度"作为两个独立下拉控件
+Agents 标签页展示独立主智能体区域及四个系统子代理 Profile：每个卡片将模型与"思考强度"作为两个独立下拉控件
 展示；模型选项使用 `Provider / Model · Protocol · Connection`，思考强度候选值来自当前模型
 声明。模型改变时，有候选的模型切换为其声明的默认 effort，没有显式默认时使用首个候选；
 无候选模型保存空选择并禁用强度控件。仅改变思考强度时保持当前 provider 和 model 不变。

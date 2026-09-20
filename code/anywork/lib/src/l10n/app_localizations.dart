@@ -863,7 +863,7 @@ abstract class AppLocalizations {
   /// No description provided for @statusPlannerModel.
   ///
   /// In en, this message translates to:
-  /// **'Planner model'**
+  /// **'Main agent model'**
   String get statusPlannerModel;
 
   /// No description provided for @statusExecutorModel.
@@ -2498,7 +2498,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsRolePlannerDescription.
   ///
   /// In en, this message translates to:
-  /// **'Draft plans and structure intent.'**
+  /// **'Understand requests, plan work, coordinate subagents, integrate and verify results.'**
   String get settingsRolePlannerDescription;
 
   /// No description provided for @settingsRoleExecutorDescription.
@@ -3170,7 +3170,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsAgentsSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'System agent profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory mode limits built-in file writes to the project only; shell, Git, and MCP can still bypass it.'**
+  /// **'Configure the main agent model and reasoning effort. Enable and configure subagents by purpose; directory mode restricts built-in file writes, not OS access.'**
   String get settingsAgentsSubtitle;
 
   /// No description provided for @settingsAgentsAddUserProfile.
@@ -3470,7 +3470,7 @@ abstract class AppLocalizations {
   /// No description provided for @rolePlanner.
   ///
   /// In en, this message translates to:
-  /// **'Planner'**
+  /// **'Main agent'**
   String get rolePlanner;
 
   /// No description provided for @roleExecutor.
@@ -3560,13 +3560,13 @@ abstract class AppLocalizations {
   /// No description provided for @settingsSystemAgentsGroup.
   ///
   /// In en, this message translates to:
-  /// **'System agents'**
+  /// **'System subagents'**
   String get settingsSystemAgentsGroup;
 
   /// No description provided for @settingsUserAgentsGroup.
   ///
   /// In en, this message translates to:
-  /// **'User agents'**
+  /// **'User subagents'**
   String get settingsUserAgentsGroup;
 
   /// No description provided for @settingsAppearanceGroup.
@@ -4192,6 +4192,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Conversation and workspace check did not complete'**
   String get recoveryCheckFailed;
+
+  /// No description provided for @agentRoleRetired.
+  ///
+  /// In en, this message translates to:
+  /// **'This subagent role has been retired. History is read-only.'**
+  String get agentRoleRetired;
 }
 
 class _AppLocalizationsDelegate

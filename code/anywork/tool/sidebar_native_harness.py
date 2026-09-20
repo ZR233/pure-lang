@@ -61,7 +61,7 @@ def resize(display):
         x.XCloseDisplay(connection)
 
 
-def run(output):
+def run(output, driver="project_sidebar_acceptance_driver.dart"):
     root = Path(__file__).resolve().parents[3]
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -82,7 +82,7 @@ def run(output):
             else:
                 raise TimeoutError('GUI did not publish VM service')
             with (output / 'driver.log').open('w') as driver_log:
-                subprocess.run(['cargo', 'dart', 'run', 'test_driver/project_sidebar_acceptance_driver.dart', matches[-1], str(output), display_file.read_text().strip()], cwd=root, env=dict(os.environ, DISPLAY=display_file.read_text().strip(), XAUTHORITY=auth_file.read_text().strip()), stdout=driver_log, stderr=subprocess.STDOUT, check=True, timeout=300)
+                subprocess.run(['cargo', 'dart', 'run', 'test_driver/' + driver, matches[-1], str(output), display_file.read_text().strip()], cwd=root, env=dict(os.environ, DISPLAY=display_file.read_text().strip(), XAUTHORITY=auth_file.read_text().strip()), stdout=driver_log, stderr=subprocess.STDOUT, check=True, timeout=300)
     finally:
         if gui is not None:
             try:

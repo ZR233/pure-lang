@@ -239,6 +239,7 @@ class DemoStudioApi implements StudioApi {
                 'planner',
                 'explorer',
                 'executor',
+                'worktree_executor',
                 'reviewer',
               ])
                 RoleSettingsView(
@@ -787,22 +788,6 @@ class DemoStudioApi implements StudioApi {
         workspaceMode: AgentWorkspaceMode.unrestricted,
       ),
       AgentProfileView(
-        id: 'planner',
-        displayName: 'Planner',
-        description: '分析目标并形成可执行方案。',
-        whenToUse: '需要梳理复杂方案或阶段设计时。',
-        systemInstructions: '输出可验证的分阶段计划。',
-        providerId: 'demo',
-        model: 'demo',
-        effort: 'medium',
-        source: 'studio-builtin',
-        revision: 'studio-system-agent-v1',
-        contentHash: 'demo-planner',
-        system: true,
-        enabled: !_disabledSystemAgents.contains('planner'),
-        workspaceMode: AgentWorkspaceMode.unrestricted,
-      ),
-      AgentProfileView(
         id: 'executor',
         displayName: 'Executor',
         description: '在项目目录内实施边界明确的修改。',
@@ -860,6 +845,18 @@ class DemoStudioApi implements StudioApi {
     required String profileId,
     required bool enabled,
   }) async {
+    if (![
+      'explorer',
+      'executor',
+      'worktree_executor',
+      'reviewer',
+    ].contains(profileId)) {
+      throw ArgumentError.value(
+        profileId,
+        'profileId',
+        'not a system subagent',
+      );
+    }
     _checkSettingsRevision(expectedSettingsRevision);
     if (enabled) {
       _disabledSystemAgents.remove(profileId);
@@ -875,6 +872,15 @@ class DemoStudioApi implements StudioApi {
     int expectedSettingsRevision,
     AgentProfileDraft draft,
   ) async {
+    if ([
+      'planner',
+      'explorer',
+      'executor',
+      'worktree_executor',
+      'reviewer',
+    ].contains(draft.id)) {
+      throw ArgumentError.value(draft.id, 'id', 'reserved agent identifier');
+    }
     _checkSettingsRevision(expectedSettingsRevision);
     _userAgentProfiles[draft.id] = AgentProfileView(
       id: draft.id,
@@ -2381,6 +2387,36 @@ ThreadWorkspace _demoUpdateInteraction(
 /// Deterministic demo fixture exposed only by the dedicated Driver build.
 class DriverDemoStudioApi extends DemoStudioApi {
   DriverDemoStudioApi({super.lspActivityLoop});
+
+  bool _retiredPlannerScenario = false;
+
+  void prepareRetiredPlannerScenario() {
+    prepareSessionLifecycleScenario();
+    _retiredPlannerScenario = true;
+    _selectedThreadId = 'thread-main';
+  }
+
+  @override
+  ({StudioProject project, List<StudioThread> threads})
+  _ensureWorkspaceFixture() {
+    final fixture = super._ensureWorkspaceFixture();
+    if (!_retiredPlannerScenario) return fixture;
+    final threads = [
+      for (final thread in fixture.threads)
+        if (thread.id == 'thread-reviewer')
+          thread.copyWith(role: 'planner', status: ThreadStatusView.idle)
+        else
+          thread,
+    ];
+    final retired = threads.singleWhere(
+      (thread) => thread.id == 'thread-reviewer',
+    );
+    _workspaces[retired.id] = _workspaces[retired.id]!.copyWith(
+      thread: retired,
+      interactions: const [],
+    );
+    return (project: fixture.project, threads: threads);
+  }
 
   bool _themeScenario = false;
   bool _themePlanScenario = false;
