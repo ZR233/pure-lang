@@ -284,14 +284,14 @@ impl StudioThreadFactory {
                 // 身份比较在同一 POSIX 表示上进行：`canonical_path` 由远端 helper 返回
                 // 恒为 POSIX，会话工作区根也必须归一化后比较，否则 Windows 宿主形态会被
                 // 误判为「目标已改变」。
-                let requested = crate::agent::worktree::remote_path_text(binding.workspace.root());
+                let requested = pl_tool::remote::normalize_remote_absolute_path(
+                    &binding.workspace.root().to_string_lossy(),
+                )
+                .map_err(|error| resource_error("normalize Thread remote workspace", error))?;
                 let host = self
                     .services
                     .ssh_manager
-                    .open_workspace_host(
-                        server,
-                        binding.workspace.root().to_string_lossy().into_owned(),
-                    )
+                    .open_workspace_host(server, requested.clone())
                     .await
                     .map_err(|error| resource_error("reopen Thread remote workspace", error))?;
                 if host.files.canonical_path() != requested.as_str() {

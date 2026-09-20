@@ -264,7 +264,10 @@ credential helper，最长 120 秒。两者都以本次解析出的仓库根作�
 
 远端后端的 `git worktree add`/`remove` 路径参数、workspace 打开参数与 lease 记录使用同一
 POSIX 形式：客户端宿主形态（含 Windows 路径分隔符）不得跨端，否则物理 worktree 会落在与
-lease 记录不一致的位置（跨端路径约定见 [22](./22-ssh-remote.md) §22.3）。
+lease 记录不一致的位置。远端绝对路径的唯一规范化边界是
+`pl-tool::remote::normalize_remote_absolute_path`：它把反斜杠转换为 `/`、折叠重复分隔符与
+`.`，并拒绝空值、相对路径和 `..`；Studio、worktree backend 与恢复代码不得维护第二套路径
+解释（跨端路径约定见 [22](./22-ssh-remote.md) §22.3）。
 
 根会话 worktree 对本地与 SSH 项目都可用，并在创建会话的命令内建立：先按 `HEAD` 解析仓库与
 base、记录含 `ssh_alias` 的 `prepared` lease，再创建物理 worktree，随后转为 `active`，然后

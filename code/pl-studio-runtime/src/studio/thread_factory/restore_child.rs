@@ -194,7 +194,8 @@ impl StudioThreadFactory {
                 let manager = crate::studio::agent_host::workspace_preparation::manager_from_lease(
                     &self.services.ssh_manager,
                     &lease,
-                );
+                )
+                .map_err(|error| resource_error("open restored child workspace manager", error))?;
                 let handle = crate::agent::worktree::WorktreeHandle {
                     path: PathBuf::from(&lease.path),
                     branch: lease.branch.clone(),

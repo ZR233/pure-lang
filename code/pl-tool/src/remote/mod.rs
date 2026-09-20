@@ -21,6 +21,7 @@ pub use manager::{
     RemoteHelperAssets, RemoteHelperTarget, SshConnectionSnapshot, SshConnectionState, SshManager,
     SshServerProfile,
 };
+pub use path::{RemotePathError, normalize_remote_absolute_path};
 pub use skill::RemoteSkillProvider;
 pub use ssh_config::{
     SshConfigEntry, SshConfigFile, allocate_alias, sanitize_alias_base, validate_alias,

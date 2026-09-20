@@ -6,21 +6,19 @@ use std::time::Duration;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use pl_tool::execution::{ExecutionBackend, ExecutionOutput, ExecutionRequest};
-use pl_tool::remote::SshManager;
+use pl_tool::remote::{SshManager, normalize_remote_absolute_path};
 
 use pl_tool::git::GitPolicy;
 
 use super::backend::{changed_files, checked_output, non_empty_head};
-use super::{
-    WorktreeBackend, WorktreeCreateFailure, WorktreeError, WorktreeStatus, remote_path_text,
-};
+use super::{WorktreeBackend, WorktreeCreateFailure, WorktreeError, WorktreeStatus};
 
 const WORKTREE_GIT_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone)]
 pub struct RemoteWorktreeBackend {
     transport: Arc<dyn RemoteWorktreeTransport>,
-    repo_root: PathBuf,
+    repo_root: String,
     policy: GitPolicy,
 }
 
@@ -41,13 +39,13 @@ trait RemoteWorktreeTransport: std::fmt::Debug + Send + Sync {
 struct SshRemoteWorktreeTransport {
     ssh_manager: Arc<SshManager>,
     server_id: String,
-    repo_root: PathBuf,
+    repo_root: String,
 }
 
 impl SshRemoteWorktreeTransport {
     async fn host(&self) -> Result<pl_tool::remote::RemoteWorkspaceHost, String> {
         self.ssh_manager
-            .open_workspace_host(&self.server_id, remote_path_text(&self.repo_root))
+            .open_workspace_host(&self.server_id, self.repo_root.clone())
             .await
             .map_err(|error| error.to_string())
     }
@@ -112,9 +110,10 @@ impl RemoteWorktreeBackend {
         ssh_manager: Arc<SshManager>,
         server_id: impl Into<String>,
         repo_root: PathBuf,
-    ) -> Self {
+    ) -> Result<Self, WorktreeError> {
         let server_id = server_id.into();
-        Self {
+        let repo_root = remote_path(&repo_root)?;
+        Ok(Self {
             transport: Arc::new(SshRemoteWorktreeTransport {
                 ssh_manager,
                 server_id,
@@ -122,7 +121,7 @@ impl RemoteWorktreeBackend {
             }),
             repo_root,
             policy: GitPolicy::default(),
-        }
+        })
     }
 
     async fn run_git(
@@ -130,11 +129,12 @@ impl RemoteWorktreeBackend {
         cwd: &Path,
         args: &[String],
     ) -> Result<pl_tool::execution::ExecutionOutput, WorktreeError> {
+        let cwd = remote_path(cwd)?;
         let mut full_args = vec![
             "-c".to_string(),
             "core.hooksPath=/dev/null".to_string(),
             "-c".to_string(),
-            format!("safe.directory={}", cwd.display()),
+            format!("safe.directory={cwd}"),
             "-c".to_string(),
             "credential.helper=".to_string(),
         ];
@@ -143,7 +143,7 @@ impl RemoteWorktreeBackend {
             .run(ExecutionRequest {
                 program: PathBuf::from("git"),
                 args: full_args,
-                cwd: cwd.to_path_buf(),
+                cwd: PathBuf::from(cwd),
                 env: BTreeMap::new(),
                 timeout: Some(WORKTREE_GIT_TIMEOUT),
             })
@@ -155,7 +155,7 @@ impl RemoteWorktreeBackend {
     }
 
     fn relative_path(&self, path: &Path) -> Result<String, WorktreeError> {
-        self.relative_path_text(&remote_path_text(path))
+        self.relative_path_text(&remote_path(path)?)
     }
 
     /// 把已归一化的 POSIX 路径表达成仓库根下的 workspace-relative 形式。
@@ -164,26 +164,30 @@ impl RemoteWorktreeBackend {
     /// 因此先把两侧都表达成 POSIX，再按目录边界剥离。这样目录/文件操作与 git 路径参数
     /// 都源自同一个 POSIX 结果。
     fn relative_path_text(&self, path: &str) -> Result<String, WorktreeError> {
-        let root = remote_path_text(&self.repo_root);
-        let root = root.trim_end_matches('/');
-        let relative = if path == root {
+        let path = normalize_remote_absolute_path(path)
+            .map_err(|error| WorktreeError::InvalidResource(error.to_string()))?;
+        let relative = if path == self.repo_root {
             ""
-        } else if root == "/" {
-            path.strip_prefix('/').unwrap_or(path)
+        } else if self.repo_root == "/" {
+            path.strip_prefix('/').unwrap_or(&path)
         } else {
-            match path.strip_prefix(root) {
+            match path.strip_prefix(&self.repo_root) {
                 Some(relative) if relative.starts_with('/') => &relative[1..],
                 _ => {
                     return Err(WorktreeError::InvalidResource(format!(
                         "{} is outside {}",
-                        path,
-                        self.repo_root.display()
+                        path, self.repo_root
                     )));
                 }
             }
         };
         Ok(relative.to_string())
     }
+}
+
+fn remote_path(path: &Path) -> Result<String, WorktreeError> {
+    normalize_remote_absolute_path(&path.to_string_lossy())
+        .map_err(|error| WorktreeError::InvalidResource(error.to_string()))
 }
 
 impl WorktreeBackend for RemoteWorktreeBackend {
@@ -194,7 +198,8 @@ impl WorktreeBackend for RemoteWorktreeBackend {
         async move {
             let args = vec!["rev-parse".to_string(), "--show-toplevel".to_string()];
             let output = checked_output(&args, self.run_git(path, &args).await?)?;
-            non_empty_head(&args, &output.stdout).map(PathBuf::from)
+            let root = non_empty_head(&args, &output.stdout)?;
+            remote_path(Path::new(&root)).map(PathBuf::from)
         }
         .boxed()
     }
@@ -207,7 +212,7 @@ impl WorktreeBackend for RemoteWorktreeBackend {
         async move {
             // 先归一化为 POSIX，再在 POSIX 空间取父目录：宿主 `Path::parent()` 会在归一化
             // 之前按本地分隔符切分混用形态的 target，从而算出错误的父目录。
-            let target = remote_path_text(target_path);
+            let target = remote_path(target_path)?;
             let parent = target
                 .rsplit_once('/')
                 .map(|(parent, _)| parent)
@@ -267,7 +272,7 @@ impl WorktreeBackend for RemoteWorktreeBackend {
                 // git 路径参数使用 POSIX 绝对路径：它与 lease 记录的 `path`、会话工作区根
                 // 以及远端 workspace handle 根是同一字符串；目录/文件操作所用的
                 // workspace-relative 形式是该绝对 POSIX 路径对仓库根的确定性投影。
-                remote_path_text(target_path),
+                remote_path(target_path).map_err(WorktreeCreateFailure::no_side_effects)?,
                 base_commit.to_string(),
             ];
             let output = self
@@ -324,7 +329,7 @@ impl WorktreeBackend for RemoteWorktreeBackend {
             if force {
                 args.push("--force".to_string());
             }
-            args.push(remote_path_text(target_path));
+            args.push(remote_path(target_path)?);
             let output = self.run_git(repo_root, &args).await?;
             checked_output(&args, output).map(|_| ())
         }
@@ -417,7 +422,7 @@ mod tests {
     fn backend_at(transport: Arc<RecordingTransport>, repo_root: &str) -> RemoteWorktreeBackend {
         RemoteWorktreeBackend {
             transport,
-            repo_root: PathBuf::from(repo_root),
+            repo_root: normalize_remote_absolute_path(repo_root).unwrap(),
             policy: GitPolicy::default(),
         }
     }
@@ -555,6 +560,8 @@ mod tests {
             .create(Path::new("/repo"), "pure-session-thread-1", &target, "base")
             .await
             .unwrap();
+        backend.resolve_head(&target).await.unwrap();
+        backend.status(&target).await.unwrap();
         backend
             .remove(Path::new("/repo"), &target, true)
             .await
@@ -575,6 +582,11 @@ mod tests {
         );
         let requests = transport.requests.lock().unwrap();
         for request in requests.iter() {
+            assert!(
+                !request.cwd.to_string_lossy().contains('\\'),
+                "跨端 git cwd 不得含宿主分隔符: {}",
+                request.cwd.display()
+            );
             for argument in &request.args {
                 assert!(
                     !argument.contains('\\'),
@@ -590,12 +602,21 @@ mod tests {
             "/repo/.anywork/worktrees/thread-1/session".into(),
             "base".into(),
         ]));
-        assert!(requests[1].args.ends_with(&[
+        assert!(requests.iter().any(|request| request.args.ends_with(&[
             "worktree".into(),
             "remove".into(),
             "--force".into(),
             "/repo/.anywork/worktrees/thread-1/session".into(),
-        ]));
+        ])));
+        assert!(requests.iter().any(|request| {
+            request.cwd.as_path() == Path::new("/repo/.anywork/worktrees/thread-1/session")
+                && request.args.windows(2).any(|args| {
+                    args == [
+                        "-c",
+                        "safe.directory=/repo/.anywork/worktrees/thread-1/session",
+                    ]
+                })
+        }));
     }
 
     /// F1：`WorktreeManager::allocate_path` 生成的 target 与 Windows 宿主 `Path::join`
@@ -613,8 +634,8 @@ mod tests {
         );
         let host_shaped = PathBuf::from("/repo\\.anywork/worktrees\\thread-1\\session");
         let expected = "/repo/.anywork/worktrees/thread-1/session";
-        assert_eq!(remote_path_text(&allocated), expected);
-        assert_eq!(remote_path_text(&host_shaped), expected);
+        assert_eq!(remote_path(&allocated).unwrap(), expected);
+        assert_eq!(remote_path(&host_shaped).unwrap(), expected);
 
         backend
             .create_parent(Path::new("/repo"), &host_shaped)

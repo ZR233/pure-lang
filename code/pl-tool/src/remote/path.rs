@@ -2,43 +2,61 @@
 
 use std::path::Path;
 
-/// 跨端边界的远端路径文本归一化。
+/// 远端绝对路径不满足跨端 POSIX 契约。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RemotePathError {
+    #[error("remote path must not be empty")]
+    Empty,
+    #[error("remote path must be absolute: {path}")]
+    Relative { path: String },
+    #[error("remote path must not contain `..`: {path}")]
+    ParentComponent { path: String },
+}
+
+/// 把跨端边界的远端绝对路径规范化为 canonical POSIX 字符串。
 ///
-/// 宿主形态（含 Windows 路径分隔符）在提交给远端 helper 之前必须统一为 POSIX 字符串，
-/// 否则 helper 端 canonicalize 会失败或把同一目录当成不同目标。这是远端路径的唯一文本
-/// 归一化表达，供 workspace 打开、相对路径计算与越界拒绝共用。
-pub(crate) fn normalize_remote_path_text(path: &str) -> String {
-    path.replace('\\', "/")
-}
-
-pub(crate) fn relative_workspace_path(root: &str, path: &Path) -> Result<String, ()> {
-    let root = normalize_root(root)?;
-    let path = normalize_remote_path_text(&path.to_string_lossy());
-    let relative = if path.starts_with('/') {
-        if path.trim_end_matches('/') == root {
-            ""
-        } else if root == "/" {
-            path.trim_start_matches('/')
-        } else {
-            path.strip_prefix(&format!("{root}/")).ok_or(())?
-        }
-    } else {
-        &path
-    };
-    normalize_relative(relative)
-}
-
-fn normalize_root(root: &str) -> Result<String, ()> {
-    let root = normalize_remote_path_text(root);
-    if !root.starts_with('/') {
-        return Err(());
+/// 宿主形态（含 Windows 路径分隔符）在提交给远端 helper 之前统一为 POSIX，重复分隔符
+/// 与 `.` 被折叠，`..` 则被拒绝。workspace 打开、远端 Git、durable lease 与身份比较
+/// 必须共用该结果，不能各自解释宿主 `Path`。
+pub fn normalize_remote_absolute_path(path: &str) -> Result<String, RemotePathError> {
+    if path.is_empty() {
+        return Err(RemotePathError::Empty);
     }
-    let components = normalized_components(&root)?;
+    let normalized = path.replace('\\', "/");
+    if !normalized.starts_with('/') {
+        return Err(RemotePathError::Relative {
+            path: path.to_string(),
+        });
+    }
+    let components =
+        normalized_components(&normalized).map_err(|()| RemotePathError::ParentComponent {
+            path: path.to_string(),
+        })?;
     Ok(if components.is_empty() {
         "/".to_string()
     } else {
         format!("/{}", components.join("/"))
     })
+}
+
+pub(crate) fn relative_workspace_path(root: &str, path: &Path) -> Result<String, ()> {
+    let root = normalize_remote_absolute_path(root).map_err(|_| ())?;
+    let path = path.to_string_lossy().replace('\\', "/");
+    let relative = if path.starts_with('/') {
+        let path = normalize_remote_absolute_path(&path).map_err(|_| ())?;
+        if path == root {
+            String::new()
+        } else if root == "/" {
+            path.trim_start_matches('/').to_string()
+        } else {
+            path.strip_prefix(&format!("{root}/"))
+                .ok_or(())?
+                .to_string()
+        }
+    } else {
+        path
+    };
+    normalize_relative(&relative)
 }
 
 fn normalize_relative(path: &str) -> Result<String, ()> {
@@ -90,15 +108,37 @@ mod tests {
     #[test]
     fn host_shaped_and_posix_paths_normalize_to_one_target() {
         let posix = "/srv/project/.anywork/worktrees/thread-1/session";
-        assert_eq!(normalize_remote_path_text(posix), posix);
+        assert_eq!(normalize_remote_absolute_path(posix).unwrap(), posix);
         assert_eq!(
-            normalize_remote_path_text(r"\srv\project\.anywork\worktrees\thread-1\session"),
+            normalize_remote_absolute_path(r"\srv\project\.anywork\worktrees\thread-1\session")
+                .unwrap(),
             posix
         );
         // 与现场日志同形：仓库根 POSIX、分隔符混用的 Windows join 结果。
         assert_eq!(
-            normalize_remote_path_text(r"/srv/project\.anywork/worktrees\thread-1\session"),
+            normalize_remote_absolute_path(r"/srv/project\.anywork//worktrees/./thread-1\session/")
+                .unwrap(),
             posix
         );
+    }
+
+    #[test]
+    fn remote_absolute_paths_reject_ambiguous_or_escaping_inputs() {
+        assert_eq!(
+            normalize_remote_absolute_path(""),
+            Err(RemotePathError::Empty)
+        );
+        assert!(matches!(
+            normalize_remote_absolute_path("srv/project"),
+            Err(RemotePathError::Relative { .. })
+        ));
+        assert!(matches!(
+            normalize_remote_absolute_path(r"C:\srv\project"),
+            Err(RemotePathError::Relative { .. })
+        ));
+        assert!(matches!(
+            normalize_remote_absolute_path("/srv/project/../outside"),
+            Err(RemotePathError::ParentComponent { .. })
+        ));
     }
 }

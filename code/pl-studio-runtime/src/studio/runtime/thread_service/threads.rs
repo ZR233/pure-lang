@@ -363,7 +363,7 @@ impl StudioRuntime {
                         crate::studio::agent_host::workspace_preparation::manager_from_lease(
                             &self.ssh_manager,
                             lease,
-                        );
+                        )?;
                     let handle = crate::agent::worktree::WorktreeHandle {
                         path: std::path::PathBuf::from(&lease.path),
                         branch: lease.branch.clone(),
@@ -554,10 +554,20 @@ impl StudioRuntime {
             if lease.state == WorktreeLeaseState::Cleaned {
                 continue;
             }
-            let manager = crate::studio::agent_host::workspace_preparation::manager_from_lease(
+            let manager = match crate::studio::agent_host::workspace_preparation::manager_from_lease(
                 &self.ssh_manager,
                 &lease,
-            );
+            ) {
+                Ok(manager) => manager,
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        thread_id = %thread_id,
+                        "archived session tree worktree manager could not be opened"
+                    );
+                    continue;
+                }
+            };
             if let Err(error) = crate::studio::agent_host::workspace_preparation::close_workspace(
                 &self.agent_facility.worktrees,
                 &manager,

@@ -83,20 +83,25 @@ impl WorktreeLease {
 
     /// 按归属校验期望 leaf 与期望 branch，仍拒绝任何非 Pure 分支。
     pub(in crate::studio) fn validate_identity(&self) -> Result<()> {
-        use crate::agent::worktree::{WorktreeManager, remote_path_text};
+        use crate::agent::worktree::WorktreeManager;
         let repository_root = std::path::Path::new(&self.repository_root);
         let ownership = self.ownership();
-        // 两侧统一按跨端 POSIX 形式比较：远端远端 lease 记录 POSIX，而 `allocate_path` 在
-        // Windows 宿主会注入 `\`；本地项目两侧都保留宿主形态，归一化后仍相等。
-        let expected = remote_path_text(&WorktreeManager::allocate_path(
-            repository_root,
-            &self.root_thread_id,
-            &ownership,
-        ));
-        anyhow::ensure!(
-            remote_path_text(std::path::Path::new(&self.path)) == expected,
-            "worktree cleanup refused a mismatched Pure-owned leaf"
-        );
+        let expected =
+            WorktreeManager::allocate_path(repository_root, &self.root_thread_id, &ownership);
+        if self.ssh_alias.is_some() {
+            let expected =
+                pl_tool::remote::normalize_remote_absolute_path(&expected.to_string_lossy())?;
+            let actual = pl_tool::remote::normalize_remote_absolute_path(&self.path)?;
+            anyhow::ensure!(
+                actual == expected,
+                "worktree cleanup refused a mismatched Pure-owned leaf"
+            );
+        } else {
+            anyhow::ensure!(
+                std::path::Path::new(&self.path) == expected,
+                "worktree cleanup refused a mismatched Pure-owned leaf"
+            );
+        }
         anyhow::ensure!(
             self.branch == WorktreeManager::branch_for(&ownership),
             "worktree cleanup refused a mismatched Pure-owned branch"
@@ -120,7 +125,12 @@ impl PersistedStudioObject for WorktreeLease {
         self.clone()
     }
 
-    fn from_persistence_dto(dto: Self::PersistenceDto) -> Result<Self> {
+    fn from_persistence_dto(mut dto: Self::PersistenceDto) -> Result<Self> {
+        if dto.ssh_alias.is_some() {
+            dto.repository_root =
+                pl_tool::remote::normalize_remote_absolute_path(&dto.repository_root)?;
+            dto.path = pl_tool::remote::normalize_remote_absolute_path(&dto.path)?;
+        }
         Ok(dto)
     }
 }
@@ -378,6 +388,29 @@ mod tests {
         value.branch = "pure-session-root-1".to_string();
         assert!(value.validate_identity().is_ok());
         value.branch = "pure-agent-root-1".to_string();
+        assert!(value.validate_identity().is_err());
+    }
+
+    #[test]
+    fn remote_lease_normalizes_host_shaped_paths_before_identity_validation() {
+        let mut value = lease();
+        value.ssh_alias = Some("server".to_string());
+        value.repository_root = r"\repo\.".to_string();
+        value.path = r"\repo\.anywork\worktrees\root-1\child-1".to_string();
+
+        let decoded = WorktreeLease::from_persistence_dto(value).unwrap();
+        assert_eq!(decoded.repository_root, "/repo");
+        assert_eq!(decoded.path, "/repo/.anywork/worktrees/root-1/child-1");
+        assert!(decoded.validate_identity().is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_lease_keeps_literal_backslash_distinct_from_separator() {
+        let mut value = lease();
+        value.repository_root = r"/repo\literal".to_string();
+        value.path = "/repo/literal/.anywork/worktrees/root-1/child-1".to_string();
+
         assert!(value.validate_identity().is_err());
     }
 

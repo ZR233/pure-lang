@@ -97,7 +97,9 @@ lease 状态机清理会话树工作树；SSH 离线时删除无法执行，按�
 工作区根、workspace 打开参数与身份比较，以及传给远端 git/helper 的路径参数都以 POSIX 形式
 表示。客户端宿主形态（包括 Windows 的路径分隔符与驱动器前缀）只在本地文件系统上使用，不得
 跨端出现；跨端前统一归一化，并保证同一个远端路径在目录写操作与 git 路径参数上使用同一结果，
-避免物理 worktree 落在与 lease 记录不一致的位置。
+避免物理 worktree 落在与 lease 记录不一致的位置。该绝对路径规范化由
+`pl-tool::remote::normalize_remote_absolute_path` 单点负责：反斜杠转换为 `/`，重复分隔符和
+`.` 被折叠，空值、相对路径及 `..` 被拒绝；Studio 不复制该逻辑。
 
 本地与远端 prompt 使用同一份执行环境：Platform developer 段声明 transport、目标 OS、
 shell dialect 和路径，并按该 dialect 生成命令语法。shell descriptor 只缓存在当前连接和

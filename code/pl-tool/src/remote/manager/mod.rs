@@ -19,10 +19,9 @@ use tokio::sync::{Mutex, RwLock, watch};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
-use super::path::normalize_remote_path_text;
 use super::{
     RemoteClient, RemoteClientError, RemoteCommandBackend, RemoteExecutionBackend,
-    RemoteWorkspaceFileBackend, RemoteWorkspaceHost,
+    RemoteWorkspaceFileBackend, RemoteWorkspaceHost, normalize_remote_absolute_path,
 };
 use crate::environment::{ExecutionEnvironment, ExecutionOs, ShellDialect};
 use pl_protocol::remote::RemoteShellDialect;
@@ -384,7 +383,8 @@ impl SshManager {
         // 映射到同一个缓存键与同一个 helper workspace，不得因 canonicalize 失败或重复
         // 打开而产生两个 workspace handle。缓存键语义保持既有形状（请求路径用于查找、
         // helper canonical 路径用于存放）。
-        let path = normalize_remote_path_text(&path);
+        let path = normalize_remote_absolute_path(&path)
+            .map_err(|error| RemoteClientError::Protocol(error.to_string()))?;
         let _operation = self.admit_connection().await?;
         let client = self.client(server_id).await?;
         let connection_lock = self.connection_lock(server_id).await;

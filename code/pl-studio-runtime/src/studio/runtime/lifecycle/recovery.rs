@@ -159,15 +159,20 @@ impl StudioRuntime {
 
     /// Fresh preview facts of one durable lease, computed from its current record.
     async fn worktree_issue_facts(&self, lease: &WorktreeLease) -> WorktreeIssueFacts {
-        let manager = self.worktree_manager(lease);
         let handle = worktree_handle(lease);
-        let identity_error = lease
+        let mut identity_error = lease
             .validate_identity()
             .err()
             .map(|error| error.to_string());
         let preview = match identity_error.as_ref() {
             Some(_) => None,
-            None => manager.preview(&handle).await.ok(),
+            None => match self.worktree_manager(lease) {
+                Ok(manager) => manager.preview(&handle).await.ok(),
+                Err(error) => {
+                    identity_error = Some(error.to_string());
+                    None
+                }
+            },
         };
         WorktreeIssueFacts {
             identity_error,
@@ -249,7 +254,7 @@ impl StudioRuntime {
             "worktree lease is still owned by a live Thread"
         );
         lease.validate_identity()?;
-        let manager = self.worktree_manager(&lease);
+        let manager = self.worktree_manager(&lease)?;
         let handle = worktree_handle(&lease);
         manager.preview_existing(&handle).await?;
         lease.transition(WorktreeLeaseState::CleanupRequested);
@@ -270,17 +275,17 @@ impl StudioRuntime {
         Ok(())
     }
 
-    fn worktree_manager(&self, lease: &WorktreeLease) -> WorktreeManager {
+    fn worktree_manager(&self, lease: &WorktreeLease) -> Result<WorktreeManager> {
         let repository_root = PathBuf::from(&lease.repository_root);
         let backend: Arc<dyn WorktreeBackend> = match lease.ssh_alias.as_deref() {
             Some(server_id) => Arc::new(RemoteWorktreeBackend::new(
                 self.ssh_manager.clone(),
                 server_id,
                 repository_root.clone(),
-            )),
+            )?),
             None => Arc::new(LocalWorktreeBackend::default()),
         };
-        WorktreeManager::new(repository_root, backend)
+        Ok(WorktreeManager::new(repository_root, backend))
     }
 
     /// Whether the product directory still holds a Thread row for a lease owner.

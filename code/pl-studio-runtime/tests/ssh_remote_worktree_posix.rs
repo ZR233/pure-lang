@@ -164,7 +164,10 @@ async fn remote_worktree_create_is_posix_for_windows_shaped_target() -> anyhow::
     println!("ACCEPT windows-shaped target: {}", win_target.display());
 
     let backend =
-        RemoteWorktreeBackend::new(manager.clone(), alias.clone(), PathBuf::from(&repo_abs));
+        RemoteWorktreeBackend::new(manager.clone(), alias.clone(), PathBuf::from(&repo_abs))
+            .map_err(|error| {
+                anyhow::anyhow!("construct remote worktree backend failed: {error}")
+            })?;
     backend
         .create_parent(Path::new(&repo_abs), &win_target)
         .await
