@@ -172,9 +172,7 @@ impl StudioChildResources for StudioThreadFactory {
             )?,
             agent_controls: crate::thread_assembler::AgentControlExposure::Disabled,
             execution: pl_core::thread::input::InputDriverOptions {
-                max_model_steps: pl_core::thread::ModelStepLimit::Limited(
-                    std::num::NonZeroU32::new(64).expect("fixed positive model step limit"),
-                ),
+                max_model_steps: Self::CHILD_MODEL_STEP_LIMIT,
             },
             id: request.id.clone(),
             parent_id: Some(request.caller.clone()),

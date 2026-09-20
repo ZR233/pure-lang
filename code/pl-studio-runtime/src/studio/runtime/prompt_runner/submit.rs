@@ -190,9 +190,7 @@ impl StudioRuntime {
                     max_model_steps: if thread_record.parent_thread_id.is_none() {
                         pl_core::thread::ModelStepLimit::Unlimited
                     } else {
-                        pl_core::thread::ModelStepLimit::Limited(
-                            std::num::NonZeroU32::new(64).expect("positive child step limit"),
-                        )
+                        crate::studio::thread_factory::StudioThreadFactory::CHILD_MODEL_STEP_LIMIT
                     },
                 },
             )

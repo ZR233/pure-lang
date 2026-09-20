@@ -38,6 +38,12 @@ pub(crate) struct StudioThreadFactory {
     session_roots: Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::path::PathBuf>>>,
 }
 impl StudioThreadFactory {
+    /// Fresh allowance for each child Turn, including explicit continuation after a step limit.
+    pub(in crate::studio) const CHILD_MODEL_STEP_LIMIT: pl_core::thread::ModelStepLimit =
+        pl_core::thread::ModelStepLimit::Limited(
+            std::num::NonZeroU32::new(256).expect("positive child step limit"),
+        );
+
     pub(in crate::studio) fn new(services: StudioThreadServices) -> Self {
         Self {
             services,
