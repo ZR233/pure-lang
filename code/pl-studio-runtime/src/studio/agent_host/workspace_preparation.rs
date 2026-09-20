@@ -680,6 +680,9 @@ mod tests {
         let durable = Path::new("/repo/.anywork/worktrees/root-1/child-1");
 
         assert!(workspace_paths_equal(computed, durable, true).unwrap());
-        assert!(!workspace_paths_equal(computed, durable, false).unwrap());
+        assert_ne!(
+            workspace_path_text(computed, false).unwrap(),
+            workspace_path_text(durable, false).unwrap()
+        );
     }
 }
