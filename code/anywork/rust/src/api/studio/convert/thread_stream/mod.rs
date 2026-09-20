@@ -638,11 +638,10 @@ fn runtime_usage(value: ThreadRuntimeUsage) -> BridgeThreadRuntimeUsage {
         completion_tokens: value.completion_tokens,
         cached_prompt_tokens: value.cached_prompt_tokens,
         cache_write_tokens: value.cache_write_tokens,
-        cache_miss_tokens: value.cache_miss_tokens,
         reasoning_tokens: value.reasoning_tokens,
         inference_count: value.inference_count,
         total_tokens: value.total_tokens,
-        cache_hit_rate: value.cache_hit_rate,
+        cache_usage: cache_usage(value.cache_usage),
         estimated_costs: value
             .estimated_costs
             .into_iter()
@@ -660,6 +659,15 @@ fn runtime_usage(value: ThreadRuntimeUsage) -> BridgeThreadRuntimeUsage {
             .prefix_changed_reason
             .map(prompt_prefix_changed_reason),
         updated_at: value.updated_at,
+    }
+}
+
+fn cache_usage(value: pl_protocol::CacheUsageSummary) -> BridgeCacheUsageSummary {
+    BridgeCacheUsageSummary {
+        input_tokens: value.input_tokens,
+        cache_read_tokens: value.cache_read_tokens,
+        hit_rate: value.hit_rate,
+        has_incomplete_usage: value.has_incomplete_usage,
     }
 }
 

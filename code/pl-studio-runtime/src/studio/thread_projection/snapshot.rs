@@ -303,7 +303,9 @@ mod tests {
         let usage = &product.runtime.as_ref().unwrap().usage;
         assert_eq!(usage.prompt_tokens, 10);
         assert_eq!(usage.total_tokens, 14);
-        assert_eq!(usage.cache_hit_rate, Some(0.8));
+        assert_eq!(usage.cache_usage.input_tokens, 10);
+        assert_eq!(usage.cache_usage.cache_read_tokens, 8);
+        assert_eq!(usage.cache_usage.hit_rate, Some(0.8));
         assert!(usage.has_unpriced_usage);
         handle.close().await.unwrap();
         let closed = project_snapshot(

@@ -431,6 +431,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusCacheLabel => '缓存';
 
   @override
+  String get statusCacheReportedOnlyLabel => '基于已报告数据';
+
+  @override
   String get statusCacheHitTokensLabel => '缓存命中';
 
   @override

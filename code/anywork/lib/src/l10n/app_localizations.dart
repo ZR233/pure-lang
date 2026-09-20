@@ -890,6 +890,12 @@ abstract class AppLocalizations {
   /// **'Cache'**
   String get statusCacheLabel;
 
+  /// No description provided for @statusCacheReportedOnlyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'based on reported data'**
+  String get statusCacheReportedOnlyLabel;
+
   /// No description provided for @statusCacheHitTokensLabel.
   ///
   /// In en, this message translates to:

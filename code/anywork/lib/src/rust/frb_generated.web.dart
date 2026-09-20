@@ -656,6 +656,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeCacheUsageSummary dco_decode_bridge_cache_usage_summary(dynamic raw);
+
+  @protected
   BridgeCancellingAgent dco_decode_bridge_cancelling_agent(dynamic raw);
 
   @protected
@@ -2558,6 +2561,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeAvailableUpdaterState sse_decode_bridge_available_updater_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeCacheUsageSummary sse_decode_bridge_cache_usage_summary(
     SseDeserializer deserializer,
   );
 
@@ -4875,6 +4883,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_available_updater_state(
     BridgeAvailableUpdaterState self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_cache_usage_summary(
+    BridgeCacheUsageSummary self,
     SseSerializer serializer,
   );
 

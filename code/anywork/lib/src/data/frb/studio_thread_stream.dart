@@ -614,10 +614,14 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
     completionTokens: usage.completionTokens.toInt(),
     cachedPromptTokens: usage.cachedPromptTokens.toInt(),
     cacheWriteTokens: usage.cacheWriteTokens.toInt(),
-    cacheMissTokens: usage.cacheMissTokens.toInt(),
     reasoningTokens: usage.reasoningTokens.toInt(),
     inferenceCount: usage.inferenceCount.toInt(),
-    cacheHitRate: usage.cacheHitRate,
+    cacheUsage: CacheUsageView(
+      inputTokens: usage.cacheUsage.inputTokens.toInt(),
+      cacheReadTokens: usage.cacheUsage.cacheReadTokens.toInt(),
+      hitRate: usage.cacheUsage.hitRate,
+      hasIncompleteUsage: usage.cacheUsage.hasIncompleteUsage,
+    ),
     estimatedCosts: estimatedCosts,
     estimatedCacheSavings: usage.estimatedCacheSavings
         .map(

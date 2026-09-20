@@ -203,6 +203,7 @@
   "statusReasoningEffort": "Reasoning effort",
   "statusContextLabel": "Context",
   "statusCacheLabel": "Cache",
+  "statusCacheReportedOnlyLabel": "based on reported data",
   "statusCacheHitTokensLabel": "Cache read",
   "statusCacheMissTokensLabel": "Cache miss",
   "statusCacheWriteTokensLabel": "Cache write",

@@ -446,6 +446,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusCacheLabel => 'Cache';
 
   @override
+  String get statusCacheReportedOnlyLabel => 'based on reported data';
+
+  @override
   String get statusCacheHitTokensLabel => 'Cache read';
 
   @override

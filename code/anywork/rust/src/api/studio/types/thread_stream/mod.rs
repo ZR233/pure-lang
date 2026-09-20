@@ -280,11 +280,10 @@ pub struct BridgeThreadRuntimeUsage {
     pub completion_tokens: u64,
     pub cached_prompt_tokens: u64,
     pub cache_write_tokens: u64,
-    pub cache_miss_tokens: u64,
     pub reasoning_tokens: u64,
     pub inference_count: u64,
     pub total_tokens: u64,
-    pub cache_hit_rate: Option<f64>,
+    pub cache_usage: BridgeCacheUsageSummary,
     pub estimated_costs: Vec<BridgeRuntimeCostAmount>,
     pub estimated_cache_savings: Vec<BridgeRuntimeCostAmount>,
     pub has_unpriced_usage: bool,
@@ -292,6 +291,15 @@ pub struct BridgeThreadRuntimeUsage {
     pub prompt_cache_policy: Option<String>,
     pub prefix_changed_reason: Option<BridgePromptPrefixChangedReason>,
     pub updated_at: i64,
+}
+
+/// FRB mirror of the canonical prompt cache effective-usage summary.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BridgeCacheUsageSummary {
+    pub input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub hit_rate: Option<f64>,
+    pub has_incomplete_usage: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

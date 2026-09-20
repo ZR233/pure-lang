@@ -112,7 +112,13 @@ class _ContextDetail extends StatelessWidget {
     final capacityLabel = hasKnownCapacity
         ? _formatCount(runtime.contextWindow)
         : _unknownCapacityPlaceholder;
-    final cacheRate = runtime.effectiveCacheHitRate;
+    final cache = runtime.cacheUsage;
+    final cacheRateLabel = cache.hitRate == null
+        ? '-'
+        : '${(cache.hitRate! * 100).round()}%';
+    final cacheRateValue = cache.hasIncompleteUsage
+        ? '$cacheRateLabel · ${context.l10n.statusCacheReportedOnlyLabel}'
+        : cacheRateLabel;
     final cost = runtime.estimatedCosts.isEmpty
         ? runtime.costLabel
         : formatRuntimeCosts(runtime.estimatedCosts);
@@ -166,20 +172,19 @@ class _ContextDetail extends StatelessWidget {
                     ? '${_formatCount(runtime.totalTokens)} · ${context.l10n.statusReportedUsageOnly}'
                     : _formatCount(runtime.totalTokens),
               ),
-              if (cacheRate != null)
-                StatusDetailRow(
-                  label: context.l10n.statusCacheLabel,
-                  value: '${(cacheRate * 100).round()}%',
-                ),
-              if (runtime.hasUsage && !runtime.hasIncompleteUsage)
+              StatusDetailRow(
+                label: context.l10n.statusCacheLabel,
+                value: cacheRateValue,
+              ),
+              if (cache.hasPositiveDenominator)
                 StatusDetailRow(
                   label: context.l10n.statusCacheHitTokensLabel,
-                  value: _formatCount(runtime.cachedPromptTokens),
+                  value: _formatCount(cache.cacheReadTokens),
                 ),
-              if (runtime.hasUsage && !runtime.hasIncompleteUsage)
+              if (cache.hasPositiveDenominator)
                 StatusDetailRow(
                   label: context.l10n.statusCacheMissTokensLabel,
-                  value: _formatCount(runtime.cacheMissTokens),
+                  value: _formatCount(cache.missTokens),
                 ),
               if (runtime.cacheWriteTokens > 0)
                 StatusDetailRow(

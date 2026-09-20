@@ -13,7 +13,42 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'thread_stream/item.dart';
 part 'thread_stream.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+
+/// FRB mirror of the canonical prompt cache effective-usage summary.
+class BridgeCacheUsageSummary {
+  final BigInt inputTokens;
+  final BigInt cacheReadTokens;
+  final double? hitRate;
+  final bool hasIncompleteUsage;
+
+  const BridgeCacheUsageSummary({
+    required this.inputTokens,
+    required this.cacheReadTokens,
+    this.hitRate,
+    required this.hasIncompleteUsage,
+  });
+
+  static Future<BridgeCacheUsageSummary> default_() => RustLib.instance.api
+      .crateApiStudioTypesThreadStreamBridgeCacheUsageSummaryDefault();
+
+  @override
+  int get hashCode =>
+      inputTokens.hashCode ^
+      cacheReadTokens.hashCode ^
+      hitRate.hashCode ^
+      hasIncompleteUsage.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeCacheUsageSummary &&
+          runtimeType == other.runtimeType &&
+          inputTokens == other.inputTokens &&
+          cacheReadTokens == other.cacheReadTokens &&
+          hitRate == other.hitRate &&
+          hasIncompleteUsage == other.hasIncompleteUsage;
+}
 
 @freezed
 sealed class BridgeInteractionContent with _$BridgeInteractionContent {
@@ -460,11 +495,10 @@ class BridgeThreadRuntimeUsage {
   final BigInt completionTokens;
   final BigInt cachedPromptTokens;
   final BigInt cacheWriteTokens;
-  final BigInt cacheMissTokens;
   final BigInt reasoningTokens;
   final BigInt inferenceCount;
   final BigInt totalTokens;
-  final double? cacheHitRate;
+  final BridgeCacheUsageSummary cacheUsage;
   final List<BridgeRuntimeCostAmount> estimatedCosts;
   final List<BridgeRuntimeCostAmount> estimatedCacheSavings;
   final bool hasUnpricedUsage;
@@ -482,11 +516,10 @@ class BridgeThreadRuntimeUsage {
     required this.completionTokens,
     required this.cachedPromptTokens,
     required this.cacheWriteTokens,
-    required this.cacheMissTokens,
     required this.reasoningTokens,
     required this.inferenceCount,
     required this.totalTokens,
-    this.cacheHitRate,
+    required this.cacheUsage,
     required this.estimatedCosts,
     required this.estimatedCacheSavings,
     required this.hasUnpricedUsage,
@@ -506,11 +539,10 @@ class BridgeThreadRuntimeUsage {
       completionTokens.hashCode ^
       cachedPromptTokens.hashCode ^
       cacheWriteTokens.hashCode ^
-      cacheMissTokens.hashCode ^
       reasoningTokens.hashCode ^
       inferenceCount.hashCode ^
       totalTokens.hashCode ^
-      cacheHitRate.hashCode ^
+      cacheUsage.hashCode ^
       estimatedCosts.hashCode ^
       estimatedCacheSavings.hashCode ^
       hasUnpricedUsage.hashCode ^
@@ -532,11 +564,10 @@ class BridgeThreadRuntimeUsage {
           completionTokens == other.completionTokens &&
           cachedPromptTokens == other.cachedPromptTokens &&
           cacheWriteTokens == other.cacheWriteTokens &&
-          cacheMissTokens == other.cacheMissTokens &&
           reasoningTokens == other.reasoningTokens &&
           inferenceCount == other.inferenceCount &&
           totalTokens == other.totalTokens &&
-          cacheHitRate == other.cacheHitRate &&
+          cacheUsage == other.cacheUsage &&
           estimatedCosts == other.estimatedCosts &&
           estimatedCacheSavings == other.estimatedCacheSavings &&
           hasUnpricedUsage == other.hasUnpricedUsage &&

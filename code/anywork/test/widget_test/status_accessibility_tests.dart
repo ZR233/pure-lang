@@ -156,6 +156,63 @@ void registerStatusAccessibilityTests() {
       }
     });
 
+    testWidgets('cache readout annotates a rate over reported-only samples', (
+      tester,
+    ) async {
+      await _pumpContextReadout(tester, _partialCacheRuntime);
+      await tester.tap(find.bySemanticsLabel('Context'));
+      await tester.pumpAndSettle();
+
+      expect(
+        _statusDetailRowValue(tester, 'Cache'),
+        '40% · based on reported data',
+      );
+      expect(find.text('400'), findsOneWidget);
+      expect(find.text('600'), findsOneWidget);
+    });
+
+    testWidgets('cache readout keeps a row with an unknown rate', (
+      tester,
+    ) async {
+      await _pumpContextReadout(tester, _contextRuntime);
+      await tester.tap(find.bySemanticsLabel('Context'));
+      await tester.pumpAndSettle();
+
+      expect(_statusDetailRowValue(tester, 'Cache'), '-');
+      expect(find.text('Cache read'), findsNothing);
+      expect(find.text('Cache miss'), findsNothing);
+    });
+
+    testWidgets('cache readout reports a real zero hit as 0%', (tester) async {
+      await _pumpContextReadout(tester, _zeroHitCacheRuntime);
+      await tester.tap(find.bySemanticsLabel('Context'));
+      await tester.pumpAndSettle();
+
+      expect(_statusDetailRowValue(tester, 'Cache'), '0%');
+      expect(find.text('Cache read'), findsOneWidget);
+      expect(find.text('Cache miss'), findsOneWidget);
+    });
+
+    testWidgets(
+      'open cache popover refreshes from a newer canonical snapshot',
+      (tester) async {
+        await _pumpContextReadout(tester, _partialCacheRuntime);
+        await tester.tap(find.bySemanticsLabel('Context'));
+        await tester.pumpAndSettle();
+        expect(
+          _statusDetailRowValue(tester, 'Cache'),
+          '40% · based on reported data',
+        );
+
+        await _pumpContextReadout(tester, _cacheRuntime);
+        expect(
+          find.byKey(StudioDriverKeys.contextUsageDetail()),
+          findsOneWidget,
+        );
+        expect(_statusDetailRowValue(tester, 'Cache'), '40%');
+      },
+    );
+
     testWidgets('missing and unpriced usage both show an unavailable cost', (
       tester,
     ) async {
@@ -174,7 +231,8 @@ void registerStatusAccessibilityTests() {
         await tester.tap(find.bySemanticsLabel('Context'));
         await tester.pumpAndSettle();
         expect(find.text('Cost'), findsOneWidget);
-        expect(find.text('-'), findsOneWidget);
+        expect(_statusDetailRowValue(tester, 'Cost'), '-');
+        expect(_statusDetailRowValue(tester, 'Cache'), '-');
         expect(find.text('Partially unpriced'), findsNothing);
         await tester.pumpWidget(const SizedBox.shrink());
       }
@@ -751,6 +809,14 @@ String _contextSemanticsValue(WidgetTester tester) => tester
     .getSemanticsData()
     .value;
 
+String _statusDetailRowValue(WidgetTester tester, String label) => tester
+    .widget<StatusDetailRow>(
+      find.byWidgetPredicate(
+        (widget) => widget is StatusDetailRow && widget.label == label,
+      ),
+    )
+    .value;
+
 const _contextFocusTargetKey = ValueKey('context-focus-target');
 
 Future<_FakeStudioApi> _pumpThreadStatusBar(
@@ -910,10 +976,13 @@ const _cacheRuntime = ThreadRuntimeView(
   completionTokens: 200,
   cachedPromptTokens: 400,
   cacheWriteTokens: 50,
-  cacheMissTokens: 600,
   reasoningTokens: 75,
   inferenceCount: 3,
-  cacheHitRate: 0.4,
+  cacheUsage: CacheUsageView(
+    inputTokens: 1000,
+    cacheReadTokens: 400,
+    hitRate: 0.4,
+  ),
   estimatedCosts: [
     RuntimeCostView(currency: 'USD', amount: 0.0025),
     RuntimeCostView(currency: 'CNY', amount: 0.31),
@@ -923,4 +992,44 @@ const _cacheRuntime = ThreadRuntimeView(
   promptGeneration: 2,
   promptCachePolicy: 'openAiPromptCacheKey',
   prefixChangedReason: 'contextAppended',
+);
+
+const _partialCacheRuntime = ThreadRuntimeView(
+  model: 'deepseek-v4-pro',
+  contextTokens: 42,
+  contextWindow: 100,
+  totalTokens: 1200,
+  costLabel: '',
+  activeSkills: [],
+  activeMcpServers: [],
+  activeLspServers: [],
+  agentCount: 0,
+  promptTokens: 1000,
+  completionTokens: 200,
+  cachedPromptTokens: 400,
+  cacheWriteTokens: 50,
+  reasoningTokens: 75,
+  inferenceCount: 3,
+  cacheUsage: CacheUsageView(
+    inputTokens: 1000,
+    cacheReadTokens: 400,
+    hitRate: 0.4,
+    hasIncompleteUsage: true,
+  ),
+  hasIncompleteUsage: true,
+);
+
+const _zeroHitCacheRuntime = ThreadRuntimeView(
+  model: 'deepseek-v4-pro',
+  contextTokens: 42,
+  contextWindow: 100,
+  totalTokens: 1200,
+  costLabel: '',
+  activeSkills: [],
+  activeMcpServers: [],
+  activeLspServers: [],
+  agentCount: 0,
+  promptTokens: 1000,
+  completionTokens: 200,
+  cacheUsage: CacheUsageView(inputTokens: 1000, cacheReadTokens: 0, hitRate: 0),
 );

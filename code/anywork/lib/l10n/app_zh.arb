@@ -151,6 +151,7 @@
   "statusReasoningEffort": "思考强度",
   "statusContextLabel": "上下文",
   "statusCacheLabel": "缓存",
+  "statusCacheReportedOnlyLabel": "基于已报告数据",
   "statusCacheHitTokensLabel": "缓存命中",
   "statusCacheMissTokensLabel": "缓存未命中",
   "statusCacheWriteTokensLabel": "缓存写入",

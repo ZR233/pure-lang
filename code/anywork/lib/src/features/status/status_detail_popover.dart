@@ -33,6 +33,24 @@ class _StatusDetailPopoverState extends State<StatusDetailPopover> {
   OverlayEntry? _entry;
   Timer? _hideTimer;
   bool _focused = false;
+  bool _refreshScheduled = false;
+
+  @override
+  void didUpdateWidget(StatusDetailPopover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The open overlay is built from a closure over `widget`; rebuild it so a
+    // canonical snapshot update refreshes the detail without reopening. The
+    // entry is not a descendant of this subtree, so it can only be marked
+    // after the current build completes.
+    if (_entry == null || _refreshScheduled) {
+      return;
+    }
+    _refreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshScheduled = false;
+      _entry?.markNeedsBuild();
+    });
+  }
 
   @override
   void dispose() {

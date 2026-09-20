@@ -186,14 +186,12 @@ pub struct ThreadRuntimeUsage {
     #[serde(default)]
     pub cache_write_tokens: u64,
     #[serde(default)]
-    pub cache_miss_tokens: u64,
-    #[serde(default)]
     pub reasoning_tokens: u64,
     #[serde(default)]
     pub inference_count: u64,
     pub total_tokens: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_hit_rate: Option<f64>,
+    #[serde(default)]
+    pub cache_usage: CacheUsageSummary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub estimated_costs: Vec<RuntimeCostAmount>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -207,6 +205,29 @@ pub struct ThreadRuntimeUsage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix_changed_reason: Option<crate::PromptPrefixChangedReason>,
     pub updated_at: i64,
+}
+
+/// 由已报告输入样本累计出的 prompt cache 有效用量。
+///
+/// 只有 input 与 cache read 同时报告、且 cache read（连同可选的 cache
+/// write）不超过 input 的样本才计入累计；缺失或矛盾的样本只置
+/// `has_incomplete_usage`，不改变累计值。命中率分母是累计 input，因为它
+/// 已经包含 cache read，未知不等于真实零命中。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheUsageSummary {
+    /// 计入累计的有效样本 input 总量，已包含 cache read。
+    #[serde(default)]
+    pub input_tokens: u64,
+    /// 计入累计的有效样本 cache read 总量。
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    /// `cache_read_tokens / input_tokens`；累计 input 为零时为 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_rate: Option<f64>,
+    /// 是否存在被排除在累计之外的缺失或矛盾样本。
+    #[serde(default)]
+    pub has_incomplete_usage: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

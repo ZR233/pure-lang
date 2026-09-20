@@ -184,6 +184,50 @@ class ModelPerformanceSnapshotView {
   }
 }
 
+/// 由已报告输入样本累计出的 prompt cache 有效用量。
+///
+/// 只有 input 与 cache read 同时报告、且 cache read（连同可选的 cache write）
+/// 不超过 input 的样本才计入累计；缺失或矛盾的样本只置 [hasIncompleteUsage]。
+/// 命中率分母是累计 input，因为它已经包含 cache read。
+class CacheUsageView {
+  const CacheUsageView({
+    this.inputTokens = 0,
+    this.cacheReadTokens = 0,
+    this.hitRate,
+    this.hasIncompleteUsage = false,
+  });
+
+  /// 计入累计的有效样本 input 总量，已包含 cache read。
+  final int inputTokens;
+
+  /// 计入累计的有效样本 cache read 总量。
+  final int cacheReadTokens;
+
+  /// `cacheReadTokens / inputTokens`；累计 input 为零时为 null。
+  final double? hitRate;
+
+  /// 是否存在被排除在累计之外的缺失或矛盾样本。
+  final bool hasIncompleteUsage;
+
+  /// 累计分母为正时命中率才有意义。
+  bool get hasPositiveDenominator => inputTokens > 0;
+
+  /// 命中率同口径的未命中 token；有效样本保证不出现负值。
+  int get missTokens => inputTokens - cacheReadTokens;
+
+  @override
+  bool operator ==(Object other) =>
+      other is CacheUsageView &&
+      inputTokens == other.inputTokens &&
+      cacheReadTokens == other.cacheReadTokens &&
+      hitRate == other.hitRate &&
+      hasIncompleteUsage == other.hasIncompleteUsage;
+
+  @override
+  int get hashCode =>
+      Object.hash(inputTokens, cacheReadTokens, hitRate, hasIncompleteUsage);
+}
+
 class ThreadRuntimeView {
   const ThreadRuntimeView({
     required this.model,
@@ -199,10 +243,9 @@ class ThreadRuntimeView {
     this.completionTokens = 0,
     this.cachedPromptTokens = 0,
     this.cacheWriteTokens = 0,
-    this.cacheMissTokens = 0,
     this.reasoningTokens = 0,
     this.inferenceCount = 0,
-    this.cacheHitRate,
+    this.cacheUsage = const CacheUsageView(),
     this.estimatedCosts = const [],
     this.estimatedCacheSavings = const [],
     this.hasUnpricedUsage = false,
@@ -228,10 +271,9 @@ class ThreadRuntimeView {
   final int completionTokens;
   final int cachedPromptTokens;
   final int cacheWriteTokens;
-  final int cacheMissTokens;
   final int reasoningTokens;
   final int inferenceCount;
-  final double? cacheHitRate;
+  final CacheUsageView cacheUsage;
   final List<RuntimeCostView> estimatedCosts;
   final List<RuntimeCostView> estimatedCacheSavings;
   final bool hasUnpricedUsage;
@@ -250,9 +292,6 @@ class ThreadRuntimeView {
       ? turnCompletionTokens * 1000 / turnDecodeMillis
       : null;
 
-  double? get effectiveCacheHitRate =>
-      hasUsage && !hasIncompleteUsage ? cacheHitRate : null;
-
   @override
   bool operator ==(Object other) {
     return identical(this, other) ||
@@ -270,10 +309,9 @@ class ThreadRuntimeView {
             completionTokens == other.completionTokens &&
             cachedPromptTokens == other.cachedPromptTokens &&
             cacheWriteTokens == other.cacheWriteTokens &&
-            cacheMissTokens == other.cacheMissTokens &&
             reasoningTokens == other.reasoningTokens &&
             inferenceCount == other.inferenceCount &&
-            cacheHitRate == other.cacheHitRate &&
+            cacheUsage == other.cacheUsage &&
             listEquals(estimatedCosts, other.estimatedCosts) &&
             listEquals(estimatedCacheSavings, other.estimatedCacheSavings) &&
             hasUnpricedUsage == other.hasUnpricedUsage &&
@@ -301,10 +339,9 @@ class ThreadRuntimeView {
     completionTokens,
     cachedPromptTokens,
     cacheWriteTokens,
-    cacheMissTokens,
     reasoningTokens,
     inferenceCount,
-    cacheHitRate,
+    cacheUsage,
     Object.hashAll(estimatedCosts),
     Object.hashAll(estimatedCacheSavings),
     hasUnpricedUsage,
@@ -331,10 +368,9 @@ class ThreadRuntimeView {
     int? completionTokens,
     int? cachedPromptTokens,
     int? cacheWriteTokens,
-    int? cacheMissTokens,
     int? reasoningTokens,
     int? inferenceCount,
-    double? cacheHitRate,
+    CacheUsageView? cacheUsage,
     List<RuntimeCostView>? estimatedCosts,
     List<RuntimeCostView>? estimatedCacheSavings,
     bool? hasUnpricedUsage,
@@ -360,10 +396,9 @@ class ThreadRuntimeView {
       completionTokens: completionTokens ?? this.completionTokens,
       cachedPromptTokens: cachedPromptTokens ?? this.cachedPromptTokens,
       cacheWriteTokens: cacheWriteTokens ?? this.cacheWriteTokens,
-      cacheMissTokens: cacheMissTokens ?? this.cacheMissTokens,
       reasoningTokens: reasoningTokens ?? this.reasoningTokens,
       inferenceCount: inferenceCount ?? this.inferenceCount,
-      cacheHitRate: cacheHitRate ?? this.cacheHitRate,
+      cacheUsage: cacheUsage ?? this.cacheUsage,
       estimatedCosts: estimatedCosts ?? this.estimatedCosts,
       estimatedCacheSavings:
           estimatedCacheSavings ?? this.estimatedCacheSavings,

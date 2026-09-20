@@ -88,7 +88,7 @@ pub use provider_catalog::{
 };
 pub use thread::mode::{ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId};
 pub use thread::{
-    THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition, ThreadNotification,
+    CacheUsageSummary, THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition, ThreadNotification,
     ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot,
     ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTurnHistory,
     ThreadTurnPage, ThreadWorkspaceMode, TimelinePage, TimelineQuery, TimelineTurn,

@@ -706,10 +706,13 @@ class DemoStudioApi implements StudioApi {
         completionTokens: 4160,
         cachedPromptTokens: 8860,
         cacheWriteTokens: 1240,
-        cacheMissTokens: 3100,
         reasoningTokens: 1520,
         inferenceCount: 6,
-        cacheHitRate: 0.4,
+        cacheUsage: CacheUsageView(
+          inputTokens: 22160,
+          cacheReadTokens: 8860,
+          hitRate: 0.4,
+        ),
         estimatedCosts: [
           RuntimeCostView(currency: 'CNY', amount: 0.13),
           RuntimeCostView(currency: 'USD', amount: 0.02),

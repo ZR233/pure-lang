@@ -1,7 +1,9 @@
 //! Usage and product state are decoded by their producers, never inferred from tool text.
 use super::ProjectionError;
 use pl_core::thread::{AttemptOutcome, ThreadSnapshot, journal::ThreadCommit};
-use pl_protocol::{InferenceAccounting, ThreadRuntimeSnapshot, ThreadRuntimeUsage};
+use pl_protocol::{
+    CacheUsageSummary, InferenceAccounting, ThreadRuntimeSnapshot, ThreadRuntimeUsage, UsageReport,
+};
 use std::sync::Arc;
 
 pub(super) fn project_runtime(
@@ -23,11 +25,10 @@ pub(super) fn project_runtime(
         completion_tokens: 0,
         cached_prompt_tokens: 0,
         cache_write_tokens: 0,
-        cache_miss_tokens: 0,
         reasoning_tokens: 0,
         inference_count: 0,
         total_tokens: 0,
-        cache_hit_rate: None,
+        cache_usage: CacheUsageSummary::default(),
         estimated_costs: Vec::new(),
         estimated_cache_savings: Vec::new(),
         has_unpriced_usage: false,
@@ -60,6 +61,7 @@ pub(super) fn project_runtime(
             AttemptOutcome::Interrupted => {
                 usage.has_incomplete_usage = true;
                 usage.has_unpriced_usage = true;
+                usage.cache_usage.has_incomplete_usage = true;
                 None
             }
         };
@@ -102,8 +104,10 @@ pub(super) fn project_runtime(
         }
     }
     usage.latest_context_tokens = latest_context_tokens;
-    if !usage.has_incomplete_usage && usage.prompt_tokens > 0 {
-        usage.cache_hit_rate = Some(usage.cached_prompt_tokens as f64 / usage.prompt_tokens as f64);
+    if usage.cache_usage.input_tokens > 0 {
+        usage.cache_usage.hit_rate = Some(
+            usage.cache_usage.cache_read_tokens as f64 / usage.cache_usage.input_tokens as f64,
+        );
     }
     let todo = state
         .extensions
@@ -191,9 +195,20 @@ fn add_usage(
     ] {
         *current = current.checked_add(value).ok_or(ProjectionError::Count)?;
     }
-    target.cache_miss_tokens = target
-        .prompt_tokens
-        .saturating_sub(target.cached_prompt_tokens);
+    if let Some((input, read)) = valid_cache_sample(&accounting.usage) {
+        target.cache_usage.input_tokens = target
+            .cache_usage
+            .input_tokens
+            .checked_add(input)
+            .ok_or(ProjectionError::Count)?;
+        target.cache_usage.cache_read_tokens = target
+            .cache_usage
+            .cache_read_tokens
+            .checked_add(read)
+            .ok_or(ProjectionError::Count)?;
+    } else {
+        target.cache_usage.has_incomplete_usage = true;
+    }
     if let Some(tokens) = accounting.usage.known_total_tokens() {
         target.latest_context_tokens = tokens;
     }
@@ -203,6 +218,26 @@ fn add_usage(
         &accounting.estimated_cache_savings(),
     );
     Ok(())
+}
+
+/// 提取一次 inference 的输入侧缓存样本。
+///
+/// 只有 input 与 cache read 同时报告、且 cache read（连同可选的 cache
+/// write）不超过 input 时才有效。输出侧字段缺失或矛盾不影响缓存样本有效
+/// 性，因为命中率只由输入侧累计得出。
+fn valid_cache_sample(usage: &UsageReport) -> Option<(u64, u64)> {
+    let input = usage.input_tokens?;
+    let read = usage.cache_read_tokens?;
+    if read > input {
+        return None;
+    }
+    if let Some(write) = usage.cache_write_tokens {
+        let billed = read.checked_add(write)?;
+        if billed > input {
+            return None;
+        }
+    }
+    Some((input, read))
 }
 
 fn merge_costs(
@@ -225,7 +260,7 @@ fn merge_costs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pl_core::model::{ModelError, ModelFailureKind, ModelStepOutput};
+    use pl_core::model::{ModelError, ModelFailureKind, ModelStepOutput, ModelUsage};
     use pl_core::thread::{AttemptOutcome, RequestAttempt, ThreadSnapshot};
     use pretty_assertions::assert_eq;
 
@@ -268,13 +303,17 @@ mod tests {
     }
 
     fn output() -> ModelStepOutput {
+        output_with_usage(ModelUsage::default())
+    }
+
+    fn output_with_usage(usage: ModelUsage) -> ModelStepOutput {
         ModelStepOutput {
             attempt_id: "attempt".into(),
             base_context_revision: 0,
             content: Vec::new(),
             tool_calls: Vec::new(),
             private_context: None,
-            usage: Default::default(),
+            usage,
         }
     }
 
@@ -422,5 +461,260 @@ mod tests {
         let usage = projected_usage(&state);
         assert_eq!(usage.model, FLASH_MODEL);
         assert_eq!(usage.context_window, Some(DEEPSEEK_CAPACITY));
+    }
+
+    /// 历史缺失的样本只标记不完整，后续有效样本仍能更新缓存命中率。
+    ///
+    /// 旧实现用总 `has_incomplete_usage` 门控命中率，任何历史缺失都会永久
+    /// 阻断；本用例在那种实现下会失败。
+    #[test]
+    fn cache_usage_recovers_after_a_missing_history_sample() {
+        let state = snapshot(vec![
+            attempt(
+                "missing",
+                None,
+                AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                    input_tokens: Some(100),
+                    output_tokens: Some(20),
+                    ..Default::default()
+                })),
+            ),
+            attempt(
+                "reported",
+                None,
+                AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                    input_tokens: Some(100),
+                    output_tokens: Some(20),
+                    cache_read_tokens: Some(90),
+                    ..Default::default()
+                })),
+            ),
+        ]);
+        let usage = projected_usage(&state);
+        assert!(
+            usage.has_incomplete_usage,
+            "the missing sample still flags the raw total"
+        );
+        assert!(usage.cache_usage.has_incomplete_usage);
+        assert_eq!(usage.cache_usage.input_tokens, 100);
+        assert_eq!(usage.cache_usage.cache_read_tokens, 90);
+        assert_eq!(usage.cache_usage.hit_rate, Some(0.9));
+    }
+
+    /// 命中率只依赖输入侧字段：输出缺失不影响有效缓存样本。
+    #[test]
+    fn cache_usage_counts_input_samples_even_when_output_is_missing() {
+        let state = snapshot(vec![attempt(
+            "partial",
+            None,
+            AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                input_tokens: Some(100),
+                cache_read_tokens: Some(40),
+                ..Default::default()
+            })),
+        )]);
+        let usage = projected_usage(&state);
+        assert!(
+            usage.has_incomplete_usage,
+            "missing output still flags the total"
+        );
+        assert!(!usage.cache_usage.has_incomplete_usage);
+        assert_eq!(usage.cache_usage.input_tokens, 100);
+        assert_eq!(usage.cache_usage.cache_read_tokens, 40);
+        assert_eq!(usage.cache_usage.hit_rate, Some(0.4));
+    }
+
+    /// 零输入零读取是有效样本，但累计分母为零时命中率未知而不是零。
+    #[test]
+    fn cache_usage_reports_an_unknown_rate_when_the_denominator_is_zero() {
+        let state = snapshot(vec![attempt(
+            "empty",
+            None,
+            AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                input_tokens: Some(0),
+                cache_read_tokens: Some(0),
+                ..Default::default()
+            })),
+        )]);
+        let usage = projected_usage(&state);
+        assert!(!usage.cache_usage.has_incomplete_usage);
+        assert_eq!(usage.cache_usage.input_tokens, 0);
+        assert_eq!(usage.cache_usage.hit_rate, None);
+    }
+
+    /// 正分母下的真实零命中报告为 `Some(0.0)`，不伪装成未知。
+    #[test]
+    fn cache_usage_reports_a_real_zero_hit_as_zero() {
+        let state = snapshot(vec![attempt(
+            "reported",
+            None,
+            AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                input_tokens: Some(100),
+                output_tokens: Some(5),
+                cache_read_tokens: Some(0),
+                ..Default::default()
+            })),
+        )]);
+        let usage = projected_usage(&state);
+        assert_eq!(usage.cache_usage.hit_rate, Some(0.0));
+    }
+
+    /// 分母分子来自全部有效样本，而不是最后一次样本。
+    #[test]
+    fn cache_usage_matches_accumulated_numerator_and_denominator() {
+        let state = snapshot(vec![
+            attempt(
+                "first",
+                None,
+                AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                    input_tokens: Some(100),
+                    output_tokens: Some(5),
+                    cache_read_tokens: Some(40),
+                    ..Default::default()
+                })),
+            ),
+            attempt(
+                "second",
+                None,
+                AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                    input_tokens: Some(300),
+                    output_tokens: Some(5),
+                    cache_read_tokens: Some(260),
+                    ..Default::default()
+                })),
+            ),
+        ]);
+        let usage = projected_usage(&state);
+        assert_eq!(usage.cache_usage.input_tokens, 400);
+        assert_eq!(usage.cache_usage.cache_read_tokens, 300);
+        assert_eq!(usage.cache_usage.hit_rate, Some(0.75));
+    }
+
+    /// 矛盾的输入侧样本被排除在累计之外，并标记不完整。
+    #[test]
+    fn cache_usage_excludes_contradictory_samples() {
+        for (read, write) in [(120, None), (60, Some(60))] {
+            let state = snapshot(vec![attempt(
+                "contradiction",
+                None,
+                AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                    input_tokens: Some(100),
+                    output_tokens: Some(5),
+                    cache_read_tokens: Some(read),
+                    cache_write_tokens: write,
+                    ..Default::default()
+                })),
+            )]);
+            let usage = projected_usage(&state);
+            assert!(
+                usage.cache_usage.has_incomplete_usage,
+                "read {read} write {write:?}"
+            );
+            assert_eq!(usage.cache_usage.input_tokens, 0);
+            assert_eq!(usage.cache_usage.hit_rate, None);
+        }
+    }
+
+    /// 累计溢出以类型化错误失败，不截断或回绕比例。
+    #[test]
+    fn cache_usage_overflow_fails_instead_of_truncating() {
+        let state = snapshot(vec![
+            attempt(
+                "max",
+                None,
+                AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                    input_tokens: Some(u64::MAX),
+                    cache_read_tokens: Some(0),
+                    ..Default::default()
+                })),
+            ),
+            attempt(
+                "one",
+                None,
+                AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                    input_tokens: Some(1),
+                    cache_read_tokens: Some(0),
+                    ..Default::default()
+                })),
+            ),
+        ]);
+        assert!(matches!(
+            project_runtime("thread", &state, &[]),
+            Err(super::ProjectionError::Count)
+        ));
+    }
+
+    /// Running 尝试不计数也不污染缓存样本完整性。
+    #[test]
+    fn running_attempt_neither_counts_nor_marks_cache_incomplete() {
+        let state = snapshot(vec![
+            attempt(
+                "done",
+                None,
+                AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                    input_tokens: Some(100),
+                    output_tokens: Some(5),
+                    cache_read_tokens: Some(50),
+                    ..Default::default()
+                })),
+            ),
+            attempt("running", None, AttemptOutcome::Running),
+        ]);
+        let usage = projected_usage(&state);
+        assert!(!usage.cache_usage.has_incomplete_usage);
+        assert_eq!(usage.cache_usage.input_tokens, 100);
+        assert_eq!(usage.cache_usage.hit_rate, Some(0.5));
+    }
+
+    /// compaction 回执按原路径各纳入一次，重投影结果稳定不翻倍。
+    #[test]
+    fn cache_usage_includes_compaction_once_and_stays_stable_across_reprojection() {
+        let mut state = snapshot(vec![attempt(
+            "turn",
+            None,
+            AttemptOutcome::Committed(output_with_usage(ModelUsage {
+                input_tokens: Some(100),
+                output_tokens: Some(10),
+                cache_read_tokens: Some(50),
+                ..Default::default()
+            })),
+        )]);
+        let receipt = serde_json::json!({
+            "inferenceId": "studio.compaction",
+            "binding": binding(FLASH_MODEL, None),
+            "reasoningEffort": null,
+            "contextWindow": null,
+            "turnId": "turn",
+            "accounting": serde_json::to_value(InferenceAccounting {
+                usage: UsageReport {
+                    input_tokens: Some(200),
+                    output_tokens: Some(20),
+                    cache_read_tokens: Some(150),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .expect("accounting serializes"),
+            "implementation": "native",
+            "error": null,
+        });
+        state.extensions.insert(
+            "compaction".into(),
+            pl_core::thread::extensions::ExtensionRecord {
+                revision: 1,
+                payload: pl_core::context::OpaquePayload::new(
+                    "pl.studio.compaction",
+                    1,
+                    receipt.to_string(),
+                )
+                .expect("static format and version are valid"),
+            },
+        );
+        let first = projected_usage(&state);
+        let second = projected_usage(&state);
+        assert_eq!(first, second);
+        assert_eq!(first.cache_usage.input_tokens, 300);
+        assert_eq!(first.cache_usage.cache_read_tokens, 200);
+        assert_eq!(first.cache_usage.hit_rate, Some(200.0 / 300.0));
     }
 }
