@@ -145,8 +145,8 @@ root 负责综合结论和亲自维护 `design/**`，child 不替代 root 编译
 - 单个边界清晰的实现，或多个写集合完全互斥的并行实现，使用 `executor`；并行时为每个
   child 传入最窄且互不重叠的 `writablePaths`，禁止 child 借 shell、Git 或 MCP 越界修改、
   stage、commit 或 reset。
-- 会触及共同接口、manifest、lockfile、生成文件、全仓格式化或高风险 Git 状态的任务使用
-  `worktree_executor`。每个 child 在独立 worktree 提交，root 顺序审查和采纳；worktree 不能
+- 会触及共同接口、manifest、lockfile、生成文件或高风险 Git 状态的任务使用
+  `worktree_executor`。每个 child 在独立 worktree 提交，经局部审查通过后由 root 串行合入当前工作空间；worktree 不能
   替代真实前后依赖的顺序执行。对于任务要求创建的新文件，child 必须先用文件工具创建并以
   只读工具确认精确路径和内容，之后才能执行引用该路径的 `git add` 或 `git commit`，不得用
   试探性暂存验证文件是否存在。状态检查、文件创建、内容确认、测试、暂存、提交和提交复核
@@ -159,13 +159,14 @@ DAG 或验证表，无独立探索价值时不派 explorer。root 可以承担�
 
 ### ready frontier 调度
 
-planning 开始和每批 child 交付后，root 都执行一次成本感知的并行化分析：从需求、仓库边界
+planning 开始和每个 child 交付后，root 都执行一次成本感知的并行化分析：从需求、仓库边界
 和验证目标识别可交付节点；仅当多个实质交付存在依赖时，为合格节点记录前置依赖、读写
 范围、适用 Profile、交付证据与 root-only 标记，形成任务 DAG。依赖已满足、边界清楚、可
-独立验收且预计能缩短关键路径或显著增加独立证据的节点构成 ready frontier；root 必须在
-首次 `wait` 前派出该前沿的全部 child，等待期间继续处理未委托的综合和编排工作，不得重复
-child 的任务。收齐本批 Turn 报告后，root 更新 DAG 并立即释放下一 ready frontier，
-直到没有剩余节点。调度不使用固定 agent 数量。
+独立验收且预计能缩短关键路径或显著增加独立证据的节点构成 ready frontier；root 按容量
+派发就绪任务，等待期间继续处理未委托工作，不得重复 child 的任务。每收到一个执行者的
+本轮终态报告，root 即核对证据、安排局部审查并更新依赖；满足依赖的
+后续任务立即释放，不等待整批完成。容量不足时将就绪审查排队，不用整批屏障代替容量调度。
+调度不使用固定 agent 数量。
 
 ### Turn 报告与收据
 
@@ -197,40 +198,59 @@ spawn/send 收据仅表示消息受理。父代理绑定真实 agentId 和本轮
 历史查询，不是正常交付必经步骤。旧进度与通知仅在迁移边界转换，保留原始内容、身份和顺序，
 不得把 readyForCompletion 推断成成功执行。
 
-### 整合与 reviewer 门禁
+### 独立审查与增量合入
 
-Task 默认在 working 后进入 integrating。directory 成果由 root 检查组合 diff 并形成最终
-提交；worktree 成果由 root 审查 commit、用普通 Git 显式整合；执行者和 worktree 保留至最终
-审查与验证通过后才 cleanup。同一并行批次包含多个 worktree child 时，root 必须先审查并
-整合该批次全部接受的 commit，第二次及后续整合全部成功后才能发出第一次 cleanup；随后再
-逐个 cleanup 并验证对应 branch/worktree 消失，不得按 child 交错执行"整合一个、清理一个"。
-root 可在解决冲突时完成保持合并语义所需的相邻实现和测试修复，但不得借机展开无关重构。
+working 内各实现任务独立推进编码、局部验证、静态审查和修复。root 收到单个执行者的本轮
+完成证据后即派 fresh-context reviewer，不等待其他执行者；原执行者在该轮审查期间暂停修改
+被审范围，其他互斥范围可继续工作。执行者只做自身改动范围的格式检查、静态检查、单元测试
+和必要定向回归，不运行全仓格式化、全量测试或最终集成门禁。无法定向执行的检查交 root；
+若目标项目强制每次提交前全量验证，派 directory executor，由 root 统一验证后按授权提交，
+不能让 worktree executor 跳过项目规则。
+
+每次审查消息包含当前已批准的完整实施计划及已确认调整、该任务范围与验收要求、执行者
+身份、实际工作区、基线、差异和局部验证证据。reviewer 逐项核对负责范围是否完成计划、
+是否偏离设计以及代码缺陷，只做静态审查，不执行 shell 或测试。未完成的其他独立任务不算
+当前任务遗漏，但影响本任务正确性的真实依赖必须明确。缺少完整计划或必要源码证据时补齐
+后才能批准。计划明确留给 root 的最终验收尚未执行，不单独阻塞局部静态审查。
+
+审查结论绑定 worktree commit 或 directory 差异及文件内容身份。reviewer 读取被审执行者
+的实际工作区，不限定为 root 工作区；工具不能访问时，root 提供完整可核对的源码和差异，
+不能凭摘要批准。报告明确批准或阻塞问题并附证据，不得同时批准又要求先补齐审查必要证据。
+root 消费对应 reviewer 本轮终态报告，不解析字符串 marker，不另读 submission。
+
+- directory 成果已在当前工作空间。审查通过、局部验证和前置条件满足后标记该任务完成，
+  不执行 cherry-pick、merge 或模拟合入，也不顺带提交其他未完成或未审查的本地改动。
+- worktree 成果审查通过且依赖满足后，root 即用普通 Git 将已批准提交合入当前工作空间，
+  不等待其他执行者。主工作区 Git 操作串行；合入成功后才标记任务完成并释放依赖。
+- 冲突解决、后续修改或依赖变化影响已审范围时，补充该范围的验证和 fresh-context 复审；
+  无关变化不使全部审查失效。不得丢弃其他所有者的改动或借冲突处理扩大为无关重构。
+
+代码 finding 由 root 发回原执行者；修复后先局部复审，再按工作区类型完成或合入。设计问题
+由 root 在继续相关编码前同步文档；需要调整计划时遵循既有确认流程，不用修改计划掩盖偏离。
+各任务循环互不阻塞，所有执行者及 worktree 保留至最终验收通过，不能把增量合入当作 cleanup。
+
+全部本地任务完成、全部工作树任务完成并合入后，integrating 核对交付完整性和审查版本；
+没有 worktree 就不制造合入操作。reviewing 由 root 对照完整计划进行跨任务静态审查、适用的
+全量检查、集成与功能验收，逐项对应要求、实现和实际证据。不强制再派全量 reviewer，局部
+审查批准也不能代替整体验收。最终验收发现代码问题时回 working，由原执行者局部修复、复审，
+worktree 修复再次合入，directory 修复直接留在当前工作空间；设计问题回 editing_documents。
+仅环境故障则处理环境并重跑受阻检查，不机械触发代码返工。所有必要验收通过后关闭子代理，
+清理已接受的 worktree 并核对资源回收，再进入 completed；失败或取消保留未交付现场。
+
 合适 child 不可用或失败时，root 先等待容量并收窄重派一次；仍失败才允许最小实现兜底，并
-在交付中记录 `ROOT_IMPLEMENTATION_FALLBACK`、原因和直接修改文件。
-
-参数或合同错误不得原样重放：root 先按工具 schema 修正 camelCase 参数、模式专属字段和目标
-id，再用新的调用重试一次；容量或 provider 暂时失败则等待后收窄重派。刻意验证 directory
-边界的拒绝必须标记为 expected rejection，禁止绕过，也不计入非预期首次调用失败。
-
-所有成果整合后必须创建 fresh-context 的只读 `reviewer`，综合检查目标、设计、完整 diff、
-错误路径、测试、冲突和 fallback。reviewer 不直接修复：代码 finding 回到 working 交给
-executor，设计 finding 回到 editing_documents 由 root 修订；重新整合后必须再派新的
-reviewer。reviewer 在本轮报告中明确批准或阻塞 finding，并提供证据；不能同时批准和要求先
-完成必要检查。root 消费对应 reviewer 本轮终态报告，不解析字符串 marker，不另读 submission。
-全部 reviewer 批准后进入最终验证，任一阻塞 finding 都需返工、整合和新的审查。审查者保持只读。
-
-上述职责由本 Turn 的 Mode/Profile 指令约束，不新增专用 executor/reviewer runtime 生命
-周期，也不按阶段裁剪普通工具能力。
+在交付中记录 `ROOT_IMPLEMENTATION_FALLBACK`、原因和直接修改范围。参数错误按实际 schema
+修正后再调用，不能重复相同错误；刻意验证目录边界的拒绝记为 expected rejection，不能绕过。
+上述职责是 Mode/Profile 提示词合同，不新增运行时子任务状态机或工具能力裁剪。
 
 ### 原执行者返工与验证证据
 
 root 保存任务读写范围与原执行者 `agentId` 的映射，交付后保持执行者 idle、可续跑，不提前
 关闭或清理 worktree。代码 finding 必须先用 `send_message` 续跑原执行者，附 finding、当前
 整合基线、修复范围和验证记录；只有执行者不可用或原权限无法覆盖修复时才重派，并记录具体
-原因。设计 finding 仍由 root 修订。worktree 返工前由 root 协调同步 canonical 基线；只采纳
+原因。设计 finding 仍由 root 修订。worktree 返工前由 root 协调核对最新 canonical 基线，仅在依赖或冲突需要时同步；只采纳
 本轮新增修复提交，不重复整合旧提交。每次续跑都重新建立 pending 集合，使用本轮消息之后的
-终态报告；旧轮次完成状态与旧交付不能证明返工完成。重新整合
-后创建 fresh-context reviewer，全部 approval 且最终验证通过后才关闭执行者、清理 worktree；
+终态报告；旧轮次完成状态与旧交付不能证明返工完成。修复后创建 fresh-context reviewer，
+局部批准后本地任务直接完成，worktree 新增提交由 root 合入；最终验收通过后才关闭执行者、清理 worktree；
 停止或失败保留未交付现场并报告原因。
 
 执行者、reviewer 的本轮报告包含验证记录：实际执行者、完整命令、
@@ -240,7 +260,7 @@ root 保存任务读写范围与原执行者 `agentId` 的映射，交付后保�
 汇总。执行身份以成功 spawn 回执中的 Pure agentId 为准；child 无法确认时报告角色/范围，
 由 root 绑定 ID，不使用环境变量、进程或外层宿主 ID。相同命令、相关代码范围与环境未变且
 已有成功证据时复用；修改或依赖变化、冲突、失败诊断、覆盖缺口与强制门禁要求重跑时，报告
-具体原因。不同角色不机械重复全量检查，最终整合验证与项目强制门禁仍须满足；reviewer 不为
+具体原因。执行者只做局部验证，root 承担最终整合验证与项目强制门禁；reviewer 不为
 补测试越过只读工具边界。验证记录使用报告正文，不新增生产协议、持久化字段或
 GUI 接口。复用会话增加上下文及 provider prompt cache 复用机会，缓存命中只按上游实际
 usage 报告，不承诺固定收益。阶段完成标准消费可复用的验证记录，只补缺失或失效的检查，

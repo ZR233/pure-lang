@@ -169,8 +169,11 @@ reviewing -> working | editing_documents | completed
 completed、stopped 为终态
 ```
 
-`completed` 与 `stopped` 都是无任何出边的 final state，停止边只从非终态进入 `stopped`。代码
-finding 回到 working，设计 finding 回到 editing_documents；两条返工路径都必须重新经过
+`completed` 与 `stopped` 都是无任何出边的 final state，停止边只从非终态进入 `stopped`。
+working 内各执行者独立进行编码、局部静态审查和修复；本地任务通过后直接完成，
+工作树任务通过后由 root 增量合入，不等待整批。integrating 核对全部任务与合入完整性，
+reviewing 由 root 完成整体集成及功能验收，不强制最终全量子代理审查。最终验收的代码
+finding 回到 working，设计 finding 回到 editing_documents；两条返工路径都重新经过
 integrating 和 reviewing。状态指令、完成标准和每条边的 guard 属于图；协作、工具使用与角色
 约束属于 Mode Prompt（完整编排合同见 [12](./12-collaboration.md)）。
 
