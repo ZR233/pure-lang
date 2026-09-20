@@ -158,8 +158,9 @@ crate 职责、依赖方向与禁止依赖的唯一权威源是 [Crate 边界](d
   桌面 xtask 构建会嵌入 worker；两种宿主均不使用裸 shell 后备路径。
 
 - 不默认启用 `--all-features`：`live-tests` 等 feature 依赖外部服务与有效
-  API key，需要时以 `cargo test -p pl-model --features live-tests` 等显式
+  API key，需要时以 `cargo run -p pl-studio-runtime --features live-tests --example model_observe -- <provider> <model> <task-file> <artifact-dir>` 等显式
   opt-in 执行，CI 与本地默认检查都不包含。
+- 真实模型和真实 GUI 任务使用人工观察入口，不断言回答、工具次数、缓存命中或业务终态；执行状态与人工结论分开记录，默认待评审。单元、本地协议 fixture、恢复迁移及确定性 demo/widget 测试保留断言。
 - CI（PR Quality Gate）只运行上述确定性检查，外加 Conventional PR 标题与发布
   配置校验；Flutter Driver smoke、任务流 harness 与 live 模型验收不在 CI 中
   运行——涉及 GUI 行为改动时，交付前本地执行 `cargo xtask verify-gui

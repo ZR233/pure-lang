@@ -3,8 +3,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
-use async_openai::Client;
-use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
 use pl_protocol::trace::{AgentEventSender, TraceEventSink};
 use pl_protocol::{InferenceTiming, PureError, Result};
@@ -21,8 +19,7 @@ use crate::completion::{
 use crate::model::capabilities::ModelCapabilities;
 use crate::model::info::ModelInfo;
 use crate::provider::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProtocol};
-use crate::runtime::openai::sse;
-use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody, PureOpenAiConfig};
+use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody};
 use crate::runtime::transport_policy::{
     MODEL_MAX_RETRIES, RESPONSES_WEBSOCKET_MAX_RETRIES, model_request_retry_delay,
 };
@@ -183,8 +180,6 @@ pub(crate) struct InvocationRunner {
     pub(crate) clock: Arc<dyn super::InferenceClock>,
     pub(crate) pricing_mode: pl_protocol::PricingMode,
 }
-
-use super::provider_error::openai_error_to_pure;
 
 enum ConnectionNotice {
     Retrying,
@@ -367,6 +362,30 @@ impl InvocationRunner {
         } else {
             context.session.admit().await?
         };
+        let mut request = super::context::project_request(&self.endpoint, &self.model, request)?;
+        let prepare = async {
+            super::attachments::AttachmentBackend {
+                endpoint: &self.endpoint,
+                model: &self.model,
+                client: &self.http_client,
+                session: &context.session,
+                fingerprint: self.connection_fingerprint(),
+                now: self.clock.unix_seconds()?,
+                cancellation: context.cancellation.clone().unwrap_or_default(),
+            }
+            .prepare(&mut request)
+            .await
+        };
+        if let Some(token) = &context.cancellation {
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => return Err(CompletionFailure::cancelled(
+                    PureError::LlmError("attachment preparation cancelled".into()), Box::default())),
+                result = prepare => result?,
+            }
+        } else {
+            prepare.await?;
+        }
         let inference_timer = InferenceTimer::start();
         let original_trace = context.trace.clone();
         let retry_jitter_key = original_trace
@@ -377,6 +396,7 @@ impl InvocationRunner {
         let mut attempt_number = 0_u32;
         let transport_metrics_before = context.session.orchestration_snapshot();
         let mut http_fallbacks = 0_u64;
+        let mut refreshed_attachments = false;
 
         loop {
             if context
@@ -391,7 +411,17 @@ impl InvocationRunner {
             }
             let transport = self.active_transport(&context.session);
             let max_retries = MODEL_MAX_RETRIES;
-            let attempt_request = request.clone();
+            let mut attempt_request = request.clone();
+            if attempt_number > 0 {
+                for media in &mut attempt_request.prepared_content {
+                    media.sources.retain(|source| {
+                        !matches!(
+                            source,
+                            crate::completion::AttachmentRepresentation::RemoteUrl { .. }
+                        )
+                    });
+                }
+            }
             let mut trace = original_trace.clone();
             if attempt_number > 0
                 && let Some(trace) = trace.as_mut()
@@ -471,6 +501,70 @@ impl InvocationRunner {
                     );
                 }
                 return Err(error);
+            }
+            let recovery = error
+                .source
+                .provider_failure_ref()
+                .map(|failure| failure.context.recovery)
+                .unwrap_or_default();
+            if recovery == pl_protocol::ProviderRecovery::HttpFallback
+                && transport == OpenAiTransport::ResponsesWebSocket
+                && attempt_number < max_retries
+            {
+                if context
+                    .session
+                    .activate_responses_http_fallback(self.connection_fingerprint())
+                    .await
+                {
+                    http_fallbacks += 1;
+                }
+                attempt_number += 1;
+                context.publish_retry_notice(attempt_number, ConnectionNotice::Retrying)?;
+                continue;
+            }
+            if recovery == pl_protocol::ProviderRecovery::RefreshAttachments
+                && !refreshed_attachments
+                && attempt_number < max_retries
+                && request.prepared_content.iter().any(|part| {
+                    part.sources.iter().any(|source| {
+                        matches!(
+                            source,
+                            crate::completion::AttachmentRepresentation::ProviderFile { .. }
+                        )
+                    })
+                })
+            {
+                context
+                    .session
+                    .uploaded_files
+                    .lock()
+                    .await
+                    .retain(|(fingerprint, _), _| *fingerprint != self.connection_fingerprint());
+                let prepare = async {
+                    super::attachments::AttachmentBackend {
+                        endpoint: &self.endpoint,
+                        model: &self.model,
+                        client: &self.http_client,
+                        session: &context.session,
+                        fingerprint: self.connection_fingerprint(),
+                        now: self.clock.unix_seconds()?,
+                        cancellation: context.cancellation.clone().unwrap_or_default(),
+                    }
+                    .prepare(&mut request)
+                    .await
+                };
+                if let Some(token) = &context.cancellation {
+                    tokio::select! {
+                        biased;
+                        _ = token.cancelled() => return Err(CompletionFailure::cancelled(PureError::LlmError("attachment refresh cancelled".into()), error.accounting)),
+                        result = prepare => result?,
+                    }
+                } else {
+                    prepare.await?;
+                }
+                refreshed_attachments = true;
+                attempt_number += 1;
+                continue;
             }
             if !error.is_transient_model_transport() {
                 return Err(error);
@@ -662,25 +756,26 @@ impl InvocationRunner {
                 return Ok(decode_raw_event_stream(raw_stream, protocol));
             }
             let capture = wire_capture::capture_http(&body, trace.as_ref()).await?;
-            let config = PureOpenAiConfig::new(
-                api_base,
-                token,
+            let headers = super::transport::headers(
+                token.as_deref(),
                 endpoint.http_headers.as_ref(),
                 &model_info.binding.request.headers,
             )?;
-            // 仅当前逻辑请求所有者重试；库默认执行器另有重试预算，必须绕过。
-            let service = async_openai::middleware::ReqwestService::new(http_client.clone());
-            let client = Client::build(http_client, config).with_http_service(service);
-            let stream_result: std::result::Result<
-                StreamResponse<sse::SseStreamEvent>,
-                async_openai::error::OpenAIError,
-            > = match body {
-                OpenAiRequestBody::Responses(body) => {
-                    client.responses().create_stream_byot(body).await
-                }
-                OpenAiRequestBody::Chat(body) => client.chat().create_stream_byot(body).await,
+            let request = match body {
+                OpenAiRequestBody::Responses(body) => http_client
+                    .post(format!("{api_base}/responses"))
+                    .json(&body),
+                OpenAiRequestBody::Chat(body) => http_client
+                    .post(format!("{api_base}/chat/completions"))
+                    .json(&body),
             };
-            let stream = match stream_result {
+            let stream = match super::transport::sse(
+                request
+                    .headers(headers)
+                    .header("accept", "text/event-stream"),
+            )
+            .await
+            {
                 Ok(stream) => {
                     if let Some(capture) = &capture {
                         capture.record_stage("streamOpened").await?;
@@ -691,13 +786,11 @@ impl InvocationRunner {
                     if let Some(capture) = &capture {
                         capture.record_stage("streamOpenFailed").await?;
                     }
-                    return Err(openai_error_to_pure(error));
+                    return Err(error);
                 }
             };
 
-            let raw_stream = stream
-                .map(|event| event.map_err(openai_error_to_pure))
-                .boxed();
+            let raw_stream = stream;
             let raw_stream = wire_capture::observe_http_stream(raw_stream, capture);
             let raw_stream =
                 if model_info.binding.transport.protocol == ProviderWireProtocol::Responses {
@@ -1600,12 +1693,12 @@ mod tests {
                 }
                 .into(),
             ])
-            .prepared_content(vec![crate::completion::PreparedContentPart {
+            .prepared_content(vec![crate::completion::ResolvedAttachment {
                 attachment_id,
                 modality: pl_protocol::AttachmentModality::Image,
                 media_type: "image/png".to_string(),
                 filename: Some("marker.png".to_string()),
-                sources: vec![crate::completion::PreparedContentSource::DataUrl {
+                sources: vec![crate::completion::AttachmentRepresentation::DataUrl {
                     base64: "aW1hZ2U=".to_string(),
                 }],
             }])

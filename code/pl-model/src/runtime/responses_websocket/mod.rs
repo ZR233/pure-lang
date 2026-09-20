@@ -1258,6 +1258,45 @@ mod orchestration_tests {
     }
 
     #[tokio::test]
+    async fn rejected_upgrade_switches_to_http_without_a_second_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            #[allow(clippy::result_large_err)]
+            fn reject(
+                request: &WebSocketRequest,
+                _: WebSocketResponse,
+            ) -> std::result::Result<WebSocketResponse, ErrorResponse> {
+                assert_eq!(request.uri().path(), "/v1/responses");
+                Err(tokio_tungstenite::tungstenite::http::Response::builder()
+                    .status(426)
+                    .body(None)
+                    .unwrap())
+            }
+            assert!(accept_hdr_async(socket, reject).await.is_err());
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = capture_http_request(&mut socket).await;
+            assert_eq!(request.request_line, "POST /v1/responses HTTP/1.1");
+            send_responses_sse(&mut socket, "http-response", "http-message", "http-ok").await;
+        });
+        let provider = local_websocket_provider(&address.to_string(), None);
+        let session = ModelSession::default();
+        let response = provider
+            .complete(
+                minimal_request("local-responses"),
+                ModelInvocationContext::new(session.clone()),
+            )
+            .await
+            .expect("426 must select the supported HTTP transport");
+        server.await.unwrap();
+        assert_eq!(response.content.as_deref(), Some("http-ok"));
+        assert_eq!(response.orchestration.transport_attempts, 2);
+        assert_eq!(response.orchestration.http_fallbacks, 1);
+        assert!(session.uses_responses_http_fallback(provider.connection_fingerprint()));
+    }
+
+    #[tokio::test]
     async fn responses_websocket_does_not_retry_unauthorized_handshake() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -1289,9 +1328,18 @@ mod orchestration_tests {
         server.await.unwrap();
 
         assert!(!error.is_transient_model_transport());
+        let failure = error
+            .source
+            .provider_failure_ref()
+            .expect("typed handshake failure");
+        assert_eq!(failure.http_status, Some(401));
         assert_eq!(
-            error.to_string(),
-            "HTTP error: Responses WebSocket handshake failed with HTTP 401"
+            failure.kind,
+            pl_protocol::ProviderFailureKind::Authentication
+        );
+        assert_eq!(
+            failure.context.stage,
+            pl_protocol::ProviderFailureStage::Handshake
         );
     }
 

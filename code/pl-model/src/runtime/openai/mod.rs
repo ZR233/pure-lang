@@ -5,7 +5,6 @@ use crate::completion::CompletionRequest;
 use crate::completion::CompletionResponse;
 use crate::model::info::ModelInfo;
 
-mod client_config;
 mod identity;
 mod request;
 #[cfg(test)]
@@ -13,7 +12,6 @@ mod response;
 pub(crate) mod sse;
 pub(crate) mod usage;
 
-pub(crate) use client_config::PureOpenAiConfig;
 pub(crate) use request::OpenAiRequestBody;
 use request::build_openai_request_body;
 #[cfg(test)]
@@ -173,13 +171,13 @@ pub(crate) mod test_support {
         }
     }
 
-    pub(crate) fn image_prepared_content() -> Vec<crate::completion::PreparedContentPart> {
-        vec![crate::completion::PreparedContentPart {
+    pub(crate) fn image_prepared_content() -> Vec<crate::completion::ResolvedAttachment> {
+        vec![crate::completion::ResolvedAttachment {
             attachment_id: "attachment-1".to_string(),
             modality: AttachmentModality::Image,
             media_type: "image/png".to_string(),
             filename: Some("sample.png".to_string()),
-            sources: vec![crate::completion::PreparedContentSource::DataUrl {
+            sources: vec![crate::completion::AttachmentRepresentation::DataUrl {
                 base64: "aGVsbG8=".to_string(),
             }],
         }]

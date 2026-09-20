@@ -8,6 +8,7 @@
 //! 本域公共类型字段与公共方法签名中出现的 `pl-protocol` 类型在下方精确重导出，
 //! 消费方只需依赖 `pl-model` 即可命名完整签名。
 
+mod attachment;
 pub(crate) mod compaction;
 pub(crate) mod request;
 pub(crate) mod response;
@@ -17,6 +18,7 @@ pub(crate) mod tool_call;
 pub(crate) mod tool_schema;
 pub(crate) mod usage;
 mod visible_text;
+pub use attachment::{AttachmentInput, AttachmentSource, ResourceAccess, ResourceReference};
 
 pub use compaction::*;
 pub use pl_protocol::{

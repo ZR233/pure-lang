@@ -4,8 +4,8 @@ use crate::runtime::{InvocationRunner, ModelInvocationContext};
 
 /// Concrete MiMo client, obtained from the resolved runtime's provider enum.
 #[derive(Debug, Clone)]
-pub struct MiMoClient {
-    pub(crate) runner: InvocationRunner,
+pub struct MiMoClient<'a> {
+    pub(crate) runner: &'a InvocationRunner,
 }
 
 /// MiMo thinking mode; generated reasoning remains in tool-call history.
@@ -30,7 +30,7 @@ pub struct MiMoCompletion {
     pub options: MiMoCompletionOptions,
 }
 
-impl MiMoClient {
+impl MiMoClient<'_> {
     /// Executes a native request with shared cancellation, retries and final accounting.
     ///
     /// # Errors

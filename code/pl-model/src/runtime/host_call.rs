@@ -126,7 +126,7 @@ impl ModelTurnClient {
     }
 
     /// Explicit access to the bound native client; ordinary completion remains provider-neutral.
-    pub fn provider(&self) -> &crate::provider::ProviderClient {
+    pub fn provider(&self) -> crate::provider::ProviderClient<'_> {
         self.runtime.provider()
     }
 

@@ -2,6 +2,7 @@
 mod clients;
 pub mod compatible;
 pub mod deepseek;
+pub(crate) mod files;
 pub mod mimo;
 pub mod openai;
 pub mod zhipu;
@@ -67,6 +68,8 @@ pub struct WebSearchProviderCapabilities {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderServiceCapabilities {
     #[serde(default)]
+    pub files: FileUploadCapability,
+    #[serde(default)]
     pub remote_compaction: bool,
     #[serde(default)]
     pub web_search: WebSearchProviderCapabilities,
@@ -74,6 +77,15 @@ pub struct ProviderServiceCapabilities {
     pub prompt_cache: PromptCacheProviderCapabilities,
     #[serde(default)]
     pub responses_tools: ResponsesHostedToolCapabilities,
+}
+
+/// Explicit upload dialect; custom endpoints must opt in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileUploadCapability {
+    #[default]
+    None,
+    DeepSeek,
 }
 
 /// Endpoint 对 Responses hosted tool 类型的支持。
@@ -152,6 +164,7 @@ impl ProviderServiceCapabilities {
     pub fn openai_web_search() -> Self {
         Self {
             remote_compaction: true,
+            files: FileUploadCapability::None,
             web_search: WebSearchProviderCapabilities {
                 hosted_responses: true,
                 hosted_dialect: HostedWebSearchDialect::OpenAiResponses,
@@ -305,6 +318,14 @@ impl ProviderEndpoint {
     }
 
     pub fn deepseek(base_url: Option<String>) -> Self {
+        let files = if base_url
+            .as_deref()
+            .is_none_or(|url| url.trim_end_matches('/') == "https://api.deepseek.com")
+        {
+            FileUploadCapability::DeepSeek
+        } else {
+            FileUploadCapability::None
+        };
         Self {
             adapter: ProviderAdapterKind::DeepSeek,
             name: "DeepSeek".into(),
@@ -314,6 +335,7 @@ impl ProviderEndpoint {
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
             service_capabilities: ProviderServiceCapabilities {
+                files,
                 web_search: WebSearchProviderCapabilities {
                     hosted_responses: true,
                     hosted_dialect: HostedWebSearchDialect::DeepSeekResponses,

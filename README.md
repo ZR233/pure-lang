@@ -271,9 +271,9 @@ pure-lang/
 | 序列化 | serde + serde_json + toml |
 | Flutter 状态管理 | Riverpod |
 | Flutter 路由 | go_router |
-| LLM 集成 | OpenAI 兼容 API、SSE 与 Responses WebSocket（async-openai 等适配） |
+| LLM 集成 | 共享 OpenAI 协议、供应商 backend、reqwest 与 Responses WebSocket |
 | LSP 客户端 | lsp-types + 自研 JSON-RPC framing（rust-analyzer 支持） |
-| 流式解析 | async-openai stream |
+| 流式解析 | eventsource-stream 分帧与自有 typed 协议事件解码 |
 
 ## 核心概念
 

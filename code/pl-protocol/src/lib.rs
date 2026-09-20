@@ -106,7 +106,8 @@ pub use turn::{
     TurnPhase, TurnRolloverOutcome, TurnState, TurnTransitionDecision, TurnTransitionError,
 };
 pub use turn_failure::{
-    ProviderFailure, ProviderFailureKind, RetryDisposition, TurnFailure, TurnFailureCategory,
+    ProviderFailure, ProviderFailureContext, ProviderFailureKind, ProviderFailureStage,
+    ProviderRecovery, RetryDisposition, TurnFailure, TurnFailureCategory,
 };
 pub use workflow::{
     WorkflowDefinition, WorkflowOperationReceipt, WorkflowRun, WorkflowRunArchive,

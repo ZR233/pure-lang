@@ -154,6 +154,7 @@ impl ProviderConfig {
                             != preset.provider.base_url.trim_end_matches('/')
                         {
                             capabilities.remote_compaction = false;
+                            capabilities.files = Default::default();
                             capabilities.responses_tools = Default::default();
                             capabilities.web_search.hosted_responses = false;
                         }

@@ -41,7 +41,7 @@ provider tool result 匹配。
 
 pl-model 实现并依赖 core 的模型会话/模型请求契约，core 不依赖 model。产品 DTO 和 adapter 内部
 消息可依赖 pl-protocol；pl-trace 只读消费 core 观察接口，不作为模型执行门面。provider 适配可以
-使用 async-openai、reqwest、tokio-tungstenite 与 serde 等依赖，它们只用于内部 transport、typed
+使用 reqwest、eventsource-stream、tokio-tungstenite 与 serde 等依赖，它们只用于内部 transport、typed
 protocol request 和 typed stream event 解析，不向 pl-core 暴露。
 
 公开 API 按四个稳定域组织（completion / model / provider / runtime），消费方通过域模块前缀访问
@@ -77,8 +77,21 @@ include usage 与 tool stream 配置。厂商原生选项在具体客户端公�
 
 ## 6.4 Provider 与运行时
 
+协议栈按调用编排、OpenAI 协议编解码、网络传输和供应商 backend 分工。ModelRuntime 持有唯一执行器，
+原生供应商客户端是借用同一执行器的类型化能力视图，不再各自拥有执行器。Responses HTTP 与 WS
+共用请求和事件解释；Chat 保留独立 wire codec。HTTP JSON、SSE 和 multipart 由共享 reqwest
+transport 执行，重试预算只由调用编排拥有。供应商 backend 组合附件准备、请求选项和错误分类。
+
+附件输入描述来源而非发送方式：URL、Base64、共享 bytes 或宿主资源引用在准备阶段解析；backend
+选择 URL、Data URL 或上传后的 file id。持久历史仍只保存资源引用与快照，上传 id 是按 endpoint、
+凭据身份和内容摘要隔离的可重建会话缓存。DeepSeek Files 上传使用 user_data 与 24 小时租期，
+取消和上传结果不明不得盲目重复 POST；明确不支持上传才允许在推理发送前回退 inline。
+
+本次迁移以本地 Codex 的 endpoint/transport/session 分层为参照，不依赖其产品专属上传协议。
+握手 426 允许在统一预算内切换 HTTP，普通 400 保留为请求错误，不以扩大重试掩盖协议错误。
+
 模型执行采用窄接口与具体供应商客户端组合：统一入口只负责推理；OpenAI、DeepSeek、智谱、MiMo 与
-OpenAI-compatible 拥有各自的具体客户端和类型化原生选项，动态路由使用持有这些客户端的封闭枚举。
+OpenAI-compatible 拥有各自的类型化原生选项，动态路由返回借用共享执行器的封闭客户端视图。
 单模型运行时与辅助请求客户端显式开放类型化供应商访问入口，不使用 `Any`、向下转型或包含所有
 可选操作的大 trait。
 
@@ -232,9 +245,9 @@ codec 还定义 `video_url` 与 `file_url`，但模型只有在精确请求契�
 验证后才声明对应能力。GLM-5.3-Flash 当前只声明 text/image：远程图片首发优选 URL，本地图片
 以及历史、重试和恢复统一使用 Data URL。未声明相应 modality 的模型必须在任何附件 IO 或凭据
 读取前拒绝。DeepSeek V4.1 Flash 当前声明 text/image，并通过 Responses `input_image` 发送：
-远程图片首发优选 URL，本地图片、历史、重试和恢复使用 Data URL；支持的快照格式固定为 JPEG、
-PNG、GIF、WebP。官方 Files API 在 provider file 上传、瞬时 file id 与快照回放生命周期全部实现
-前不声明该表示。官方对少于 15 张与至少 15 张图片使用不同边长上限：canonical profile 选择全
+远程图片首发优选 URL；支持 Files 的 endpoint 将本地快照上传并引用 file_id，不支持 Files 时
+使用 Data URL。支持的快照格式固定为 JPEG、PNG、GIF、WebP。上传能力为独立 endpoint 声明，
+不因模型支持图片而推断；自定义地址需显式选择上传方言。官方对少于 15 张与至少 15 张图片使用不同边长上限：canonical profile 选择全
 批次均可成立的 4096 像素保守上限，并以 32 MiB snapshot 批次总字节上限保证 Data URL 重放不会
 越过接口的 48 MiB 请求体边界；该保守子集不按模型名在 adapter 中特判。
 

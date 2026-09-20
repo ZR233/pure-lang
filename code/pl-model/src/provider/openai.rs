@@ -4,8 +4,8 @@ use crate::runtime::{InvocationRunner, ModelInvocationContext};
 
 /// Concrete OpenAi client, obtained from the resolved runtime's provider enum.
 #[derive(Debug, Clone)]
-pub struct OpenAiClient {
-    pub(crate) runner: InvocationRunner,
+pub struct OpenAiClient<'a> {
+    pub(crate) runner: &'a InvocationRunner,
 }
 
 /// OpenAI cache placement mode.
@@ -38,7 +38,7 @@ pub struct OpenAiCompletion {
     pub options: OpenAiCompletionOptions,
 }
 
-impl OpenAiClient {
+impl OpenAiClient<'_> {
     /// Executes a native request with shared cancellation, retries and final accounting.
     ///
     /// # Errors

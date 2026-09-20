@@ -4,8 +4,8 @@ use crate::runtime::{InvocationRunner, ModelInvocationContext};
 
 /// Concrete Zhipu client, obtained from the resolved runtime's provider enum.
 #[derive(Debug, Clone)]
-pub struct ZhipuClient {
-    pub(crate) runner: InvocationRunner,
+pub struct ZhipuClient<'a> {
+    pub(crate) runner: &'a InvocationRunner,
 }
 
 /// Native tool argument streaming, independent of standard chat streaming.
@@ -26,7 +26,7 @@ pub struct ZhipuCompletion {
     pub options: ZhipuCompletionOptions,
 }
 
-impl ZhipuClient {
+impl ZhipuClient<'_> {
     /// Executes a native request with shared cancellation, retries and final accounting.
     ///
     /// # Errors

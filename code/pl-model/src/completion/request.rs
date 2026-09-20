@@ -9,19 +9,14 @@ use pl_protocol::{
     AttachmentModality, ContentPart, Message, ModelContextItem, PureError, ToolSpec,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct CompletionRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
     pub input: Vec<ModelContextItem>,
-    #[serde(default)]
-    pub prepared_content: Vec<PreparedContentPart>,
-    #[serde(default)]
+    pub attachments: Vec<super::AttachmentInput>,
+    pub(crate) prepared_content: Vec<ResolvedAttachment>,
     pub tools: Vec<ToolSpec>,
-    #[serde(default = "default_tool_choice")]
     pub tool_choice: String,
-    #[serde(default)]
     pub parallel_tool_calls: bool,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u64>,
@@ -30,18 +25,18 @@ pub struct CompletionRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PreparedContentPart {
+pub(crate) struct ResolvedAttachment {
     pub attachment_id: String,
     pub modality: AttachmentModality,
     pub media_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
-    pub sources: Vec<PreparedContentSource>,
+    pub sources: Vec<AttachmentRepresentation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
-pub enum PreparedContentSource {
+pub(crate) enum AttachmentRepresentation {
     DataUrl { base64: String },
     RemoteUrl { url: String },
     ProviderFile { file_id: String },
@@ -77,8 +72,14 @@ impl CompletionRequestBuilder {
         self
     }
 
-    pub fn prepared_content(mut self, prepared_content: Vec<PreparedContentPart>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn prepared_content(mut self, prepared_content: Vec<ResolvedAttachment>) -> Self {
         self.request.prepared_content = prepared_content;
+        self
+    }
+
+    pub fn attachments(mut self, attachments: Vec<super::AttachmentInput>) -> Self {
+        self.request.attachments = attachments;
         self
     }
 
@@ -129,6 +130,7 @@ impl CompletionRequest {
                 instructions: None,
                 input: Vec::new(),
                 prepared_content: Vec::new(),
+                attachments: Vec::new(),
                 tools: Vec::new(),
                 tool_choice: default_tool_choice(),
                 parallel_tool_calls: false,
@@ -154,7 +156,19 @@ impl CompletionRequest {
         model: &str,
         capabilities: &ModelCapabilities,
     ) -> pl_protocol::Result<()> {
-        let requirements = RequestRequirements::from_input(&self.input, &self.prepared_content)?;
+        let declared = self
+            .attachments
+            .iter()
+            .map(|input| ResolvedAttachment {
+                attachment_id: input.attachment_id.clone(),
+                modality: input.modality,
+                media_type: input.media_type.clone(),
+                filename: input.filename.clone(),
+                sources: Vec::new(),
+            })
+            .chain(self.prepared_content.iter().cloned())
+            .collect::<Vec<_>>();
+        let requirements = RequestRequirements::from_input(&self.input, &declared)?;
         if requirements.text && !capabilities.supports_input_modality(ModelModality::Text) {
             return Err(PureError::ConfigError(format!(
                 "model {} does not support text input",
@@ -252,7 +266,7 @@ struct RequestRequirements {
 impl RequestRequirements {
     fn from_input(
         input: &[ModelContextItem],
-        prepared_content: &[PreparedContentPart],
+        prepared_content: &[ResolvedAttachment],
     ) -> pl_protocol::Result<Self> {
         let mut requirements = Self::default();
         for item in input {
@@ -297,7 +311,7 @@ impl RequestRequirements {
         &mut self,
         attachment_id: &str,
         modality: AttachmentModality,
-        prepared_content: &[PreparedContentPart],
+        prepared_content: &[ResolvedAttachment],
     ) -> pl_protocol::Result<()> {
         match modality {
             AttachmentModality::Image => self.image = true,
@@ -370,12 +384,12 @@ mod tests {
             media_type: "image/png".to_string(),
             filename: None,
         }]));
-        request.prepared_content = vec![PreparedContentPart {
+        request.prepared_content = vec![ResolvedAttachment {
             attachment_id: "attachment-1".to_string(),
             modality: AttachmentModality::Image,
             media_type: "image/png".to_string(),
             filename: None,
-            sources: vec![PreparedContentSource::DataUrl {
+            sources: vec![AttachmentRepresentation::DataUrl {
                 base64: "aGVsbG8=".to_string(),
             }],
         }];

@@ -757,7 +757,7 @@ mod tests {
             }]
             .into(),
         };
-        let encoded = serde_json::to_string(&request(&input).unwrap()).unwrap();
+        let encoded = serde_json::to_string(&request(&input).unwrap().input).unwrap();
         assert!(!encoded.contains("reported-model"));
         assert!(!encoded.contains("opaque-isolation-digest"));
         assert!(encoded.contains("exact reply"));

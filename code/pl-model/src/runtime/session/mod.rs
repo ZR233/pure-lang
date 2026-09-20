@@ -18,6 +18,8 @@ pub(crate) use responses_websocket::ResponsesWebSocketConnection;
 /// 因而不同 agent/session 不会共用 Responses WebSocket continuation。
 #[derive(Clone, Default)]
 pub struct ModelSession {
+    pub(super) uploaded_files:
+        Arc<Mutex<std::collections::HashMap<(u64, String), super::attachments::UploadState>>>,
     responses_websocket: Arc<Mutex<ResponsesWebSocketSession>>,
     admission: Arc<SessionAdmission>,
     closing_transport: Arc<Mutex<Option<TransportClose>>>,
@@ -104,6 +106,7 @@ impl ModelSession {
             pl_protocol::PureError::LlmError(format!("model transport close failed: {error}"))
         })?;
         self.lock_responses_websocket().await.invalidate();
+        self.uploaded_files.lock().await.clear();
         self.responses_http_fallback_keys
             .write()
             .map_err(|_| {

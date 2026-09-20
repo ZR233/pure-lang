@@ -4,11 +4,11 @@ use crate::runtime::{InvocationRunner, ModelInvocationContext};
 
 /// Standard compatible client. Optional authentication belongs to its endpoint.
 #[derive(Debug, Clone)]
-pub struct CompatibleClient {
-    pub(crate) runner: InvocationRunner,
+pub struct CompatibleClient<'a> {
+    pub(crate) runner: &'a InvocationRunner,
 }
 
-impl CompatibleClient {
+impl CompatibleClient<'_> {
     /// Runs a standard request with complete final usage collection.
     ///
     /// # Errors

@@ -11,7 +11,7 @@ use pl_protocol::{PricingMode, Result};
 /// One resolved model route. Native capabilities remain available through `provider()`.
 #[derive(Debug, Clone)]
 pub struct ModelRuntime {
-    client: ProviderClient,
+    runner: InvocationRunner,
 }
 
 impl ModelRuntime {
@@ -44,39 +44,39 @@ impl ModelRuntime {
         model: ModelInfo,
     ) -> Result<Self> {
         Ok(Self {
-            client: ProviderClient::new(id.into(), endpoint, model)?,
+            runner: InvocationRunner::new_with_provider_id(id, endpoint, model)?,
         })
     }
 
     /// Explicit native access, preserving the concrete vendor types.
-    pub fn provider(&self) -> &ProviderClient {
-        &self.client
+    pub fn provider(&self) -> ProviderClient<'_> {
+        ProviderClient::new(self.runner.endpoint(), &self.runner)
     }
     pub fn model(&self) -> &ModelInfo {
-        self.client.runner().model()
+        self.runner.model()
     }
     pub fn endpoint(&self) -> &ProviderEndpoint {
-        self.client.runner().endpoint()
+        self.runner.endpoint()
     }
     pub fn provider_instance_id(&self) -> &str {
-        self.client.runner().provider_instance_id()
+        self.runner.provider_instance_id()
     }
     pub fn effective_model_capabilities(&self) -> ModelCapabilities {
-        self.client.runner().effective_model_capabilities()
+        self.runner.effective_model_capabilities()
     }
     pub fn connection_fingerprint(&self) -> u64 {
-        self.client.runner().connection_fingerprint()
+        self.runner.connection_fingerprint()
     }
 
     /// Freezes this provider's monetary accounting choice for subsequent invocations.
     pub fn with_pricing_mode(mut self, mode: PricingMode) -> Self {
-        self.client.runner_mut().pricing_mode = mode;
+        self.runner.pricing_mode = mode;
         self
     }
 
     /// Uses an explicit clock for reproducible tariff selection and replay simulations.
     pub fn with_clock(mut self, clock: std::sync::Arc<dyn super::InferenceClock>) -> Self {
-        self.client.runner_mut().clock = clock;
+        self.runner.clock = clock;
         self
     }
 
@@ -88,12 +88,12 @@ impl ModelRuntime {
         request: CompletionRequest,
         context: ModelInvocationContext,
     ) -> std::result::Result<CompletionResponse, CompletionFailure> {
-        self.client.runner().complete(request, context).await
+        self.runner.complete(request, context).await
     }
 
     /// Returns a real remote compaction capability only when the endpoint declares support.
     pub fn compaction(&self) -> Option<RemoteCompaction<'_>> {
-        let runner = self.client.runner();
+        let runner = &self.runner;
         (runner.endpoint().service_capabilities.remote_compaction
             && runner.model().binding.transport.protocol == ProviderWireProtocol::Responses)
             .then_some(RemoteCompaction { runner })
@@ -124,7 +124,8 @@ impl RemoteCompaction<'_> {
         request: CompletionRequest,
         context: ModelInvocationContext,
     ) -> std::result::Result<NativeCompactionCheckpoint, CompletionFailure> {
-        if !request.prepared_content.is_empty()
+        if !request.attachments.is_empty()
+            || !request.prepared_content.is_empty()
             || request.temperature.is_some()
             || request.max_tokens.is_some()
             || request.tool_choice != "auto"

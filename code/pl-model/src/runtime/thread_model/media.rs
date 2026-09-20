@@ -1,12 +1,9 @@
 //! Explicit role-free media projection and verified preparation before request admission.
 use super::{AdapterError, failure};
 use crate::{
-    completion::{
-        AttachmentModality, CompletionRequest, PreparedContentPart, PreparedContentSource,
-    },
+    completion::{AttachmentInput, AttachmentModality, AttachmentSource, CompletionRequest},
     model::{ModelInfo, ModelInputSource, ModelModality},
 };
-use base64::{Engine, engine::general_purpose::STANDARD};
 use pl_core::{
     context::{ContextContent, OpaquePayload, ResourceReference},
     model::{ModelError, ModelFailureKind, ModelRequest},
@@ -265,14 +262,12 @@ pub(super) async fn prepare(
                 AdapterError::Content("media preparation cancelled"),
             ));
         }
-        encoded.prepared_content.push(PreparedContentPart {
+        encoded.attachments.push(AttachmentInput {
             attachment_id: attachment.reference.id().to_owned(),
             modality: attachment.modality,
             media_type: attachment.reference.media_type().to_owned(),
             filename: None,
-            sources: vec![PreparedContentSource::DataUrl {
-                base64: STANDARD.encode(&bytes),
-            }],
+            source: AttachmentSource::Bytes { bytes },
         });
     }
     Ok(())
@@ -396,12 +391,10 @@ mod tests {
         let mut encoded = super::super::codec::request(&request).unwrap();
         prepare(&request, &mut encoded, &model()).await.unwrap();
         assert_eq!(reads.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            encoded.prepared_content[0].sources,
-            vec![PreparedContentSource::DataUrl {
-                base64: STANDARD.encode(bytes)
-            }]
-        );
+        let AttachmentSource::Bytes { bytes: actual } = &encoded.attachments[0].source else {
+            panic!("retained content must remain bytes until backend preparation");
+        };
+        assert_eq!(actual.as_ref(), bytes.as_slice());
     }
 
     #[tokio::test]

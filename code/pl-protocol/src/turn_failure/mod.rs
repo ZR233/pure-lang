@@ -81,9 +81,39 @@ impl TurnFailure {
 }
 
 /// Provider adapter 跨 crate 返回的结构化失败。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderFailureStage {
+    #[default]
+    Unknown,
+    Request,
+    Handshake,
+    Stream,
+    Attachment,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderRecovery {
+    #[default]
+    None,
+    HttpFallback,
+    RefreshAttachments,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderFailureContext {
+    pub stage: ProviderFailureStage,
+    pub request_id: Option<String>,
+    pub recovery: ProviderRecovery,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderFailure {
+    #[serde(default)]
+    pub context: ProviderFailureContext,
     pub kind: ProviderFailureKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,

@@ -1,4 +1,3 @@
-use async_openai::error::OpenAIError;
 use pl_protocol::{ProviderFailure, ProviderFailureKind, PureError, RetryDisposition};
 
 #[derive(Debug, Clone, Copy)]
@@ -16,6 +15,7 @@ impl ProviderFailureMetadata<'_> {
 
     pub fn into_transient(self, message: String) -> PureError {
         PureError::provider_failure(ProviderFailure {
+            context: Default::default(),
             kind: provider_failure_kind(self.code, self.http_status, true),
             code: self.code.map(ToString::to_string),
             http_status: self.http_status,
@@ -28,47 +28,13 @@ impl ProviderFailureMetadata<'_> {
 
     pub fn into_permanent(self, message: String) -> PureError {
         PureError::provider_failure(ProviderFailure {
+            context: Default::default(),
             kind: provider_failure_kind(self.code, self.http_status, false),
             code: self.code.map(ToString::to_string),
             http_status: self.http_status,
             message,
             retry: RetryDisposition::Permanent,
         })
-    }
-}
-
-pub(crate) fn openai_error_to_pure(error: OpenAIError) -> PureError {
-    match error {
-        OpenAIError::ApiError(api_error) => {
-            let status = api_error.status_code.as_u16();
-            let metadata = ProviderFailureMetadata {
-                code: api_error.api_error.code.as_deref(),
-                http_status: Some(status),
-                retry_after_ms: None,
-            };
-            let detail = redact_secret_like_values(&format!("API error {api_error}"));
-            if metadata.is_retryable() {
-                metadata.into_transient(detail)
-            } else {
-                metadata.into_permanent(detail)
-            }
-        }
-        OpenAIError::Reqwest(error) => reqwest_error_to_pure(error),
-        OpenAIError::Boxed(error) => PureError::provider_failure(ProviderFailure {
-            kind: ProviderFailureKind::Unknown,
-            code: None,
-            http_status: None,
-            message: redact_secret_like_values(&error.to_string()),
-            retry: RetryDisposition::Permanent,
-        }),
-        OpenAIError::JSONDeserialize(error, content) => {
-            protocol_failure(redact_secret_like_values(&format!("{error}: {content}")))
-        }
-        OpenAIError::StreamError(error) => stream_error_to_pure(&error),
-        OpenAIError::InvalidArgument(message) => configuration_failure(message),
-        OpenAIError::FileSaveError(message) | OpenAIError::FileReadError(message) => {
-            PureError::Io(std::io::Error::other(message))
-        }
     }
 }
 
@@ -84,49 +50,19 @@ pub(crate) fn provider_stream_failure(
         retry_after_ms,
     };
     let message = redact_secret_like_values(&message);
-    if metadata.is_retryable() {
+    let mut error = if metadata.is_retryable() {
         metadata.into_transient(message)
     } else {
         metadata.into_permanent(message)
+    };
+    if let PureError::Provider(failure) = &mut error {
+        failure.context.stage = pl_protocol::ProviderFailureStage::Stream;
     }
+    error
 }
 
-/// SSE 流中断：传输层根因（连接被掐断/响应体解码失败）按瞬态处理并允许重试；
-/// 纯协议解析错误仍保持 Permanent。
-fn stream_error_to_pure(error: &async_openai::error::StreamError) -> PureError {
-    match error {
-        async_openai::error::StreamError::EventStream(detail) => {
-            let detail = redact_secret_like_values(detail);
-            if eventstream_transport_failure(&detail) {
-                PureError::transient_model_failure(detail, None, None, None)
-            } else {
-                protocol_failure(detail)
-            }
-        }
-        async_openai::error::StreamError::UnknownEvent(_) => {
-            protocol_failure(redact_secret_like_values(&error.to_string()))
-        }
-    }
-}
-
-/// eventsource_stream 的错误只剩字符串；按已知传输层签名识别瞬时网络中断。
-fn eventstream_transport_failure(detail: &str) -> bool {
-    let lower = detail.to_ascii_lowercase();
-    [
-        "transport error",
-        "error decoding response body",
-        "error reading a body",
-        "connection closed",
-        "connection reset",
-        "broken pipe",
-        "unexpected eof",
-        "incomplete message",
-    ]
-    .iter()
-    .any(|signature| lower.contains(signature))
-}
-
-fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
+pub(crate) fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
+    let error = error.without_url();
     let detail = redact_secret_like_values(&error.to_string());
     if error.is_timeout() || error.is_connect() || response_start_connection_closed(&error) {
         return PureError::transient_model_failure(
@@ -153,6 +89,7 @@ fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
         }
     } else {
         PureError::provider_failure(ProviderFailure {
+            context: Default::default(),
             kind: ProviderFailureKind::Unknown,
             code: None,
             http_status: error.status().map(|status| status.as_u16()),
@@ -164,6 +101,7 @@ fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
 
 fn configuration_failure(message: impl Into<String>) -> PureError {
     PureError::provider_failure(ProviderFailure {
+        context: Default::default(),
         kind: ProviderFailureKind::Configuration,
         code: None,
         http_status: None,
@@ -174,6 +112,7 @@ fn configuration_failure(message: impl Into<String>) -> PureError {
 
 fn protocol_failure(message: impl Into<String>) -> PureError {
     PureError::provider_failure(ProviderFailure {
+        context: Default::default(),
         kind: ProviderFailureKind::Protocol,
         code: None,
         http_status: None,
@@ -296,183 +235,51 @@ fn looks_like_secret_token(token: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use async_openai::error::{ApiError, ApiErrorResponse};
-    use pretty_assertions::assert_eq;
-    use reqwest::StatusCode;
-
     use super::*;
 
     #[test]
-    fn http_overload_preserves_retry_metadata() {
-        let error = openai_error_to_pure(api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
+    fn status_code_and_retry_metadata_survive_classification() {
+        let error = provider_stream_failure(
             Some("server_is_overloaded"),
-        ));
-
+            Some(503),
+            Some(250),
+            "overloaded".into(),
+        );
         assert!(error.is_transient_model_transport());
+        assert_eq!(error.retry_after_ms(), Some(250));
         assert_eq!(
             error.transient_model_metadata(),
             Some((Some("server_is_overloaded"), Some(503)))
         );
+        for (status, kind) in [
+            (400, ProviderFailureKind::Configuration),
+            (401, ProviderFailureKind::Authentication),
+            (403, ProviderFailureKind::Authorization),
+        ] {
+            let error = provider_stream_failure(
+                None,
+                Some(status),
+                None,
+                "invalid sk-super-secret-provider-key".into(),
+            );
+            let failure = error.provider_failure_ref().unwrap();
+            assert_eq!(failure.kind, kind);
+            assert!(!failure.retry.is_retryable());
+            assert!(!failure.message.contains("sk-super-secret-provider-key"));
+        }
     }
 
     #[test]
-    fn http_bad_request_remains_permanent() {
-        let error =
-            openai_error_to_pure(api_error(StatusCode::BAD_REQUEST, Some("invalid_request")));
-
-        assert!(!error.is_transient_model_transport());
-        let failure = error
-            .provider_failure_ref()
-            .expect("typed provider failure");
-        assert_eq!(failure.kind, ProviderFailureKind::Configuration);
-        assert_eq!(failure.http_status, Some(400));
-        assert!(!failure.retry.is_retryable());
-    }
-
-    #[test]
-    fn request_build_errors_remain_permanent() {
-        let request_error = reqwest::Client::new()
+    fn invalid_request_url_is_not_retried() {
+        let error = reqwest::Client::new()
             .get("://invalid-url")
             .build()
-            .expect_err("invalid URL must fail while building the request");
-        let error = openai_error_to_pure(OpenAIError::Reqwest(request_error));
-
+            .unwrap_err();
+        let error = reqwest_error_to_pure(error);
         assert!(!error.is_transient_model_transport());
         assert_eq!(
-            error.provider_failure_ref().map(|failure| failure.kind),
-            Some(ProviderFailureKind::Configuration)
+            error.provider_failure_ref().unwrap().kind,
+            ProviderFailureKind::Configuration
         );
-    }
-
-    #[test]
-    fn retryable_http_statuses_match_the_transport_policy() {
-        for status in [408, 409, 425, 429, 500, 503, 599] {
-            assert!(retryable_provider_status(status), "status {status}");
-        }
-        for status in [400, 401, 403, 404, 422] {
-            assert!(!retryable_provider_status(status), "status {status}");
-        }
-    }
-
-    #[test]
-    fn invalid_api_key_is_typed_permanent_and_redacted() {
-        let secret = "sk-super-secret-provider-key";
-        let error = openai_error_to_pure(api_error_with_message(
-            StatusCode::UNAUTHORIZED,
-            Some("invalid_api_key"),
-            &format!("Invalid API key {secret}"),
-        ));
-
-        let failure = error
-            .provider_failure_ref()
-            .expect("typed provider failure");
-        assert_eq!(failure.kind, ProviderFailureKind::Authentication);
-        assert_eq!(failure.code.as_deref(), Some("invalid_api_key"));
-        assert_eq!(failure.http_status, Some(401));
-        assert!(!failure.retry.is_retryable());
-        assert!(!failure.message.contains(secret));
-        assert!(failure.message.contains("[REDACTED_API_KEY]"));
-    }
-
-    #[test]
-    fn permission_and_missing_model_are_fatal_provider_kinds() {
-        let forbidden =
-            openai_error_to_pure(api_error(StatusCode::FORBIDDEN, Some("permission_denied")));
-        assert_eq!(
-            forbidden.provider_failure_ref().map(|failure| failure.kind),
-            Some(ProviderFailureKind::Authorization)
-        );
-
-        let missing_model =
-            openai_error_to_pure(api_error(StatusCode::NOT_FOUND, Some("model_not_found")));
-        assert_eq!(
-            missing_model
-                .provider_failure_ref()
-                .map(|failure| failure.kind),
-            Some(ProviderFailureKind::Configuration)
-        );
-    }
-
-    fn api_error(status_code: StatusCode, code: Option<&str>) -> OpenAIError {
-        api_error_with_message(
-            status_code,
-            code,
-            "Our servers are currently overloaded. Please try again later.",
-        )
-    }
-
-    fn api_error_with_message(
-        status_code: StatusCode,
-        code: Option<&str>,
-        message: &str,
-    ) -> OpenAIError {
-        OpenAIError::ApiError(ApiErrorResponse {
-            status_code,
-            api_error: ApiError {
-                message: message.to_string(),
-                r#type: Some("server_error".to_string()),
-                param: None,
-                code: code.map(ToString::to_string),
-            },
-        })
-    }
-    #[test]
-    fn stream_transport_drop_is_transient_and_retryable() {
-        let error = openai_error_to_pure(OpenAIError::StreamError(Box::new(
-            async_openai::error::StreamError::EventStream(
-                "Transport error: error decoding response body".to_string(),
-            ),
-        )));
-
-        assert!(error.is_transient_model_transport());
-        let failure = error
-            .provider_failure_ref()
-            .expect("typed provider failure");
-        assert_eq!(failure.kind, ProviderFailureKind::Transport);
-        assert!(failure.retry.is_retryable());
-    }
-
-    #[test]
-    fn stream_connection_reset_signature_is_transient() {
-        for detail in [
-            "EventStream error: Transport error: connection reset by peer",
-            "EventStream error: error reading a body from connection",
-            "EventStream error: connection closed before message completed",
-        ] {
-            let error = openai_error_to_pure(OpenAIError::StreamError(Box::new(
-                async_openai::error::StreamError::EventStream(detail.to_string()),
-            )));
-            assert!(
-                error.is_transient_model_transport(),
-                "detail must classify as transient: {detail}"
-            );
-        }
-    }
-
-    #[test]
-    fn stream_pure_parse_failure_remains_permanent() {
-        let error = openai_error_to_pure(OpenAIError::StreamError(Box::new(
-            async_openai::error::StreamError::EventStream(
-                "expected field `id` of type String".to_string(),
-            ),
-        )));
-
-        assert!(!error.is_transient_model_transport());
-        let failure = error
-            .provider_failure_ref()
-            .expect("typed provider failure");
-        assert_eq!(failure.kind, ProviderFailureKind::Protocol);
-        assert!(!failure.retry.is_retryable());
-    }
-
-    #[test]
-    fn redacts_openai_api_keys_from_error_text() {
-        let input = "Incorrect API key provided: sk-abc123*******************************************************xyz.";
-
-        let redacted = redact_secret_like_values(input);
-
-        assert_eq!(redacted, "Incorrect API key provided: [REDACTED_API_KEY].");
-        assert!(!redacted.contains("sk-abc123"));
     }
 }

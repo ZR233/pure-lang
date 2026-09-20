@@ -319,7 +319,7 @@ struct ChatToolCustom {
 
 fn chat_content_for_user(
     content: &MessageContent,
-    prepared_content: &[crate::completion::PreparedContentPart],
+    prepared_content: &[crate::completion::ResolvedAttachment],
     media_plan: &MediaRepresentationPlan,
 ) -> Result<ChatMessageContent> {
     let mut has_media = false;

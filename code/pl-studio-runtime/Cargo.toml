@@ -49,34 +49,14 @@ tracing-subscriber = { workspace = true }
 name = "collaboration_observe"
 required-features = ["live-tests"]
 
-[[test]]
-name = "lsp_live"
-path = "tests/lsp_live.rs"
-required-features = ["live-tests"]
 
 [[example]]
-name = "model_accounting_live"
+name = "model_observe"
 required-features = ["live-tests"]
 
-[[test]]
-name = "apply_patch_live"
-path = "tests/apply_patch_live.rs"
-required-features = ["live-tests"]
 
-[[test]]
-name = "trace_live"
-path = "tests/trace_live.rs"
-required-features = ["live-tests"]
 
-[[test]]
-name = "context_compaction_live"
-path = "tests/context_compaction_live.rs"
-required-features = ["live-tests"]
 
-[[test]]
-name = "prompt_cache_live"
-path = "tests/prompt_cache_live.rs"
-required-features = ["live-tests"]
 
 [build-dependencies]
 sha2 = { workspace = true }

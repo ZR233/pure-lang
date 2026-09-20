@@ -4,9 +4,7 @@ use serde_json::{Map, Value};
 use tokio_tungstenite::tungstenite::Error as TungsteniteError;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
-use super::super::provider_error::{
-    ProviderFailureMetadata, redact_secret_like_values, retryable_provider_status,
-};
+use super::super::provider_error::{ProviderFailureMetadata, redact_secret_like_values};
 
 const HANDSHAKE_TIMEOUT_MESSAGE: &str = "Responses WebSocket handshake timed out after 15 seconds; check WebSocket network access or switch this provider instance to HTTP explicitly in Studio settings";
 
@@ -58,16 +56,30 @@ pub(super) fn handshake_error(error: TungsteniteError) -> PureError {
     if let TungsteniteError::Http(response) = &error {
         let status = response.status().as_u16();
         let detail = format!("Responses WebSocket handshake failed with HTTP {status}");
-        if retryable_provider_status(status) {
-            return transient(detail, retry_after_from_http_headers(response.headers()));
-        }
         if status == 426 {
-            return PureError::ConfigError(
-                "Responses WebSocket upgrade was rejected with HTTP 426; switch this provider instance to HTTP explicitly"
-                    .to_string(),
-            );
+            return PureError::provider_failure(pl_protocol::ProviderFailure {
+                context: pl_protocol::ProviderFailureContext {
+                    stage: pl_protocol::ProviderFailureStage::Handshake,
+                    request_id: response
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|v| v.to_str().ok())
+                        .map(redact_secret_like_values),
+                    recovery: pl_protocol::ProviderRecovery::HttpFallback,
+                },
+                kind: pl_protocol::ProviderFailureKind::Transport,
+                code: None,
+                http_status: Some(status),
+                message: detail,
+                retry: pl_protocol::RetryDisposition::Permanent,
+            });
         }
-        return PureError::HttpError(detail);
+        return super::super::transport::response_error(
+            status,
+            response.headers(),
+            response.body().as_deref().unwrap_or_default(),
+            pl_protocol::ProviderFailureStage::Handshake,
+        );
     }
 
     let detail =
@@ -210,10 +222,6 @@ pub(super) fn continuation_retry_error() -> PureError {
     )
 }
 
-fn transient(message: String, retry_after_ms: Option<u64>) -> PureError {
-    PureError::transient_model_failure(message, retry_after_ms, None, None)
-}
-
 fn websocket_error_message(status: Option<u16>, code: Option<&str>, message: &str) -> String {
     let label = match (status, code) {
         (Some(status), Some(code)) => format!("Responses WebSocket error {code} (HTTP {status})"),
@@ -222,22 +230,6 @@ fn websocket_error_message(status: Option<u16>, code: Option<&str>, message: &st
         (None, None) => "Responses WebSocket error".to_string(),
     };
     redact_secret_like_values(&format!("{label}: {message}"))
-}
-
-fn retry_after_from_http_headers(
-    headers: &tokio_tungstenite::tungstenite::http::HeaderMap,
-) -> Option<u64> {
-    headers
-        .get("retry-after-ms")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse().ok())
-        .or_else(|| {
-            headers
-                .get("retry-after")
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.parse::<u64>().ok())
-                .map(|seconds| seconds.saturating_mul(1_000))
-        })
 }
 
 fn retry_after_from_json_headers(headers: &Map<String, Value>) -> Option<u64> {

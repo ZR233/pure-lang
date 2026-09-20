@@ -9,7 +9,7 @@ use crate::model::info::MediaWireFormat;
 
 use super::body::ToolFormatBody;
 use super::content::{
-    MediaRepresentationPlan, media_url, message_content_text, tool_media_content,
+    MediaRepresentationPlan, media_file_id, media_url, message_content_text, tool_media_content,
 };
 use super::protocol_error;
 use super::tool_history::{record_arguments_text, record_custom_input, tool_callers_by_call_id};
@@ -276,9 +276,23 @@ impl From<MessageRole> for ResponsesRole {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ResponsesContent {
-    InputText { text: String },
-    InputImage { image_url: String },
-    OutputText { text: String },
+    InputText {
+        text: String,
+    },
+    InputImage {
+        #[serde(flatten)]
+        source: ImageReference,
+    },
+    OutputText {
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+enum ImageReference {
+    Url { image_url: String },
+    File { file_id: String },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -406,7 +420,7 @@ impl ResponsesReasoningSummary {
 fn responses_content_for_message(
     content: &MessageContent,
     role: MessageRole,
-    prepared_content: &[crate::completion::PreparedContentPart],
+    prepared_content: &[crate::completion::ResolvedAttachment],
     media_plan: &MediaRepresentationPlan,
 ) -> Result<Vec<ResponsesContent>> {
     let mut response_content = Vec::new();
@@ -431,15 +445,24 @@ fn responses_content_for_message(
                             "Chat media wire cannot be serialized by Responses",
                         ));
                     }
-                    response_content.push(ResponsesContent::InputImage {
-                        image_url: media_url(
-                            attachment_id,
-                            media_type,
-                            *modality,
-                            prepared_content,
-                            media_plan,
-                        )?,
-                    });
+                    let source = if let Some(file_id) =
+                        media_file_id(attachment_id, prepared_content, media_plan)
+                    {
+                        ImageReference::File {
+                            file_id: file_id.to_owned(),
+                        }
+                    } else {
+                        ImageReference::Url {
+                            image_url: media_url(
+                                attachment_id,
+                                media_type,
+                                *modality,
+                                prepared_content,
+                                media_plan,
+                            )?,
+                        }
+                    };
+                    response_content.push(ResponsesContent::InputImage { source });
                 }
                 AttachmentModality::File | AttachmentModality::Video => {
                     return Err(protocol_error(format!(

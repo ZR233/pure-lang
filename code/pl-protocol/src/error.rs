@@ -65,6 +65,7 @@ impl PureError {
     /// 构造一个可以安全重放完整模型请求的临时传输错误。
     pub fn transient_model_transport(message: impl Into<String>) -> Self {
         Self::Provider(ProviderFailure {
+            context: Default::default(),
             kind: ProviderFailureKind::Transport,
             code: None,
             http_status: None,
@@ -81,6 +82,7 @@ impl PureError {
         retry_after_ms: u64,
     ) -> Self {
         Self::Provider(ProviderFailure {
+            context: Default::default(),
             kind: ProviderFailureKind::Transport,
             code: None,
             http_status: None,
@@ -99,6 +101,7 @@ impl PureError {
         http_status: Option<u16>,
     ) -> Self {
         Self::Provider(ProviderFailure {
+            context: Default::default(),
             kind: ProviderFailureKind::Transport,
             code,
             http_status,

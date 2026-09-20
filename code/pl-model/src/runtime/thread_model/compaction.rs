@@ -106,6 +106,7 @@ impl ThreadModel {
         let invocation = ModelInvocationContext::new(session.clone())
             .with_cancellation(Some(request.cancellation.clone()));
         let native = (options.strategy == ThreadCompactionStrategy::PreferNative
+            && encoded.attachments.is_empty()
             && encoded.prepared_content.is_empty())
         .then(|| self.runtime.compaction())
         .flatten();
@@ -127,7 +128,7 @@ impl ThreadModel {
                     TextSummaryRequest {
                         instructions: &options.instructions,
                         input: encoded.input,
-                        prepared_content: encoded.prepared_content,
+                        attachments: encoded.attachments,
                         reasoning: encoded.reasoning,
                         tools: &encoded.tools,
                         requirement: &options.requirement,

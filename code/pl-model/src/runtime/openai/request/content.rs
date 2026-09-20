@@ -4,7 +4,7 @@ use pl_protocol::{
     AttachmentModality, ContentPart, MessageContent, ModelContextItem, Result, ToolMediaContext,
 };
 
-use crate::completion::{CompletionRequest, PreparedContentPart, PreparedContentSource};
+use crate::completion::{AttachmentRepresentation, CompletionRequest, ResolvedAttachment};
 use crate::model::info::{MediaMixPolicy, MediaRepresentation, MediaWireFormat, ModelInfo};
 
 use super::protocol_error;
@@ -97,22 +97,27 @@ impl MediaRepresentationPlan {
             } else {
                 &profile.first_send
             };
-            let representation = candidates
+            let uploaded = media
                 .iter()
-                .copied()
-                .find(|candidate| {
+                .all(|item| has_representation(item, MediaRepresentation::ProviderFile))
+                && profile.wire == MediaWireFormat::ResponsesInputImage;
+            let representation = if uploaded {
+                Some(MediaRepresentation::ProviderFile)
+            } else {
+                candidates.iter().copied().find(|candidate| {
                     media
                         .iter()
                         .all(|item| has_representation(item, *candidate))
                 })
-                .ok_or_else(|| {
-                    protocol_error(format!(
-                        "model={} modality={} count={} has no common media representation",
-                        model.slug,
-                        modality_label(modality),
-                        media.len()
-                    ))
-                })?;
+            }
+            .ok_or_else(|| {
+                protocol_error(format!(
+                    "model={} modality={} count={} has no common media representation",
+                    model.slug,
+                    modality_label(modality),
+                    media.len()
+                ))
+            })?;
             tracing::info!(
                 model = %model.slug,
                 modality = modality_label(modality),
@@ -149,6 +154,21 @@ impl MediaRepresentationPlan {
     }
 }
 
+pub(super) fn media_file_id<'a>(
+    id: &str,
+    media: &'a [ResolvedAttachment],
+    plan: &MediaRepresentationPlan,
+) -> Option<&'a str> {
+    let media = media.iter().find(|part| part.attachment_id == id)?;
+    if plan.representation(media.modality).ok()? != MediaRepresentation::ProviderFile {
+        return None;
+    }
+    media.sources.iter().find_map(|source| match source {
+        AttachmentRepresentation::ProviderFile { file_id } => Some(file_id.as_str()),
+        _ => None,
+    })
+}
+
 pub(super) fn tool_media_content(items: &[ToolMediaContext]) -> MessageContent {
     let mut parts = Vec::with_capacity(items.len().saturating_mul(2));
     for item in items {
@@ -172,7 +192,7 @@ pub(super) fn media_url(
     attachment_id: &str,
     media_type: &str,
     modality: AttachmentModality,
-    prepared_content: &[PreparedContentPart],
+    prepared_content: &[ResolvedAttachment],
     plan: &MediaRepresentationPlan,
 ) -> Result<String> {
     let media = prepared_content
@@ -199,7 +219,7 @@ pub(super) fn media_url(
             ))
         })?;
     match source {
-        PreparedContentSource::DataUrl { base64 } => {
+        AttachmentRepresentation::DataUrl { base64 } => {
             let actual_media_type = if media_type.is_empty() {
                 media.media_type.as_str()
             } else {
@@ -207,8 +227,8 @@ pub(super) fn media_url(
             };
             Ok(format!("data:{actual_media_type};base64,{base64}"))
         }
-        PreparedContentSource::RemoteUrl { url } => Ok(url.clone()),
-        PreparedContentSource::ProviderFile { .. } => Err(protocol_error(
+        AttachmentRepresentation::RemoteUrl { url } => Ok(url.clone()),
+        AttachmentRepresentation::ProviderFile { .. } => Err(protocol_error(
             "provider file cannot be serialized as a URL content part",
         )),
     }
@@ -219,7 +239,7 @@ fn prepared_content<'a>(
     attachment_id: &str,
     modality: AttachmentModality,
     model: &ModelInfo,
-) -> Result<&'a PreparedContentPart> {
+) -> Result<&'a ResolvedAttachment> {
     let matching = request
         .prepared_content
         .iter()
@@ -241,31 +261,31 @@ fn prepared_content<'a>(
     Ok(media)
 }
 
-fn has_representation(media: &PreparedContentPart, representation: MediaRepresentation) -> bool {
+fn has_representation(media: &ResolvedAttachment, representation: MediaRepresentation) -> bool {
     media
         .sources
         .iter()
         .any(|source| source_matches(source, representation))
 }
 
-fn source_matches(source: &PreparedContentSource, representation: MediaRepresentation) -> bool {
+fn source_matches(source: &AttachmentRepresentation, representation: MediaRepresentation) -> bool {
     matches!(
         (source, representation),
         (
-            PreparedContentSource::RemoteUrl { .. },
+            AttachmentRepresentation::RemoteUrl { .. },
             MediaRepresentation::RemoteUrl
         ) | (
-            PreparedContentSource::ProviderFile { .. },
+            AttachmentRepresentation::ProviderFile { .. },
             MediaRepresentation::ProviderFile
         ) | (
-            PreparedContentSource::DataUrl { .. },
+            AttachmentRepresentation::DataUrl { .. },
             MediaRepresentation::DataUrl
         )
     )
 }
 
-fn is_snapshot_source(source: &PreparedContentSource) -> bool {
-    matches!(source, PreparedContentSource::DataUrl { .. })
+fn is_snapshot_source(source: &AttachmentRepresentation) -> bool {
+    matches!(source, AttachmentRepresentation::DataUrl { .. })
 }
 
 fn model_modality(modality: AttachmentModality) -> crate::model::ModelModality {
@@ -337,19 +357,19 @@ mod tests {
         attachment_id: &str,
         remote_url: Option<&str>,
         base64: Option<&str>,
-    ) -> crate::completion::PreparedContentPart {
+    ) -> crate::completion::ResolvedAttachment {
         let mut sources = Vec::new();
         if let Some(remote_url) = remote_url {
-            sources.push(crate::completion::PreparedContentSource::RemoteUrl {
+            sources.push(crate::completion::AttachmentRepresentation::RemoteUrl {
                 url: remote_url.to_string(),
             });
         }
         if let Some(base64) = base64 {
-            sources.push(crate::completion::PreparedContentSource::DataUrl {
+            sources.push(crate::completion::AttachmentRepresentation::DataUrl {
                 base64: base64.to_string(),
             });
         }
-        crate::completion::PreparedContentPart {
+        crate::completion::ResolvedAttachment {
             attachment_id: attachment_id.to_string(),
             modality: AttachmentModality::Image,
             media_type: "image/png".to_string(),
@@ -383,13 +403,13 @@ mod tests {
         attachment_id: &str,
         modality: AttachmentModality,
         media_type: &str,
-    ) -> crate::completion::PreparedContentPart {
-        crate::completion::PreparedContentPart {
+    ) -> crate::completion::ResolvedAttachment {
+        crate::completion::ResolvedAttachment {
             attachment_id: attachment_id.to_string(),
             modality,
             media_type: media_type.to_string(),
             filename: Some(attachment_id.to_string()),
-            sources: vec![crate::completion::PreparedContentSource::DataUrl {
+            sources: vec![crate::completion::AttachmentRepresentation::DataUrl {
                 base64: "cGF5bG9hZA==".to_string(),
             }],
         }

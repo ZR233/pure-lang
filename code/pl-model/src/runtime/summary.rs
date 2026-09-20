@@ -9,7 +9,7 @@ use crate::completion::{
 pub struct TextSummaryRequest<'a> {
     pub instructions: &'a str,
     pub input: Vec<ModelContextItem>,
-    pub prepared_content: Vec<crate::completion::PreparedContentPart>,
+    pub attachments: Vec<crate::completion::AttachmentInput>,
     pub reasoning: Option<crate::completion::ReasoningConfig>,
     pub tools: &'a [ToolSpec],
     pub requirement: &'a str,
@@ -51,7 +51,7 @@ impl ModelRuntime {
             request.requirement,
             request.max_output_tokens,
         );
-        completion.prepared_content = request.prepared_content;
+        completion.attachments = request.attachments;
         completion.reasoning = request.reasoning;
         let response = self
             .complete(completion, invocation.with_session(session.clone()))
@@ -137,7 +137,7 @@ mod tests {
                 TextSummaryRequest {
                     instructions: "stable instructions",
                     input: Vec::new(),
-                    prepared_content: Vec::new(),
+                    attachments: Vec::new(),
                     reasoning: None,
                     tools: &tools,
                     requirement: "summarize",

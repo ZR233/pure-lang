@@ -21,12 +21,65 @@ async fn main() -> Result<()> {
     };
     std::fs::create_dir_all(&artifacts)?;
     let home = artifacts.join("studio-home");
-    let workspace = artifacts.join("workspace");
+    let workspace = tempfile::Builder::new()
+        .prefix("anywork-observation-workspace-")
+        .tempdir()?
+        .keep();
+    std::fs::write(
+        artifacts.join("workspace-path.txt"),
+        workspace.to_string_lossy().as_bytes(),
+    )?;
     std::fs::create_dir_all(&home)?;
     std::fs::create_dir_all(&workspace)?;
     let installed = ConfigStore::default_app()?;
     // Copy bytes, never save a hydrated config: the credential store belongs to the user.
     std::fs::copy(installed.paths().config_file(), home.join("config.toml"))?;
+    if let Ok(provider_id) = std::env::var("ANYWORK_OBSERVATION_PROVIDER") {
+        let slug = std::env::var("ANYWORK_OBSERVATION_MODEL")
+            .context("selected observation provider requires ANYWORK_OBSERVATION_MODEL")?;
+        let mut config: toml::Value =
+            toml::from_str(&std::fs::read_to_string(home.join("config.toml"))?)?;
+        let providers = config
+            .get_mut("models")
+            .and_then(|v| v.get_mut("providers"))
+            .and_then(toml::Value::as_table_mut)
+            .context("provider table is missing")?;
+        let selected = providers
+            .get(&provider_id)
+            .context("observation provider is not configured")?
+            .clone();
+        let provider: pl_model::config::ProviderConfig = selected.clone().try_into()?;
+        let model = provider
+            .effective_models()?
+            .into_iter()
+            .find(|m| m.slug == slug)
+            .context("observation model is not configured")?;
+        let effort = model
+            .parameters
+            .iter()
+            .find(|p| p.name == "effort")
+            .and_then(|p| p.candidates.first());
+        providers.clear();
+        providers.insert(provider_id.clone(), selected);
+        let routes = config
+            .get_mut("models")
+            .and_then(|v| v.get_mut("routes"))
+            .and_then(toml::Value::as_table_mut)
+            .context("route table is missing")?;
+        for (_, route) in routes.iter_mut() {
+            let route = route.as_table_mut().context("invalid route")?;
+            route.insert("provider".into(), provider_id.clone().into());
+            route.insert("model".into(), slug.clone().into());
+            if let Some(effort) = effort {
+                route.insert("effort".into(), effort.clone().into());
+            } else {
+                route.remove("effort");
+            }
+        }
+        std::fs::write(home.join("config.toml"), toml::to_string(&config)?)?;
+    }
+    // Fail explicitly before runtime initialization can apply configuration recovery defaults.
+    ConfigStore::for_studio_home(home.clone()).load()?;
     let prompt = match std::env::var_os("ANYWORK_OBSERVATION_PROMPT") {
         Some(path) => std::fs::read_to_string(path)?,
         None => "请派两个 fresh-context explorer 分别解释文件所有权和 Turn 生命周期。详细、自包含地派发。一个自然 final，另一个 finish_turn。等待完整报告，阅读后总结；不修改文件，不提交计划，不询问用户。".into(),
@@ -38,7 +91,7 @@ async fn main() -> Result<()> {
         .unwrap_or(180);
     let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
         studio_home: Some(home),
-        host: StudioHostKind::Test,
+        host: StudioHostKind::Desktop,
     })
     .await?;
     runtime.start_runtime().await?;
@@ -77,7 +130,7 @@ async fn main() -> Result<()> {
                 if cursor.is_none() { break; }
             }
             std::fs::write(artifacts.join(format!("{id}.turns.json")), serde_json::to_vec_pretty(&turns)?)?;
-            let snapshot = runtime.thread_snapshot(&id).await?;
+            let snapshot = runtime.thread_snapshot(id).await?;
             std::fs::write(artifacts.join(format!("{id}.snapshot.json")),serde_json::to_vec_pretty(&snapshot)?)?;
         }
         runtime.shutdown_runtime().await?;
@@ -90,7 +143,7 @@ async fn main() -> Result<()> {
     match (result, shutdown) {
         (Ok(()), Ok(_)) => Ok(()),
         (Err(error), _) => Err(error),
-        (Ok(()), Err(error)) => Err(error.into()),
+        (Ok(()), Err(error)) => Err(error),
     }
 }
 

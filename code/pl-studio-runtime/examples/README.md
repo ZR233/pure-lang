@@ -1,34 +1,34 @@
-# 模型计量真实验收
+# 真实任务人工观察
 
-从仓库根目录运行：
-
-```bash
-ANYWORK_WIRE_CAPTURE_DIR="$PWD/target/model-accounting-live/wire" \
-  cargo run -p pl-studio-runtime --features live-tests \
-  --example model_accounting_live -- target/model-accounting-live/report.json
-```
-
-示例只读取现有配置的连接信息，从系统凭据库或配置指定的环境变量取得 Key；不改写用户配置。
-每个已配置供应商执行短请求、最多三次固定前缀缓存验证，以及真实注册工具的多轮任务。
-报告记录 endpoint、模型、请求时刻、最终计量和冻结费用；`usage-*.json` 只保存服务端数值计数及响应身份。
-每次运行应使用新的 capture 目录，以保留此前证据。
-
-- `--tools`：只执行完整工具任务，输出 `TurnResult.billing` 中的逐笔账单。
-- `--native`：验证 DeepSeek 原生搜索与上下文回放，以及转发 OpenAI 的兼容 Responses。
-- `--compatible`：验证显式兼容 Chat（DeepSeek endpoint）和 Responses（OpenAI endpoint）的工具往返。
-
-鉴权、配额、缺少配置或未取得完整用量均不算通过。三次缓存验证仍未观察到命中也保留为未完成；
-退出码非零，同时保留此前成功的账单和失败证据。未配置 MiMo 时，完整验收不能宣称全部通过。
-OpenAI 的现有转发地址只证明该入口的行为，不能代替官方直连验收。
-
-GUI 功能验收使用 `cargo xtask verify-gui --integration`。另可启动隔离数据目录的
-`cargo xtask run-gui --driver`，再执行：
+从仓库根目录运行，artifact 目录必须尚不存在：
 
 ```bash
-cargo dart run test_driver/provider_acceptance_driver.dart \
-  <VM服务地址> <绝对路径的证据目录>
+cargo run -p pl-studio-runtime --features live-tests --example model_observe -- \
+  openai gpt-6-astra /absolute/task.txt /absolute/new-artifacts
 ```
 
-Driver 从设置页添加兼容供应商、保存、确认 canonical 模型选择，提交任务并检查界面的最终用量。
-原生模式使用脚本内的本地 HTTP 供应商，只替换外部网络；模型执行、工具收尾、数据库及 FRB 全部是真实实现。
-`run-gui --demo --driver` 配合脚本的 `--demo` 选项只用于界面交互验收。
+读取 anywork 用户配置中选定供应商的完整配置与系统凭据，不改写配置或会话库。
+任务文件是实际待处理要求，不要求固定回答。可选参数：
+
+- `--image FILE`：图片 bytes。
+- `--image-url URL`：远程图片，保存请求期快照。
+- `--image-base64 FILE`：保存完整原始 Base64 的文本文件，默认 PNG。
+- `--followup TASK_FILE`：在同一模型会话中继续任务，可重复。
+
+`events.jsonl` 保存过程，`response-N.json` 保存响应和服务端用量，
+`report.json` 分开记录 execution 与 review。execution 完成不是验收通过；
+review 默认 pending，由观察者阅读过程、结果和产物后另行记录结论。
+缺少配置、鉴权失败、超时与事件缺口必须保留，不能静默跳过。
+不会断言回答文字、工具次数、缓存命中或业务终态。
+
+完整工具/协作任务使用 `collaboration_observe`：
+设置 `ANYWORK_OBSERVATION_PROMPT` 为任务文件，
+`ANYWORK_WORKFLOW_ARTIFACT_DIR` 为新的证据目录，
+`ANYWORK_OBSERVATION_SECONDS` 为观察时长。使用隔离 Studio 数据和工作目录，
+读取用户配置并通过系统凭据库鉴权，过程结束回收 runtime。
+设置 `ANYWORK_OBSERVATION_PROVIDER` 与 `ANYWORK_OBSERVATION_MODEL` 可在隔离副本中选择所有角色的模型；未选中的供应商不参与此次配置校验，原配置保持不变。
+可用真实任务观察 patch、LSP、跨轮历史、压缩与协作，不再维护固定通过标记。
+
+GUI 真实任务通过 `cargo xtask run-gui --driver` 启动，由观察者使用 Flutter Driver
+提交任务、查看流、截图和产物。确定性 demo/widget、本地 HTTP/WS fixture、
+配置迁移和恢复测试继续自动断言；`verify-gui --integration` 的 demo 回归不改为人工判断。
