@@ -60,6 +60,8 @@ pub struct ModelFailureReceipt {
     pub message: String,
     pub binding: ModelCallBinding,
     pub accounting: crate::completion::InferenceAccounting,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_observation: Option<crate::completion::InferenceModelObservation>,
 }
 
 /// Reads a producer-owned failure receipt without repricing history using current configuration.
@@ -97,13 +99,47 @@ pub(super) fn failure_error(
         pl_core::model::ModelFailureKind::Unavailable
     };
     let usage = super::usage(&failure.accounting.usage);
+    let model_observation = failure.model_observation().cloned();
     let receipt = ModelFailureReceipt {
         provider_failure: failure.source.provider_failure_ref().cloned(),
         message: failure.source.to_string(),
         binding,
         accounting: (*failure.accounting).clone(),
+        model_observation,
     };
-    let details = match serde_json::to_string(&receipt) {
+    let details = failure_details(&receipt);
+    ModelError {
+        kind,
+        details: Some(Box::new(details)),
+        usage,
+        source: Some(Box::new(failure)),
+    }
+}
+
+pub(super) fn postprocess_failure_error(
+    binding: ModelCallBinding,
+    accounting: crate::completion::InferenceAccounting,
+    model_observation: Option<crate::completion::InferenceModelObservation>,
+    error: ModelError,
+) -> ModelError {
+    let receipt = ModelFailureReceipt {
+        provider_failure: None,
+        message: error.to_string(),
+        binding,
+        accounting,
+        model_observation,
+    };
+    let details = failure_details(&receipt);
+    ModelError {
+        kind: error.kind,
+        details: Some(Box::new(details)),
+        usage: error.usage.clone(),
+        source: Some(Box::new(error)),
+    }
+}
+
+fn failure_details(receipt: &ModelFailureReceipt) -> pl_core::context::OpaquePayload {
+    match serde_json::to_string(receipt) {
         Ok(content) => pl_core::context::OpaquePayload::new("pl.model.failure", 1, content)
             .expect("static format and version are valid"),
         Err(encoding) => pl_core::context::OpaquePayload::new(
@@ -114,12 +150,6 @@ pub(super) fn failure_error(
             ),
         )
         .expect("static format and version are valid"),
-    };
-    ModelError {
-        kind,
-        details: Some(Box::new(details)),
-        usage,
-        source: Some(Box::new(failure)),
     }
 }
 
@@ -288,6 +318,11 @@ mod tests {
             ..Default::default()
         };
         let original = accounting.clone();
+        let model_observation = pl_protocol::InferenceModelObservation {
+            configured_model: "catalog-model".into(),
+            sent_model: "wire-model".into(),
+            reported_model: Some("provider-model".into()),
+        };
         let binding = ModelCallBinding {
             provider_instance_id: "original-provider".into(),
             requested_model: "original-model".into(),
@@ -300,8 +335,11 @@ mod tests {
         let error = failure_error(
             binding,
             crate::completion::CompletionFailure {
-                source: pl_protocol::PureError::LlmError("stream interrupted".into()),
+                source: Box::new(pl_protocol::PureError::LlmError(
+                    "stream interrupted".into(),
+                )),
                 accounting: Box::new(accounting),
+                model_observation: Some(Box::new(model_observation.clone())),
                 cancelled: false,
             },
         );
@@ -313,6 +351,7 @@ mod tests {
         assert_eq!(receipt.binding.purpose, "review");
         assert_eq!(receipt.binding.provider_instance_id, "original-provider");
         assert_eq!(receipt.binding.context_window, Some(1_000_000));
+        assert_eq!(receipt.model_observation, Some(model_observation));
     }
 
     #[tokio::test]
@@ -341,6 +380,7 @@ mod tests {
                 trace: None,
                 trace_sink: None,
                 cancellation: Some(token),
+                model_observation: None,
             },
             std::time::Duration::from_secs(3600),
         )
@@ -370,6 +410,7 @@ mod tests {
                 trace: None,
                 trace_sink: None,
                 cancellation: None,
+                model_observation: None,
             },
             std::time::Duration::from_secs(3600),
         )
@@ -398,5 +439,29 @@ mod tests {
         let runtime = catalog_runtime("deepseek-flash");
         let error = failure_error(ModelCallBinding::capture(&runtime, "turn"), failure);
         assert_eq!(error.kind, pl_core::model::ModelFailureKind::Unavailable);
+    }
+
+    #[test]
+    fn postprocess_failure_preserves_model_observation_in_failure_receipt() {
+        let runtime = catalog_runtime("deepseek-flash");
+        let observation = pl_protocol::InferenceModelObservation {
+            configured_model: "deepseek-flash".into(),
+            sent_model: "deepseek-v4".into(),
+            reported_model: Some("deepseek-v4-202609".into()),
+        };
+        let accounting = crate::completion::InferenceAccounting::default();
+        let error = postprocess_failure_error(
+            ModelCallBinding::capture(&runtime, "turn"),
+            accounting.clone(),
+            Some(observation.clone()),
+            super::super::failure(
+                pl_core::model::ModelFailureKind::InvalidResponse,
+                std::io::Error::other("receipt encoding failed"),
+            ),
+        );
+
+        let receipt = model_failure_receipt(&error).unwrap().unwrap();
+        assert_eq!(receipt.accounting, accounting);
+        assert_eq!(receipt.model_observation, Some(observation));
     }
 }

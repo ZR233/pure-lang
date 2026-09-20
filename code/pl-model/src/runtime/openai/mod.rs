@@ -12,8 +12,8 @@ mod response;
 pub(crate) mod sse;
 pub(crate) mod usage;
 
-pub(crate) use request::OpenAiRequestBody;
 use request::build_openai_request_body;
+pub(crate) use request::{OpenAiRequestBody, sent_model_from_wire_body};
 #[cfg(test)]
 use response::{chat_parse_response, responses_parse_response};
 

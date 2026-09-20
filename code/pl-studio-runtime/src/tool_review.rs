@@ -79,17 +79,27 @@ async fn review(binding: ReviewBinding, request: ToolReviewRequest) -> ToolAppro
         Ok(response) => response.accounting.clone(),
         Err(failure) => (*failure.accounting).clone(),
     };
+    let model_observation = match &result {
+        Ok(response) => response.model_observation.clone(),
+        Err(failure) => failure.model_observation().cloned(),
+    };
     let billing = pl_protocol::InferenceBillingRecord {
         purpose: Some("review".into()),
         inference_id: crate::studio::new_id("review"),
         provider_instance_id: route.provider_id.as_str().into(),
         provider: route.endpoint.name.clone(),
-        model: result
-            .as_ref()
-            .ok()
-            .map(|response| response.model.clone())
-            .filter(|model| !model.is_empty())
-            .unwrap_or_else(|| route.model.slug.clone()),
+        model: model_observation.as_ref().map_or_else(
+            || {
+                result
+                    .as_ref()
+                    .ok()
+                    .map(|response| response.model.clone())
+                    .filter(|model| !model.is_empty())
+                    .unwrap_or_else(|| route.model.slug.clone())
+            },
+            |observation| observation.sent_model.clone(),
+        ),
+        model_observation,
         reasoning_effort: route.effort.as_ref().map(|effort| effort.as_str().into()),
         context_window: route.model.resolved_context_window(),
         accounting,

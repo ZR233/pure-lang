@@ -68,6 +68,7 @@ pub(super) async fn compact_context(
         .for_compaction(headers, body)
         .complete(completion, context)
         .await?;
+    let model_observation = response.model_observation.clone();
     let accounting = response.accounting;
     let mut checkpoints = response
         .responses_context_items
@@ -87,13 +88,15 @@ pub(super) async fn compact_context(
         })
     })()
     .map_err(|source| CompletionFailure {
-        source,
+        source: Box::new(source),
         accounting: Box::new(accounting.clone()),
+        model_observation: model_observation.clone().map(Box::new),
         cancelled: false,
     })?;
     Ok(ModelCompactionResponse {
         input: vec![replacement],
         accounting,
+        model_observation,
     })
 }
 

@@ -49,6 +49,7 @@ impl ProgressProjection {
                 }
             }
             ModelStreamEvent::ResponseStarted { .. }
+            | ModelStreamEvent::ResponseModelObserved { .. }
             | ModelStreamEvent::ReasoningRawDelta { .. }
             | ModelStreamEvent::ToolInputStarted { .. }
             | ModelStreamEvent::ToolInputDelta { .. }

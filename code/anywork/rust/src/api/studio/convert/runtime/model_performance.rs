@@ -1,8 +1,9 @@
 use pl_studio_runtime::StudioModelPerformanceSnapshot;
 
 use crate::api::studio::types::{
-    BridgeModelPerformanceSample, BridgeModelPerformanceSnapshot, BridgeModelPerformanceSummary,
-    BridgePurposeCostSnapshot, BridgeRuntimeCostAmount, BridgeSessionCostSnapshot,
+    BridgeModelMatchState, BridgeModelPerformanceSample, BridgeModelPerformanceSnapshot,
+    BridgeModelPerformanceSummary, BridgePurposeCostSnapshot, BridgeRuntimeCostAmount,
+    BridgeSessionCostSnapshot,
 };
 
 pub(crate) fn bridge_model_performance(
@@ -69,6 +70,17 @@ pub(crate) fn bridge_model_performance(
                 provider_instance_id: sample.provider_instance_id,
                 provider_display_name: sample.provider_display_name,
                 model: sample.model,
+                configured_model: sample.configured_model,
+                sent_model: sample.sent_model,
+                reported_model: sample.reported_model,
+                model_match_state: match sample.model_match_state {
+                    pl_protocol::ModelMatchState::Matched => BridgeModelMatchState::Matched,
+                    pl_protocol::ModelMatchState::Mismatched => BridgeModelMatchState::Mismatched,
+                    pl_protocol::ModelMatchState::Unreported => BridgeModelMatchState::Unreported,
+                    pl_protocol::ModelMatchState::LegacyUnknown => {
+                        BridgeModelMatchState::LegacyUnknown
+                    }
+                },
                 reasoning_effort: sample.reasoning_effort,
                 completion_tokens: sample.completion_tokens,
                 ttft_millis: sample.ttft_millis,

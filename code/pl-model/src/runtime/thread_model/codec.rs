@@ -426,6 +426,23 @@ pub(super) fn response(
     context: ResponseContext<'_>,
     response: CompletionResponse,
 ) -> Result<ModelStepOutput, ModelError> {
+    let failure_binding = context.binding.clone();
+    let failure_accounting = response.accounting.clone();
+    let failure_model_observation = response.model_observation.clone();
+    response_inner(context, response).map_err(|error| {
+        super::receipt::postprocess_failure_error(
+            failure_binding,
+            failure_accounting,
+            failure_model_observation,
+            error,
+        )
+    })
+}
+
+fn response_inner(
+    context: ResponseContext<'_>,
+    response: CompletionResponse,
+) -> Result<ModelStepOutput, ModelError> {
     let ResponseContext {
         request,
         names,
@@ -599,6 +616,7 @@ mod tests {
                     timing: None,
                     accounting: Default::default(),
                     model: "test".into(),
+                    model_observation: None,
                 },
             },
             bindings: bindings.clone(),
@@ -720,6 +738,11 @@ mod tests {
                 },
                 ..Default::default()
             },
+            model_observation: Some(pl_protocol::InferenceModelObservation {
+                configured_model: "requested-model".into(),
+                sent_model: "wire-model".into(),
+                reported_model: Some("reported-model".into()),
+            }),
         };
         let original = serde_json::to_value(&response_value).unwrap();
         let output = response(
@@ -746,6 +769,14 @@ mod tests {
         assert_eq!(saved.binding.requested_model, "requested-model");
         assert_eq!(saved.binding.context_window, Some(1_000_000));
         assert_eq!(saved.response.model, "reported-model");
+        assert_eq!(
+            saved
+                .response
+                .model_observation
+                .as_ref()
+                .map(|observation| observation.sent_model.as_str()),
+            Some("wire-model")
+        );
         input.context = ContextSnapshot {
             revision: 1,
             records: vec![ContextRecord {

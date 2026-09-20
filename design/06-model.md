@@ -169,6 +169,15 @@ effort 等可调参数的 wire 写入由通用透传机制驱动，协议层不�
 与 parameter wire（用户选中的候选值按模型 parameters 声明写入或移除字段，见 6.8）。覆盖优先级
 为 parameter wire > base body > 协议默认字段。
 
+每次 inference 在最终请求体完成全部覆盖后冻结模型身份观察：`configuredModel` 是目录中选中的
+slug，`sentModel` 是最终 wire body 实际发送的 `model`，`reportedModel` 是 Provider 明确报告的
+模型。请求体缺失 `model`、值不是字符串或只有空白时，在发送前以协议错误拒绝。该观察由统一
+invocation runtime 产生并随成功、失败和宿主只读响应传播；普通 Turn、压缩、自动标题和自动审批
+不得各自重新推断。Chat、Responses HTTP 和 Responses WebSocket 将模型声明归一化为 canonical
+`ResponseModelObserved` 事件：首个有效非终态声明建立观察，终态声明可以覆盖，终态后的声明忽略。
+返回值 trim 后须非空、无控制字符且至多 256 字节；无效或缺失时保持未知，不回退为配置或发送
+模型。比较采用大小写敏感的精确字符串比较，不按 provider 或 catalog alias 归一化。
+
 OpenAI Responses 的 `reasoning.summary` 仍按 Codex wire 语义发送（Auto 和兼容层的 Enabled 都
 发送 `auto`，Disabled 不发送 summary 字段），由 reasoning 配置的 summary 选项独立驱动，不进入
 parameter wire。模型返回的 `reasoning_content` 进入 canonical reasoning event；历史回放时仍通过
@@ -432,3 +441,7 @@ Studio、Flutter 仅归属、累计和展示，不再次解释供应商 usage �
 响应必须先记账；缺失或无效用量不能覆盖此前已知的上下文用量。自动标题等没有会话上下文的内部
 推理，将完整冻结账单保存在所属 root Thread 的内部账单中，并与费用累计一次性提交；内部调用
 不覆盖主会话上下文用量，重载只读取原账单和原累计。
+
+冻结账单同时保存可选模型身份观察。新记录的性能分组模型只使用 `sentModel`；
+`reportedModel` 只用于诊断，不改变路由、价格、上下文容量、重试、continuation 或汇总。
+旧账单只有单一 `model` 时保持身份未知，不依据当前配置猜测其发送或返回值。

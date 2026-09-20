@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use pl_protocol::trace::{AgentEvent, AgentEventSender, TraceEventSink, TraceTextChannel};
 use pl_protocol::{
-    InferenceOrchestrationMetrics, PureError, ResponsesContextItem, ResponsesContextItemKind,
-    Result, ToolCallCaller, UsageReport,
+    InferenceModelObservation, InferenceOrchestrationMetrics, PureError, ResponsesContextItem,
+    ResponsesContextItemKind, Result, ToolCallCaller, UsageReport,
 };
 
 use crate::completion::{CompletionResponse, CompletionTraceContext, ToolCall};
@@ -33,6 +33,8 @@ pub(crate) struct StreamCompletionAccumulator {
     lifecycle: StreamLifecycle,
     final_usage: Option<UsageReport>,
     response_id: Option<String>,
+    model_observation: Option<InferenceModelObservation>,
+    reported_model_is_terminal: bool,
     state: StreamAccumulatorState,
     trace: Option<TraceProjection>,
 }
@@ -43,9 +45,18 @@ impl StreamCompletionAccumulator {
         Self::with_trace_sink(trace, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn with_trace_sink(
         trace: Option<CompletionTraceContext>,
         trace_sink: Option<Arc<dyn TraceEventSink>>,
+    ) -> Self {
+        Self::with_model_observation(trace, trace_sink, None)
+    }
+
+    pub(crate) fn with_model_observation(
+        trace: Option<CompletionTraceContext>,
+        trace_sink: Option<Arc<dyn TraceEventSink>>,
+        model_observation: Option<InferenceModelObservation>,
     ) -> Self {
         Self {
             content_parts: Vec::new(),
@@ -59,6 +70,8 @@ impl StreamCompletionAccumulator {
             lifecycle: StreamLifecycle::new(),
             final_usage: None,
             response_id: None,
+            model_observation,
+            reported_model_is_terminal: false,
             state: StreamAccumulatorState::open(),
             trace: trace.map(|trace| TraceProjection::with_sink(trace, trace_sink)),
         }
@@ -307,6 +320,9 @@ impl StreamCompletionAccumulator {
                     self.response_id = response_id;
                 }
             }
+            ModelStreamEvent::ResponseModelObserved { model, terminal } => {
+                self.observe_reported_model(&model, terminal);
+            }
         }
 
         Ok(())
@@ -382,6 +398,11 @@ impl StreamCompletionAccumulator {
         }
         let orchestration =
             stream_orchestration_metrics(&self.responses_context_items, &self.tool_calls);
+        let model = self
+            .model_observation
+            .as_ref()
+            .and_then(|observation| observation.reported_model.clone())
+            .unwrap_or_default();
         Ok(CompletionResponse {
             response_id: self.response_id,
             content,
@@ -394,8 +415,31 @@ impl StreamCompletionAccumulator {
                 usage: self.final_usage.unwrap_or_default(),
                 ..Default::default()
             },
-            model: String::new(),
+            model,
+            model_observation: self.model_observation,
         })
+    }
+
+    fn observe_reported_model(&mut self, model: &str, terminal: bool) {
+        if self.reported_model_is_terminal {
+            return;
+        }
+        let Some(model) = valid_reported_model(model) else {
+            return;
+        };
+        let Some(observation) = self.model_observation.as_mut() else {
+            return;
+        };
+        if terminal || observation.reported_model.is_none() {
+            observation.reported_model = Some(model);
+        }
+        if terminal {
+            self.reported_model_is_terminal = true;
+        }
+    }
+
+    pub(super) fn model_observation(&self) -> Option<InferenceModelObservation> {
+        self.model_observation.clone()
     }
 
     fn attach_tool_caller(&mut self, call: &mut ToolCall) {
@@ -583,6 +627,12 @@ impl StreamCompletionAccumulator {
     }
 }
 
+fn valid_reported_model(model: &str) -> Option<String> {
+    let model = model.trim();
+    (!model.is_empty() && model.len() <= 256 && !model.chars().any(char::is_control))
+        .then(|| model.to_string())
+}
+
 fn stream_orchestration_metrics(
     context_items: &[ResponsesContextItem],
     tool_calls: &[ToolCall],
@@ -744,6 +794,78 @@ mod tests {
         let response = finish_with_trace(accumulator, &event_tx).unwrap();
 
         assert_eq!(response.response_id.as_deref(), Some("resp_completed"));
+    }
+
+    #[test]
+    fn reported_model_keeps_first_nonterminal_and_terminal_value_wins() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let observation = InferenceModelObservation {
+            configured_model: "catalog-model".into(),
+            sent_model: "wire-model".into(),
+            reported_model: None,
+        };
+        let mut accumulator =
+            StreamCompletionAccumulator::with_model_observation(None, None, Some(observation));
+        for (model, terminal) in [
+            ("early-model", false),
+            ("ignored-nonterminal", false),
+            ("terminal-model", true),
+            ("ignored-after-terminal", false),
+        ] {
+            accumulator
+                .apply(
+                    ModelStreamEvent::ResponseModelObserved {
+                        model: model.into(),
+                        terminal,
+                    },
+                    &event_tx,
+                )
+                .unwrap();
+        }
+        accumulator
+            .apply(ModelStreamEvent::Completed { response_id: None }, &event_tx)
+            .unwrap();
+
+        let response = accumulator.finish(&event_tx).unwrap();
+        assert_eq!(response.model, "terminal-model");
+        assert_eq!(
+            response
+                .model_observation
+                .unwrap()
+                .reported_model
+                .as_deref(),
+            Some("terminal-model")
+        );
+    }
+
+    #[test]
+    fn invalid_reported_models_are_ignored() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let observation = InferenceModelObservation {
+            configured_model: "catalog-model".into(),
+            sent_model: "wire-model".into(),
+            reported_model: None,
+        };
+        let mut accumulator =
+            StreamCompletionAccumulator::with_model_observation(None, None, Some(observation));
+        for model in ["   ".to_string(), "bad\nmodel".to_string(), "x".repeat(257)] {
+            accumulator
+                .apply(
+                    ModelStreamEvent::ResponseModelObserved {
+                        model,
+                        terminal: true,
+                    },
+                    &event_tx,
+                )
+                .unwrap();
+        }
+        accumulator
+            .apply(ModelStreamEvent::Completed { response_id: None }, &event_tx)
+            .unwrap();
+
+        let response = accumulator.finish(&event_tx).unwrap();
+        assert_eq!(response.model, "");
+        assert_eq!(response.model_observation.unwrap().reported_model, None);
     }
 
     #[test]

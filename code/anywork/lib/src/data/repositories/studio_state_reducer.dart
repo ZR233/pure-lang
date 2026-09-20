@@ -56,9 +56,7 @@ StudioReduceResult reduceStudioEvent(
       applyProviderUsageState(current, state),
     ),
     ModelPerformanceStateChangedPayload(:final state) => StudioReduceResult(
-      state.revision <= current.modelPerformance.revision
-          ? current
-          : current.copyWith(modelPerformance: state),
+      applyModelPerformanceState(current, state),
     ),
     UpdaterStateChangedPayload(:final state) => StudioReduceResult(
       applyUpdaterState(current, state),
@@ -68,6 +66,14 @@ StudioReduceResult reduceStudioEvent(
     ),
     StalePayload() => StudioReduceResult(current),
   };
+}
+
+StudioState applyModelPerformanceState(
+  StudioState current,
+  ModelPerformanceSnapshotView next,
+) {
+  if (next.revision <= current.modelPerformance.revision) return current;
+  return current.copyWith(modelPerformance: next);
 }
 
 StudioState applyPersistenceState(

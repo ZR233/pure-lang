@@ -42,8 +42,9 @@ pub use agent_session::plan::{
     AgentSessionPlanTransitionRecord,
 };
 pub use billing::{
-    InferenceBillingAppend, InferenceBillingRecord, InferenceOrchestrationMetrics, InferenceTiming,
-    InferenceTokenUsage, ModelPricingSnapshot, TurnBillingRecord,
+    InferenceBillingAppend, InferenceBillingRecord, InferenceModelObservation,
+    InferenceOrchestrationMetrics, InferenceTiming, InferenceTokenUsage, ModelMatchState,
+    ModelPricingSnapshot, TurnBillingRecord,
 };
 pub use error::{PureError, Result};
 pub use event::{

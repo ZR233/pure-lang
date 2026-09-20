@@ -8,6 +8,7 @@
 pub struct CompletionResponseSnapshot {
     id: Option<String>,
     model: String,
+    model_observation: Option<pl_protocol::InferenceModelObservation>,
     output: Vec<CompletionResponseOutputSnapshot>,
     accounting: pl_protocol::InferenceAccounting,
 }
@@ -23,6 +24,10 @@ impl CompletionResponseSnapshot {
 
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    pub fn model_observation(&self) -> Option<&pl_protocol::InferenceModelObservation> {
+        self.model_observation.as_ref()
     }
 
     /// Final accounting, including missing usage and disabled pricing states.
@@ -175,6 +180,7 @@ pub fn completion_response_snapshot(
     CompletionResponseSnapshot {
         id: response.response_id.clone(),
         model: response.model.clone(),
+        model_observation: response.model_observation.clone(),
         output,
         accounting: response.accounting.clone(),
     }
@@ -234,6 +240,7 @@ mod tests {
                 ..Default::default()
             },
             model: "test-model".to_string(),
+            model_observation: None,
         };
 
         let snapshot = super::completion_response_snapshot(&response);
@@ -281,6 +288,7 @@ mod tests {
             timing: None,
             accounting: pl_protocol::InferenceAccounting::default(),
             model: "test-model".to_string(),
+            model_observation: None,
         };
 
         assert_eq!(

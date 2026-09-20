@@ -111,6 +111,7 @@ pub struct RemoteCompaction<'a> {
 pub struct NativeCompactionCheckpoint {
     pub item: crate::completion::ModelContextItem,
     pub accounting: pl_protocol::InferenceAccounting,
+    pub model_observation: Option<pl_protocol::InferenceModelObservation>,
 }
 
 impl RemoteCompaction<'_> {
@@ -154,14 +155,16 @@ impl RemoteCompaction<'_> {
         let item =
             crate::completion::remote_compaction_checkpoint(response.input).map_err(|source| {
                 CompletionFailure {
-                    source,
+                    source: Box::new(source),
                     accounting: Box::new(response.accounting.clone()),
+                    model_observation: response.model_observation.clone().map(Box::new),
                     cancelled: false,
                 }
             })?;
         Ok(NativeCompactionCheckpoint {
             item,
             accounting: response.accounting,
+            model_observation: response.model_observation,
         })
     }
 

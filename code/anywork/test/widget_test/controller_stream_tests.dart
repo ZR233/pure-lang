@@ -868,6 +868,31 @@ void registerControllerStreamTests() {
     },
   );
 
+  test('resync reload merges newer model performance snapshot', () async {
+    final initial = _emptyState().copyWith(
+      modelPerformance: _modelPerformanceFixture(revision: 3),
+    );
+    final api = _FakeStudioApi(initial);
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    final controller = container.read(studioControllerProvider.notifier);
+
+    api.debugReplaceCurrentState(
+      initial.copyWith(modelPerformance: _modelPerformanceFixture(revision: 4)),
+    );
+    api.emitGlobal(
+      const StudioBridgeEvent(payload: StalePayload(laggedEvents: 1)),
+    );
+    await pumpEventQueue();
+    await controller.debugReloadForTest();
+
+    final after = container.read(studioControllerProvider).requireValue;
+    expect(after.modelPerformance.revision, 4);
+  });
+
   test('explicit start page survives reload and directory upserts', () async {
     final initial = _emptyState();
     final api = _FakeStudioApi(initial);

@@ -25,6 +25,13 @@ pub(crate) enum OpenAiRequestBody {
 }
 
 impl OpenAiRequestBody {
+    pub(crate) fn sent_model(&self) -> Result<String> {
+        let body = match self {
+            Self::Responses(body) | Self::Chat(body) => body,
+        };
+        sent_model_from_wire_body(body)
+    }
+
     pub(crate) fn prepare_compaction(&mut self) {
         match self {
             Self::Responses(body) | Self::Chat(body) => {
@@ -38,6 +45,15 @@ impl OpenAiRequestBody {
         match self {
             Self::Responses(body) | Self::Chat(body) => body::merge_base_body(body, options),
         }
+    }
+}
+
+pub(crate) fn sent_model_from_wire_body(body: &Map<String, Value>) -> Result<String> {
+    match body.get("model") {
+        Some(Value::String(model)) if !model.trim().is_empty() => Ok(model.clone()),
+        Some(Value::String(_)) => Err(protocol_error("final request body model must not be blank")),
+        Some(_) => Err(protocol_error("final request body model must be a string")),
+        None => Err(protocol_error("final request body model is required")),
     }
 }
 
@@ -111,4 +127,39 @@ fn apply_responses_max_tokens_field(
 fn protocol_error(message: impl Into<String>) -> PureError {
     let msg = message.into();
     PureError::LlmError(format!("OpenAI request protocol error: {msg}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sent_model_requires_a_non_blank_string() {
+        for (body, message) in [
+            (Map::new(), "is required"),
+            (
+                Map::from_iter([("model".to_string(), Value::Null)]),
+                "must be a string",
+            ),
+            (
+                Map::from_iter([("model".to_string(), Value::String("  ".into()))]),
+                "must not be blank",
+            ),
+        ] {
+            let error = OpenAiRequestBody::Chat(body).sent_model().unwrap_err();
+            assert!(error.to_string().contains(message));
+        }
+    }
+
+    #[test]
+    fn sent_model_preserves_the_exact_wire_value() {
+        let body = Map::from_iter([(
+            "model".to_string(),
+            Value::String("  provider-model  ".into()),
+        )]);
+        assert_eq!(
+            OpenAiRequestBody::Responses(body).sent_model().unwrap(),
+            "  provider-model  "
+        );
+    }
 }

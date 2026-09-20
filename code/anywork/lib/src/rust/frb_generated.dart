@@ -5370,6 +5370,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeModelMatchState dco_decode_bridge_model_match_state(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeModelMatchState.values[raw as int];
+  }
+
+  @protected
   BridgeModelModality dco_decode_bridge_model_modality(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return BridgeModelModality.values[raw as int];
@@ -5381,19 +5387,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return BridgeModelPerformanceSample(
       completedAt: dco_decode_i_64(arr[0]),
       providerInstanceId: dco_decode_String(arr[1]),
       providerDisplayName: dco_decode_String(arr[2]),
       model: dco_decode_String(arr[3]),
-      reasoningEffort: dco_decode_opt_String(arr[4]),
-      completionTokens: dco_decode_u_64(arr[5]),
-      ttftMillis: dco_decode_u_64(arr[6]),
-      decodeMillis: dco_decode_u_64(arr[7]),
-      totalResponseMillis: dco_decode_u_64(arr[8]),
-      tokensPerSecond: dco_decode_f_64(arr[9]),
+      configuredModel: dco_decode_opt_String(arr[4]),
+      sentModel: dco_decode_opt_String(arr[5]),
+      reportedModel: dco_decode_opt_String(arr[6]),
+      modelMatchState: dco_decode_bridge_model_match_state(arr[7]),
+      reasoningEffort: dco_decode_opt_String(arr[8]),
+      completionTokens: dco_decode_u_64(arr[9]),
+      ttftMillis: dco_decode_u_64(arr[10]),
+      decodeMillis: dco_decode_u_64(arr[11]),
+      totalResponseMillis: dco_decode_u_64(arr[12]),
+      tokensPerSecond: dco_decode_f_64(arr[13]),
     );
   }
 
@@ -11622,6 +11632,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeModelMatchState sse_decode_bridge_model_match_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeModelMatchState.values[inner];
+  }
+
+  @protected
   BridgeModelModality sse_decode_bridge_model_modality(
     SseDeserializer deserializer,
   ) {
@@ -11639,6 +11658,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_providerInstanceId = sse_decode_String(deserializer);
     var var_providerDisplayName = sse_decode_String(deserializer);
     var var_model = sse_decode_String(deserializer);
+    var var_configuredModel = sse_decode_opt_String(deserializer);
+    var var_sentModel = sse_decode_opt_String(deserializer);
+    var var_reportedModel = sse_decode_opt_String(deserializer);
+    var var_modelMatchState = sse_decode_bridge_model_match_state(deserializer);
     var var_reasoningEffort = sse_decode_opt_String(deserializer);
     var var_completionTokens = sse_decode_u_64(deserializer);
     var var_ttftMillis = sse_decode_u_64(deserializer);
@@ -11650,6 +11673,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       providerInstanceId: var_providerInstanceId,
       providerDisplayName: var_providerDisplayName,
       model: var_model,
+      configuredModel: var_configuredModel,
+      sentModel: var_sentModel,
+      reportedModel: var_reportedModel,
+      modelMatchState: var_modelMatchState,
       reasoningEffort: var_reasoningEffort,
       completionTokens: var_completionTokens,
       ttftMillis: var_ttftMillis,
@@ -18965,6 +18992,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_model_match_state(
+    BridgeModelMatchState self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_model_modality(
     BridgeModelModality self,
     SseSerializer serializer,
@@ -18983,6 +19019,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.providerInstanceId, serializer);
     sse_encode_String(self.providerDisplayName, serializer);
     sse_encode_String(self.model, serializer);
+    sse_encode_opt_String(self.configuredModel, serializer);
+    sse_encode_opt_String(self.sentModel, serializer);
+    sse_encode_opt_String(self.reportedModel, serializer);
+    sse_encode_bridge_model_match_state(self.modelMatchState, serializer);
     sse_encode_opt_String(self.reasoningEffort, serializer);
     sse_encode_u_64(self.completionTokens, serializer);
     sse_encode_u_64(self.ttftMillis, serializer);

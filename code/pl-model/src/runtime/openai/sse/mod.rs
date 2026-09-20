@@ -154,11 +154,42 @@ fn chat_choice_events(event: &SseStreamEvent) -> Option<Vec<ModelStreamEvent>> {
 
 /// 将原始 SSE 事件解析为 canonical stream event。
 pub fn process_sse_events(event: &SseStreamEvent) -> Vec<ModelStreamEvent> {
-    match process_sse_event(event) {
+    let mut events = match process_sse_event(event) {
         Some(StreamEventBatch::Single(event)) => vec![event],
         Some(StreamEventBatch::Many(events)) => events,
         None => Vec::new(),
+    };
+    if let Some(model_observation) = response_model_observation(event) {
+        events.insert(0, model_observation);
     }
+    events
+}
+
+pub(super) fn response_model_observation(event: &SseStreamEvent) -> Option<ModelStreamEvent> {
+    reported_model(event).map(|model| ModelStreamEvent::ResponseModelObserved {
+        model,
+        terminal: model_declaration_is_terminal(event),
+    })
+}
+
+fn reported_model(event: &SseStreamEvent) -> Option<String> {
+    event
+        .response
+        .as_ref()
+        .and_then(|response| response.get("model"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| event.model.clone())
+}
+
+fn model_declaration_is_terminal(event: &SseStreamEvent) -> bool {
+    matches!(
+        event.kind.as_str(),
+        "response.completed" | "response.failed" | "response.incomplete"
+    ) || event
+        .choices
+        .as_ref()
+        .is_some_and(|choices| choices.iter().any(|choice| choice.finish_reason.is_some()))
 }
 
 enum StreamEventBatch {
@@ -450,6 +481,56 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn chat_and_responses_streams_emit_model_observations() {
+        let chat: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "model": "chat-reported",
+            "choices": [{"delta": {}, "finish_reason": "stop"}]
+        }))
+        .unwrap();
+        assert!(matches!(
+            process_sse_events(&chat).first(),
+            Some(ModelStreamEvent::ResponseModelObserved { model, terminal: true })
+                if model == "chat-reported"
+        ));
+
+        let created: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.created",
+            "response": {"id": "resp_1", "model": "responses-early"}
+        }))
+        .unwrap();
+        assert!(matches!(
+            process_sse_events(&created).first(),
+            Some(ModelStreamEvent::ResponseModelObserved { model, terminal: false })
+                if model == "responses-early"
+        ));
+
+        let completed: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "resp_1", "model": "responses-final"}
+        }))
+        .unwrap();
+        assert!(matches!(
+            process_sse_events(&completed).first(),
+            Some(ModelStreamEvent::ResponseModelObserved { model, terminal: true })
+                if model == "responses-final"
+        ));
+    }
+
+    #[test]
+    fn stream_without_reported_model_does_not_invent_one() {
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.created",
+            "response": {"id": "resp_1"}
+        }))
+        .unwrap();
+        assert!(
+            !process_sse_events(&event)
+                .iter()
+                .any(|event| matches!(event, ModelStreamEvent::ResponseModelObserved { .. }))
+        );
     }
 
     #[test]

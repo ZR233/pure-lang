@@ -189,6 +189,36 @@ impl InferenceTokenUsage {
     }
 }
 
+/// 一次推理从目录选择到 wire 请求和 Provider 响应的冻结模型身份。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InferenceModelObservation {
+    pub configured_model: String,
+    pub sent_model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_model: Option<String>,
+}
+
+impl InferenceModelObservation {
+    pub fn match_state(&self) -> ModelMatchState {
+        match self.reported_model.as_deref() {
+            Some(reported) if reported == self.sent_model => ModelMatchState::Matched,
+            Some(_) => ModelMatchState::Mismatched,
+            None => ModelMatchState::Unreported,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelMatchState {
+    Matched,
+    Mismatched,
+    Unreported,
+    #[default]
+    LegacyUnknown,
+}
+
 /// SQLite 中以 `inference_id` 幂等保存的单次计费记录。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -201,6 +231,8 @@ pub struct InferenceBillingRecord {
     pub provider_instance_id: String,
     pub provider: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_observation: Option<InferenceModelObservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -233,7 +265,7 @@ pub struct TurnBillingRecord {
 }
 
 impl TurnBillingRecord {
-    pub const VERSION: u32 = 5;
+    pub const VERSION: u32 = 6;
 
     pub fn new() -> Self {
         Self {
@@ -313,10 +345,15 @@ mod tests {
             .as_object_mut()
             .expect("billing record should be an object")
             .remove("reasoningEffort");
+        value
+            .as_object_mut()
+            .expect("billing record should be an object")
+            .remove("modelObservation");
 
         let restored: InferenceBillingRecord =
             serde_json::from_value(value).expect("legacy billing record should deserialize");
         assert_eq!(restored.reasoning_effort, None);
+        assert_eq!(restored.model_observation, None);
     }
 
     #[test]
@@ -341,6 +378,11 @@ mod tests {
             provider_instance_id: "provider-1".to_string(),
             provider: "Provider 1".to_string(),
             model: "model-1".to_string(),
+            model_observation: Some(InferenceModelObservation {
+                configured_model: "catalog-model".to_string(),
+                sent_model: "model-1".to_string(),
+                reported_model: Some("model-1".to_string()),
+            }),
             reasoning_effort: reasoning_effort.map(str::to_owned),
             context_window: None,
             accounting: crate::InferenceAccounting::default(),
@@ -369,5 +411,24 @@ mod tests {
         changed.purpose = Some("review".into());
         assert!(history.append(changed).is_err());
         assert_eq!(history.inferences.len(), 1);
+    }
+
+    #[test]
+    fn model_observation_distinguishes_match_mismatch_and_missing_report() {
+        let mut observation = InferenceModelObservation {
+            configured_model: "catalog-model".into(),
+            sent_model: "wire-model".into(),
+            reported_model: Some("wire-model".into()),
+        };
+        assert_eq!(observation.match_state(), ModelMatchState::Matched);
+        observation.reported_model = Some("other-model".into());
+        assert_eq!(observation.match_state(), ModelMatchState::Mismatched);
+        observation.reported_model = None;
+        assert_eq!(observation.match_state(), ModelMatchState::Unreported);
+    }
+
+    #[test]
+    fn turn_billing_uses_current_version() {
+        assert_eq!(TurnBillingRecord::new().version, 6);
     }
 }

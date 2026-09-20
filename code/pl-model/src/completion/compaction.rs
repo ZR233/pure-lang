@@ -38,6 +38,7 @@ pub struct ModelCompactionRequest {
 pub struct ModelCompactionResponse {
     pub input: Vec<ModelContextItem>,
     pub accounting: InferenceAccounting,
+    pub model_observation: Option<pl_protocol::InferenceModelObservation>,
 }
 
 /// Extracts the single native checkpoint returned by a remote v2 compaction adapter.

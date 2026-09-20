@@ -47,6 +47,7 @@ mod tests {
         assert_nameable::<crate::completion::AttachmentModality>();
         assert_nameable::<crate::completion::ContentPart>();
         assert_nameable::<crate::completion::InferenceOrchestrationMetrics>();
+        assert_nameable::<crate::completion::InferenceModelObservation>();
         assert_nameable::<crate::completion::InferenceTiming>();
         assert_nameable::<crate::completion::Message>();
         assert_nameable::<crate::completion::MessageContent>();

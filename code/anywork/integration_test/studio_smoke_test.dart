@@ -228,6 +228,15 @@ void main() {
         'Complete the compatible-provider acceptance task.',
       );
       await tester.pump();
+      await _pumpUntilFound(
+        tester,
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is IconButton &&
+              widget.key == StudioDriverKeys.composerSubmit &&
+              widget.onPressed != null,
+        ),
+      );
       await tester.tap(find.byKey(StudioDriverKeys.composerSubmit));
       await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.composerStop));
       await _pumpUntilFound(

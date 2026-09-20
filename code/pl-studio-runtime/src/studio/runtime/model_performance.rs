@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use crate::hash::merge_costs;
-use pl_protocol::{InferenceBillingRecord, RuntimeCostAmount};
+use pl_protocol::{
+    InferenceBillingRecord, InferenceModelObservation, ModelMatchState, RuntimeCostAmount,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Mutex;
@@ -17,7 +19,8 @@ use crate::{
 use super::super::agent_host::ThreadWriteBehindWriter;
 
 pub(in crate::studio) const MODEL_PERFORMANCE_OWNER_ID: &str = "global";
-const CACHE_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 3;
+const LEGACY_CACHE_VERSION: u32 = 2;
 const HISTORY_LIMIT: usize = 1_000;
 
 #[derive(Clone)]
@@ -159,6 +162,8 @@ struct PerformanceSample {
     provider_display_name: String,
     model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_observation: Option<InferenceModelObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<String>,
     completion_tokens: u64,
     ttft_millis: u64,
@@ -194,11 +199,19 @@ impl ModelPerformanceOwner {
         else {
             return Ok(());
         };
-        if restored.version != CACHE_VERSION {
-            return Err(PureError::MemoryError(format!(
-                "unsupported model performance cache version {}",
-                restored.version
-            )));
+        match restored.version {
+            CACHE_VERSION => {}
+            LEGACY_CACHE_VERSION => {
+                restored.version = CACHE_VERSION;
+                for session in restored.sessions.values_mut() {
+                    session.internal_billing.version = pl_protocol::TurnBillingRecord::VERSION;
+                }
+            }
+            version => {
+                return Err(PureError::MemoryError(format!(
+                    "unsupported model performance cache version {version}"
+                )));
+            }
         }
         while restored.history.len() > HISTORY_LIMIT {
             restored.history.pop_front();
@@ -335,7 +348,11 @@ fn performance_sample(
     let timing = billing
         .timing
         .filter(|timing| timing.has_throughput_sample())?;
-    if billing.provider_instance_id.is_empty() || billing.model.is_empty() {
+    let model = billing
+        .model_observation
+        .as_ref()
+        .map_or_else(|| billing.model.clone(), |value| value.sent_model.clone());
+    if billing.provider_instance_id.is_empty() || model.is_empty() {
         return None;
     }
     Some(PerformanceSample {
@@ -344,7 +361,8 @@ fn performance_sample(
         completed_at: billing.recorded_at,
         provider_instance_id: billing.provider_instance_id.clone(),
         provider_display_name: billing.provider.clone(),
-        model: billing.model.clone(),
+        model,
+        model_observation: billing.model_observation.clone(),
         reasoning_effort: billing.reasoning_effort.clone(),
         completion_tokens: billing.accounting.usage.totals().completion_tokens,
         ttft_millis: timing.ttft_millis,
@@ -388,6 +406,22 @@ fn public_sample(sample: &PerformanceSample) -> StudioModelPerformanceSample {
         provider_instance_id: sample.provider_instance_id.clone(),
         provider_display_name: sample.provider_display_name.clone(),
         model: sample.model.clone(),
+        configured_model: sample
+            .model_observation
+            .as_ref()
+            .map(|value| value.configured_model.clone()),
+        sent_model: sample
+            .model_observation
+            .as_ref()
+            .map(|value| value.sent_model.clone()),
+        reported_model: sample
+            .model_observation
+            .as_ref()
+            .and_then(|value| value.reported_model.clone()),
+        model_match_state: sample
+            .model_observation
+            .as_ref()
+            .map_or(ModelMatchState::LegacyUnknown, |value| value.match_state()),
         reasoning_effort: sample.reasoning_effort.clone(),
         completion_tokens: sample.completion_tokens,
         ttft_millis: sample.ttft_millis,
@@ -474,7 +508,9 @@ fn billing_fingerprint(billing: &InferenceBillingRecord) -> Result<String, PureE
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::{InferenceOrchestrationMetrics, InferenceTiming};
+    use pl_protocol::{
+        InferenceModelObservation, InferenceOrchestrationMetrics, InferenceTiming, ModelMatchState,
+    };
 
     use super::*;
     use crate::StudioProductEventKind;
@@ -903,10 +939,90 @@ mod tests {
         assert_eq!(snapshot.history.len(), 1);
     }
 
+    #[tokio::test]
+    async fn reported_model_is_diagnostic_only_and_sent_model_owns_grouping() {
+        let (owner, _, writer, _) = memory_owner().await;
+        let mut billing = billing_record("mismatch", "provider-a", "legacy-model", 10, 100, 1);
+        billing.model = "must-not-group-here".into();
+        billing.model_observation = Some(InferenceModelObservation {
+            configured_model: "catalog-alias".into(),
+            sent_model: "wire-model".into(),
+            reported_model: Some("provider-other".into()),
+        });
+
+        owner
+            .record_inference("root", "root", &billing)
+            .expect("mismatch sample");
+        let snapshot = owner.snapshot().await;
+
+        assert_eq!(snapshot.summaries[0].model, "wire-model");
+        assert_eq!(snapshot.history[0].model, "wire-model");
+        assert_eq!(
+            snapshot.history[0].model_match_state,
+            ModelMatchState::Mismatched
+        );
+        assert_eq!(
+            snapshot.history[0].reported_model.as_deref(),
+            Some("provider-other")
+        );
+
+        writer.shutdown().await.expect("writer shutdown");
+    }
+
+    #[tokio::test]
+    async fn v2_cache_migrates_without_guessing_model_identity() {
+        use crate::studio::store::object::put_object;
+
+        let (owner, store, writer, _) = memory_owner().await;
+        let legacy = ModelPerformanceState {
+            version: LEGACY_CACHE_VERSION,
+            revision: 7,
+            updated_at: 9,
+            sessions: BTreeMap::new(),
+            history: VecDeque::from([PerformanceSample {
+                thread_id: "thread-1".into(),
+                inference_id: "inference-1".into(),
+                completed_at: 9,
+                provider_instance_id: "provider-1".into(),
+                provider_display_name: "Provider 1".into(),
+                model: "legacy-model".into(),
+                model_observation: None,
+                reasoning_effort: None,
+                completion_tokens: 10,
+                ttft_millis: 5,
+                decode_millis: 100,
+                total_response_millis: 105,
+            }]),
+        };
+        put_object(
+            store.database(),
+            MODEL_PERFORMANCE_OWNER_ID,
+            &legacy,
+            legacy.updated_at,
+        )
+        .await
+        .unwrap();
+
+        owner.load_cache().await.expect("migrate v2 cache");
+        let state = owner.state.lock().unwrap().clone();
+        let snapshot = owner.snapshot().await;
+        assert_eq!(state.version, CACHE_VERSION);
+        assert_eq!(snapshot.history[0].model, "legacy-model");
+        assert_eq!(snapshot.history[0].configured_model, None);
+        assert_eq!(snapshot.history[0].sent_model, None);
+        assert_eq!(snapshot.history[0].reported_model, None);
+        assert_eq!(
+            snapshot.history[0].model_match_state,
+            ModelMatchState::LegacyUnknown
+        );
+
+        writer.shutdown().await.expect("writer shutdown");
+    }
+
     #[test]
     fn performance_cache_defaults_missing_effort_and_round_trips_explicit_none() {
         let legacy = serde_json::json!({
-            "version": CACHE_VERSION,
+            "version": LEGACY_CACHE_VERSION,
             "revision": 1,
             "updatedAt": 2,
             "sessions": {},
@@ -926,6 +1042,7 @@ mod tests {
         let restored: ModelPerformanceState =
             serde_json::from_value(legacy).expect("legacy performance cache");
         assert_eq!(restored.history[0].reasoning_effort, None);
+        assert_eq!(restored.history[0].model_observation, None);
 
         let explicit_none = serde_json::json!({
             "version": CACHE_VERSION,
@@ -970,6 +1087,11 @@ mod tests {
             provider_instance_id: provider_instance_id.to_string(),
             provider: format!("{provider_instance_id} display"),
             model: model.to_string(),
+            model_observation: Some(InferenceModelObservation {
+                configured_model: model.to_string(),
+                sent_model: model.to_string(),
+                reported_model: Some(model.to_string()),
+            }),
             reasoning_effort: None,
             context_window: Some(128_000),
             accounting: pl_protocol::InferenceAccounting {

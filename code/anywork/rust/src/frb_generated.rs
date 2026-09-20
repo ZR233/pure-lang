@@ -4884,6 +4884,20 @@ impl SseDecode for crate::api::studio::types::settings::BridgeModelInputSource {
     }
 }
 
+impl SseDecode for crate::api::studio::types::response::BridgeModelMatchState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::studio::types::response::BridgeModelMatchState::Matched,
+            1 => crate::api::studio::types::response::BridgeModelMatchState::Mismatched,
+            2 => crate::api::studio::types::response::BridgeModelMatchState::Unreported,
+            3 => crate::api::studio::types::response::BridgeModelMatchState::LegacyUnknown,
+            _ => unreachable!("Invalid variant for BridgeModelMatchState: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::settings::BridgeModelModality {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4906,6 +4920,11 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSa
         let mut var_providerInstanceId = <String>::sse_decode(deserializer);
         let mut var_providerDisplayName = <String>::sse_decode(deserializer);
         let mut var_model = <String>::sse_decode(deserializer);
+        let mut var_configuredModel = <Option<String>>::sse_decode(deserializer);
+        let mut var_sentModel = <Option<String>>::sse_decode(deserializer);
+        let mut var_reportedModel = <Option<String>>::sse_decode(deserializer);
+        let mut var_modelMatchState =
+            <crate::api::studio::types::response::BridgeModelMatchState>::sse_decode(deserializer);
         let mut var_reasoningEffort = <Option<String>>::sse_decode(deserializer);
         let mut var_completionTokens = <u64>::sse_decode(deserializer);
         let mut var_ttftMillis = <u64>::sse_decode(deserializer);
@@ -4917,6 +4936,10 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSa
             provider_instance_id: var_providerInstanceId,
             provider_display_name: var_providerDisplayName,
             model: var_model,
+            configured_model: var_configuredModel,
+            sent_model: var_sentModel,
+            reported_model: var_reportedModel,
+            model_match_state: var_modelMatchState,
             reasoning_effort: var_reasoningEffort,
             completion_tokens: var_completionTokens,
             ttft_millis: var_ttftMillis,
@@ -12408,6 +12431,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::settings::Brid
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::BridgeModelMatchState {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Matched => 0.into_dart(),
+            Self::Mismatched => 1.into_dart(),
+            Self::Unreported => 2.into_dart(),
+            Self::LegacyUnknown => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgeModelMatchState
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::BridgeModelMatchState>
+    for crate::api::studio::types::response::BridgeModelMatchState
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::BridgeModelMatchState {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::BridgeModelModality {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -12441,6 +12487,10 @@ impl flutter_rust_bridge::IntoDart
             self.provider_instance_id.into_into_dart().into_dart(),
             self.provider_display_name.into_into_dart().into_dart(),
             self.model.into_into_dart().into_dart(),
+            self.configured_model.into_into_dart().into_dart(),
+            self.sent_model.into_into_dart().into_dart(),
+            self.reported_model.into_into_dart().into_dart(),
+            self.model_match_state.into_into_dart().into_dart(),
             self.reasoning_effort.into_into_dart().into_dart(),
             self.completion_tokens.into_into_dart().into_dart(),
             self.ttft_millis.into_into_dart().into_dart(),
@@ -18878,6 +18928,24 @@ impl SseEncode for crate::api::studio::types::settings::BridgeModelInputSource {
     }
 }
 
+impl SseEncode for crate::api::studio::types::response::BridgeModelMatchState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::studio::types::response::BridgeModelMatchState::Matched => 0,
+                crate::api::studio::types::response::BridgeModelMatchState::Mismatched => 1,
+                crate::api::studio::types::response::BridgeModelMatchState::Unreported => 2,
+                crate::api::studio::types::response::BridgeModelMatchState::LegacyUnknown => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::studio::types::settings::BridgeModelModality {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -18904,6 +18972,13 @@ impl SseEncode for crate::api::studio::types::response::BridgeModelPerformanceSa
         <String>::sse_encode(self.provider_instance_id, serializer);
         <String>::sse_encode(self.provider_display_name, serializer);
         <String>::sse_encode(self.model, serializer);
+        <Option<String>>::sse_encode(self.configured_model, serializer);
+        <Option<String>>::sse_encode(self.sent_model, serializer);
+        <Option<String>>::sse_encode(self.reported_model, serializer);
+        <crate::api::studio::types::response::BridgeModelMatchState>::sse_encode(
+            self.model_match_state,
+            serializer,
+        );
         <Option<String>>::sse_encode(self.reasoning_effort, serializer);
         <u64>::sse_encode(self.completion_tokens, serializer);
         <u64>::sse_encode(self.ttft_millis, serializer);

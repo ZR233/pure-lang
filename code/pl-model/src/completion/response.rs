@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::completion::tool_call::ToolCall;
-use pl_protocol::{InferenceAccounting, PureError};
+use pl_protocol::{InferenceAccounting, InferenceModelObservation, PureError};
 use pl_protocol::{InferenceTiming, ResponsesContextItem};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +24,8 @@ pub struct CompletionResponse {
     pub timing: Option<InferenceTiming>,
     pub accounting: InferenceAccounting,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_observation: Option<InferenceModelObservation>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,8 +45,9 @@ pub struct CompletionTraceContext {
 #[error("{source}")]
 pub struct CompletionFailure {
     #[source]
-    pub source: PureError,
+    pub source: Box<PureError>,
     pub accounting: Box<InferenceAccounting>,
+    pub model_observation: Option<Box<InferenceModelObservation>>,
     pub(crate) cancelled: bool,
 }
 
@@ -57,8 +60,9 @@ impl CompletionFailure {
     /// `false`, and only pl-model's own cancellation branch may produce a cancelled failure.
     pub fn new(source: PureError, accounting: Box<InferenceAccounting>) -> Self {
         Self {
-            source,
+            source: Box::new(source),
             accounting,
+            model_observation: None,
             cancelled: false,
         }
     }
@@ -71,14 +75,35 @@ impl CompletionFailure {
         self.cancelled
     }
 
+    pub fn model_observation(&self) -> Option<&InferenceModelObservation> {
+        self.model_observation.as_deref()
+    }
+
+    pub(crate) fn with_model_observation(
+        mut self,
+        model_observation: InferenceModelObservation,
+    ) -> Self {
+        self.model_observation = Some(Box::new(model_observation));
+        self
+    }
+
+    pub(crate) fn with_optional_model_observation(
+        mut self,
+        model_observation: Option<InferenceModelObservation>,
+    ) -> Self {
+        self.model_observation = model_observation.map(Box::new);
+        self
+    }
+
     /// Builds the failure produced by the invocation's own cancellation branch.
     ///
     /// Only the code that drove the call and matched its cancellation branch may use this;
     /// a caller outside pl-model cannot fabricate the cancellation fact.
     pub(crate) fn cancelled(source: PureError, accounting: Box<InferenceAccounting>) -> Self {
         Self {
-            source,
+            source: Box::new(source),
             accounting,
+            model_observation: None,
             cancelled: true,
         }
     }
@@ -87,8 +112,9 @@ impl CompletionFailure {
 impl From<PureError> for CompletionFailure {
     fn from(source: PureError) -> Self {
         Self {
-            source,
+            source: Box::new(source),
             accounting: Box::default(),
+            model_observation: None,
             cancelled: false,
         }
     }
@@ -97,12 +123,12 @@ impl From<PureError> for CompletionFailure {
 impl std::ops::Deref for CompletionFailure {
     type Target = PureError;
     fn deref(&self) -> &PureError {
-        &self.source
+        self.source.as_ref()
     }
 }
 
 impl From<CompletionFailure> for PureError {
     fn from(failure: CompletionFailure) -> Self {
-        failure.source
+        *failure.source
     }
 }

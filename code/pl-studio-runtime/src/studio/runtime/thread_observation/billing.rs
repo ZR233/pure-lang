@@ -23,7 +23,11 @@ pub(super) fn record(
                 purpose: Some(receipt.binding.purpose),
                 provider_instance_id: receipt.binding.provider_instance_id.clone(),
                 provider: receipt.binding.provider_instance_id,
-                model: receipt.binding.requested_model,
+                model: receipt.model_observation.as_ref().map_or_else(
+                    || receipt.binding.requested_model.clone(),
+                    |value| value.sent_model.clone(),
+                ),
+                model_observation: receipt.model_observation,
                 reasoning_effort: receipt.reasoning_effort,
                 context_window: receipt.context_window,
                 accounting: receipt.accounting,
@@ -51,12 +55,13 @@ pub(super) fn record(
         .as_ref()
         .map(pl_model::runtime::model_request_receipt)
         .transpose()?;
-    let (binding, accounting, model, timing, orchestration) = match output {
+    let (binding, accounting, model, model_observation, timing, orchestration) = match output {
         Ok(output) => match pl_model::runtime::model_response_receipt(output)? {
             Some(receipt) => (
                 Some(receipt.binding),
                 receipt.response.accounting,
                 receipt.response.model,
+                receipt.response.model_observation,
                 receipt.response.timing,
                 receipt.response.orchestration,
             ),
@@ -64,6 +69,7 @@ pub(super) fn record(
                 request.as_ref().map(|request| request.binding.clone()),
                 unknown(&output.usage),
                 String::new(),
+                None,
                 None,
                 Default::default(),
             ),
@@ -73,6 +79,7 @@ pub(super) fn record(
                 Some(receipt.binding),
                 receipt.accounting,
                 String::new(),
+                receipt.model_observation,
                 None,
                 Default::default(),
             ),
@@ -81,11 +88,14 @@ pub(super) fn record(
                 unknown(&error.usage),
                 String::new(),
                 None,
+                None,
                 Default::default(),
             ),
         },
     };
-    let model = if model.is_empty() {
+    let model = if let Some(observation) = &model_observation {
+        observation.sent_model.clone()
+    } else if model.is_empty() {
         binding
             .as_ref()
             .map_or_else(String::new, |binding| binding.requested_model.clone())
@@ -101,6 +111,7 @@ pub(super) fn record(
         provider_instance_id: provider.clone(),
         provider,
         model,
+        model_observation,
         reasoning_effort: request
             .and_then(|request| request.reasoning)
             .and_then(|reasoning| reasoning.effort),

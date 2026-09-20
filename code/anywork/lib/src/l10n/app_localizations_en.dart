@@ -506,7 +506,38 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsStatisticsEmpty => 'No complete performance samples yet.';
 
   @override
+  String get settingsStatisticsMismatchesOnly => 'Mismatches only';
+
+  @override
+  String get settingsStatisticsMismatchEmpty =>
+      'No model mismatches match these filters.';
+
+  @override
   String get statisticsModel => 'Provider / model';
+
+  @override
+  String get statisticsConfiguredModel => 'Configured model';
+
+  @override
+  String get statisticsSentModel => 'Sent model';
+
+  @override
+  String get statisticsReportedModel => 'Reported model';
+
+  @override
+  String get statisticsModelMatched => 'Matched';
+
+  @override
+  String get statisticsModelMismatched => 'Mismatch';
+
+  @override
+  String get statisticsModelUnreported => 'Not reported';
+
+  @override
+  String get statisticsModelLegacyUnknown => 'Not collected';
+
+  @override
+  String get statisticsModelUnavailable => 'Unavailable';
 
   @override
   String get statisticsReasoningEffort => 'Reasoning effort';

@@ -83,6 +83,7 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
             ..Default::default()
         },
         model: body.model.unwrap_or_default(),
+        model_observation: None,
     })
 }
 
@@ -242,6 +243,7 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
             ..Default::default()
         },
         model: body.model.unwrap_or_default(),
+        model_observation: None,
     })
 }
 

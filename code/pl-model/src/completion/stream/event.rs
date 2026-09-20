@@ -12,6 +12,10 @@ pub enum ModelStreamEvent {
     ResponseStarted {
         response_id: Option<String>,
     },
+    ResponseModelObserved {
+        model: String,
+        terminal: bool,
+    },
     BlockOpened {
         id: String,
         kind: ModelBlockKind,
@@ -144,6 +148,7 @@ impl ModelStreamEvent {
             }
             Self::ToolInputDelta { payload_delta, .. } => !payload_delta.text().is_empty(),
             Self::ResponseStarted { .. }
+            | Self::ResponseModelObserved { .. }
             | Self::BlockOpened { .. }
             | Self::BlockClosed { .. }
             | Self::ToolInputStarted { .. }

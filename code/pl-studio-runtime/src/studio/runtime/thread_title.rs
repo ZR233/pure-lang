@@ -326,9 +326,18 @@ async fn generate_title(
         Ok(response) => response.accounting().clone(),
         Err(failure) => (*failure.accounting).clone(),
     };
-    let model = billing_model(
-        &route.model.slug,
-        result.as_ref().ok().map(|response| response.model()),
+    let model_observation = match &result {
+        Ok(response) => response.model_observation().cloned(),
+        Err(failure) => failure.model_observation().cloned(),
+    };
+    let model = model_observation.as_ref().map_or_else(
+        || {
+            billing_model(
+                &route.model.slug,
+                result.as_ref().ok().map(|response| response.model()),
+            )
+        },
+        |observation| observation.sent_model.clone(),
     );
     let billing = pl_protocol::InferenceBillingRecord {
         purpose: Some("title".into()),
@@ -336,6 +345,7 @@ async fn generate_title(
         provider_instance_id: route.provider_id.as_str().to_owned(),
         provider: route.endpoint.name.clone(),
         model,
+        model_observation,
         reasoning_effort,
         context_window: route.model.resolved_context_window(),
         accounting,

@@ -134,6 +134,7 @@ mod tests {
                 reasoning_effort: None,
                 context_window: None,
                 turn_id: request.model.turn_id,
+                model_observation: None,
                 implementation: Some("native".into()),
                 error: None,
                 accounting: pl_protocol::InferenceAccounting {

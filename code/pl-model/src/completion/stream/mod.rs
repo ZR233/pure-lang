@@ -36,6 +36,7 @@ pub(crate) struct StreamCollectContext<'a> {
     pub(crate) trace: Option<CompletionTraceContext>,
     pub(crate) trace_sink: Option<Arc<dyn TraceEventSink>>,
     pub(crate) cancellation: Option<tokio_util::sync::CancellationToken>,
+    pub(crate) model_observation: Option<pl_protocol::InferenceModelObservation>,
 }
 
 pub(crate) async fn collect_completion_event_stream(
@@ -62,8 +63,10 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
         trace,
         trace_sink,
         cancellation,
+        model_observation,
     } = context;
-    let mut accumulator = StreamCompletionAccumulator::with_trace_sink(trace, trace_sink);
+    let mut accumulator =
+        StreamCompletionAccumulator::with_model_observation(trace, trace_sink, model_observation);
 
     loop {
         let next_event = tokio::time::timeout(idle_timeout, stream.next());
@@ -76,7 +79,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                         return Err(crate::completion::CompletionFailure::cancelled(
                             PureError::LlmError("model invocation cancelled".to_string()),
                             Box::new(accumulator.accounting()),
-                        ));
+                        ).with_optional_model_observation(accumulator.model_observation()));
                     }
                 }
             }
@@ -91,8 +94,9 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                 );
                 accumulator.fail_attempt(&error, event_tx);
                 return Err(crate::completion::CompletionFailure {
-                    source: error,
+                    source: Box::new(error),
                     accounting: Box::new(accumulator.accounting()),
+                    model_observation: accumulator.model_observation().map(Box::new),
                     cancelled: false,
                 });
             }
@@ -102,8 +106,9 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
             Err(error) => {
                 accumulator.fail_attempt(&error, event_tx);
                 return Err(crate::completion::CompletionFailure {
-                    source: error,
+                    source: Box::new(error),
                     accounting: Box::new(accumulator.accounting()),
+                    model_observation: accumulator.model_observation().map(Box::new),
                     cancelled: false,
                 });
             }
@@ -111,19 +116,22 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
         if let Err(error) = accumulator.apply(event, event_tx) {
             accumulator.fail_attempt(&error, event_tx);
             return Err(crate::completion::CompletionFailure {
-                source: error,
+                source: Box::new(error),
                 accounting: Box::new(accumulator.accounting()),
+                model_observation: accumulator.model_observation().map(Box::new),
                 cancelled: false,
             });
         }
     }
 
     let accounting = accumulator.accounting();
+    let model_observation = accumulator.model_observation();
     accumulator
         .finish(event_tx)
         .map_err(|source| crate::completion::CompletionFailure {
-            source,
+            source: Box::new(source),
             accounting: Box::new(accounting),
+            model_observation: model_observation.map(Box::new),
             cancelled: false,
         })
 }
@@ -152,6 +160,7 @@ mod tests {
                 trace: None,
                 trace_sink: None,
                 cancellation: None,
+                model_observation: None,
             },
             std::time::Duration::from_millis(10),
         )
@@ -186,6 +195,7 @@ mod tests {
                 trace: None,
                 trace_sink: None,
                 cancellation: Some(token),
+                model_observation: None,
             },
             std::time::Duration::from_secs(3600),
         )

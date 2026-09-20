@@ -94,12 +94,25 @@ pub struct BridgeModelPerformanceSample {
     pub provider_instance_id: String,
     pub provider_display_name: String,
     pub model: String,
+    pub configured_model: Option<String>,
+    pub sent_model: Option<String>,
+    pub reported_model: Option<String>,
+    pub model_match_state: BridgeModelMatchState,
     pub reasoning_effort: Option<String>,
     pub completion_tokens: u64,
     pub ttft_millis: u64,
     pub decode_millis: u64,
     pub total_response_millis: u64,
     pub tokens_per_second: f64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeModelMatchState {
+    Matched,
+    Mismatched,
+    Unreported,
+    LegacyUnknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

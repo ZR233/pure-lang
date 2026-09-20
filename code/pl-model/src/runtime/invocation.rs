@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use pl_protocol::trace::{AgentEventSender, TraceEventSink};
-use pl_protocol::{InferenceTiming, PureError, Result};
+use pl_protocol::{InferenceModelObservation, InferenceTiming, PureError, Result};
 
 use super::{ModelSession, responses_websocket, wire_capture};
 
@@ -23,6 +23,11 @@ use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody};
 use crate::runtime::transport_policy::{
     MODEL_MAX_RETRIES, RESPONSES_WEBSOCKET_MAX_RETRIES, model_request_retry_delay,
 };
+
+struct OpenedCompletionStream {
+    events: CompletionEventStream,
+    sent_model: String,
+}
 /// 单次模型调用的运行期上下文。
 ///
 /// 连接 continuation 属于 [`ModelSession`]；trace、事件输出和 prompt cache key
@@ -397,6 +402,7 @@ impl InvocationRunner {
         let transport_metrics_before = context.session.orchestration_snapshot();
         let mut http_fallbacks = 0_u64;
         let mut refreshed_attachments = false;
+        let mut last_model_observation = None;
 
         loop {
             if context
@@ -407,7 +413,8 @@ impl InvocationRunner {
                 return Err(CompletionFailure::cancelled(
                     PureError::LlmError("model invocation cancelled".into()),
                     Box::default(),
-                ));
+                )
+                .with_optional_model_observation(last_model_observation));
             }
             let transport = self.active_transport(&context.session);
             let max_retries = MODEL_MAX_RETRIES;
@@ -440,9 +447,6 @@ impl InvocationRunner {
                 .await;
             let error = match result {
                 Ok(mut response) => {
-                    if response.model.is_empty() {
-                        response.model = self.model.slug.clone();
-                    }
                     let transport_metrics_after = context.session.orchestration_snapshot();
                     response.orchestration.transport_attempts = u64::from(attempt_number) + 1;
                     response.orchestration.continuation_attempts = transport_metrics_after
@@ -476,6 +480,7 @@ impl InvocationRunner {
                     error
                 }
             };
+            last_model_observation = error.model_observation().cloned();
             if !retry_allowed {
                 if transport == OpenAiTransport::ResponsesWebSocket
                     && error.is_transient_model_transport()
@@ -554,9 +559,13 @@ impl InvocationRunner {
                     .await
                 };
                 if let Some(token) = &context.cancellation {
+                    let model_observation = error.model_observation().cloned();
                     tokio::select! {
                         biased;
-                        _ = token.cancelled() => return Err(CompletionFailure::cancelled(PureError::LlmError("attachment refresh cancelled".into()), error.accounting)),
+                        _ = token.cancelled() => return Err(CompletionFailure::cancelled(
+                            PureError::LlmError("attachment refresh cancelled".into()),
+                            error.accounting,
+                        ).with_optional_model_observation(model_observation)),
                         result = prepare => result?,
                     }
                 } else {
@@ -607,12 +616,13 @@ impl InvocationRunner {
                 "模型连接中断，将在统一预算内重试当前请求"
             );
             if let Some(token) = &context.cancellation {
+                let model_observation = error.model_observation().cloned();
                 tokio::select! {
                     _ = tokio::time::sleep(delay) => {},
                     _ = token.cancelled() => return Err(CompletionFailure::cancelled(
                         PureError::LlmError("model invocation cancelled".into()),
                         error.accounting,
-                    )),
+                    ).with_optional_model_observation(model_observation)),
                 }
             } else {
                 tokio::time::sleep(delay).await;
@@ -639,12 +649,12 @@ impl InvocationRunner {
                 pl_protocol::ToolSpec::ProgrammaticToolCalling
                 | pl_protocol::ToolSpec::WebSearch { .. } => true,
             });
-        let opening = self.stream_events(
-            request,
-            context.session.clone(),
-            context.prompt_cache_key.clone(),
-            trace.clone(),
-        );
+        let (body, mut model_observation) =
+            match self.prepare_request_body(request, context.prompt_cache_key.as_deref()) {
+                Ok(prepared) => prepared,
+                Err(error) => return (Err(error.into()), true),
+            };
+        let opening = self.stream_events(body, context.session.clone(), trace.clone());
         tokio::pin!(opening);
         let opened = match context.cancellation.as_ref() {
             Some(token) => tokio::select! {
@@ -652,14 +662,16 @@ impl InvocationRunner {
                 _ = token.cancelled() => return (Err(CompletionFailure::cancelled(
                     PureError::LlmError("model invocation cancelled".into()),
                     Box::default(),
-                )), false),
+                ).with_model_observation(model_observation.clone())), false),
             },
             None => opening.await,
         };
         match opened {
-            Ok(event_stream) => {
+            Ok(opened) => {
+                model_observation.sent_model = opened.sent_model;
                 let replay_unsafe = Arc::new(AtomicBool::new(false));
-                let tracked_stream: CompletionEventStream = event_stream
+                let tracked_stream: CompletionEventStream = opened
+                    .events
                     .inspect({
                         let replay_unsafe = Arc::clone(&replay_unsafe);
                         let inference_timer = inference_timer.clone();
@@ -686,14 +698,41 @@ impl InvocationRunner {
                         trace,
                         trace_sink: context.trace_sink.clone(),
                         cancellation: context.cancellation.clone(),
+                        model_observation: Some(model_observation),
                     },
                 )
                 .await;
                 let retry_allowed = !replay_unsafe.load(Ordering::Acquire);
                 (result, retry_allowed)
             }
-            Err(error) => (Err(error.into()), true),
+            Err(error) => (
+                Err(CompletionFailure::from(error).with_model_observation(model_observation)),
+                true,
+            ),
         }
+    }
+
+    fn prepare_request_body(
+        &self,
+        request: CompletionRequest,
+        prompt_cache_key: Option<&str>,
+    ) -> Result<(OpenAiRequestBody, InferenceModelObservation)> {
+        let protocol = openai_protocol(self.model.binding.transport.protocol);
+        let request = super::context::project_request(&self.endpoint, &self.model, request)?;
+        let mut body = protocol.build_request(&request, &self.model, prompt_cache_key)?;
+        body.apply_native_options(&self.native_body);
+        if self.purpose == InvocationPurpose::RemoteCompaction {
+            body.prepare_compaction();
+        }
+        let sent_model = body.sent_model()?;
+        Ok((
+            body,
+            InferenceModelObservation {
+                configured_model: self.model.slug.clone(),
+                sent_model,
+                reported_model: None,
+            },
+        ))
     }
 
     fn active_transport(&self, session: &ModelSession) -> OpenAiTransport {
@@ -710,11 +749,10 @@ impl InvocationRunner {
 
     fn stream_events(
         &self,
-        request: CompletionRequest,
+        body: OpenAiRequestBody,
         session: ModelSession,
-        prompt_cache_key: Option<String>,
         trace: Option<CompletionTraceContext>,
-    ) -> impl std::future::Future<Output = Result<CompletionEventStream>> + Send {
+    ) -> impl std::future::Future<Output = Result<OpenedCompletionStream>> + Send {
         let http_client = self.http_client.clone();
         let api_base = self.resolve_base_url();
         let endpoint = self.endpoint.clone();
@@ -722,18 +760,9 @@ impl InvocationRunner {
         let protocol = openai_protocol(model_info.binding.transport.protocol);
         let connection_key = self.connection_fingerprint();
         let transport = self.active_transport(&session);
-        let native_body = self.native_body.clone();
-        let purpose = self.purpose;
         async move {
+            let expected_sent_model = body.sent_model()?;
             let token = endpoint.bearer_token.clone();
-
-            let request = super::context::project_request(&endpoint, &model_info, request)?;
-            let mut body =
-                protocol.build_request(&request, &model_info, prompt_cache_key.as_deref())?;
-            body.apply_native_options(&native_body);
-            if purpose == InvocationPurpose::RemoteCompaction {
-                body.prepare_compaction();
-            }
             if transport == OpenAiTransport::ResponsesWebSocket {
                 let OpenAiRequestBody::Responses(body) = body else {
                     return Err(PureError::ConfigError(
@@ -749,11 +778,15 @@ impl InvocationRunner {
                         connection_key,
                         model_session: session,
                         body,
+                        expected_sent_model,
                         trace,
                     },
                 )
                 .await?;
-                return Ok(decode_raw_event_stream(raw_stream, protocol));
+                return Ok(OpenedCompletionStream {
+                    events: decode_raw_event_stream(raw_stream.stream, protocol),
+                    sent_model: raw_stream.sent_model,
+                });
             }
             let capture = wire_capture::capture_http(&body, trace.as_ref()).await?;
             let headers = super::transport::headers(
@@ -813,7 +846,10 @@ impl InvocationRunner {
                 } else {
                     raw_stream
                 };
-            Ok(decode_raw_event_stream(raw_stream, protocol))
+            Ok(OpenedCompletionStream {
+                events: decode_raw_event_stream(raw_stream, protocol),
+                sent_model: expected_sent_model,
+            })
         }
     }
 
@@ -1196,6 +1232,132 @@ mod tests {
         let provider = InvocationRunner::new(ProviderEndpoint::deepseek(None), model).unwrap();
 
         assert_eq!(provider.model().display_name, "Custom DeepSeek");
+    }
+
+    #[test]
+    fn sent_model_is_extracted_after_all_wire_overrides() {
+        let endpoint = ProviderEndpoint::compatible("Local", "http://127.0.0.1:1/v1");
+
+        let catalog =
+            InvocationRunner::new(endpoint.clone(), ModelInfo::compatible("catalog-model"))
+                .unwrap();
+        let (_, observation) = catalog
+            .prepare_request_body(minimal_request("catalog-model"), None)
+            .unwrap();
+        assert_eq!(observation.sent_model, "catalog-model");
+
+        let mut api_model = ModelInfo::compatible("catalog-model");
+        api_model.binding.request.api_model = Some("api-model".into());
+        let api = InvocationRunner::new(endpoint.clone(), api_model).unwrap();
+        let (_, observation) = api
+            .prepare_request_body(minimal_request("catalog-model"), None)
+            .unwrap();
+        assert_eq!(observation.sent_model, "api-model");
+
+        let mut base_model = ModelInfo::compatible("catalog-model");
+        base_model.binding.request.api_model = Some("api-model".into());
+        base_model
+            .binding
+            .request
+            .body
+            .insert("model".into(), serde_json::json!("base-body-model"));
+        let base = InvocationRunner::new(endpoint, base_model).unwrap();
+        let (_, observation) = base
+            .prepare_request_body(minimal_request("catalog-model"), None)
+            .unwrap();
+        assert_eq!(observation.sent_model, "base-body-model");
+
+        let native = base.with_native_body(serde_json::Map::from_iter([(
+            "model".into(),
+            serde_json::json!("native-model"),
+        )]));
+        let (_, observation) = native
+            .prepare_request_body(minimal_request("catalog-model"), None)
+            .unwrap();
+        assert_eq!(observation.sent_model, "native-model");
+        assert_eq!(observation.configured_model, "catalog-model");
+    }
+
+    #[test]
+    fn invalid_final_wire_model_fails_before_transport() {
+        let provider = InvocationRunner::new(
+            ProviderEndpoint::compatible("Local", "http://127.0.0.1:1/v1"),
+            ModelInfo::compatible("catalog-model"),
+        )
+        .unwrap()
+        .with_native_body(serde_json::Map::from_iter([(
+            "model".into(),
+            serde_json::Value::Null,
+        )]));
+
+        let error = provider
+            .prepare_request_body(minimal_request("catalog-model"), None)
+            .unwrap_err();
+        assert!(error.to_string().contains("model must be a string"));
+    }
+
+    #[tokio::test]
+    async fn responses_http_records_configured_sent_and_reported_models() {
+        let body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"reported-model\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, server) = serve_sse_once(body).await;
+        let mut model = responses_http_model("catalog-model");
+        model.binding.request.api_model = Some("wire-model".into());
+        let provider =
+            InvocationRunner::new(ProviderEndpoint::compatible("Local", base_url), model).unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+
+        let response = provider
+            .complete(minimal_request("catalog-model"), invocation(event_tx))
+            .await
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(
+            response.model_observation,
+            Some(InferenceModelObservation {
+                configured_model: "catalog-model".into(),
+                sent_model: "wire-model".into(),
+                reported_model: Some("reported-model".into()),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_http_without_reported_model_keeps_compatibility_model_empty() {
+        let body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, server) = serve_sse_once(body).await;
+        let provider = InvocationRunner::new(
+            ProviderEndpoint::compatible("Local", base_url),
+            responses_http_model("catalog-model"),
+        )
+        .unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+
+        let response = provider
+            .complete(minimal_request("catalog-model"), invocation(event_tx))
+            .await
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(response.model, "");
+        assert_eq!(
+            response.model_observation,
+            Some(InferenceModelObservation {
+                configured_model: "catalog-model".into(),
+                sent_model: "catalog-model".into(),
+                reported_model: None,
+            })
+        );
     }
 
     #[test]
@@ -1773,6 +1935,12 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .unwrap_err();
+            assert_eq!(
+                error
+                    .model_observation()
+                    .map(|observation| observation.sent_model.as_str()),
+                Some("local-responses")
+            );
             let (listener, count) = server.await.unwrap();
             assert_eq!(count, if cancel { 1 } else { 6 });
             assert!(

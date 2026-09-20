@@ -14,6 +14,7 @@ use crate::completion::CompletionTraceContext;
 use crate::completion::stream::OpenAiRawEventStream;
 use crate::provider::RESPONSES_WEBSOCKET_DIALECT;
 use crate::runtime::ModelSession;
+use crate::runtime::openai::sent_model_from_wire_body;
 use crate::runtime::openai::sse::SseStreamEvent;
 use crate::runtime::session::{ResponsesWebSocketConnection, ResponsesWebSocketSession};
 use crate::runtime::transport_policy::{
@@ -42,12 +43,18 @@ pub(super) struct StreamResponsesInput<'a> {
     pub connection_key: u64,
     pub model_session: ModelSession,
     pub body: Map<String, Value>,
+    pub expected_sent_model: String,
     pub trace: Option<CompletionTraceContext>,
+}
+
+pub(super) struct OpenedResponsesStream {
+    pub stream: OpenAiRawEventStream,
+    pub sent_model: String,
 }
 
 pub(super) async fn stream_responses(
     input: StreamResponsesInput<'_>,
-) -> Result<OpenAiRawEventStream> {
+) -> Result<OpenedResponsesStream> {
     let StreamResponsesInput {
         api_base,
         token,
@@ -56,6 +63,7 @@ pub(super) async fn stream_responses(
         connection_key,
         model_session,
         mut body,
+        expected_sent_model,
         trace,
     } = input;
     normalize_websocket_request_body(&mut body);
@@ -98,6 +106,12 @@ pub(super) async fn stream_responses(
     } else {
         "full"
     };
+    let sent_model = sent_model_from_wire_body(&wire_body)?;
+    if sent_model != expected_sent_model {
+        return Err(PureError::LlmError(format!(
+            "Responses WebSocket request protocol error: final wire model changed from {expected_sent_model:?} to {sent_model:?}"
+        )));
+    }
     let request_text = response_create_text(&mut wire_body)?;
     super::wire_capture::capture_responses_websocket(request_mode, &wire_body, trace.as_ref())
         .await?;
@@ -125,26 +139,29 @@ pub(super) async fn stream_responses(
         full_request: body,
         model_session,
     };
-    Ok(futures::stream::unfold(state, |mut state| async move {
-        match &state.state {
-            ResponsesStreamState::Open(_) => {}
-            ResponsesStreamState::Completed(_) => {
-                state.finish_completed_response();
-                return None;
+    Ok(OpenedResponsesStream {
+        stream: futures::stream::unfold(state, |mut state| async move {
+            match &state.state {
+                ResponsesStreamState::Open(_) => {}
+                ResponsesStreamState::Completed(_) => {
+                    state.finish_completed_response();
+                    return None;
+                }
+                ResponsesStreamState::Failed(failed) => {
+                    tracing::debug!(
+                        detail = failed.detail(),
+                        "Responses WebSocket stream stopped"
+                    );
+                    return None;
+                }
+                ResponsesStreamState::Closed(_) => return None,
             }
-            ResponsesStreamState::Failed(failed) => {
-                tracing::debug!(
-                    detail = failed.detail(),
-                    "Responses WebSocket stream stopped"
-                );
-                return None;
-            }
-            ResponsesStreamState::Closed(_) => return None,
-        }
-        let event = state.next_event().await;
-        Some((event, state))
+            let event = state.next_event().await;
+            Some((event, state))
+        })
+        .boxed(),
+        sent_model,
     })
-    .boxed())
 }
 
 fn normalize_websocket_request_body(body: &mut Map<String, Value>) {
@@ -1097,6 +1114,20 @@ mod orchestration_tests {
 
         assert_eq!(first.content.as_deref(), Some("ok-1"));
         assert_eq!(second.content.as_deref(), Some("ok-2"));
+        assert_eq!(
+            first
+                .model_observation
+                .as_ref()
+                .map(|value| value.sent_model.as_str()),
+            requests[0]["model"].as_str()
+        );
+        assert_eq!(
+            first
+                .model_observation
+                .as_ref()
+                .and_then(|value| value.reported_model.as_deref()),
+            Some("local-responses")
+        );
         assert_eq!(first.orchestration.continuation_attempts, 0);
         assert_eq!(second.orchestration.continuation_attempts, 1);
         assert_eq!(second.orchestration.continuation_used, 1);

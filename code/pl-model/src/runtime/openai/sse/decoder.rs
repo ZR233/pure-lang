@@ -14,7 +14,7 @@ use super::item::{
     assistant_message_identity, assistant_message_text, output_item_native_context,
     reasoning_item_id, reasoning_summary_texts,
 };
-use super::{DEFAULT_TEXT_ID, SseStreamEvent, process_sse_events};
+use super::{DEFAULT_TEXT_ID, SseStreamEvent, process_sse_events, response_model_observation};
 
 /// Stateful OpenAI stream decoder.
 ///
@@ -80,7 +80,7 @@ impl OpenAiStreamDecoder {
                     self.text_channels.insert(item_id.clone(), channel);
                     let (block_id, events) = self.ensure_text_block_open(&item_id, channel);
                     let _ = block_id;
-                    return events;
+                    return with_response_model_observation(event, events);
                 }
                 if let Some(item) = event.item.as_ref()
                     && let Some(item_id) = reasoning_item_id(item)
@@ -93,7 +93,7 @@ impl OpenAiStreamDecoder {
                         *provider_metadata = Some(item.clone());
                     }
                     let _ = block_id;
-                    return events;
+                    return with_response_model_observation(event, events);
                 }
             }
             "response.output_text.delta" => {
@@ -109,9 +109,9 @@ impl OpenAiStreamDecoder {
                 if let Some(delta) = event.delta.clone() {
                     let (block_id, mut events) = self.ensure_text_block_open(&item_id, channel);
                     events.push(ModelStreamEvent::text_delta(block_id, channel, delta));
-                    return events;
+                    return with_response_model_observation(event, events);
                 }
-                return Vec::new();
+                return with_response_model_observation(event, Vec::new());
             }
             "response.output_item.done" => {
                 if let Some(item) = event.item.as_ref()
@@ -126,7 +126,7 @@ impl OpenAiStreamDecoder {
                         (item_id.clone(), Vec::new())
                     };
                     if authoritative_text.is_none() && !was_open {
-                        return Vec::new();
+                        return with_response_model_observation(event, Vec::new());
                     }
                     let block_id = self
                         .open_text_blocks
@@ -138,7 +138,7 @@ impl OpenAiStreamDecoder {
                         channel,
                         authoritative_text,
                     ));
-                    return events;
+                    return with_response_model_observation(event, events);
                 }
                 if let Some(item) = event.item.as_ref()
                     && let Some(item_id) = reasoning_item_id(item)
@@ -151,7 +151,7 @@ impl OpenAiStreamDecoder {
                         (item_id.clone(), Vec::new())
                     };
                     if authoritative_summary.is_none() && !was_open {
-                        return Vec::new();
+                        return with_response_model_observation(event, Vec::new());
                     }
                     let block_id = self
                         .open_reasoning_blocks
@@ -165,7 +165,7 @@ impl OpenAiStreamDecoder {
                     if let Some(native) = output_item_native_context(item) {
                         events.push(native);
                     }
-                    return events;
+                    return with_response_model_observation(event, events);
                 }
             }
             _ => {
@@ -416,6 +416,16 @@ impl OpenAiStreamDecoder {
     }
 }
 
+fn with_response_model_observation(
+    event: &SseStreamEvent,
+    mut events: Vec<ModelStreamEvent>,
+) -> Vec<ModelStreamEvent> {
+    if let Some(model_observation) = response_model_observation(event) {
+        events.insert(0, model_observation);
+    }
+    events
+}
+
 fn text_block_counter_key(item_id: &str) -> String {
     item_id.to_string()
 }
@@ -552,6 +562,29 @@ mod tests {
             }
             other => panic!("unexpected events: {other:?}"),
         }
+    }
+
+    #[test]
+    fn native_responses_special_events_preserve_model_observations() {
+        let mut decoder = OpenAiStreamDecoder::new(VisibleOutputProtocol::NativePhases);
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "model": "responses-special-model",
+            "item": {
+                "id": "msg_progress",
+                "type": "message",
+                "role": "assistant",
+                "phase": "commentary",
+                "content": []
+            }
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            decoder.decode(&event).first(),
+            Some(ModelStreamEvent::ResponseModelObserved { model, terminal: false })
+                if model == "responses-special-model"
+        ));
     }
 
     #[test]

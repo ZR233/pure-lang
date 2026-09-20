@@ -650,6 +650,16 @@ ModelPerformanceSnapshotView _modelPerformanceFromFrb(
           providerInstanceId: sample.providerInstanceId,
           providerDisplayName: sample.providerDisplayName,
           model: sample.model,
+          configuredModel: sample.configuredModel,
+          sentModel: sample.sentModel,
+          reportedModel: sample.reportedModel,
+          modelMatchState: switch (sample.modelMatchState) {
+            frb.BridgeModelMatchState.matched => ModelMatchState.matched,
+            frb.BridgeModelMatchState.mismatched => ModelMatchState.mismatched,
+            frb.BridgeModelMatchState.unreported => ModelMatchState.unreported,
+            frb.BridgeModelMatchState.legacyUnknown =>
+              ModelMatchState.legacyUnknown,
+          },
           reasoningEffort: sample.reasoningEffort,
           completionTokens: sample.completionTokens.toInt(),
           ttftMillis: sample.ttftMillis.toInt(),

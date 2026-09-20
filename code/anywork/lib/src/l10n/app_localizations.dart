@@ -1004,11 +1004,71 @@ abstract class AppLocalizations {
   /// **'No complete performance samples yet.'**
   String get settingsStatisticsEmpty;
 
+  /// No description provided for @settingsStatisticsMismatchesOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Mismatches only'**
+  String get settingsStatisticsMismatchesOnly;
+
+  /// No description provided for @settingsStatisticsMismatchEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No model mismatches match these filters.'**
+  String get settingsStatisticsMismatchEmpty;
+
   /// No description provided for @statisticsModel.
   ///
   /// In en, this message translates to:
   /// **'Provider / model'**
   String get statisticsModel;
+
+  /// No description provided for @statisticsConfiguredModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Configured model'**
+  String get statisticsConfiguredModel;
+
+  /// No description provided for @statisticsSentModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent model'**
+  String get statisticsSentModel;
+
+  /// No description provided for @statisticsReportedModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Reported model'**
+  String get statisticsReportedModel;
+
+  /// No description provided for @statisticsModelMatched.
+  ///
+  /// In en, this message translates to:
+  /// **'Matched'**
+  String get statisticsModelMatched;
+
+  /// No description provided for @statisticsModelMismatched.
+  ///
+  /// In en, this message translates to:
+  /// **'Mismatch'**
+  String get statisticsModelMismatched;
+
+  /// No description provided for @statisticsModelUnreported.
+  ///
+  /// In en, this message translates to:
+  /// **'Not reported'**
+  String get statisticsModelUnreported;
+
+  /// No description provided for @statisticsModelLegacyUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Not collected'**
+  String get statisticsModelLegacyUnknown;
+
+  /// No description provided for @statisticsModelUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Unavailable'**
+  String get statisticsModelUnavailable;
 
   /// No description provided for @statisticsReasoningEffort.
   ///

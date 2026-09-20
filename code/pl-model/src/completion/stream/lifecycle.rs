@@ -218,6 +218,9 @@ impl StreamLifecycle {
                 events.push(ModelStreamEvent::ResponseStarted { response_id });
                 events
             }
+            ModelStreamEvent::ResponseModelObserved { model, terminal } => {
+                vec![ModelStreamEvent::ResponseModelObserved { model, terminal }]
+            }
             ModelStreamEvent::ToolCallReady {
                 stream_id,
                 item_id,

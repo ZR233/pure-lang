@@ -85,6 +85,9 @@ abstract final class StudioDriverKeys {
   static const statisticsSummary = ValueKey<String>('statistics-summary');
   static const statisticsHistory = ValueKey<String>('statistics-history');
   static const statisticsFilter = ValueKey<String>('statistics-filter');
+  static const statisticsMismatchOnly = ValueKey<String>(
+    'statistics-mismatch-only',
+  );
 
   static ValueKey<String> statisticsSummaryRow(
     String providerInstanceId,

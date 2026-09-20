@@ -15,7 +15,7 @@ owner。进程运行期间 Project、Thread、Agent、Workflow、Recovery 和服
 ## 18.2 公共 snapshot
 
 StudioState 聚合 projectDirectory、threadDirectory、agentDirectory、modeCatalog、settings、
-recovery、MCP/LSP、provider usage 与 updater。Thread workspace 单独包含 timeline、pending
+recovery、MCP/LSP、provider usage、model performance 与 updater。Thread workspace 单独包含 timeline、pending
 Interaction、ThreadRuntimeView 和 workflow 投影；不存在 taskDirectory。Thread 目录条目携带
 会话工作区模式（`local | worktree`）与会话工作区地址 `workspacePath`，只读投影为侧栏与会话
 展示的 canonical 事实，GUI 不推导、不本地改写，也不按模式分别取 Project 路径或工作树路径。
@@ -28,6 +28,9 @@ ThreadDirectoryChanged、AgentDirectoryChanged、ModeCatalogChanged、ThreadRunt
 的内存索引属于 owner 准备步骤，不单独形成产品事实或广播。归档只装载目录，不重放冷历史
 或激活冷 owner；最终业务 mutation 才通过
 directory command 发布 canonical delta。
+
+全量 snapshot resync 按领域 revision 合并 `modelPerformance`，与增量事件使用同一 canonical
+状态；本地已有快照不能遮蔽服务端更新，旧全量快照也不能覆盖已收到的新事件。
 
 ## 18.3 Activation
 
@@ -148,6 +151,10 @@ commit 的投影、目录保存及计费保存完成。观察者更新产品目�
 提交的完整 detail，超大单条以带字节位置的 UTF-8 JSON 分片继续读取，不能截断正文。
 冷目录读取遇到未知 mode payload 保留已有目录元数据；只读历史展示原始载荷，真正激活
 仍严格校验所需 producer codec。
+
+模型性能历史以冻结账单中的实际发送模型作为统计身份，并投影配置模型、Provider 返回模型和
+`matched`、`mismatched`、`unreported`、`legacyUnknown` 四态结果。返回模型不参与费用或速度
+汇总，旧账单没有观察事实时只能标记 `legacyUnknown`。
 
 工具附件投影：Studio 从持久化工具媒体通过格式所有者的 typed 解码生成工具输出附件，
 实时与历史恢复共用同一投影。附件身份沿用归档引用，MIME、字节数与可用尺寸必须对应

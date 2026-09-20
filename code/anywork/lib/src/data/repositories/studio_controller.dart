@@ -1574,6 +1574,7 @@ StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
   next = applyLspState(next, incoming.lspState);
   next = applyThreadModeCatalog(next, incoming.threadModeCatalog);
   next = applyProviderUsageState(next, incoming.providerUsageState);
+  next = applyModelPerformanceState(next, incoming.modelPerformance);
   next = applyUpdaterState(next, incoming.updaterState);
   for (final snapshot in incoming.skillsByProject.values) {
     next = applySkillsState(next, snapshot);

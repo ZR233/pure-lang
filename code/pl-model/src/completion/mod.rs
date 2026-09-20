@@ -23,10 +23,10 @@ pub use attachment::{AttachmentInput, AttachmentSource, ResourceAccess, Resource
 pub use compaction::*;
 pub use pl_protocol::{
     AttachmentModality, ContentPart, HostedWebSearchOptions, InferenceAccounting,
-    InferenceOrchestrationMetrics, InferenceTiming, InferenceTokenUsage, Message, MessageContent,
-    MessageRole, ModelContextItem, PureError, ResponsesContextItem, Result, ToolCallCaller,
-    ToolCallKind, ToolCallRecord, ToolSpec, UsageReport, WebSearchContextSize, WebSearchFilters,
-    WebSearchUserLocation,
+    InferenceModelObservation, InferenceOrchestrationMetrics, InferenceTiming, InferenceTokenUsage,
+    Message, MessageContent, MessageRole, ModelContextItem, PureError, ResponsesContextItem,
+    Result, ToolCallCaller, ToolCallKind, ToolCallRecord, ToolSpec, UsageReport,
+    WebSearchContextSize, WebSearchFilters, WebSearchUserLocation,
 };
 pub use request::*;
 pub use response::*;

@@ -35,6 +35,7 @@ pub struct ThreadCompaction {
     pub binding: super::receipt::ModelCallBinding,
     pub replacement: ReplaceContext,
     pub accounting: InferenceAccounting,
+    pub model_observation: Option<crate::completion::InferenceModelObservation>,
     pub implementation: ThreadCompactionStrategy,
 }
 
@@ -119,6 +120,7 @@ impl ThreadModel {
                         Some(checkpoint.item),
                         None,
                         checkpoint.accounting,
+                        checkpoint.model_observation,
                         ThreadCompactionStrategy::PreferNative,
                     )
                 })
@@ -143,19 +145,21 @@ impl ThreadModel {
                         None,
                         Some(summary.text),
                         summary.accounting,
+                        summary.model_observation,
                         ThreadCompactionStrategy::TextSummary,
                     )
                 })
         };
         let cleanup = session.close().await;
-        let (item, text, accounting, implementation) = match result {
+        let (item, text, accounting, model_observation, implementation) = match result {
             Ok(result) => {
                 if let Err(source) = cleanup {
                     return Err(receipt::failure_error(
                         binding,
                         crate::completion::CompletionFailure {
-                            source,
+                            source: Box::new(source),
                             accounting: Box::new(result.2),
+                            model_observation: result.3.map(Box::new),
                             cancelled: false,
                         },
                     ));
@@ -164,22 +168,34 @@ impl ThreadModel {
             }
             Err(mut error) => {
                 if let Err(cleanup) = cleanup {
-                    error.source = crate::completion::PureError::Io(std::io::Error::other(
-                        CompactionCleanupError {
-                            primary: error.source,
+                    error.source = Box::new(crate::completion::PureError::Io(
+                        std::io::Error::other(CompactionCleanupError {
+                            primary: *error.source,
                             cleanup,
-                        },
+                        }),
                     ));
                 }
                 return Err(receipt::failure_error(binding, error));
             }
         };
         let content = if let Some(item) = item {
-            let content = serde_json::to_string(&item)
-                .map_err(|error| failure(ModelFailureKind::InvalidResponse, error))?;
+            let content = serde_json::to_string(&item).map_err(|error| {
+                receipt::postprocess_failure_error(
+                    binding.clone(),
+                    accounting.clone(),
+                    model_observation.clone(),
+                    failure(ModelFailureKind::InvalidResponse, error),
+                )
+            })?;
             vec![ContextContent::Opaque {
-                payload: OpaquePayload::new(FORMAT, 1, content)
-                    .map_err(|error| failure(ModelFailureKind::InvalidResponse, error))?,
+                payload: OpaquePayload::new(FORMAT, 1, content).map_err(|error| {
+                    receipt::postprocess_failure_error(
+                        binding.clone(),
+                        accounting.clone(),
+                        model_observation.clone(),
+                        failure(ModelFailureKind::InvalidResponse, error),
+                    )
+                })?,
             }]
         } else {
             vec![ContextContent::Text {
@@ -210,6 +226,7 @@ impl ThreadModel {
                 records,
             },
             accounting,
+            model_observation,
             implementation,
         })
     }

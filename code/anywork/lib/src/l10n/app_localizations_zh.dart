@@ -488,7 +488,37 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsStatisticsEmpty => '暂无完整性能样本。';
 
   @override
+  String get settingsStatisticsMismatchesOnly => '仅看不一致';
+
+  @override
+  String get settingsStatisticsMismatchEmpty => '当前筛选条件下没有模型不一致记录。';
+
+  @override
   String get statisticsModel => '模型服务商 / 模型';
+
+  @override
+  String get statisticsConfiguredModel => '配置模型';
+
+  @override
+  String get statisticsSentModel => '发送模型';
+
+  @override
+  String get statisticsReportedModel => '返回模型';
+
+  @override
+  String get statisticsModelMatched => '一致';
+
+  @override
+  String get statisticsModelMismatched => '不一致';
+
+  @override
+  String get statisticsModelUnreported => '未报告';
+
+  @override
+  String get statisticsModelLegacyUnknown => '未采集';
+
+  @override
+  String get statisticsModelUnavailable => '无';
 
   @override
   String get statisticsReasoningEffort => '思考强度';

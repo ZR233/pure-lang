@@ -3552,6 +3552,18 @@ void registerShellSettingsTests() {
     );
     expect(tester.takeException(), isNull);
 
+    final semantics = tester.ensureSemantics();
+    expect(
+      find.bySemanticsLabel(
+        RegExp(
+          'Configured model: catalog-model-a.*Sent model: model-a.*Reported model: provider-other.*Mismatch',
+          dotAll: true,
+        ),
+      ),
+      findsWidgets,
+    );
+    semantics.dispose();
+
     await tester.tap(find.byKey(StudioDriverKeys.statisticsFilter));
     await tester.pumpAndSettle();
     await tester.tap(find.text('DeepSeek · provider-a · model-a · high').last);
@@ -3634,6 +3646,40 @@ void registerShellSettingsTests() {
       ),
       findsOneWidget,
     );
+
+    await tester.tap(find.byKey(StudioDriverKeys.statisticsMismatchOnly));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('No model mismatches match these filters.'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(StudioDriverKeys.statisticsFilter));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DeepSeek · provider-a · model-a · high').last);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow(
+          'provider-a',
+          'model-a',
+          'high',
+          0,
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow(
+          'provider-a',
+          'model-a',
+          'high',
+          1,
+        ),
+      ),
+      findsNothing,
+    );
   });
 
   testWidgets(
@@ -3701,6 +3747,7 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     final filter = find.byKey(StudioDriverKeys.statisticsFilter);
+    final mismatchOnly = find.byKey(StudioDriverKeys.statisticsMismatchOnly);
     final statisticsScrollable = find
         .descendant(
           of: find.byKey(StudioDriverKeys.statisticsHistory),
@@ -3714,11 +3761,16 @@ void registerShellSettingsTests() {
     );
     final title = find.text('Call history');
     expect(filter, findsOneWidget);
+    expect(mismatchOnly, findsOneWidget);
     expect(title, findsOneWidget);
     expect(tester.getSize(filter).width, lessThanOrEqualTo(208));
     expect(tester.getSize(title).width, greaterThan(0));
     expect(tester.getSize(title).height, greaterThan(0));
     expect(tester.getRect(title).overlaps(tester.getRect(filter)), isFalse);
+    expect(
+      tester.getRect(filter).overlaps(tester.getRect(mismatchOnly)),
+      isFalse,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -5750,9 +5802,10 @@ const _danglingUserAgentProfile = AgentProfileView(
 ModelPerformanceSnapshotView _modelPerformanceFixture({
   bool hasUnpricedUsage = false,
   List<RuntimeCostView>? estimatedCosts,
+  int revision = 3,
 }) {
   return ModelPerformanceSnapshotView(
-    revision: 3,
+    revision: revision,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(3000),
     sessionCosts: [
       SessionCostView(
@@ -5828,6 +5881,10 @@ ModelPerformanceSnapshotView _modelPerformanceFixture({
         providerInstanceId: 'provider-a',
         providerDisplayName: 'DeepSeek',
         model: 'model-a',
+        configuredModel: 'catalog-model-a',
+        sentModel: 'model-a',
+        reportedModel: 'provider-other',
+        modelMatchState: ModelMatchState.mismatched,
         reasoningEffort: 'high',
         completionTokens: 50,
         ttftMillis: 100,
@@ -5840,6 +5897,10 @@ ModelPerformanceSnapshotView _modelPerformanceFixture({
         providerInstanceId: 'provider-a',
         providerDisplayName: 'DeepSeek',
         model: 'model-a',
+        configuredModel: 'model-a',
+        sentModel: 'model-a',
+        reportedModel: 'model-a',
+        modelMatchState: ModelMatchState.matched,
         reasoningEffort: 'high',
         completionTokens: 55,
         ttftMillis: 110,
@@ -5852,6 +5913,9 @@ ModelPerformanceSnapshotView _modelPerformanceFixture({
         providerInstanceId: 'provider-a',
         providerDisplayName: 'DeepSeek',
         model: 'model-a',
+        configuredModel: 'catalog-model-a',
+        sentModel: 'model-a',
+        modelMatchState: ModelMatchState.unreported,
         reasoningEffort: 'none',
         completionTokens: 30,
         ttftMillis: 80,
@@ -5875,6 +5939,10 @@ ModelPerformanceSnapshotView _modelPerformanceFixture({
         providerInstanceId: 'provider-b',
         providerDisplayName: 'OpenAI',
         model: 'model-b',
+        configuredModel: 'model-b',
+        sentModel: 'model-b',
+        reportedModel: 'model-b',
+        modelMatchState: ModelMatchState.matched,
         completionTokens: 30,
         ttftMillis: 80,
         decodeMillis: 300,

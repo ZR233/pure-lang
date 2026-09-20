@@ -119,12 +119,18 @@ class ModelPerformanceSummaryView {
       jsonEncode(<Object?>[providerInstanceId, model, reasoningEffort]);
 }
 
+enum ModelMatchState { matched, mismatched, unreported, legacyUnknown }
+
 class ModelPerformanceSampleView {
   const ModelPerformanceSampleView({
     required this.completedAt,
     required this.providerInstanceId,
     required this.providerDisplayName,
     required this.model,
+    this.configuredModel,
+    this.sentModel,
+    this.reportedModel,
+    this.modelMatchState = ModelMatchState.legacyUnknown,
     this.reasoningEffort,
     required this.completionTokens,
     required this.ttftMillis,
@@ -137,6 +143,10 @@ class ModelPerformanceSampleView {
   final String providerInstanceId;
   final String providerDisplayName;
   final String model;
+  final String? configuredModel;
+  final String? sentModel;
+  final String? reportedModel;
+  final ModelMatchState modelMatchState;
   final String? reasoningEffort;
   final int completionTokens;
   final int ttftMillis;
@@ -146,6 +156,8 @@ class ModelPerformanceSampleView {
 
   String get filterKey =>
       jsonEncode(<Object?>[providerInstanceId, model, reasoningEffort]);
+
+  String get displayModel => sentModel ?? model;
 }
 
 class ModelPerformanceSnapshotView {

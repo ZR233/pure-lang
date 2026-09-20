@@ -22,6 +22,7 @@ pub struct TextSummaryRequest<'a> {
 pub struct TextSummary {
     pub text: String,
     pub accounting: InferenceAccounting,
+    pub model_observation: Option<crate::completion::InferenceModelObservation>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -61,8 +62,9 @@ impl ModelRuntime {
             (Ok(response), Ok(())) => response,
             (Ok(response), Err(source)) => {
                 return Err(CompletionFailure {
-                    source,
+                    source: Box::new(source),
                     accounting: Box::new(response.accounting),
+                    model_observation: response.model_observation.map(Box::new),
                     cancelled: false,
                 });
             }
@@ -71,25 +73,31 @@ impl ModelRuntime {
                 // Folding a separate cleanup failure in does not erase the primary call's fact.
                 let cancelled = failure.is_cancelled();
                 return Err(CompletionFailure {
-                    source: PureError::Io(std::io::Error::other(SummaryCleanupFailure {
-                        primary: failure.source,
-                        cleanup,
-                    })),
+                    source: Box::new(PureError::Io(std::io::Error::other(
+                        SummaryCleanupFailure {
+                            primary: *failure.source,
+                            cleanup,
+                        },
+                    ))),
                     accounting: failure.accounting,
+                    model_observation: failure.model_observation,
                     cancelled,
                 });
             }
         };
+        let model_observation = response.model_observation.clone();
         let Some(text) = response.content.filter(|text| !text.trim().is_empty()) else {
             return Err(CompletionFailure {
-                source: PureError::LlmError(request.empty_summary_error.to_owned()),
+                source: Box::new(PureError::LlmError(request.empty_summary_error.to_owned())),
                 accounting: Box::new(response.accounting),
+                model_observation: model_observation.clone().map(Box::new),
                 cancelled: false,
             });
         };
         Ok(TextSummary {
             text,
             accounting: response.accounting,
+            model_observation,
         })
     }
 }

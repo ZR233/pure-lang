@@ -100,6 +100,7 @@ impl ContextPreparationHook for StudioCompaction {
                     context_window: self.context_window,
                     turn_id: turn_id.clone(),
                     accounting: result.accounting,
+                    model_observation: result.model_observation,
                     implementation: Some(
                         match result.implementation {
                             ThreadCompactionStrategy::TextSummary => "textSummary",
@@ -131,6 +132,7 @@ impl ContextPreparationHook for StudioCompaction {
                         context_window: self.context_window,
                         turn_id: turn_id.clone(),
                         accounting: receipt.accounting,
+                        model_observation: receipt.model_observation,
                         implementation: None,
                         error: Some(receipt.message),
                     });
@@ -154,6 +156,8 @@ pub(crate) struct CompactionReceipt {
     pub context_window: Option<u64>,
     pub turn_id: String,
     pub accounting: pl_model::completion::InferenceAccounting,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_observation: Option<pl_protocol::InferenceModelObservation>,
     pub implementation: Option<String>,
     pub error: Option<String>,
 }
