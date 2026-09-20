@@ -408,8 +408,9 @@ StudioState _remoteProjectAdoptedState({
   );
 }
 
-StudioState _stateWithAttachmentModels() {
+StudioState _stateWithAttachmentModels({bool visualModel = true}) {
   final state = _emptyState();
+  final selectedModel = visualModel ? 'glm-5.3-flash' : 'glm-5.3';
   const imageModel = ProviderModelView(
     slug: 'glm-5.3-flash',
     displayName: 'GLM-5.3-Flash',
@@ -437,7 +438,7 @@ StudioState _stateWithAttachmentModels() {
   return state.copyWith(
     settingsState: SettingsStateSnapshot.fromState(
       state: _testReady(
-        const SettingsStateData(
+        SettingsStateData(
           providers: [
             ProviderSettingsView(
               id: 'zhipu',
@@ -455,13 +456,13 @@ StudioState _stateWithAttachmentModels() {
             RoleSettingsView(
               key: 'executor',
               providerId: 'zhipu',
-              model: 'glm-5.3-flash',
+              model: selectedModel,
               effort: 'high',
             ),
             RoleSettingsView(
               key: 'planner',
               providerId: 'zhipu',
-              model: 'glm-5.3-flash',
+              model: selectedModel,
               effort: 'high',
             ),
           ],
@@ -470,7 +471,7 @@ StudioState _stateWithAttachmentModels() {
     ),
     workspacesByThread: {
       state.selectedThreadId!: state.selectedWorkspace!.copyWith(
-        runtime: state.runtime.copyWith(model: 'glm-5.3-flash'),
+        runtime: state.runtime.copyWith(model: selectedModel),
       ),
     },
   );

@@ -1754,6 +1754,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get composerAttachmentRemoveTooltip => 'Remove';
 
   @override
+  String get composerClipboardImageUnsupported =>
+      'The current model does not support pasted images.';
+
+  @override
+  String get composerClipboardReadFailed =>
+      'Unable to read the clipboard image.';
+
+  @override
   String settingsModelOutputCapabilities(String capabilities) {
     return 'Outputs: $capabilities';
   }

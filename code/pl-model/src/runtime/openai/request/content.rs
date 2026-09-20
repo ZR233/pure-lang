@@ -97,27 +97,22 @@ impl MediaRepresentationPlan {
             } else {
                 &profile.first_send
             };
-            let uploaded = media
+            let representation = candidates
                 .iter()
-                .all(|item| has_representation(item, MediaRepresentation::ProviderFile))
-                && profile.wire == MediaWireFormat::ResponsesInputImage;
-            let representation = if uploaded {
-                Some(MediaRepresentation::ProviderFile)
-            } else {
-                candidates.iter().copied().find(|candidate| {
+                .copied()
+                .find(|candidate| {
                     media
                         .iter()
                         .all(|item| has_representation(item, *candidate))
                 })
-            }
-            .ok_or_else(|| {
-                protocol_error(format!(
-                    "model={} modality={} count={} has no common media representation",
-                    model.slug,
-                    modality_label(modality),
-                    media.len()
-                ))
-            })?;
+                .ok_or_else(|| {
+                    protocol_error(format!(
+                        "model={} modality={} count={} has no common media representation",
+                        model.slug,
+                        modality_label(modality),
+                        media.len()
+                    ))
+                })?;
             tracing::info!(
                 model = %model.slug,
                 modality = modality_label(modality),
@@ -543,6 +538,66 @@ mod tests {
             body["input"][0]["content"][1]["image_url"],
             "data:image/png;base64,aGVsbG8="
         );
+    }
+
+    #[test]
+    fn responses_respects_media_profile_when_provider_file_is_available() {
+        let mut prepared = image_prepared_content();
+        prepared[0].sources.insert(
+            0,
+            crate::completion::AttachmentRepresentation::ProviderFile {
+                file_id: "file-ignored".to_string(),
+            },
+        );
+        let request = CompletionRequest::builder()
+            .input(context_items(vec![image_message()]))
+            .prepared_content(prepared)
+            .build();
+        let mut model = bundled_model("deepseek-flash");
+        let image = model
+            .binding
+            .request
+            .media
+            .iter_mut()
+            .find(|profile| profile.modality == crate::model::ModelModality::Image)
+            .expect("DeepSeek Flash has an image profile");
+        image.first_send = vec![MediaRepresentation::DataUrl];
+        image.replay = vec![MediaRepresentation::DataUrl];
+
+        let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+        let image = &body["input"][0]["content"][1];
+
+        assert_eq!(image["image_url"], "data:image/png;base64,aGVsbG8=");
+        assert!(image.get("file_id").is_none());
+    }
+
+    #[test]
+    fn responses_deepseek_prefers_provider_file_over_remote_and_data_urls() {
+        let mut prepared = image_prepared_content();
+        prepared[0].sources.insert(
+            0,
+            crate::completion::AttachmentRepresentation::RemoteUrl {
+                url: "https://cdn.example/marker.png".to_string(),
+            },
+        );
+        prepared[0].sources.insert(
+            0,
+            crate::completion::AttachmentRepresentation::ProviderFile {
+                file_id: "file-deepseek-7429".to_string(),
+            },
+        );
+        let request = CompletionRequest::builder()
+            .input(context_items(vec![image_message()]))
+            .prepared_content(prepared)
+            .build();
+
+        let body = OpenAiProtocol::responses()
+            .build_request_body_with_model(&request, &bundled_model("deepseek-flash"));
+        let image = &body["input"][0]["content"][1];
+
+        assert_eq!(image["type"], "input_image");
+        assert_eq!(image["file_id"], "file-deepseek-7429");
+        assert!(image.get("image_url").is_none());
     }
 
     #[test]

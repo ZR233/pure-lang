@@ -1681,6 +1681,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get composerAttachmentRemoveTooltip => '移除';
 
   @override
+  String get composerClipboardImageUnsupported => '当前模型不支持粘贴图片。';
+
+  @override
+  String get composerClipboardReadFailed => '无法读取剪贴板图片。';
+
+  @override
   String settingsModelOutputCapabilities(String capabilities) {
     return '输出：$capabilities';
   }

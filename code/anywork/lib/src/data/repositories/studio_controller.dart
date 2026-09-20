@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show visibleForTesting, debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/studio_models.dart';
+import '../../platform/clipboard_image_reader.dart';
 import '../frb/studio_api.dart';
 import 'studio_api_provider.dart';
 import 'studio_state_reducer.dart';
@@ -647,6 +649,49 @@ class StudioController extends _$StudioController {
     await _admitAttachments([
       for (final path in paths) AttachmentDraftSource.localFile(path),
     ], threadId: threadId);
+  }
+
+  Future<void> addClipboardImage(Uint8List pngBytes, {String? threadId}) async {
+    if (pngBytes.isEmpty) {
+      reportComposerFailure(
+        StateError('Clipboard image is empty.'),
+        threadId: threadId,
+      );
+      return;
+    }
+    StagedClipboardImage? staged;
+    try {
+      staged = await ref.read(clipboardImageStagerProvider).stage(pngBytes);
+      await addLocalAttachments([staged.path], threadId: threadId);
+    } catch (error) {
+      reportComposerFailure(error, threadId: threadId);
+    } finally {
+      await staged?.dispose();
+    }
+  }
+
+  void reportComposerFailure(Object error, {String? threadId}) {
+    final current = state.value;
+    if (current == null ||
+        (threadId != null && current.selectedThreadId != threadId) ||
+        (threadId == null && current.selectedThreadId != null)) {
+      return;
+    }
+    state = AsyncData(
+      threadId == null
+          ? current.copyWith(
+              newThreadComposerByProject: {
+                ...current.newThreadComposerByProject,
+                ?current.selectedProjectId: current.newThreadComposer
+                    .reportFailure(error),
+              },
+            )
+          : _withWorkspaceUi(
+              current,
+              threadId,
+              (ui) => ui.copyWith(composer: ui.composer.reportFailure(error)),
+            ),
+    );
   }
 
   Future<void> addRemoteAttachment(String url, {String? threadId}) async {

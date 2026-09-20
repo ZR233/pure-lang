@@ -405,6 +405,7 @@ mod tests {
                     assert!(headers.starts_with("POST /files HTTP/1.1"));
                     let body = String::from_utf8_lossy(&body);
                     assert!(body.contains("user_data"));
+                    assert!(body.contains("created_at"));
                     assert!(body.contains("86400"));
                     uploads += 1;
                     json(
@@ -461,7 +462,7 @@ mod tests {
 
     #[tokio::test]
     async fn unsupported_upload_falls_back_but_authentication_does_not() {
-        for status in [404, 401] {
+        for status in [404, 405, 501, 401] {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let server = tokio::spawn(async move {
@@ -473,7 +474,7 @@ mod tests {
                     serde_json::json!({"error":{"message":"rejected"}}),
                 )
                 .await;
-                if status == 404 {
+                if matches!(status, 404 | 405 | 501) {
                     let (mut socket, _) = listener.accept().await.unwrap();
                     let (_, body) = read_request(&mut socket).await;
                     let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -498,7 +499,7 @@ mod tests {
                     ModelInvocationContext::default(),
                 )
                 .await;
-            if status == 404 {
+            if matches!(status, 404 | 405 | 501) {
                 assert_eq!(result.unwrap().content.as_deref(), Some("inline"));
             } else {
                 assert_eq!(

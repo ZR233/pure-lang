@@ -990,6 +990,8 @@
   "composerAttachmentUnsupportedTooltip": "The current model does not support attachments",
   "composerAttachmentPickLocal": "Choose local files",
   "composerAttachmentRemoveTooltip": "Remove",
+  "composerClipboardImageUnsupported": "The current model does not support pasted images.",
+  "composerClipboardReadFailed": "Unable to read the clipboard image.",
   "settingsModelOutputCapabilities": "Outputs: {capabilities}",
   "@settingsModelOutputCapabilities": {
     "placeholders": {

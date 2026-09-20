@@ -174,6 +174,251 @@ void registerInteractionTests() {
     expect(api.removedAttachmentDraftIds, ['draft-image-1']);
   });
 
+  testWidgets(
+    'focused Composer pastes an image through the canonical attachment rail',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(1280, 800));
+      final clipboard = _FakeClipboardImageReader(
+        image: base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        ),
+      );
+      final stager = _FakeClipboardImageStager();
+      final api = _FakeStudioApi(_stateWithAttachmentModels())
+        ..nextAdmittedDrafts = const [
+          AttachmentDraftView(
+            id: 'clipboard-image-1',
+            modality: AttachmentModalityView.image,
+            mediaType: 'image/png',
+            filename: 'clipboard-image.png',
+            byteSize: 68,
+            width: 1,
+            height: 1,
+          ),
+        ]
+        ..attachmentDraftBytes['clipboard-image-1'] = clipboard.image!;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            studioApiProvider.overrideWithValue(api),
+            clipboardImageReaderProvider.overrideWithValue(clipboard),
+            clipboardImageStagerProvider.overrideWithValue(stager),
+          ],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.showKeyboard(find.byKey(StudioDriverKeys.composerInput));
+      await _sendControlPaste(tester);
+      await tester.pumpAndSettle();
+
+      expect(clipboard.imageReadCount, 1);
+      expect(clipboard.textReadCount, 0);
+      expect(api.attachmentAdmissionRequests, hasLength(1));
+      final source =
+          api.attachmentAdmissionRequests.single.sources.single
+              as LocalFileAttachmentDraftSource;
+      expect(source.path, stager.path);
+      expect(stager.disposeCount, 1);
+      expect(find.byKey(StudioDriverKeys.attachmentDraftRail), findsOneWidget);
+      expect(
+        find.byKey(StudioDriverKeys.attachmentDraft('clipboard-image-1')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.attachmentRemove('clipboard-image-1')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(StudioDriverKeys.attachmentDraftRail), findsNothing);
+      expect(api.removedAttachmentDraftIds, ['clipboard-image-1']);
+    },
+  );
+
+  testWidgets(
+    'image-free clipboard paste replaces the current text selection',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(1280, 800));
+      final clipboard = _FakeClipboardImageReader(text: 'pasted');
+      final api = _FakeStudioApi(_stateWithAttachmentModels());
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            studioApiProvider.overrideWithValue(api),
+            clipboardImageReaderProvider.overrideWithValue(clipboard),
+          ],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final input = find.byKey(StudioDriverKeys.composerInput);
+      await tester.enterText(input, 'hello world');
+      final field = tester.widget<TextField>(input);
+      field.controller!.selection = const TextSelection(
+        baseOffset: 6,
+        extentOffset: 11,
+      );
+
+      await _sendControlPaste(tester);
+      await tester.pumpAndSettle();
+
+      expect(field.controller!.text, 'hello pasted');
+      expect(
+        field.controller!.selection,
+        const TextSelection.collapsed(offset: 12),
+      );
+      expect(clipboard.imageReadCount, 1);
+      expect(clipboard.textReadCount, 1);
+      expect(api.attachmentAdmissionRequests, isEmpty);
+    },
+  );
+
+  testWidgets('unfocused Composer does not intercept paste shortcuts', (
+    tester,
+  ) async {
+    final clipboard = _FakeClipboardImageReader(
+      image: Uint8List.fromList([1, 2, 3]),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          studioApiProvider.overrideWithValue(
+            _FakeStudioApi(_stateWithAttachmentModels()),
+          ),
+          clipboardImageReaderProvider.overrideWithValue(clipboard),
+        ],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _sendControlPaste(tester);
+    await tester.pump();
+
+    expect(clipboard.imageReadCount, 0);
+    expect(clipboard.textReadCount, 0);
+  });
+
+  testWidgets('Composer rejects pasted images for a text-only model', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(1280, 800));
+    final clipboard = _FakeClipboardImageReader(
+      image: Uint8List.fromList([1, 2, 3]),
+    );
+    final api = _FakeStudioApi(_stateWithAttachmentModels(visualModel: false));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          studioApiProvider.overrideWithValue(api),
+          clipboardImageReaderProvider.overrideWithValue(clipboard),
+        ],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.showKeyboard(find.byKey(StudioDriverKeys.composerInput));
+
+    await _sendControlPaste(tester);
+    await tester.pumpAndSettle();
+
+    expect(api.attachmentAdmissionRequests, isEmpty);
+    expect(find.byKey(StudioDriverKeys.composerError), findsOneWidget);
+    expect(
+      find.textContaining('does not support pasted images'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'Composer admits only one clipboard image while paste is pending',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(1280, 800));
+      final gate = Completer<Uint8List?>();
+      final clipboard = _FakeClipboardImageReader(imageGate: gate);
+      final stager = _FakeClipboardImageStager();
+      final api = _FakeStudioApi(_stateWithAttachmentModels());
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            studioApiProvider.overrideWithValue(api),
+            clipboardImageReaderProvider.overrideWithValue(clipboard),
+            clipboardImageStagerProvider.overrideWithValue(stager),
+          ],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.showKeyboard(find.byKey(StudioDriverKeys.composerInput));
+
+      await _sendControlPaste(tester);
+      await _sendControlPaste(tester);
+      await tester.pump();
+      expect(clipboard.imageReadCount, 1);
+
+      gate.complete(Uint8List.fromList([1, 2, 3]));
+      await tester.pumpAndSettle();
+      expect(api.attachmentAdmissionRequests, hasLength(1));
+      expect(stager.disposeCount, 1);
+    },
+  );
+
+  test(
+    'system clipboard image stager removes its temporary directory',
+    () async {
+      final staged = await const SystemClipboardImageStager().stage(
+        Uint8List.fromList([1, 2, 3]),
+      );
+      final file = File(staged.path);
+
+      expect(file.path, endsWith('/clipboard-image.png'));
+      expect(await file.readAsBytes(), [1, 2, 3]);
+
+      await staged.dispose();
+      expect(await file.exists(), isFalse);
+    },
+  );
+
+  testWidgets(
+    'clipboard failure preserves the draft and reports Composer error',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(1280, 800));
+      final clipboard = _FakeClipboardImageReader(
+        imageError: const FormatException('invalid clipboard image'),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            studioApiProvider.overrideWithValue(
+              _FakeStudioApi(_stateWithAttachmentModels()),
+            ),
+            clipboardImageReaderProvider.overrideWithValue(clipboard),
+          ],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final input = find.byKey(StudioDriverKeys.composerInput);
+      await tester.enterText(input, 'keep this draft');
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.insert);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<TextField>(input).controller!.text,
+        'keep this draft',
+      );
+      expect(find.byKey(StudioDriverKeys.composerError), findsOneWidget);
+      expect(
+        find.textContaining('Unable to read the clipboard image.'),
+        findsOneWidget,
+      );
+    },
+  );
+
   testWidgets('Composer exposes an accepted Turn failure by driver key', (
     tester,
   ) async {
@@ -624,6 +869,58 @@ void registerInteractionTests() {
     );
     await tester.pumpAndSettle();
   });
+}
+
+Future<void> _sendControlPaste(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+}
+
+class _FakeClipboardImageReader implements ClipboardImageReader {
+  _FakeClipboardImageReader({
+    this.image,
+    this.text,
+    this.imageError,
+    this.imageGate,
+  });
+
+  final Uint8List? image;
+  final String? text;
+  final Object? imageError;
+  final Completer<Uint8List?>? imageGate;
+  int imageReadCount = 0;
+  int textReadCount = 0;
+
+  @override
+  Future<Uint8List?> readImage() async {
+    imageReadCount += 1;
+    if (imageError case final error?) throw error;
+    return imageGate?.future ?? image;
+  }
+
+  @override
+  Future<String?> readText() async {
+    textReadCount += 1;
+    return text;
+  }
+}
+
+class _FakeClipboardImageStager implements ClipboardImageStager {
+  _FakeClipboardImageStager();
+
+  final String path = '/tmp/anywork-clipboard-test/clipboard-image.png';
+  int disposeCount = 0;
+
+  @override
+  Future<StagedClipboardImage> stage(Uint8List pngBytes) async {
+    return StagedClipboardImage(
+      path: path,
+      dispose: () async {
+        disposeCount += 1;
+      },
+    );
+  }
 }
 
 const _planMarkdown = '''

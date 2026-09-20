@@ -254,8 +254,9 @@ codec 还定义 `video_url` 与 `file_url`，但模型只有在精确请求契�
 验证后才声明对应能力。GLM-5.3-Flash 当前只声明 text/image：远程图片首发优选 URL，本地图片
 以及历史、重试和恢复统一使用 Data URL。未声明相应 modality 的模型必须在任何附件 IO 或凭据
 读取前拒绝。DeepSeek V4.1 Flash 当前声明 text/image，并通过 Responses `input_image` 发送：
-远程图片首发优选 URL；支持 Files 的 endpoint 将本地快照上传并引用 file_id，不支持 Files 时
-使用 Data URL。支持的快照格式固定为 JPEG、PNG、GIF、WebP。上传能力为独立 endpoint 声明，
+表示顺序由模型 profile 显式声明，首发依次选择 Provider File、远程 URL、Data URL，重放依次
+选择 Provider File、Data URL；支持 Files 的 endpoint 将本地快照上传并引用 file_id，远程来源
+在未上传时优选 URL，不支持 Files 时回退 Data URL。支持的快照格式固定为 JPEG、PNG、GIF、WebP。上传能力为独立 endpoint 声明，
 不因模型支持图片而推断；自定义地址需显式选择上传方言。官方对少于 15 张与至少 15 张图片使用不同边长上限：canonical profile 选择全
 批次均可成立的 4096 像素保守上限，并以 32 MiB snapshot 批次总字节上限保证 Data URL 重放不会
 越过接口的 48 MiB 请求体边界；该保守子集不按模型名在 adapter 中特判。

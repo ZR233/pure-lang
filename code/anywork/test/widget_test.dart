@@ -21,7 +21,7 @@ import 'package:anywork/src/features/settings/settings_ssh_tab.dart';
 import 'package:anywork/src/features/settings/settings_statistics_tab.dart';
 import 'package:anywork/src/features/interaction/composer_dock.dart';
 
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
 import 'package:anywork/src/platform/vscode_detection.dart';
 import 'package:anywork/src/platform/vscode_launcher.dart';
@@ -34,6 +34,7 @@ import 'package:anywork/src/features/todo/todo_panel.dart';
 import 'package:anywork/src/features/timeline/timeline_view.dart';
 import 'package:anywork/src/features/update/studio_update_controller.dart';
 import 'package:anywork/src/l10n/app_localizations.dart';
+import 'package:anywork/src/platform/clipboard_image_reader.dart';
 import 'package:anywork/src/platform/external_url_launcher.dart';
 import 'package:anywork/src/shared/studio_driver_keys.dart';
 import 'package:anywork/src/shared/studio_driver_state.dart';

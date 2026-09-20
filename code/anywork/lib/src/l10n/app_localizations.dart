@@ -3161,6 +3161,18 @@ abstract class AppLocalizations {
   /// **'Remove'**
   String get composerAttachmentRemoveTooltip;
 
+  /// No description provided for @composerClipboardImageUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'The current model does not support pasted images.'**
+  String get composerClipboardImageUnsupported;
+
+  /// No description provided for @composerClipboardReadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Unable to read the clipboard image.'**
+  String get composerClipboardReadFailed;
+
   /// No description provided for @settingsModelOutputCapabilities.
   ///
   /// In en, this message translates to:

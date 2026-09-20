@@ -27,9 +27,19 @@ Future<void> main(List<String> arguments) async {
     await _openWorkspace(session, snapshots, options);
     await _assertModelCapabilities(session, snapshots, options);
     if (!options.activeViewImage) {
-      await _admitImage(session, snapshots, options);
-      await File(options.previewScreenshotOutput)
-          .writeAsBytes(await session.screenshot(), flush: true);
+      if (options.pasteSignalOutput case final signal?) {
+        await _admitPastedImage(session, snapshots, options, signal, 1);
+        await File(options.previewScreenshotOutput)
+            .writeAsBytes(await session.screenshot(), flush: true);
+        await _removePastedImage(session, snapshots);
+        await File(options.removedScreenshotOutput)
+            .writeAsBytes(await session.screenshot(), flush: true);
+        await _admitPastedImage(session, snapshots, options, signal, 2);
+      } else {
+        await _admitImage(session, snapshots, options);
+        await File(options.previewScreenshotOutput)
+            .writeAsBytes(await session.screenshot(), flush: true);
+      }
     }
     await _submitPrompt(session, snapshots, options);
     final completed = await _waitForRealCompletion(session, snapshots, options);
@@ -46,8 +56,10 @@ Future<void> main(List<String> arguments) async {
         'activeViewImage': options.activeViewImage,
         'model': options.expectedModel,
         'marker': options.expectedMarker,
+        'answer': _finalAnswerText(completed),
         'modelScreenshot': options.modelScreenshotOutput,
         'previewScreenshot': options.previewScreenshotOutput,
+        'removedScreenshot': options.removedScreenshotOutput,
         'screenshot': options.screenshotOutput,
         'threadId': _workspace(completed)?['threadId'],
         'viewImage': viewImage,
@@ -92,8 +104,18 @@ Future<void> _openWorkspace(
       session.tap(find.byValueKey('sidebar-open-project')),
       'open project',
     );
-    await session.tap(find.byValueKey('add-project-local'));
-    await session.tap(find.byValueKey('add-project-continue'));
+    await _command(
+      session.tap(find.byValueKey('add-project-local')),
+      'select local project',
+    );
+    await _command(
+      session.waitForNoPendingFrame(timeout: const Duration(seconds: 10)),
+      'settle local project selection',
+    );
+    await _command(
+      session.tap(find.byValueKey('add-project-continue')),
+      'continue local project',
+    );
     await _command(
       session.waitFor(
         find.byValueKey('project-path-dialog'),
@@ -134,7 +156,9 @@ Future<void> _openWorkspace(
     (value) =>
         _selectedProjectPath(value) == options.workspace &&
         (value['navigation'] as Map<String, dynamic>?)?['isStartPage'] == true,
-    timeout: const Duration(minutes: 1),
+    timeout: options.pasteSignalOutput == null
+        ? const Duration(minutes: 1)
+        : const Duration(seconds: 20),
   );
   await _command(
     session.waitFor(
@@ -169,9 +193,10 @@ Future<void> _assertModelCapabilities(
     session.getText(capabilityFinder),
     'read model capabilities',
   );
-  if (capabilities != '文本 · 视觉') {
+  if (capabilities != '文本 · 视觉' && capabilities != 'Text · Vision') {
     throw StateError(
-      'expected 文本 · 视觉 for ${options.expectedModel}, got $capabilities',
+      'expected a text and vision capability label for '
+      '${options.expectedModel}, got $capabilities',
     );
   }
   await File(options.modelScreenshotOutput)
@@ -195,6 +220,37 @@ Future<void> _admitImage(
     'local attachment option',
   );
   await _command(session.tap(local), 'select local image');
+  await _waitForAdmittedImage(session, snapshots, options);
+}
+
+Future<void> _admitPastedImage(
+  FlutterDriverSession session,
+  File snapshots,
+  _DriverOptions options,
+  String signalOutput,
+  int sequence,
+) async {
+  await _command(
+    session.tap(find.byValueKey('composer-input')),
+    'focus Composer for native paste',
+  );
+  final signal = File(signalOutput);
+  await signal.parent.create(recursive: true);
+  await signal.writeAsString(
+    jsonEncode({
+      'sequence': sequence,
+      'readyAt': DateTime.now().toUtc().toIso8601String(),
+    }),
+    flush: true,
+  );
+  await _waitForAdmittedImage(session, snapshots, options);
+}
+
+Future<Map<String, dynamic>> _waitForAdmittedImage(
+  FlutterDriverSession session,
+  File snapshots,
+  _DriverOptions options,
+) async {
   final admitted = await _waitForSnapshot(
     session,
     snapshots,
@@ -222,6 +278,40 @@ Future<void> _admitImage(
       timeout: const Duration(seconds: 30),
     ),
     'attachment preview rail',
+  );
+  return attachment;
+}
+
+Future<void> _removePastedImage(
+  FlutterDriverSession session,
+  File snapshots,
+) async {
+  final before = await _snapshot(session, snapshots, kind: 'beforeRemove');
+  final attachments = _newComposer(before)?['attachments'];
+  if (attachments is! List<dynamic> || attachments.length != 1) {
+    throw StateError('expected one pasted attachment before removal');
+  }
+  final attachment = attachments.single;
+  if (attachment is! Map<String, dynamic> || attachment['id'] is! String) {
+    throw StateError('pasted attachment is missing its draft id');
+  }
+  final draftId = attachment['id'] as String;
+  await _command(
+    session.tap(find.byValueKey('attachment-remove-$draftId')),
+    'remove pasted attachment',
+  );
+  await _waitForSnapshot(session, snapshots, 'pasted image removal', (
+    snapshot,
+  ) {
+    final remaining = _newComposer(snapshot)?['attachments'];
+    return remaining is List<dynamic> && remaining.isEmpty;
+  }, timeout: const Duration(minutes: 1));
+  await _command(
+    session.waitForAbsent(
+      find.byValueKey('attachment-draft-rail'),
+      timeout: const Duration(seconds: 30),
+    ),
+    'removed attachment preview rail',
   );
 }
 
@@ -292,11 +382,29 @@ bool _completedWithMarker(
         (row) =>
             row is Map<String, dynamic> &&
             row['type'] == 'finalAnswer' &&
-            (row['text'] as String? ?? '').contains(options.expectedMarker),
+            _answerMatches(row['text'] as String? ?? '', options),
       );
   return hasAnswer &&
       (!options.activeViewImage ||
           _viewImageReceipt(snapshot, options) != null);
+}
+
+bool _answerMatches(String answer, _DriverOptions options) {
+  if (!answer.contains(options.expectedMarker)) return false;
+  final pattern = options.expectedAnswerPattern;
+  return pattern == null ||
+      RegExp(pattern, caseSensitive: false, dotAll: true).hasMatch(answer);
+}
+
+String? _finalAnswerText(Map<String, dynamic> snapshot) {
+  final timeline = _workspace(snapshot)?['timeline'];
+  if (timeline is! List<dynamic>) return null;
+  for (final row in timeline.reversed) {
+    if (row is Map<String, dynamic> && row['type'] == 'finalAnswer') {
+      return row['text'] as String?;
+    }
+  }
+  return null;
 }
 
 Map<String, String>? _viewImageReceipt(
@@ -484,14 +592,17 @@ class _DriverOptions {
     required this.snapshotOutput,
     required this.modelScreenshotOutput,
     required this.previewScreenshotOutput,
+    required this.removedScreenshotOutput,
     required this.screenshotOutput,
     required this.providerId,
     required this.expectedModel,
     required this.expectedMarker,
+    required this.expectedAnswerPattern,
     required this.expectedFilename,
     required this.prompt,
     required this.turnTimeout,
     required this.activeViewImage,
+    required this.pasteSignalOutput,
   });
 
   final String vmServiceUrl;
@@ -499,14 +610,17 @@ class _DriverOptions {
   final String snapshotOutput;
   final String modelScreenshotOutput;
   final String previewScreenshotOutput;
+  final String removedScreenshotOutput;
   final String screenshotOutput;
   final String providerId;
   final String expectedModel;
   final String expectedMarker;
+  final String? expectedAnswerPattern;
   final String expectedFilename;
   final String prompt;
   final Duration turnTimeout;
   final bool activeViewImage;
+  final String? pasteSignalOutput;
 
   static _DriverOptions parse(List<String> arguments) {
     final values = <String, String>{};
@@ -524,22 +638,28 @@ class _DriverOptions {
       return value;
     }
 
+    final previewScreenshotOutput = required('preview-screenshot-output');
     return _DriverOptions(
       vmServiceUrl: required('vm-service-url'),
       workspace: required('workspace'),
       snapshotOutput: required('snapshot-output'),
       modelScreenshotOutput: required('model-screenshot-output'),
-      previewScreenshotOutput: required('preview-screenshot-output'),
+      previewScreenshotOutput: previewScreenshotOutput,
+      removedScreenshotOutput:
+          values['removed-screenshot-output'] ??
+          '$previewScreenshotOutput.removed.png',
       screenshotOutput: required('screenshot-output'),
       providerId: values['provider-id'] ?? 'zhipu',
       expectedModel: values['expected-model'] ?? 'glm-5.3-flash',
       expectedMarker: values['expected-marker'] ?? 'PURE-7429',
+      expectedAnswerPattern: values['expected-answer-pattern'],
       expectedFilename: required('expected-filename'),
       prompt: values['prompt'] ?? '只输出图片中央的字符，不要解释',
       turnTimeout: Duration(
         seconds: int.tryParse(values['turn-timeout-seconds'] ?? '') ?? 300,
       ),
       activeViewImage: values['active-view-image'] == 'true',
+      pasteSignalOutput: values['paste-signal-output'],
     );
   }
 }

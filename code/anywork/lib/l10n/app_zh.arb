@@ -641,6 +641,8 @@
   "composerAttachmentUnsupportedTooltip": "当前模型不支持附件",
   "composerAttachmentPickLocal": "选择本地文件",
   "composerAttachmentRemoveTooltip": "移除",
+  "composerClipboardImageUnsupported": "当前模型不支持粘贴图片。",
+  "composerClipboardReadFailed": "无法读取剪贴板图片。",
   "settingsModelOutputCapabilities": "输出：{capabilities}",
   "@settingsModelOutputCapabilities": {
     "placeholders": {

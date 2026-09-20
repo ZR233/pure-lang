@@ -10,6 +10,7 @@ import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../platform/clipboard_image_reader.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
 import '../../shared/studio_driver_state.dart';
@@ -94,6 +95,7 @@ class StartPageComposerDock extends ConsumerWidget {
               permissionMode: view.permissionMode,
               enabled: view.canSubmit,
               isBusy: false,
+              clipboard: ref.read(clipboardImageReaderProvider),
               selectorBar: Wrap(
                 key: StudioDriverKeys.startPageSelectors,
                 spacing: 6,
@@ -122,6 +124,8 @@ class StartPageComposerDock extends ConsumerWidget {
               onChanged: controller.updateNewThreadComposer,
               onSubmit: () => unawaited(controller.submitNewThreadComposer()),
               inputCapabilities: model?.inputCapabilities ?? const [],
+              onPasteImage: controller.addClipboardImage,
+              onReportFailure: controller.reportComposerFailure,
               onAddLocal: (paths) => controller.addLocalAttachments(paths),
               onAddUrl: (url) => controller.addRemoteAttachment(url),
               onRemoveAttachment: (id) => controller.removeAttachmentDraft(id),
@@ -186,6 +190,7 @@ class _PromptComposer extends ConsumerWidget {
       permissionMode: workspace.permissionMode,
       enabled: enabled,
       isBusy: workspace.isBusy,
+      clipboard: ref.read(clipboardImageReaderProvider),
       selectorBar: workspace.thread.isRoot
           ? Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
@@ -218,6 +223,10 @@ class _PromptComposer extends ConsumerWidget {
       onSubmit: () => unawaited(controller.submitComposer(workspace.threadId)),
       onStop: () => unawaited(controller.stop(workspace.threadId)),
       inputCapabilities: model?.inputCapabilities ?? const [],
+      onPasteImage: (bytes) =>
+          controller.addClipboardImage(bytes, threadId: workspace.threadId),
+      onReportFailure: (error) =>
+          controller.reportComposerFailure(error, threadId: workspace.threadId),
       onAddLocal: (paths) =>
           controller.addLocalAttachments(paths, threadId: workspace.threadId),
       onAddUrl: (url) =>
@@ -234,9 +243,12 @@ class _PromptComposerPanel extends StatefulWidget {
     required this.permissionMode,
     required this.enabled,
     required this.isBusy,
+    required this.clipboard,
     required this.onChanged,
     required this.onSubmit,
     required this.inputCapabilities,
+    required this.onPasteImage,
+    required this.onReportFailure,
     required this.onAddLocal,
     required this.onAddUrl,
     required this.onRemoveAttachment,
@@ -248,9 +260,12 @@ class _PromptComposerPanel extends StatefulWidget {
   final PermissionMode permissionMode;
   final bool enabled;
   final bool isBusy;
+  final ClipboardImageReader clipboard;
   final ValueChanged<String> onChanged;
   final VoidCallback onSubmit;
   final List<ModelInputCapabilityView> inputCapabilities;
+  final Future<void> Function(Uint8List pngBytes) onPasteImage;
+  final ValueChanged<Object> onReportFailure;
   final Future<void> Function(List<String> paths) onAddLocal;
   final Future<void> Function(String url) onAddUrl;
   final Future<void> Function(String draftId) onRemoveAttachment;
@@ -263,12 +278,15 @@ class _PromptComposerPanel extends StatefulWidget {
 
 class _PromptComposerPanelState extends State<_PromptComposerPanel> {
   late final TextEditingController _controller;
+  late final FocusNode _inputFocusNode;
   bool _dragging = false;
+  bool _pasteInFlight = false;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.composer.draft);
+    _inputFocusNode = FocusNode(debugLabel: 'composer-input');
   }
 
   @override
@@ -285,6 +303,7 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
 
   @override
   void dispose() {
+    _inputFocusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -297,6 +316,12 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
   bool get _canSubmit =>
       widget.enabled && _hasContent && !widget.composer.isSubmissionPending;
 
+  bool get _supportsPastedImages => widget.inputCapabilities.any(
+    (capability) =>
+        capability.modality == ModelModalityView.image &&
+        capability.supportsSource(ModelInputSourceView.local),
+  );
+
   /// 回车提交当前草稿，语义与主按钮一致。
   ///
   /// Shift+Enter 与输入法组字过程保持原生行为（插入换行）；未满足提交前置条件
@@ -304,6 +329,15 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
   KeyEventResult _handleComposerKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
+    if (_isPasteShortcut(key)) {
+      if (!_inputFocusNode.hasFocus ||
+          !widget.enabled ||
+          widget.composer.isSubmissionPending) {
+        return KeyEventResult.ignored;
+      }
+      if (!_pasteInFlight) unawaited(_pasteClipboard());
+      return KeyEventResult.handled;
+    }
     if (key != LogicalKeyboardKey.enter &&
         key != LogicalKeyboardKey.numpadEnter) {
       return KeyEventResult.ignored;
@@ -315,6 +349,55 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
     if (!_canSubmit) return KeyEventResult.ignored;
     widget.onSubmit();
     return KeyEventResult.handled;
+  }
+
+  bool _isPasteShortcut(LogicalKeyboardKey key) {
+    final keyboard = HardwareKeyboard.instance;
+    return key == LogicalKeyboardKey.paste ||
+        key == LogicalKeyboardKey.keyV &&
+            (keyboard.isControlPressed || keyboard.isMetaPressed) ||
+        key == LogicalKeyboardKey.insert && keyboard.isShiftPressed;
+  }
+
+  Future<void> _pasteClipboard() async {
+    _pasteInFlight = true;
+    try {
+      final image = await widget.clipboard.readImage();
+      if (!mounted) return;
+      if (image != null) {
+        if (!_supportsPastedImages) {
+          widget.onReportFailure(
+            StateError(context.l10n.composerClipboardImageUnsupported),
+          );
+          return;
+        }
+        await widget.onPasteImage(image);
+        return;
+      }
+      final text = await widget.clipboard.readText();
+      if (!mounted || text == null || text.isEmpty) return;
+      _pasteText(text);
+    } catch (_) {
+      if (mounted) {
+        widget.onReportFailure(
+          StateError(context.l10n.composerClipboardReadFailed),
+        );
+      }
+    } finally {
+      _pasteInFlight = false;
+    }
+  }
+
+  void _pasteText(String text) {
+    final value = _controller.value;
+    final selection = value.selection;
+    if (!selection.isValid) return;
+    final collapsed = value.copyWith(
+      selection: TextSelection.collapsed(offset: selection.end),
+      composing: TextRange.empty,
+    );
+    _controller.value = collapsed.replaced(selection, text);
+    widget.onChanged(_controller.text);
   }
 
   @override
@@ -362,6 +445,7 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
             child: TextField(
               key: StudioDriverKeys.composerInput,
               controller: _controller,
+              focusNode: _inputFocusNode,
               enabled: widget.enabled && !composer.isSubmissionPending,
               minLines: 3,
               maxLines: 8,
