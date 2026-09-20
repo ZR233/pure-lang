@@ -4,11 +4,14 @@ mod directory;
 mod reports;
 
 use super::{ModelPerformanceOwner, StudioRuntime};
+use crate::studio::thread_projection::engine::{Facts, ProjectionDelta, ProjectionState};
 use crate::studio::{ProductEventBus, StudioStore};
 use anyhow::{Context, Result, bail};
-use pl_core::thread::{ThreadHandle, ThreadLifecycle, ThreadSnapshot, journal::ThreadCommit};
+use pl_core::thread::{
+    ThreadHandle, ThreadLifecycle, ThreadSnapshot, TurnState, journal::ThreadCommit,
+};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
@@ -23,6 +26,10 @@ struct Progress {
     applied: u64,
     error: Option<Arc<anyhow::Error>>,
     finished: bool,
+    /// Test-only instrumentation: canonical commits folded into the resident projection, a
+    /// strictly monotonic proof that each commit is applied exactly once without a prefix replay.
+    #[cfg(test)]
+    applies: u64,
 }
 struct WorkerState {
     progress: watch::Sender<Progress>,
@@ -206,8 +213,18 @@ impl ThreadObservations {
                 .read_thread_journal(&child.id)
                 .await?;
             let child = pl_protocol::Thread::from(child);
-            for through in 1..=history.len() {
-                reports::publish(services, &child, &history[..through], false).await?;
+            // Fold the saved journal once through the same incremental projection the live path
+            // uses, so every already-terminal Turn is repaired exactly once without replaying a
+            // prefix per commit.
+            let snapshot = pl_core::thread::journal::replay(&history)?;
+            let mut state =
+                ProjectionState::new(child.id.as_str(), child.parent_thread_id.as_deref());
+            let mut tracker = ReportTracker::default();
+            for commit in &history {
+                state.apply(commit)?;
+                tracker
+                    .observe(services, &child, &state, &snapshot, commit, false)
+                    .await?;
             }
         }
         Ok(())
@@ -268,38 +285,44 @@ async fn run(
     recovered_through: u64,
 ) {
     let mut updates = thread.subscribe();
-    let mut journal = Vec::<Arc<ThreadCommit>>::new();
+    let mut projection: Option<ThreadProjection> = None;
+    let mut persistence = projector.store.sessions().subscribe_persistence();
     let mut current = thread.snapshot();
-    let mut projected = None;
+    let mut projected: Option<(u64, ThreadLifecycle)> = None;
     loop {
         use futures::FutureExt;
         let result = if projected == Some((current.commit_sequence, current.lifecycle)) {
-            Ok(())
+            Ok(true)
         } else {
             std::panic::AssertUnwindSafe(project(
                 &projector,
                 &id,
                 &thread,
                 &current,
-                &mut journal,
-                state,
+                &mut projection,
                 recovered_through,
             ))
             .catch_unwind()
             .await
             .unwrap_or_else(|_| Err(anyhow::anyhow!("Thread product projection panicked")))
         };
+        let watermark = projection.as_ref().map_or(0, ThreadProjection::watermark);
         match result {
-            Ok(()) => {
-                projected = Some((current.commit_sequence, current.lifecycle));
-                let finished = current.lifecycle == ThreadLifecycle::Closed;
+            Ok(reached) => {
+                // Only a snapshot every observed commit is projected holds the guard; a projection
+                // still waiting on durability stays unguarded so the next wake resumes it.
+                projected = reached.then_some((current.commit_sequence, current.lifecycle));
                 state.progress.send_replace(Progress {
                     initialized: true,
-                    applied: current.commit_sequence,
+                    applied: watermark,
                     error: None,
                     finished: false,
+                    #[cfg(test)]
+                    applies: projection.as_ref().map_or(0, ThreadProjection::applies),
                 });
-                if finished {
+                if current.lifecycle == ThreadLifecycle::Closed
+                    && watermark >= current.commit_sequence
+                {
                     match projector.writer.flush().await {
                         Ok(()) => {
                             state
@@ -315,27 +338,32 @@ async fn run(
                 }
             }
             Err(error) => {
+                projected = None;
                 state
                     .progress
                     .send_modify(|progress| progress.error = Some(Arc::new(error)));
             }
         }
         if current.lifecycle == ThreadLifecycle::Closed {
-            state.retry.notified().await;
+        tokio::select! {
+                () = state.retry.notified() => {}
+                () = session_durable_wake(&mut persistence) => {}
+                }
             current = thread.snapshot();
             continue;
-        }
+            }
         tokio::select! {
             () = state.retry.notified() => current = thread.snapshot(),
+            () = session_durable_wake(&mut persistence) => current = thread.snapshot(),
             update = updates.next() => match update {
                 Some(snapshot) => current = snapshot,
                 None => {
                     state.progress.send_modify(|progress| progress.error = Some(Arc::new(anyhow::anyhow!("Thread subscription ended before its final projection"))));
                     state.retry.notified().await;
                     current = thread.snapshot();
-                }
-            }
         }
+    }
+}
     }
 }
 
@@ -344,26 +372,9 @@ async fn project(
     id: &str,
     thread: &ThreadHandle,
     snapshot: &ThreadSnapshot,
-    journal: &mut Vec<Arc<ThreadCommit>>,
-    state: &WorkerState,
+    projection: &mut Option<ThreadProjection>,
     recovered_through: u64,
-) -> Result<()> {
-    while (journal.len() as u64) < snapshot.commit_sequence {
-        let page = thread
-            .journal_page(
-                journal.len() as u64,
-                NonZeroUsize::new(128).expect("constant is nonzero"),
-            )
-            .await?;
-        let before = journal.len();
-        journal.extend(
-            page.into_iter()
-                .take_while(|commit| commit.sequence <= snapshot.commit_sequence),
-        );
-        if before == journal.len() {
-            bail!("Thread {id} journal did not reach observed watermark");
-        }
-    }
+) -> Result<bool> {
     let mut product = match projector.events.thread_snapshot(id) {
         Some(thread) => thread,
         None => {
@@ -379,22 +390,303 @@ async fn project(
             )
         }
     };
-    let applied = state.progress.borrow().applied;
-    for commit in journal.iter().filter(|commit| commit.sequence > applied) {
-        billing::record(&projector.performance, &product.root_thread_id, commit)?;
-        reports::publish(
-            projector,
-            &product,
-            &journal[..usize::try_from(commit.sequence)?],
-            commit.sequence > recovered_through,
-        )
-        .await?;
+    if projection.is_none() {
+        *projection = Some(
+            ThreadProjection::open(projector, id, product.parent_thread_id.as_deref()).await?,
+        );
     }
+    let projection = projection.as_mut().expect("projection was just initialised");
+    projection
+        .advance(projector, id, thread, snapshot, &product, recovered_through)
+        .await?;
+    let reached = projection.watermark() >= snapshot.commit_sequence;
+    if !reached {
+        return Ok(false);
+}
     product.status = crate::studio::thread_projection::status(snapshot);
     product.updated_at = product
         .updated_at
-        .max(journal.last().map_or(0, |commit| commit.committed_at));
-    directory::publish(projector, product, snapshot, journal).await
+        .max(projection.last_committed_at());
+    directory::publish(
+        projector,
+        product,
+        snapshot,
+        &projection.state,
+        &projection.last_delta,
+    )
+    .await?;
+    Ok(true)
+}
+
+/// Resolves when the aggregated per-Thread session writer publishes new durability progress, and
+/// never resolves once its sender is gone (the owner then tears the observation worker down).
+async fn session_durable_wake(
+    receiver: &mut watch::Receiver<pl_core::persistence::SessionPersistenceSnapshot>,
+) {
+    if receiver.changed().await.is_err() {
+        std::future::pending::<()>().await;
+    }
+    }
+
+/// Reads exactly one immutable commit from the owner's journal at a fixed watermark.
+async fn fetch_commit(thread: &ThreadHandle, id: &str, sequence: u64) -> Result<Arc<ThreadCommit>> {
+    let page = thread
+        .journal_page(
+            sequence.saturating_sub(1),
+            NonZeroUsize::new(1).expect("constant is nonzero"),
+        )
+                    .await?;
+    page.into_iter()
+        .next()
+        .filter(|commit| commit.sequence == sequence)
+        .with_context(|| format!("Thread {id} journal did not reach observed watermark {sequence}"))
+            }
+
+/// One Thread's durable Studio timeline index inside its own session database.
+///
+/// The core journal reader proves which commits are already durable in the same database, so the
+/// derived index can never lead the facts it derives from; the reader loads only the working set a
+/// commit needs, and the writer commits head, facts, slots and panel in one transaction.
+struct TimelineIndex {
+    journal: pl_core::persistence::SessionJournalReader,
+    reader: crate::studio::timeline_store::TimelineReader,
+    writer: crate::studio::timeline_store::TimelineWriter,
+        }
+
+impl TimelineIndex {
+    async fn open(path: std::path::PathBuf, id: &str) -> Result<Self> {
+        let journal =
+            pl_core::persistence::open_journal_reader(pl_core::persistence::SqliteSessionOptions {
+                path: path.clone(),
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!("open Thread {id} journal reader: {error}"))?;
+        // Opening the writer first provisions the derived schema, so the reader never treats an
+        // un-indexed session database as an empty timeline.
+        let writer = crate::studio::timeline_store::TimelineWriter::open(&path).await?;
+        let reader = crate::studio::timeline_store::TimelineReader::open(&path).await?;
+        Ok(Self {
+            journal,
+            reader,
+            writer,
+        })
+    }
+
+    /// True when the durable journal in the same session database already holds `sequence`.
+    async fn is_durable(&self, id: &str, sequence: u64) -> Result<bool> {
+        let page = self
+            .journal
+            .read_page(
+                id,
+                sequence.saturating_sub(1),
+                NonZeroUsize::new(1).expect("constant is nonzero"),
+            )
+            .await
+            .map_err(|error| anyhow::anyhow!("read Thread {id} durable journal: {error}"))?;
+        Ok(page.first().map(|commit| commit.sequence) == Some(sequence))
+}
+}
+
+/// Per-commit product consumption shared by the live driver and the explicit repair path.
+///
+/// Billing is idempotent per commit, and each terminal Turn notifies its parent exactly once
+/// through the stable message identity derived from the commit sequence.
+#[derive(Default)]
+struct ReportTracker {
+    reported_turns: BTreeSet<String>,
+    turn_open: BTreeMap<String, (u64, u64)>,
+    running_consumed: u64,
+    running_wake: u64,
+}
+
+impl ReportTracker {
+    async fn observe(
+        &mut self,
+        services: &ObservationServices,
+        product: &pl_protocol::Thread,
+        state: &ProjectionState,
+        snapshot: &ThreadSnapshot,
+        commit: &ThreadCommit,
+        wake: bool,
+    ) -> Result<()> {
+        billing::record(&services.performance, &product.root_thread_id, commit)?;
+        if let Some(turn) = &commit.turn
+            && !self.turn_open.contains_key(&turn.turn_id)
+        {
+            self.turn_open.insert(
+                turn.turn_id.clone(),
+                (self.running_consumed, self.running_wake),
+            );
+        }
+        if let Some(consumed) = commit.consumed_messages {
+            self.running_consumed = self.running_consumed.max(consumed);
+        }
+        if let Some(through) = commit.wake_messages_through {
+            self.running_wake = self.running_wake.max(through);
+        }
+        // A terminal Turn reports once, through the first commit that reaches the terminal state.
+        let Some(turn) = commit
+            .turn
+            .as_ref()
+            .filter(|turn| turn.state != TurnState::Running)
+        else {
+            return Ok(());
+        };
+        if !self.reported_turns.insert(turn.turn_id.clone()) {
+            return Ok(());
+        }
+        let opening = self
+            .turn_open
+            .get(&turn.turn_id)
+            .copied()
+            .unwrap_or((0, 0));
+        reports::publish(
+            services,
+            product,
+            state,
+            snapshot,
+            commit,
+            opening,
+            self.running_consumed,
+            wake,
+        )
+        .await
+    }
+}
+
+/// One Thread's single incremental product projection.
+///
+/// A resident [`ProjectionState`] is advanced exactly once per canonical commit. The resulting
+/// [`ProjectionDelta`] persists the durable timeline index (when the Thread has a session database)
+/// and drives the product directory, billing and parent notifications, so the index write and the
+/// product projection always share one state and one watermark (design/17 §17.2, design/18 §18.8).
+struct ThreadProjection {
+    state: ProjectionState,
+    index: Option<TimelineIndex>,
+    tracker: ReportTracker,
+    #[cfg(test)]
+    applies: u64,
+    last_committed_at: i64,
+    last_delta: ProjectionDelta,
+}
+
+impl ThreadProjection {
+    async fn open(
+        projector: &ObservationServices,
+        id: &str,
+        parent_id: Option<&str>,
+    ) -> Result<Self> {
+        let index = match projector.store.sessions().sessions_dir() {
+            Some(dir) => {
+                let path = crate::studio::paths::session_database_path(dir, id)?;
+                if tokio::fs::try_exists(&path).await? {
+                    Some(TimelineIndex::open(path, id).await?)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+        let state = match &index {
+            Some(index) => match index.reader.read_head(id).await {
+                Ok(head) => {
+                    let panel = index.reader.read_panel(id).await?;
+                    // A restored head keeps the bounded working set: the facts and slots for each
+                    // commit are loaded from the index, never a whole decoded history.
+                    let facts = Facts {
+                        message_source: parent_id.map(|parent| format!("agent:{parent}")),
+                        ..Default::default()
+                    };
+                    ProjectionState::restore(head, facts, panel, Vec::new())
+                }
+                Err(crate::studio::timeline_store::TimelineStoreError::ThreadNotIndexed {
+                    ..
+                }) => ProjectionState::new(id, parent_id),
+                Err(error) => return Err(error.into()),
+            },
+            None => ProjectionState::new(id, parent_id),
+        };
+        Ok(Self {
+            state,
+            index,
+            tracker: ReportTracker::default(),
+            #[cfg(test)]
+            applies: 0,
+            last_committed_at: 0,
+            last_delta: ProjectionDelta::default(),
+        })
+    }
+
+    /// Folds every commit the resident projection is missing, in order, at the observed watermark.
+    ///
+    /// Each canonical commit is applied exactly once. A commit enters the durable index only once
+    /// its core row is durable in the same session database; while durability lags the observed
+    /// watermark the projection stops and the worker resumes it on the next durability wake, so no
+    /// history prefix is ever replayed.
+    async fn advance(
+        &mut self,
+        projector: &ObservationServices,
+        id: &str,
+        thread: &ThreadHandle,
+        snapshot: &ThreadSnapshot,
+        product: &pl_protocol::Thread,
+        recovered_through: u64,
+    ) -> Result<()> {
+        while self.state.watermark() < snapshot.commit_sequence {
+            let sequence = self.state.watermark() + 1;
+            let commit = fetch_commit(thread, id, sequence).await?;
+            if let Some(index) = &self.index {
+                if !index.is_durable(id, sequence).await? {
+                    break;
+                }
+                // Two-phase plan: requirements are fact-independent, while `slot_keys` also names
+                // slots the commit consumes, which the projector reads from the loaded facts.
+                let requirements = self.state.apply_plan(&commit).requirements;
+                let facts = index.reader.load_requirements(id, &requirements).await?;
+                self.state.load_facts(facts.rows)?;
+                let slot_keys = self.state.apply_plan(&commit).slot_keys;
+                let slots = index.reader.read_slots(id, &slot_keys).await?;
+                self.state.load_slots(slots)?;
+            }
+            let delta = self.state.apply(&commit)?;
+            if let Some(index) = &self.index {
+                index
+                    .writer
+                    .persist_commit(&commit, &self.state, &delta)
+                    .await?;
+            }
+            #[cfg(test)]
+            {
+            self.applies += 1;
+            }
+            self.last_committed_at = self.last_committed_at.max(commit.committed_at);
+            self.last_delta = delta;
+            self.tracker
+                .observe(
+                    projector,
+                    product,
+                    &self.state,
+                    snapshot,
+                    &commit,
+                    commit.sequence > recovered_through,
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
+    fn watermark(&self) -> u64 {
+        self.state.watermark()
+    }
+
+    #[cfg(test)]
+    fn applies(&self) -> u64 {
+        self.applies
+    }
+
+    fn last_committed_at(&self) -> i64 {
+        self.last_committed_at
+    }
 }
 
 #[cfg(test)]
@@ -502,6 +794,9 @@ mod tests {
             .await
             .unwrap();
         observers.synchronize(Some(&product.id)).await.unwrap();
+        let observed = thread.snapshot().commit_sequence;
+        assert_eq!(progress.borrow().applied, observed);
+        assert_eq!(progress.borrow().applies, observed);
         let billed = performance.snapshot().await;
         assert_eq!(billed.revision, 1);
         observers.synchronize(Some(&product.id)).await.unwrap();
@@ -519,5 +814,278 @@ mod tests {
         assert_eq!(reloaded.snapshot().await, billed);
         writer.shutdown().await.unwrap();
         store.sessions().shutdown().await.unwrap();
+    }
+
+    /// One real temp-SQLite Studio store with a resident, cold-attached root Thread.
+    struct ObservationHarness {
+        home: tempfile::TempDir,
+        _workspace: tempfile::TempDir,
+        store: StudioStore,
+        writer: crate::studio::agent_host::ThreadWriteBehindWriter,
+        events: ProductEventBus,
+        observers: ThreadObservations,
+        thread: ThreadHandle,
+        product: pl_protocol::Thread,
+}
+
+    impl ObservationHarness {
+        async fn start(model: DynModelSession, register: bool) -> Self {
+            let home = tempfile::tempdir().unwrap();
+            let store = StudioStore::open(home.path().join("studio.sqlite"))
+                .await
+                .unwrap();
+            let writer = crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone());
+            let events = ProductEventBus::new(store.clone(), writer.clone());
+            let performance =
+                ModelPerformanceOwner::new(store.clone(), writer.clone(), events.clone());
+            let observers = ThreadObservations::new(ObservationServices {
+                store: store.clone(),
+                events: events.clone(),
+                performance,
+                threads: crate::thread_assembler::StudioThreadAssembler::default(),
+                writer: writer.clone(),
+            });
+            let workspace = tempfile::tempdir().unwrap();
+            let project = store.upsert_project(workspace.path()).await.unwrap();
+            let (delta, product) =
+                crate::studio::store::directory::DirectoryDelta::register_root_thread(
+                    crate::studio::ids::new_id("thread"),
+                    &project.id,
+                    "task",
+                    pl_protocol::ThreadModeId::simple(),
+                    pl_protocol::ThreadWorkspaceMode::Local,
+                    project.path.clone(),
+                );
+            let thread = ThreadHandle::start(product.id.clone(), model).unwrap();
+            thread
+                .attach_storage(pl_core::thread::cold::ColdStoreHandle::new(
+                    store.sessions().open_thread(&product.id).await.unwrap(),
+                ))
+                .await
+                .unwrap();
+            if register {
+                events.commit_directory(delta).await.unwrap();
+                writer.flush().await.unwrap();
+            }
+            observers.observe(product.id.clone(), thread.clone());
+            Self {
+                home,
+                _workspace: workspace,
+                store,
+                writer,
+                events,
+                observers,
+                thread,
+                product,
+            }
+        }
+
+        fn observation(&self) -> Arc<Observation> {
+            self.observers
+                .0
+                .observations
+                .lock()
+                .unwrap()
+                .get(&self.product.id)
+                .unwrap()[0]
+                .clone()
+        }
+
+        fn progress(&self) -> Progress {
+            self.observation().state.progress.borrow().clone()
+        }
+
+        async fn wait_for_error(&self) {
+            let mut progress = self.observation().state.progress.subscribe();
+            while progress.borrow().error.is_none() {
+                progress.changed().await.unwrap();
+            }
+        }
+
+        fn index_path(&self) -> std::path::PathBuf {
+            crate::studio::paths::session_database_path(
+                self.store.sessions().sessions_dir().expect("file-backed"),
+                &self.product.id,
+            )
+            .unwrap()
+        }
+
+        async fn step(&self, turn: &str) {
+            self.thread
+                .step(pl_core::thread::StepInput {
+                    turn_id: turn.into(),
+                    attempt_id: format!("{turn}-attempt"),
+                    content: vec![ContextContent::Text {
+                        text: Arc::from("question"),
+                    }],
+                    cancellation: tokio_util::sync::CancellationToken::new(),
+                })
+                .await
+                .unwrap();
+        }
+
+        async fn synchronize(&self) {
+            self.observers
+                .synchronize(Some(&self.product.id))
+                .await
+                .unwrap();
+        }
+
+        async fn close(&self) {
+            self.thread.close().await.unwrap();
+            self.observers.finish().await.unwrap();
+            self.writer.flush().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn one_incremental_projection_advances_the_index_and_the_cold_directory() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let harness =
+            ObservationHarness::start(DynModelSession::new(Reply(calls.clone())), true).await;
+        harness.step("turn-1").await;
+        harness.step("turn-2").await;
+        let observed = harness.thread.snapshot().commit_sequence;
+        assert!(observed >= 2, "expected several canonical commits");
+        harness.synchronize().await;
+
+        let progress = harness.progress();
+        assert!(progress.initialized);
+        assert!(progress.error.is_none());
+        // Every canonical commit is folded exactly once: the projection watermark and the applied
+        // count both equal the observed journal length, so no history prefix was replayed.
+        assert_eq!(progress.applied, observed);
+        assert_eq!(progress.applies, observed);
+
+        // The durable timeline index writes the same state at the same watermark.
+        let reader = crate::studio::timeline_store::TimelineReader::open(harness.index_path())
+            .await
+            .unwrap();
+        let head = reader.read_head(&harness.product.id).await.unwrap();
+        assert_eq!(head.watermark, progress.applied);
+        reader.close().await.unwrap();
+
+        // Re-synchronizing an unchanged snapshot applies nothing a second time.
+        harness.synchronize().await;
+        assert_eq!(harness.progress().applies, observed);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+        harness.close().await;
+
+        // The durable directory summary carries the observed status without a journal replay.
+        let durable = harness
+            .store
+            .read_thread_association(&harness.product.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(durable.status, pl_protocol::ThreadStatus::Closed);
+        assert!(durable.updated_at >= harness.product.updated_at);
+
+        // Restarting over the same database keeps the cold directory facts without opening a
+        // journal.
+        harness.store.sessions().shutdown().await.unwrap();
+        harness.writer.shutdown().await.unwrap();
+        let reopened = StudioStore::open(harness.home.path().join("studio.sqlite"))
+            .await
+            .unwrap();
+        let cold = reopened
+            .read_thread_association(&harness.product.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cold.status, pl_protocol::ThreadStatus::Closed);
+        assert_eq!(cold.updated_at, durable.updated_at);
+        reopened.sessions().shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_failed_projection_is_retried_and_only_ever_applies_each_commit_once() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let harness =
+            ObservationHarness::start(DynModelSession::new(Reply(calls.clone())), false).await;
+        harness.step("turn-1").await;
+        // The observation fails: the Thread has a durable journal but no product association yet.
+        harness.wait_for_error().await;
+        assert!(!harness.progress().initialized);
+        assert_eq!(harness.progress().applies, 0);
+
+        // Registering the association lets the same worker retry and fold the whole journal once.
+        harness
+            .events
+            .commit_directory(crate::studio::store::directory::DirectoryDelta {
+                thread_upserts: vec![harness.product.clone()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        harness.synchronize().await;
+        let observed = harness.thread.snapshot().commit_sequence;
+        assert_eq!(harness.progress().applied, observed);
+        assert_eq!(harness.progress().applies, observed);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        harness.close().await;
+
+        harness.store.sessions().shutdown().await.unwrap();
+        harness.writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_late_observation_never_overwrites_archived_or_renamed_directory_facts() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let harness =
+            ObservationHarness::start(DynModelSession::new(Reply(calls.clone())), true).await;
+        harness.step("turn-1").await;
+        harness.synchronize().await;
+
+        // Rename and archive are directory owner commands; both are durable facts.
+        let mut renamed = harness.events.thread_snapshot(&harness.product.id).unwrap();
+        renamed.title = "renamed task".into();
+        renamed.updated_at = crate::studio::ids::unix_seconds();
+        harness
+            .events
+            .commit_directory(crate::studio::store::directory::DirectoryDelta {
+                thread_upserts: vec![renamed.clone()],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        harness
+            .events
+            .commit_directory(
+                crate::studio::store::directory::DirectoryDelta::archive_threads(vec![
+                    harness.product.id.clone(),
+                ]),
+            )
+            .await
+            .unwrap();
+        harness.writer.flush().await.unwrap();
+
+        // A late observation of a newer commit is rejected by the directory owner lock and never
+        // re-inserts the archived entry nor rewrites the renamed facts.
+        harness.step("turn-2").await;
+        harness.synchronize().await;
+        harness.writer.flush().await.unwrap();
+
+        let durable = harness
+            .store
+            .read_thread_association(&harness.product.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(durable.title, "renamed task");
+        assert_eq!(
+            durable.visibility,
+            crate::studio::records::ThreadVisibility::Archived
+        );
+        assert!(
+            harness
+                .events
+                .thread_snapshot(&harness.product.id)
+                .is_none_or(|thread| thread.archived)
+        );
+
+        harness.store.sessions().shutdown().await.unwrap();
+        harness.writer.shutdown().await.unwrap();
     }
 }

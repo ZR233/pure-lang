@@ -99,7 +99,7 @@ impl StudioRuntime {
         {
             return Ok(project);
         }
-        let name = canonical_path
+        let derived_name = canonical_path
             .trim_end_matches('/')
             .rsplit('/')
             .next()
@@ -107,13 +107,47 @@ impl StudioRuntime {
             .unwrap_or("remote-workspace")
             .to_string();
         let now = crate::studio::unix_seconds();
+        // Reuse the canonical declaration for an already-declared remote Project.
+        let declaration = self
+            .store
+            .workspaces()
+            .declaration_for_path(&canonical_path, Some(alias));
         let existing = self
             .store
             .find_project_by_path(&canonical_path, Some(alias))
             .await?;
-        let (id, created_at, name) = existing
-            .map(|row| (row.id, row.created_at, row.name))
-            .unwrap_or_else(|| (crate::studio::ids::new_id("project"), now, name));
+        let (id, created_at, name) = match (&declaration, existing) {
+            (Some(declaration), row) => (
+                declaration.id.clone(),
+                row.map_or(now, |row| row.created_at),
+                declaration.name.clone(),
+            ),
+            (None, Some(row)) => (row.id, row.created_at, row.name),
+            (None, None) => (crate::studio::ids::new_id("project"), now, derived_name),
+        };
+        // The canonical declaration is written before the directory mutation so a newly
+        // created SSH Project survives restart instead of disappearing with the cache.
+        self.store
+            .workspaces()
+            .declare(&crate::config::WorkspaceDeclaration::new(
+                id.clone(),
+                name.clone(),
+                canonical_path.clone(),
+                Some(alias.to_string()),
+            ))?;
+        self.agent_facility
+            .product_events
+            .record_project_fact(crate::studio::product_event_bus::ProjectFact {
+                id: id.clone(),
+                name: name.clone(),
+                path: canonical_path.clone(),
+                ssh_alias: Some(alias.to_string()),
+                created_at,
+                updated_at: now,
+                last_opened_at: Some(now),
+                closed: false,
+            })
+            .await;
         let delta = ProjectDirectoryRecord {
             id: id.clone(),
             name: name.clone(),

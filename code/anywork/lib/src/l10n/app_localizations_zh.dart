@@ -135,17 +135,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get runtimeFatalRetry => '重试';
 
   @override
-  String get configRecoveryMessage => '检测到不兼容配置，原文件已备份并替换为当前默认配置。';
-
-  @override
-  String configRecoveryBackupPath(String path) {
-    return '备份位置：$path';
-  }
-
-  @override
-  String get configRecoveryDismissTooltip => '关闭配置恢复提示';
-
-  @override
   String persistenceDegraded(int count) {
     return '保存暂时不可用，尚有 $count 项更改未保存；可以继续会话。';
   }

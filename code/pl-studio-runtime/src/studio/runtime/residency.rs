@@ -18,6 +18,8 @@ pub(in crate::studio) struct ThreadResidency {
     pinned: Arc<Mutex<HashMap<String, usize>>>,
     capacity: usize,
     pub(super) timelines: Arc<AsyncMutex<HashMap<String, super::timeline::TimelineIndex>>>,
+    /// Bounded cold-index readers and one-shot index-build workers (design/17 §17.2).
+    pub(super) timeline: super::timeline::TimelineAccess,
 }
 
 pub(in crate::studio) struct ThreadResidencyPins {
@@ -40,6 +42,7 @@ impl ThreadResidency {
             pinned: Arc::new(Mutex::new(HashMap::new())),
             capacity: INACTIVE_RESIDENT_CAPACITY,
             timelines: Arc::default(),
+            timeline: super::timeline::TimelineAccess::new(),
         }
     }
 
@@ -54,6 +57,8 @@ impl ThreadResidency {
     pub(in crate::studio) async fn remove(&self, thread_id: &str) {
         self.order.lock().await.retain(|id| id != thread_id);
         self.timelines.lock().await.remove(thread_id);
+        // Idle eviction releases the Thread's bounded cold reader and stops a pending index worker.
+        self.timeline.release(thread_id).await;
     }
 
     /// 返回超出非 pin 容量的队首候选（按最久未使用排序）。

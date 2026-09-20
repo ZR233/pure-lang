@@ -172,7 +172,12 @@ impl StudioThreadFactory {
             resources: ResourceAccess::new(resources),
             capacity: Default::default(),
             cold_store: Some(pl_core::thread::cold::ColdStoreHandle::new(
-                self.services.store.sessions().clone(),
+                self.services
+                    .store
+                    .sessions()
+                    .open_existing(id)
+                    .await
+                    .map_err(|error| resource_error("open restored child session store", error))?,
             )),
         };
         Ok(prepared.tools.install(spec))

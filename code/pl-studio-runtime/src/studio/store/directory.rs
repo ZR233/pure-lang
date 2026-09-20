@@ -26,17 +26,30 @@ pub(in crate::studio) struct DirectoryDelta {
     pub(in crate::studio) session_activity: Vec<(String, i64)>,
     pub(in crate::studio) session_registrations: Vec<String>,
     pub(in crate::studio) thread_upserts: Vec<Thread>,
+    pub(in crate::studio) thread_states: Vec<ThreadStateUpdate>,
     pub(in crate::studio) unregistered_faults: Vec<UnregisteredChildFault>,
     pub(in crate::studio) thread_removals: Vec<ThreadRemoval>,
     pub(in crate::studio) project_upserts: Vec<ProjectDirectoryRecord>,
     pub(in crate::studio) project_removals: Vec<ProjectRemoval>,
 }
 
+/// 内存目录 owner 提交的运行状态摘要（可重建缓存，不是完成判据）。
+///
+/// 只承载产品目录关心的 `status`/`error` 与更新时间，落库到线程行的 `state_json` 与
+/// `updated_at`，使不经 journal 重放的冷目录读取得到正确状态；写入失败保留重试，不回滚
+/// 已提交内存，也不携带任何历史正文。
+#[derive(Debug, Clone)]
+pub(in crate::studio) struct ThreadStateUpdate {
+    pub(in crate::studio) thread_id: String,
+    pub(in crate::studio) state: crate::studio::records::DirectoryState,
+    pub(in crate::studio) updated_at: i64,
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::studio) struct UnregisteredChildFault {
     pub thread_id: String,
     pub state: crate::studio::records::DirectoryState,
-}
+    }
 
 impl DirectoryDelta {
     pub(in crate::studio) fn is_empty(&self) -> bool {
@@ -44,6 +57,7 @@ impl DirectoryDelta {
             && self.session_registrations.is_empty()
             && self.session_activity.is_empty()
             && self.thread_upserts.is_empty()
+            && self.thread_states.is_empty()
             && self.thread_removals.is_empty()
             && self.project_upserts.is_empty()
             && self.project_removals.is_empty()
@@ -191,6 +205,18 @@ pub(in crate::studio) async fn apply_directory_delta(
             row.updated_at = Set(updated_at);
             row.update(tx).await?;
         }
+    }
+    for update in &delta.thread_states {
+        if let Some(row) = entities::thread::Entity::find_by_id(update.thread_id.clone())
+            .one(tx)
+            .await?
+        {
+            let updated_at = row.updated_at.max(update.updated_at);
+            let mut row: entities::thread::ActiveModel = row.into();
+            row.state_json = Set(serde_json::to_string(&update.state)?);
+            row.updated_at = Set(updated_at);
+            row.update(tx).await?;
+    }
     }
     for fault in &delta.unregistered_faults {
         super::agent_framework::apply_unregistered_child_fault(tx, fault).await?;

@@ -209,7 +209,6 @@ class FrbStudioApi implements StudioApi {
   static Future<void>? _shutdownFuture;
   static Future<void> Function()? _initializationOverrideForTesting;
   static bool _rustInitialized = false;
-  static ConfigRecoveryNotice? _pendingConfigRecoveryNotice;
   ProviderCatalogView? _providerCatalogCache;
 
   static Future<void> ensureReady() => _ensureReady();
@@ -221,7 +220,6 @@ class FrbStudioApi implements StudioApi {
     _initFuture = null;
     _shutdownFuture = null;
     _initializationOverrideForTesting = initialization;
-    _pendingConfigRecoveryNotice = null;
   }
 
   static Future<void> _ensureReady() {
@@ -254,17 +252,12 @@ class FrbStudioApi implements StudioApi {
             const Duration(milliseconds: 100),
             (_) => _readStartupPhase(),
           );
-          final frb.BridgeStudioStartupResult startup;
           try {
-            startup = await frb.startStudioRuntime();
+            await frb.startStudioRuntime();
             _readStartupPhase();
           } finally {
             progress.cancel();
           }
-          final recovery = startup.configRecovery;
-          _pendingConfigRecoveryNotice = recovery == null
-              ? null
-              : ConfigRecoveryNotice(backupPath: recovery.backupPath);
         }
       } catch (error, stackTrace) {
         if (identical(_initFuture, attempt)) {
@@ -302,7 +295,6 @@ class FrbStudioApi implements StudioApi {
     RustLib.dispose();
     _rustInitialized = false;
     _initFuture = null;
-    _pendingConfigRecoveryNotice = null;
   }
 
   @override
@@ -427,9 +419,7 @@ class FrbStudioApi implements StudioApi {
       'startup_stage=read_state elapsed_ms=${watch.elapsedMilliseconds}',
     );
     startupProgress.value = StudioStartupPhase.ready;
-    final recovery = _pendingConfigRecoveryNotice;
-    _pendingConfigRecoveryNotice = null;
-    return state.copyWith(configRecoveryNotice: recovery);
+    return state;
   }
 
   @override

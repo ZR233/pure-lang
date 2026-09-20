@@ -781,14 +781,16 @@ mod tests {
     use super::*;
     use crate::StudioProductEventKind;
     use crate::studio::runtime::thread_title::title_cancellation_channel;
+    use crate::studio::runtime::timeline::TimelineUnavailable;
     use crate::{StudioHostKind, StudioRuntimeOptions};
-    use pl_core::context::OpaquePayload;
+    use pl_core::context::{ContextContent, OpaquePayload};
     use pl_core::model::{
         DynModelSession, Model, ModelError, ModelFactory, ModelFailureKind, ModelRequest,
-        ModelSession, PreparedModelCall,
+        ModelSession, ModelStepOutput, PreparedModelCall,
     };
     use pl_core::thread::input::{InputDriverOptions, InputState, ThreadInput};
     use pl_core::thread::{ThreadHandle, ThreadLifecycle, TurnState, cold::ColdStoreHandle};
+    use pl_protocol::{ThreadSubscriptionRequest, ThreadSubscriptionUpdate};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -938,7 +940,14 @@ mod tests {
         )
         .unwrap();
         historical
-            .attach_storage(ColdStoreHandle::new(runtime.store.sessions().clone()))
+            .attach_storage(ColdStoreHandle::new(
+                runtime
+                    .store
+                    .sessions()
+                    .open_thread(&child_id)
+                    .await
+                    .unwrap(),
+            ))
             .await
             .unwrap();
         historical.close().await.unwrap();
@@ -1632,6 +1641,7 @@ mod tests {
             .unwrap();
         assert_eq!(thread.workspace_mode, ThreadWorkspaceMode::Worktree);
 
+        seed_session_database(&runtime, &thread.id).await;
         let owner = runtime.ensure_thread_owner(&thread.id).await.unwrap();
         assert_ne!(
             owner.snapshot().lifecycle,
@@ -1717,7 +1727,20 @@ mod tests {
             .commit_directory(delta)
             .await
             .unwrap();
+        seed_session_database(runtime, &thread_id).await;
         (thread_id, std::path::PathBuf::from(&lease.path))
+    }
+
+    /// Test fixtures register directory rows directly; explicitly seed the Thread's own
+    /// (empty) session database so activation reads existing history. Production
+    /// activation never creates a missing database, so this mirrors the creation boundary.
+    async fn seed_session_database(runtime: &StudioRuntime, thread_id: &str) {
+        runtime
+            .store
+            .sessions()
+            .open_thread(thread_id)
+            .await
+            .expect("seed Thread session database");
     }
 
     /// 会话对外只有一个 canonical 工作区地址：`local` 取 canonical Project 目录、
@@ -2868,6 +2891,7 @@ mod tests {
             .commit_directory(delta)
             .await
             .unwrap();
+        seed_session_database(&runtime, &thread.id).await;
 
         // 同一 owner id 上只有 Child 归属 lease（模拟 worktree child 激活失败的现场）。
         let repository_root = dunce::simplified(workspace.path()).to_path_buf();
@@ -3231,6 +3255,7 @@ mod tests {
             .commit_directory(delta)
             .await
             .unwrap();
+        seed_session_database(&runtime, &missing).await;
         let error = runtime.ensure_thread_owner(&missing).await.unwrap_err();
         assert!(
             format!("{error:#}").contains("workspace is unavailable"),
@@ -3259,6 +3284,7 @@ mod tests {
             .commit_directory(delta)
             .await
             .unwrap();
+        seed_session_database(&runtime, &mismatched).await;
         let mut lease = WorktreeLease {
             revision: 1,
             state: WorktreeLeaseState::Prepared,
@@ -3313,6 +3339,7 @@ mod tests {
             .commit_directory(delta)
             .await
             .unwrap();
+        seed_session_database(&runtime, &cleaned).await;
         let mut lease = WorktreeLease {
             revision: 1,
             state: WorktreeLeaseState::Prepared,
@@ -3584,5 +3611,307 @@ mod tests {
         );
         assert!(orphan.exists());
         runtime.shutdown().await;
+    }
+
+    /// 一次即完成的模型替身：返回一段文本且不发起工具调用，用来产生有内容的 canonical 历史。
+    struct ReplyModel;
+
+    impl Model for ReplyModel {
+        async fn open_session(&self) -> Result<DynModelSession, ModelError> {
+            Ok(DynModelSession::new(ReplySession))
+        }
+    }
+
+    struct ReplySession;
+
+    impl ModelSession for ReplySession {
+        async fn prepare(
+            &mut self,
+            request: ModelRequest,
+        ) -> Result<PreparedModelCall, ModelError> {
+            Ok(PreparedModelCall::new(async move {
+                Ok(ModelStepOutput {
+                    attempt_id: request.attempt_id,
+                    base_context_revision: request.context.revision,
+                    content: vec![ContextContent::Text {
+                        text: Arc::from("cold reply"),
+                    }],
+                    tool_calls: Vec::new(),
+                    private_context: None,
+                    usage: Default::default(),
+                })
+            }))
+        }
+
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+
+    /// 让 owner 产生持久 canonical 历史后把它收束为冷 Thread（不残留 owner）。
+    async fn make_thread_cold(runtime: &StudioRuntime, thread_id: &str) {
+        let thread = runtime.ensure_thread_owner(thread_id).await.unwrap();
+        thread
+            .replace_model(ModelFactory::new(ReplyModel))
+            .await
+            .unwrap();
+        thread
+            .submit_input_and_run(n3_input("cold-window-input"), drive_options())
+            .await
+            .unwrap();
+        wait_until_idle(runtime, thread_id).await;
+        if !runtime.threads.evict_idle(thread_id).await.unwrap() {
+            runtime.threads.close(thread_id).await.unwrap();
+        }
+        runtime.residency.remove(thread_id).await;
+        assert!(
+            runtime.threads.thread(thread_id).is_none(),
+            "the Thread must be cold before subscribing"
+        );
+    }
+
+    fn timeline_error_is_preparing(error: &anyhow::Error) -> bool {
+        matches!(
+            error.downcast_ref::<TimelineUnavailable>(),
+            Some(TimelineUnavailable::Preparing { .. })
+        )
+    }
+
+    /// 冷订阅的索引可能仍在准备：按 TimelineUnavailable 重试直到可用。
+    async fn subscribe_cold_ready(
+        runtime: &StudioRuntime,
+        thread_id: &str,
+    ) -> crate::StudioThreadSubscription {
+        let mut attempts = 0;
+        loop {
+            match runtime
+                .subscribe_thread(ThreadSubscriptionRequest {
+                    thread_id: thread_id.to_owned(),
+                })
+                .await
+            {
+                Ok(subscription) => return subscription,
+                Err(error) if timeline_error_is_preparing(&error) => {
+                    attempts += 1;
+                    assert!(attempts < 2_000, "the timeline index worker never finished");
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                Err(error) => panic!("cold subscription failed: {error:#}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cold_subscription_serves_a_bounded_index_window_without_activating_an_owner() {
+        let (_home, _workspace, runtime, id) = runtime_with_thread_without_optional_tools().await;
+        make_thread_cold(&runtime, &id).await;
+        assert_eq!(runtime.threads.observed_threads().len(), 0);
+
+        let mut subscription = subscribe_cold_ready(&runtime, &id).await;
+        assert!(
+            runtime.threads.thread(&id).is_none(),
+            "a cold subscription must never activate an owner"
+        );
+        assert!(
+            !runtime
+                .threads
+                .observed_threads()
+                .iter()
+                .any(|(thread_id, _)| thread_id == &id),
+            "a cold subscription must not create a model or tool owner"
+        );
+
+        let frame = subscription
+            .recv()
+            .await
+            .unwrap()
+            .expect("a cold subscription must return its first frame");
+        let ThreadSubscriptionUpdate::Snapshot { snapshot } = frame else {
+            panic!("a cold first frame must be an authoritative snapshot");
+        };
+        assert!(
+            snapshot.revision > 0,
+            "the window must carry the indexed watermark"
+        );
+        assert!(
+            !snapshot.items.is_empty(),
+            "the window must carry the committed history"
+        );
+        assert!(snapshot.items.len() <= 100);
+        assert_eq!(snapshot.thread.id, id);
+        // 冷订阅只发一帧后结束：不重放全量 journal，也不伪造空页。
+        assert!(subscription.recv().await.unwrap().is_none());
+        drop(subscription);
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn cold_subscription_reports_preparing_until_the_index_worker_finishes() {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+            studio_home: Some(home.path().to_owned()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        runtime.start_runtime().await.unwrap();
+        let project = runtime.open_project(workspace.path()).await.unwrap();
+        runtime
+            .persistence_repository()
+            .await
+            .expect("a started test runtime owns a write-behind repository")
+            .flush()
+            .await
+            .unwrap();
+        // 直接建 Thread：永不激活 owner，也不存在 durable 索引。
+        let record = runtime
+            .store
+            .create_thread(
+                &project.id,
+                "cold index",
+                pl_protocol::ThreadModeId::simple(),
+            )
+            .await
+            .unwrap();
+        assert!(runtime.threads.thread(&record.id).is_none());
+
+        let error = runtime
+            .subscribe_thread(ThreadSubscriptionRequest {
+                thread_id: record.id.clone(),
+            })
+            .await
+            .err()
+            .expect("a missing index must never be served as an empty page");
+        assert!(
+            timeline_error_is_preparing(&error),
+            "a missing index must be a typed preparing state, never an empty page: {error:#}"
+        );
+
+        let mut subscription = subscribe_cold_ready(&runtime, &record.id).await;
+        let frame = subscription
+            .recv()
+            .await
+            .unwrap()
+            .expect("the repaired index must serve its first frame");
+        let ThreadSubscriptionUpdate::Snapshot { snapshot } = frame else {
+            panic!("a cold first frame must be an authoritative snapshot");
+        };
+        assert_eq!(snapshot.revision, 0);
+        assert!(snapshot.items.is_empty());
+        assert!(
+            runtime.threads.thread(&record.id).is_none(),
+            "index preparation must never activate an owner"
+        );
+        drop(subscription);
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn subscription_pin_survives_concurrent_capacity_enforcement() {
+        let (_home, _workspace, runtime, selected_id) =
+            runtime_with_thread_without_optional_tools().await;
+        let project_id = runtime
+            .read_owned_thread(&selected_id)
+            .await
+            .unwrap()
+            .project_id;
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+
+        let subscriber = {
+            let runtime = runtime.clone();
+            let barrier = barrier.clone();
+            let selected_id = selected_id.clone();
+            tokio::spawn(async move {
+                let mut subscription = runtime
+                    .subscribe_thread(ThreadSubscriptionRequest {
+                        thread_id: selected_id,
+                    })
+                    .await
+                    .unwrap();
+                // 订阅（含订阅 pin）就绪后再放行淘汰方。
+                barrier.wait().await;
+                let frame = subscription.recv().await.unwrap();
+                // 持有 pin 直到淘汰方完成容量收敛。
+                barrier.wait().await;
+                (frame, subscription)
+            })
+        };
+
+        barrier.wait().await;
+        for index in 0..6 {
+            runtime
+                .create_thread(&project_id, &format!("idle {index}"))
+                .await
+                .unwrap();
+        }
+        runtime.enforce_residency_limit().await;
+        assert!(
+            runtime.threads.thread(&selected_id).is_some(),
+            "an actively subscribed Thread must not participate in LRU eviction"
+        );
+        barrier.wait().await;
+
+        let (frame, subscription) = subscriber.await.unwrap();
+        assert!(frame.is_some());
+        assert!(runtime.residency.is_pinned(&selected_id));
+        // 取消订阅只解除 pin，不取消或关闭后台 owner。
+        drop(subscription);
+        assert!(!runtime.residency.is_pinned(&selected_id));
+        assert!(
+            runtime.threads.thread(&selected_id).is_some(),
+            "dropping a subscription must not cancel background execution"
+        );
+        runtime.shutdown().await;
+    }
+
+    /// 统计本进程指向 `path` 的打开描述符数量。
+    #[cfg(target_os = "linux")]
+    fn open_descriptors_for(path: &std::path::Path) -> usize {
+        let Ok(entries) = std::fs::read_dir("/proc/self/fd") else {
+            return 0;
+        };
+        entries
+            .flatten()
+            .filter(|entry| std::fs::read_link(entry.path()).is_ok_and(|target| target == path))
+            .count()
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn shutdown_releases_the_cached_cold_timeline_reader() {
+        let (_home, _workspace, runtime, id) = runtime_with_thread_without_optional_tools().await;
+        make_thread_cold(&runtime, &id).await;
+        // 触发并缓存一个只读 index reader，并等待索引 worker 收束。
+        let page = loop {
+            match runtime
+                .list_timeline_items(&id, pl_protocol::TimelineQuery::Latest, 20)
+                .await
+            {
+                Ok(page) => break page,
+                Err(error) if timeline_error_is_preparing(&error) => {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                Err(error) => panic!("cold index read failed: {error:#}"),
+            }
+        };
+        assert!(page.watermark > 0);
+        let sessions_dir = runtime
+            .store
+            .sessions()
+            .sessions_dir()
+            .expect("a started test runtime owns a sessions directory")
+            .to_path_buf();
+        let path = crate::studio::paths::session_database_path(&sessions_dir, &id).unwrap();
+        assert!(
+            open_descriptors_for(&path) >= 1,
+            "a cold index read must cache a read-only reader"
+        );
+        runtime.shutdown().await;
+        assert_eq!(
+            open_descriptors_for(&path),
+            0,
+            "shutdown must close the cached index reader"
+        );
     }
 }

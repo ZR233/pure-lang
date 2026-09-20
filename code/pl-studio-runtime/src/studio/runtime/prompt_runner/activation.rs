@@ -11,6 +11,13 @@ impl StudioRuntime {
         &self,
         thread: ThreadRecord,
     ) -> Result<()> {
+        // A Thread creation command is the only place that creates a Thread's own
+        // session database; activation itself never fabricates empty history.
+        self.store
+            .sessions()
+            .open_thread(&thread.id)
+            .await
+            .map_err(anyhow::Error::new)?;
         self.ensure_thread_owner(&thread.id).await?;
         Ok(())
     }

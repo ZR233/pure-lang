@@ -28,6 +28,9 @@ impl StudioThreadFactory {
         let route = config
             .models
             .resolve(&crate::config::StudioRole::Planner.id())?;
+        // Root activation runs for both freshly created and existing Threads, so it must
+        // never create a missing history database: the creation command owns that, and a
+        // missing database here is an explicit failure surfaced by recovery.
         let history = super::recovery::recover_journal(&self.services.store, id)
             .await
             .map_err(|error| resource_error("recover Thread journal", error))?;
@@ -208,7 +211,12 @@ impl StudioThreadFactory {
             resources: ResourceAccess::new(store),
             capacity: Default::default(),
             cold_store: Some(pl_core::thread::cold::ColdStoreHandle::new(
-                self.services.store.sessions().clone(),
+                self.services
+                    .store
+                    .sessions()
+                    .open_existing(id)
+                    .await
+                    .map_err(|error| resource_error("open root Thread session store", error))?,
             )),
         };
         Ok(prepared.tools.install(spec))

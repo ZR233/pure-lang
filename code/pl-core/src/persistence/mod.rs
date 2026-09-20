@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use crate::storage::SessionEntryChange;
 pub use sqlite::{SessionStoreError, SqliteSessionOptions};
+pub use thread_journal::{SessionJournalReader, open_journal_reader};
 pub use writer::SqliteSessionStore;
 
 /// Observable writer state. Errors retain their typed cause; pending facts remain owned in memory.

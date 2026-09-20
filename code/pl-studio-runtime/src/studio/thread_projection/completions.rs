@@ -1,66 +1,37 @@
 //! Final text emitted by the explicit completion tool, decoded from the saved producer receipt.
-use super::order;
-use pl_core::thread::{AttemptOutcome, ThreadSnapshot, ToolOutcome, journal::ThreadCommit};
+use pl_core::thread::{ToolDelivery, ToolOutcome};
 use pl_protocol::{
     ThreadContentLifecycle, ThreadItem, ThreadItemState, ThreadTextChannel, ThreadTextItem,
 };
-use std::{collections::BTreeMap, sync::Arc};
 
-pub(super) fn project_completions(
+/// Builds one completion item from a saved delivery, or nothing when the delivery is not a
+/// successful end-Turn completion.
+pub(super) fn completion_item(
     thread_id: &str,
-    snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadCommit>],
-) -> Vec<ThreadItem> {
-    let turns: BTreeMap<_, _> = snapshot
-        .attempts
-        .iter()
-        .flat_map(|attempt| match &attempt.outcome {
-            AttemptOutcome::Committed(output) => output
-                .tool_calls
-                .iter()
-                .map(|call| (call.call_id.as_str(), attempt.turn_id.as_str()))
-                .collect::<Vec<_>>(),
-            AttemptOutcome::Running
-            | AttemptOutcome::Interrupted
-            | AttemptOutcome::Failed(_)
-            | AttemptOutcome::Rejected { .. }
-            | AttemptOutcome::Cancelled { .. } => Vec::new(),
-        })
-        .collect();
-    let mut items = Vec::new();
-    for commit in journal
-        .iter()
-        .filter(|commit| commit.sequence <= snapshot.commit_sequence)
-    {
-        for delivery in commit.deliveries.iter() {
-            let Some(summary) = completion_summary(delivery) else {
-                continue;
-            };
-            items.push(ThreadItem::new(
-                order::completion_id(&delivery.call_id),
-                thread_id.into(),
-                turns
-                    .get(delivery.call_id.as_str())
-                    .copied()
-                    .unwrap_or_default()
-                    .into(),
-                0,
-                commit.sequence,
-                commit.committed_at,
-                commit.committed_at,
-                ThreadItemState::Text(ThreadTextItem::new(
-                    ThreadTextChannel::Final,
-                    summary,
-                    Vec::new(),
-                    ThreadContentLifecycle::completed(commit.committed_at),
-                )),
-            ));
-        }
-    }
-    items
+    delivery: &ToolDelivery,
+    turn_id: &str,
+    sequence: u64,
+    committed_at: i64,
+) -> Option<ThreadItem> {
+    let summary = completion_summary(delivery)?;
+    Some(ThreadItem::new(
+        super::order::completion_id(&delivery.call_id),
+        thread_id.into(),
+        turn_id.into(),
+        0,
+        sequence,
+        committed_at,
+        committed_at,
+        ThreadItemState::Text(ThreadTextItem::new(
+            ThreadTextChannel::Final,
+            summary,
+            Vec::new(),
+            ThreadContentLifecycle::completed(committed_at),
+        )),
+    ))
 }
 
-fn completion_summary(delivery: &pl_core::thread::ToolDelivery) -> Option<String> {
+fn completion_summary(delivery: &ToolDelivery) -> Option<String> {
     if !matches!(delivery.outcome, ToolOutcome::Succeeded)
         || delivery.output.control() != pl_core::tool::ToolControl::EndTurn
     {

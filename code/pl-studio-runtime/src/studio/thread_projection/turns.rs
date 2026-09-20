@@ -1,16 +1,42 @@
 //! Turn lifecycle and diagnostics projected from saved commit metadata.
 use super::ProjectionError;
-use pl_core::thread::{
-    AttemptOutcome, ThreadSnapshot, TurnOutcome as CoreTurnOutcome, TurnRecord,
-    TurnState as CoreTurnState, journal::ThreadCommit,
+use pl_core::{
+    model::ModelError,
+    thread::{
+        AttemptOutcome, ThreadSnapshot, TurnOutcome as CoreTurnOutcome, TurnRecord,
+        TurnState as CoreTurnState,
+        journal::ThreadCommit,
+        task::{TaskRecord, TaskStatus},
+    },
 };
 use pl_protocol::{Turn, TurnPhase, TurnState};
 use std::{collections::BTreeMap, sync::Arc};
 
-struct Stamp {
-    started_at: i64,
-    updated_at: i64,
-    revision: u64,
+/// Admission stamp of one Turn: the first and last commits that touched it.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Stamp {
+    pub started_at: i64,
+    pub updated_at: i64,
+    pub revision: u64,
+}
+
+/// Projects one Turn from its saved record, its admission stamp and the facts of its own Turn.
+pub(super) fn turn_projected(
+    thread_id: &str,
+    record: &TurnRecord,
+    stamp: &Stamp,
+    tasks: &[&TaskRecord],
+    latest_attempt: Option<&AttemptOutcome>,
+    latest_failure: Option<&Arc<ModelError>>,
+) -> Result<Turn, ProjectionError> {
+    Ok(Turn {
+        input_id: record.input_id.clone(),
+        id: record.turn_id.clone(),
+        thread_id: thread_id.into(),
+        revision: stamp.revision,
+        state: state(record, stamp, tasks, latest_attempt, latest_failure)?,
+        updated_at: stamp.updated_at,
+    })
 }
 
 pub(in crate::studio) fn project_turns(
@@ -56,30 +82,51 @@ pub(in crate::studio) fn project_turns(
             let stamp = stamps
                 .get(&record.turn_id)
                 .ok_or_else(|| ProjectionError::MissingTurn(record.turn_id.clone()))?;
-            let state = state(snapshot, record, stamp)?;
-            Ok(Turn {
-                input_id: record.input_id.clone(),
-                id: record.turn_id.clone(),
-                thread_id: thread_id.into(),
-                revision: stamp.revision,
-                state,
-                updated_at: stamp.updated_at,
-            })
+            let tasks = snapshot
+                .tasks
+                .values()
+                .filter(|task| task.turn_id == record.turn_id)
+                .collect::<Vec<_>>();
+            let latest_attempt = snapshot
+                .attempts
+                .iter()
+                .rev()
+                .find(|attempt| attempt.turn_id == record.turn_id)
+                .map(|attempt| &attempt.outcome);
+            let latest_failure = snapshot
+                .attempts
+                .iter()
+                .rev()
+                .filter(|attempt| attempt.turn_id == record.turn_id)
+                .find_map(|attempt| match &attempt.outcome {
+                    AttemptOutcome::Failed(error) => Some(error),
+                    _ => None,
+                });
+            turn_projected(
+                thread_id,
+                record,
+                stamp,
+                &tasks,
+                latest_attempt,
+                latest_failure,
+            )
         })
         .collect()
 }
 
 fn state(
-    snapshot: &ThreadSnapshot,
     record: &TurnRecord,
     stamp: &Stamp,
+    tasks: &[&TaskRecord],
+    latest_attempt: Option<&AttemptOutcome>,
+    latest_failure: Option<&Arc<ModelError>>,
 ) -> Result<TurnState, ProjectionError> {
     let started = Some(stamp.started_at);
     let at = stamp.updated_at;
     Ok(match &record.state {
         CoreTurnState::Running => TurnState::Running(pl_protocol::RunningTurnState::new(
             stamp.started_at,
-            phase(snapshot, &record.turn_id),
+            phase(tasks, latest_attempt),
         )),
         CoreTurnState::Finished(CoreTurnOutcome::Completed) => TurnState::Completed(
             pl_protocol::CompletedTurnState::new(started, at, pl_protocol::TurnCompletion::Normal),
@@ -92,11 +139,6 @@ fn state(
             ))
         }
         CoreTurnState::Finished(CoreTurnOutcome::StepLimit) => {
-            let tasks = snapshot
-                .tasks
-                .values()
-                .filter(|task| task.turn_id == record.turn_id)
-                .collect::<Vec<_>>();
             let usage = pl_protocol::BudgetUsage {
                 model_steps: record.model_steps,
                 tool_calls: tasks.len().try_into().map_err(|_| ProjectionError::Count)?,
@@ -136,29 +178,17 @@ fn state(
                 pl_protocol::TurnCancellationCause::Recovery
             },
         )),
-        CoreTurnState::Failed { description } => {
-            TurnState::Failed(pl_protocol::FailedTurnState::new(
-                started,
-                at,
-                failure(snapshot, &record.turn_id, description),
-            ))
-        }
+        CoreTurnState::Failed { description } => TurnState::Failed(
+            pl_protocol::FailedTurnState::new(started, at, failure(latest_failure, description)),
+        ),
     })
 }
 
-fn phase(snapshot: &ThreadSnapshot, turn_id: &str) -> TurnPhase {
-    if snapshot.tasks.values().any(|task| {
-        task.turn_id == turn_id && task.status == pl_core::thread::task::TaskStatus::Running
-    }) {
+fn phase(tasks: &[&TaskRecord], latest_attempt: Option<&AttemptOutcome>) -> TurnPhase {
+    if tasks.iter().any(|task| task.status == TaskStatus::Running) {
         return TurnPhase::RunningTool;
     }
-    match snapshot
-        .attempts
-        .iter()
-        .rev()
-        .find(|attempt| attempt.turn_id == turn_id)
-        .map(|attempt| &attempt.outcome)
-    {
+    match latest_attempt {
         None => TurnPhase::Preparing,
         Some(AttemptOutcome::Committed(output)) if !output.tool_calls.is_empty() => {
             TurnPhase::Planning
@@ -175,24 +205,10 @@ fn phase(snapshot: &ThreadSnapshot, turn_id: &str) -> TurnPhase {
 }
 
 fn failure(
-    snapshot: &ThreadSnapshot,
-    turn_id: &str,
+    latest_failure: Option<&Arc<ModelError>>,
     description: &str,
 ) -> pl_protocol::TurnFailure {
-    let Some(error) = snapshot
-        .attempts
-        .iter()
-        .rev()
-        .filter(|attempt| attempt.turn_id == turn_id)
-        .find_map(|attempt| match &attempt.outcome {
-            AttemptOutcome::Failed(error) => Some(error),
-            AttemptOutcome::Running
-            | AttemptOutcome::Interrupted
-            | AttemptOutcome::Committed(_)
-            | AttemptOutcome::Cancelled { .. }
-            | AttemptOutcome::Rejected { .. } => None,
-        })
-    else {
+    let Some(error) = latest_failure else {
         return pl_protocol::TurnFailure::permanent(
             pl_protocol::TurnFailureCategory::Internal,
             description,
@@ -239,7 +255,6 @@ mod tests {
 
     #[test]
     fn interaction_completion_uses_saved_times_without_running_a_model() {
-        let snapshot = ThreadSnapshot::default();
         let record = TurnRecord {
             input_id: Some("accepted-input".into()),
             elapsed_ms: Some(42),
@@ -252,7 +267,7 @@ mod tests {
             updated_at: 101,
             revision: 2,
         };
-        let TurnState::Completed(state) = state(&snapshot, &record, &stamp).unwrap() else {
+        let TurnState::Completed(state) = state(&record, &stamp, &[], None, None).unwrap() else {
             panic!("expected interaction completion")
         };
         assert_eq!(state.started_at(), Some(100));
@@ -270,7 +285,6 @@ mod tests {
             updated_at: 11,
             revision: 2,
         };
-        let snapshot = ThreadSnapshot::default();
         let mut record = TurnRecord {
             input_id: None,
             elapsed_ms: Some(325),
@@ -278,17 +292,19 @@ mod tests {
             state: CoreTurnState::Finished(CoreTurnOutcome::StepLimit),
             model_steps: 4,
         };
-        let TurnState::BudgetLimited(limited) = state(&snapshot, &record, &stamp).unwrap() else {
+        let TurnState::BudgetLimited(limited) = state(&record, &stamp, &[], None, None).unwrap()
+        else {
             panic!("expected budget limit")
         };
         assert_eq!(limited.limit().usage.elapsed_ms, 325);
         record.elapsed_ms = None;
         assert!(matches!(
-            state(&snapshot, &record, &stamp),
+            state(&record, &stamp, &[], None, None),
             Err(ProjectionError::MissingDuration(_))
         ));
         record.state = CoreTurnState::Cancelled;
-        let TurnState::Cancelled(cancelled) = state(&snapshot, &record, &stamp).unwrap() else {
+        let TurnState::Cancelled(cancelled) = state(&record, &stamp, &[], None, None).unwrap()
+        else {
             panic!("expected cancellation")
         };
         assert_eq!(

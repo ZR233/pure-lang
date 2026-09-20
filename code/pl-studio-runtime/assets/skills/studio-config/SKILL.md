@@ -23,13 +23,13 @@ The home directory can be overridden, in resolution order:
 2. `ANYWORK_HOME` environment variable (absolute, non-empty)
 3. default `<user home>/.anywork`
 
-Product metadata lives in `<home>/studio/studio.sqlite`; Thread history lives in `<home>/studio/sessions.sqlite`. Never edit either database by hand.
+Product metadata lives in `<home>/studio/studio.sqlite`; each root or child Thread has its own `<home>/studio/sessions/<thread-id>.sqlite`. Never edit databases by hand. Workspace declarations live in `<home>/workspaces/<project-id>.toml`; recent activity and worktree ownership remain runtime-managed state, not editable workspace configuration. History browsing opens only the selected Thread and reads bounded pages, without activating execution.
 
 ## Format Rules
 
 - TOML with snake_case keys; the current runtime accepts `schema_version = 18`. Changing the version number alone does not migrate a configuration.
 - A missing file means in-memory defaults shown in Settings; nothing is written until you save.
-- Version upgrades must preserve anywork user settings and credential associations through migration; backup followed by a reset is not a migration. Implementation is incomplete: the current startup path still backs up incompatible files and replaces them with defaults. Do not rely on restart to migrate an old or invalid file; preserve the original and report the gap instead.
+- Version upgrades must preserve user settings and credential associations through explicit migrations; backup followed by a reset is not a migration. Unsupported versions, invalid files and missing migration paths must fail while preserving the original, never replace it with defaults. Do not change the schema version manually to bypass validation.
 - Explicit reload while Studio is running remains strict: it reports the invalid file instead of replacing it.
 - Saving from Settings writes atomically. External file edits are not picked up automatically; use explicit reload after editing a valid current-schema file.
 

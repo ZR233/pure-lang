@@ -1,6 +1,6 @@
 # 15 - 会话条目存储与无副作用重放
 
-本文是 core 存储信封、原子重放、异步保存与冷恢复审计的唯一权威源；Studio 双库划分与
+本文是 core 存储信封、原子重放、异步保存与冷恢复审计的唯一权威源；Studio 逐 Thread 分库与
 启动恢复见 [17](./17-studio-storage.md)，core 内核契约见 [16](./16-core-contracts.md)。
 
 ## 15.1 通用存储信封
@@ -26,6 +26,11 @@ Thread journal 以框架保留资源 ID 保存已冻结编码，完整业务 pay
 和状态同 commit。后端仅解码通用外层信封与 journal，不解释工具或产品正文，不按业务类型
 建表。journal 读取校验 owner、序号键和日志顺序；产品通过日志自行投影历史及交互。SQLite
 的具体 ORM 错误只在后端内部构造与转换，对外以标准错误链承载，不重导出 ORM 类型。
+
+journal 行不是可查询资源：打开会话库只为真正注册的资源建立内存映射，历史正文按需
+分页读取，不随打开库的规模线性驻留。该只读分页入口不启动 writer、不初始化 schema、
+不写库；只接受当前 schema 的普通文件，缺失、零长度、未知版本或损坏保持原样并报错。
+只有明确的创建命令可以新建会话库。
 
 writer 在内存保存受理水位、待保存字节、错误与关闭状态，异步事务批量写入。单资源 flush
 显式接收 Thread ID 和已受理 commit 序号：SQLite 将该不可变记录映射到 writer 的受理水位，
@@ -74,8 +79,9 @@ Studio 从同一日志水位投影 Item、Turn、Interaction 和业务面板。�
 最终 commit。挂接冷存储的 Thread 关闭先提交资源终态，再 flush 该终态；对外只有 durable
 水位覆盖关闭 commit 才显示 Closed，等待保存或保存失败时仍显示 Closing，并保留 owner、日志
 和重试入口；重复关闭不重新释放已确认关闭的模型或工具。保存失败显示 Closing 并保留
-owner。共享 SQLite store 在全部 Thread 关闭后排空 writer、join、关闭连接池，再释放数据库
-文件锁。
+owner。SQLite store 在所属 Thread 关闭后排空 writer、join、关闭连接池，再释放数据库文件锁。
+Studio 管理逐 Thread store 路由、全局预算与有界连接集合；core 不拥有产品目录或产品
+派生索引。完整 journal 重放用于显式执行恢复、迁移或审计，不作为产品历史分页的实现。
 
 ## 15.6 格式演进
 

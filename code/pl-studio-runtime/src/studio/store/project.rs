@@ -16,10 +16,12 @@ use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::project_record;
 #[cfg(test)]
 use crate::studio::paths::project_name;
-use crate::studio::paths::{default_db_path, sqlite_read_only_url, sqlite_url};
+use crate::studio::paths::{sessions_dir_beside, sqlite_read_only_url, sqlite_url};
 use crate::studio::records::ProjectRecord;
+use crate::studio::session_store::SessionStores;
 use crate::studio::store::{StudioDatabaseError, StudioStore};
 use crate::studio::store_support::{STUDIO_DATABASE_SCHEMA_VERSION, initialize_studio_schema};
+use crate::studio::workspace_declarations::{WorkspaceDeclarations, layout_marker_path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingDatabaseState {
@@ -28,11 +30,25 @@ enum ExistingDatabaseState {
 
 impl StudioStore {
     pub async fn default_app() -> Result<Self> {
-        Self::open_database(&default_db_path()?).await
+        let paths = crate::studio::paths::StudioPaths::resolve(None)?;
+        Self::open_at(&paths).await
     }
 
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_database(path.as_ref()).await
+        // Standalone/test opening: declarations sit under the database's directory.
+        let path = path.as_ref();
+        let config_dir = path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        Self::open_database(path, config_dir).await
+    }
+
+    /// Opens the configured Studio store, placing declarations at `<home>/workspaces`.
+    pub(in crate::studio) async fn open_at(
+        paths: &crate::studio::paths::StudioPaths,
+    ) -> Result<Self> {
+        Self::open_database(&paths.database(), paths.home().to_path_buf()).await
     }
 
     pub async fn open_memory() -> Result<Self> {
@@ -48,15 +64,40 @@ impl StudioStore {
             .prefix("anywork-memory-attachments-")
             .tempdir()?
             .keep();
+        let workspaces_root = tempfile::Builder::new()
+            .prefix("anywork-memory-workspaces-")
+            .tempdir()?
+            .keep();
+        let workspaces_marker = workspaces_root.join("workspace-layout.json");
         Ok(Self {
             db,
-            sessions: pl_core::persistence::SqliteSessionStore::open_memory().await?,
+            sessions: SessionStores::memory(),
             attachments_dir,
+            workspaces: std::sync::Arc::new(WorkspaceDeclarations::new(
+                crate::config::WorkspaceConfigStore::new(workspaces_root),
+                workspaces_marker,
+            )),
         })
     }
 
-    pub(super) async fn open_database(path: &Path) -> Result<Self> {
+    pub(super) async fn open_database(path: &Path, config_dir: PathBuf) -> Result<Self> {
         let path = resolve_configured_database_path(path).await?;
+        // The per-Thread layout replaces the legacy aggregate `sessions.sqlite`. Once
+        // the coordinated startup migration publishes the layout marker, the retained
+        // aggregate is recovery material and startup proceeds; without a marker the
+        // aggregate still owns durable history, so startup refuses rather than bypass it.
+        let legacy_sessions = path.with_file_name("sessions.sqlite");
+        if crate::studio::session_layout::published_marker(&path)
+            .await?
+            .is_none()
+            && tokio::fs::try_exists(&legacy_sessions).await?
+        {
+            anyhow::bail!(
+                "session layout migration is required before start: legacy aggregate database {} \
+                 must not be bypassed by the per-Thread session layout",
+                legacy_sessions.display()
+            );
+        }
         let database_exists = tokio::fs::try_exists(&path).await?;
         let family_exists = database_family_exists(&path).await?;
         let existing_state = if database_exists {
@@ -80,6 +121,10 @@ impl StudioStore {
             .parent()
             .context("Studio database path has no parent directory")?
             .join("attachments");
+        let workspaces = std::sync::Arc::new(WorkspaceDeclarations::new(
+            crate::config::WorkspaceConfigStore::new(config_dir),
+            layout_marker_path(&path),
+        ));
         let initialization = async {
             if created {
                 initialize_studio_schema(&db).await?;
@@ -111,27 +156,12 @@ impl StudioStore {
                 )),
             };
         }
-        let sessions = match pl_core::persistence::SqliteSessionStore::open(
-            pl_core::persistence::SqliteSessionOptions {
-                path: path.with_file_name("sessions.sqlite"),
-            },
-        )
-        .await
-        {
-            Ok(sessions) => sessions,
-            Err(error) => {
-                return match db.close().await {
-                    Ok(()) => Err(error.into()),
-                    Err(close) => Err(error).context(format!(
-                        "failed to open sessions; product database cleanup also failed: {close}"
-                    )),
-                };
-            }
-        };
+        let sessions = SessionStores::for_sessions_dir(sessions_dir_beside(&path));
         Ok(Self {
             db,
             sessions,
             attachments_dir,
+            workspaces,
         })
     }
 
@@ -188,6 +218,19 @@ impl StudioStore {
         Ok(projects.into_iter().map(project_record).collect())
     }
 
+    /// Every Project directory row, including closed ones, for declaration export and merge.
+    pub(in crate::studio) async fn list_project_directory_rows(
+        &self,
+    ) -> Result<Vec<ProjectRecord>> {
+        use entities::project;
+        let rows = project::Entity::find()
+            .order_by_desc(project::Column::UpdatedAt)
+            .order_by_desc(project::Column::Id)
+            .all(&self.db)
+            .await?;
+        Ok(rows.into_iter().map(project_record).collect())
+    }
+
     /// 聚合冷加载：按 path 找到既有 Project 行身份事实。
     pub(in crate::studio) async fn find_project_by_path(
         &self,
@@ -218,6 +261,39 @@ impl StudioStore {
             .await?
             .map(project_record))
     }
+
+    /// Cold baseline of every Project's dynamic columns, for the startup owner snapshot.
+    ///
+    /// This is a cold API: runtime reads consume the in-memory owner, never this table.
+    pub(in crate::studio) async fn list_project_dynamic(
+        &self,
+    ) -> Result<std::collections::HashMap<String, ProjectDynamicRow>> {
+        use entities::project;
+        let rows = project::Entity::find().all(&self.db).await?;
+        Ok(rows
+            .into_iter()
+            .map(|model| {
+                (
+                    model.id.clone(),
+                    ProjectDynamicRow {
+                        created_at: model.created_at,
+                        updated_at: model.updated_at,
+                        last_opened_at: model.last_opened_at,
+                        closed: model.closed,
+                    },
+                )
+            })
+            .collect())
+    }
+}
+
+/// Dynamic Project directory columns preserved across declaration-driven upserts.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::studio) struct ProjectDynamicRow {
+    pub(in crate::studio) created_at: i64,
+    pub(in crate::studio) updated_at: i64,
+    pub(in crate::studio) last_opened_at: Option<i64>,
+    pub(in crate::studio) closed: i32,
 }
 
 /// `find_project_by_path` 返回的持久身份事实。
@@ -500,5 +576,26 @@ mod tests {
             tokio::fs::read(&database).await.unwrap(),
             b"incompatible database"
         );
+    }
+
+    #[tokio::test]
+    async fn configured_home_places_declarations_beside_config_not_in_the_data_dir() {
+        let home = tempfile::TempDir::new().unwrap();
+        let paths =
+            crate::studio::paths::StudioPaths::resolve(Some(home.path().to_path_buf())).unwrap();
+        let store = StudioStore::open_at(&paths).await.unwrap();
+        store
+            .workspaces()
+            .declare(&crate::config::WorkspaceDeclaration::new(
+                "project-x",
+                "X",
+                "/tmp/x",
+                None,
+            ))
+            .unwrap();
+
+        assert!(home.path().join("workspaces/project-x.toml").exists());
+        assert!(!home.path().join("studio/workspaces").exists());
+        store.sessions().shutdown().await.unwrap();
     }
 }

@@ -1,14 +1,17 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::config::STUDIO_CONFIG_DIR_NAME;
 
 const STUDIO_DIR_NAME: &str = "studio";
 const DATABASE_FILE_NAME: &str = "studio.sqlite";
+const SESSIONS_DIR_NAME: &str = "sessions";
 const SKILLS_DIR_NAME: &str = "skills";
 const SYSTEM_SKILLS_DIR_NAME: &str = ".system";
 const STUDIO_HOME_ENV: &str = "ANYWORK_HOME";
+/// Longest accepted Thread identity; ids are single path segments.
+const MAX_STORAGE_ID_BYTES: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StudioPaths {
@@ -51,8 +54,51 @@ impl StudioPaths {
     }
 }
 
-pub fn default_db_path() -> Result<PathBuf> {
-    Ok(StudioPaths::resolve(None)?.database())
+/// Directory holding one SQLite session database per root/child Thread,
+/// resolved beside the product `studio.sqlite`.
+pub fn sessions_dir_beside(database: &Path) -> PathBuf {
+    database
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(SESSIONS_DIR_NAME)
+}
+
+/// Derives one session database path under `sessions_dir`, rejecting traversal.
+///
+/// The Thread id is the only input, so root and child Threads each own a
+/// distinct database file and no caller can address a database outside
+/// `sessions_dir`.
+///
+/// # Errors
+/// Rejects an id that is empty, oversized, contains path separators or
+/// traversal, or whose derived parent escapes `sessions_dir`.
+pub fn session_database_path(sessions_dir: &Path, thread_id: &str) -> Result<PathBuf> {
+    storage_path(sessions_dir, "Thread", thread_id, "sqlite")
+}
+
+fn storage_path(base: &Path, kind: &str, id: &str, extension: &str) -> Result<PathBuf> {
+    validate_storage_id(kind, id)?;
+    let path = base.join(format!("{id}.{extension}"));
+    if path.parent() != Some(base) {
+        bail!("{kind} id must resolve inside its storage directory: {id}");
+    }
+    Ok(path)
+}
+
+pub(crate) fn validate_storage_id(kind: &str, id: &str) -> Result<()> {
+    if id.is_empty() || id.len() > MAX_STORAGE_ID_BYTES {
+        bail!("{kind} id must be 1..={MAX_STORAGE_ID_BYTES} bytes");
+    }
+    if !id
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+    {
+        bail!("{kind} id must use only ASCII letters, digits, '-', '_' or '.': {id}");
+    }
+    if id == "." || id == ".." || id.contains("..") {
+        bail!("{kind} id must not traverse directories: {id}");
+    }
+    Ok(())
 }
 
 fn user_home_dir() -> Result<PathBuf> {
@@ -145,5 +191,42 @@ mod tests {
             paths.system_skills_dir(),
             root.join("studio").join("skills").join(".system")
         );
+    }
+
+    #[test]
+    fn session_paths_sit_beside_the_product_database_and_validate_identities() {
+        let root = PathBuf::from("/tmp/isolated/.anywork");
+        let database = root.join("studio").join("studio.sqlite");
+        let sessions = sessions_dir_beside(&database);
+
+        assert_eq!(sessions, root.join("studio").join("sessions"));
+        assert_eq!(
+            session_database_path(&sessions, "thread-abc-1").unwrap(),
+            root.join("studio")
+                .join("sessions")
+                .join("thread-abc-1.sqlite")
+        );
+    }
+
+    #[test]
+    fn storage_paths_reject_unsafe_identities() {
+        let sessions = PathBuf::from("/tmp/isolated/.anywork/studio/sessions");
+
+        for id in [
+            "",
+            ".",
+            "..",
+            "../escape",
+            "a/b",
+            "..\\escape",
+            "thread:1",
+            "thread id",
+            "thread\0id",
+        ] {
+            assert!(
+                session_database_path(&sessions, id).is_err(),
+                "session id {id:?} must be rejected"
+            );
+        }
     }
 }

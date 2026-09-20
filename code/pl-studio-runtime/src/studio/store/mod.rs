@@ -1,5 +1,9 @@
 use sea_orm::DatabaseConnection;
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use crate::studio::session_store::SessionStores;
+use crate::studio::workspace_declarations::WorkspaceDeclarations;
 
 mod agent_framework;
 pub(super) mod attachment;
@@ -15,14 +19,18 @@ mod thread;
 #[derive(Clone)]
 pub struct StudioStore {
     db: DatabaseConnection,
-    sessions: pl_core::persistence::SqliteSessionStore,
+    sessions: SessionStores,
     attachments_dir: PathBuf,
+    workspaces: Arc<WorkspaceDeclarations>,
 }
 
 pub use error::StudioDatabaseError;
 impl StudioStore {
-    pub(crate) fn sessions(&self) -> &pl_core::persistence::SqliteSessionStore {
+    pub(crate) fn sessions(&self) -> &SessionStores {
         &self.sessions
+    }
+    pub(in crate::studio) fn workspaces(&self) -> &WorkspaceDeclarations {
+        &self.workspaces
     }
     pub(crate) fn database(&self) -> &DatabaseConnection {
         &self.db

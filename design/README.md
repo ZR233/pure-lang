@@ -28,7 +28,7 @@
 | 14 | [Thread Runtime 宿主](./14-runtime-host.md) | 统一装配、激活、输入受理、步骤限制、后台任务与消息唤醒 |
 | 15 | [会话条目存储](./15-session-storage.md) | 存储信封、原子重放、异步保存与背压、冷恢复 |
 | 16 | [Core 内核契约](./16-core-contracts.md) | 不透明载荷、模型调用、扩展 CAS、能力归属、计量回执 |
-| 17 | [Studio 存储与诊断](./17-studio-storage.md) | 双库、checkpoint 与分页、恢复与版本迁移、实现缺口、诊断、LRU |
+| 17 | [Studio 存储与诊断](./17-studio-storage.md) | 配置/目录/逐会话分库、checkpoint 与冷分页、恢复与迁移、诊断、LRU |
 | 18 | [Studio 状态查询](./18-studio-state.md) | CQS、公共 snapshot、activation、shutdown、title、产品投影 |
 | 六、Studio 产品 | | |
 | 19 | [anywork UI](./19-studio-ui.md) | UI 边界、模式与状态、主题、设置页组织、Timeline、历史阅读 |

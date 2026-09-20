@@ -4,13 +4,18 @@ use anyhow::Result;
 use pl_core::thread::{ThreadLifecycle, ThreadSnapshot, TurnState};
 use pl_protocol::{AgentState, Thread};
 
+use crate::studio::records::DirectoryState;
+use crate::studio::store::directory::ThreadStateUpdate;
+use crate::studio::thread_projection::engine::{ProjectionDelta, ProjectionState};
+
 pub(super) async fn publish(
     projector: &ObservationServices,
     thread: Thread,
     snapshot: &ThreadSnapshot,
-    history: &[std::sync::Arc<pl_core::thread::journal::ThreadCommit>],
+    state: &ProjectionState,
+    delta: &ProjectionDelta,
 ) -> Result<()> {
-    let state = agent_state(snapshot)?;
+    let agent_state = agent_state(snapshot)?;
     let Some(thread) =
         projector
             .events
@@ -24,12 +29,8 @@ pub(super) async fn publish(
         .filter(|turn| turn.state != TurnState::Running)
     {
         Some(turn) => {
-            let text = crate::studio::thread_projection::project_items(
-                &thread.id,
-                thread.parent_thread_id.as_deref(),
-                snapshot,
-                history,
-            )?
+            let text = state
+                .materialize()
             .into_iter()
             .filter(|item| item.turn_id == turn.turn_id)
             .filter_map(|item| {
@@ -43,6 +44,14 @@ pub(super) async fn publish(
         }
         None => None,
     };
+    // The runtime usage/panel summary owns the newest product update time; a commit that did not
+    // advance it keeps the committed timestamp already folded into `thread.updated_at`.
+    let panel_updated_at = if delta.panel_changed {
+        state.read_panel()?.updated_at
+    } else {
+        0
+    };
+    let updated_at = thread.updated_at.max(panel_updated_at);
     let entry = crate::StudioAgentDirectoryEntry {
         id: thread.id.clone(),
         thread_id: thread.id.clone(),
@@ -53,10 +62,21 @@ pub(super) async fn publish(
         task: thread.title.clone(),
         summary,
         depth: u32::from(thread.parent_thread_id.is_some()),
-        state,
-        updated_at: thread.updated_at,
+        state: agent_state,
+        updated_at,
     };
     projector.events.update_agent_directory(entry).await;
+    // Durable, rebuildable directory summary: only `status`/`error` and the update time, so a cold
+    // directory read (no journal replay) sees the observed state. A late observation never
+    // re-inserts an archived entry: `patch_thread_runtime` already returned `None` for it.
+    projector.events.record_directory_state(ThreadStateUpdate {
+        thread_id: thread.id.clone(),
+        state: DirectoryState {
+            kind: thread.status,
+            error: None,
+        },
+        updated_at,
+    });
     Ok(())
 }
 fn agent_state(snapshot: &ThreadSnapshot) -> Result<AgentState> {

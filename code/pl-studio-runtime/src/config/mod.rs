@@ -12,6 +12,7 @@ pub mod mcp;
 pub use execution::RuntimeConfig;
 mod runtime;
 mod store;
+mod workspace;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -43,7 +44,11 @@ pub use pl_tool::mcp::config::validate_mcp_identifier;
 
 pub use pl_model::config::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot, ResolvedAgentProfile};
-pub use store::{ConfigPaths, ConfigRecoveryReport, ConfigStore};
+pub use store::{ConfigPaths, ConfigStore};
+pub use workspace::{
+    WORKSPACE_DECLARATION_SCHEMA_VERSION, WorkspaceConfigStore, WorkspaceDeclaration,
+    WorkspaceDeclarationError,
+};
 
 pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 18;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".anywork";

@@ -14,6 +14,7 @@ impl StudioStore {
     pub async fn list_thread_attachments(&self, thread_id: &str) -> Result<Vec<AttachmentRecord>> {
         self.sessions()
             .resources(thread_id, "studio.attachment")
+            .await?
             .iter()
             .map(AttachmentRecord::from_session_entry)
             .collect()

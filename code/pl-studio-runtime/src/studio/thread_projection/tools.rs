@@ -1,151 +1,97 @@
 //! Tool timeline facts use original call bytes and the context actually delivered by core.
 use super::{ProjectionError, content::text_content};
+use pl_core::model::ModelToolCall;
 use pl_core::thread::{
-    AttemptOutcome, ThreadSnapshot, ToolDelivery, ToolOutcome, journal::ThreadCommit,
-    permissions::PermissionState, task::TaskStatus,
+    ToolDelivery, ToolOutcome,
+    task::{TaskRecord, TaskStatus},
 };
 use pl_protocol::{
     ThreadItem, ThreadItemState, ThreadToolInvocation, ThreadToolItem, ThreadToolOutput,
     ThreadToolState,
 };
-use std::{collections::BTreeMap, sync::Arc};
 
-struct Call<'a> {
-    turn_id: &'a str,
-    call: &'a pl_core::model::ModelToolCall,
-    sequence: u64,
-    at: i64,
-}
-
-pub(in crate::studio) fn project_tools(
+/// Builds the timeline items one committed tool call produces: the optional skill activation and
+/// the invocation with its execution state.
+///
+/// A terminal task without its delivery stays an explicit failure, preserving core's invariant.
+/// The state is derived from task and permission facts; `progress` is the ephemeral preview text
+/// for a still-running task and is never stored on its own.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn call_items(
     thread_id: &str,
-    snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadCommit>],
+    turn_id: &str,
+    call: &ModelToolCall,
+    at: i64,
+    task: Option<&TaskRecord>,
+    delivery: Option<&ToolDelivery>,
+    permission_pending: bool,
+    progress: &str,
+    revision: u64,
+    updated_at: i64,
 ) -> Result<Vec<ThreadItem>, ProjectionError> {
-    let mut calls = BTreeMap::new();
-    let mut updates = BTreeMap::new();
-    for commit in journal
-        .iter()
-        .filter(|commit| commit.sequence <= snapshot.commit_sequence)
-    {
-        if let Some(attempt) = &commit.attempt
-            && let AttemptOutcome::Committed(output) = &attempt.outcome
-        {
-            for call in &output.tool_calls {
-                if calls
-                    .insert(
-                        call.call_id.as_str(),
-                        Call {
-                            turn_id: &attempt.turn_id,
-                            call,
-                            sequence: commit.sequence,
-                            at: commit.committed_at,
-                        },
-                    )
-                    .is_some()
-                {
-                    return Err(ProjectionError::DuplicateCall(call.call_id.clone()));
-                }
-            }
-        }
-        for task in commit.tasks.iter() {
-            updates.insert(
-                task.call_id.as_str(),
-                (commit.sequence, commit.committed_at),
-            );
-        }
-        for permission in commit.permissions.iter() {
-            updates.insert(
-                permission.call_id.as_str(),
-                (commit.sequence, commit.committed_at),
-            );
-        }
-        for delivery in commit.deliveries.iter() {
-            updates.insert(
-                delivery.call_id.as_str(),
-                (commit.sequence, commit.committed_at),
-            );
-        }
-    }
+    let id = call.call_id.as_str();
     let mut items = Vec::new();
-    for (id, saved) in calls {
-        let task = snapshot.tasks.values().find(|task| task.call_id == id);
-        let delivery = snapshot
-            .deliveries
-            .iter()
-            .find(|delivery| delivery.call_id == id);
-        let (revision, at) = updates
-            .get(id)
-            .copied()
-            .unwrap_or((saved.sequence, saved.at));
-        let state = if let Some(delivery) = delivery {
-            if delivery.tool_id != saved.call.tool_id {
-                return Err(ProjectionError::DuplicateCall(id.into()));
-            }
-            terminal(delivery, at)?
-        } else if let Some(task) = task {
-            if task.status != TaskStatus::Running {
-                return Err(ProjectionError::MissingToolResult(id.into()));
-            }
-            let progress = snapshot
-                .tool_progress
-                .get(&task.id)
-                .map_or_else(String::new, |content| text_content(content));
-            if task.cancel_requested {
-                ThreadToolState::Cancelling(pl_protocol::CancellingThreadTool::new(progress))
-            } else if snapshot.permissions.values().any(|permission| {
-                permission.call_id == id && permission.state == PermissionState::Pending
-            }) {
-                ThreadToolState::AwaitingApproval(pl_protocol::AwaitingApprovalThreadTool)
-            } else {
-                ThreadToolState::Running(pl_protocol::RunningThreadTool::new(progress))
-            }
+    let state = if let Some(delivery) = delivery {
+        if delivery.tool_id != call.tool_id {
+            return Err(ProjectionError::DuplicateCall(id.into()));
+        }
+        terminal(delivery, updated_at)?
+    } else if let Some(task) = task {
+        if task.status != TaskStatus::Running {
+            return Err(ProjectionError::MissingToolResult(id.into()));
+        }
+        if task.cancel_requested {
+            ThreadToolState::Cancelling(pl_protocol::CancellingThreadTool::new(progress.into()))
+        } else if permission_pending {
+            ThreadToolState::AwaitingApproval(pl_protocol::AwaitingApprovalThreadTool)
         } else {
-            ThreadToolState::Queued(pl_protocol::QueuedThreadTool)
-        };
-        if let Some(delivery) = delivery
-            && delivery.tool_id == "skill_view"
-            && matches!(delivery.outcome, ToolOutcome::Succeeded)
-            && let Ok(Some(mut activation)) = pl_tool::skill::saved_skill_activation(
-                delivery.output.payload(),
-                saved.turn_id.into(),
-                pl_protocol::SkillActivationCause::Tool {
-                    tool_call_id: id.into(),
-                },
-            )
-        {
-            activation.activated_at = at;
-            items.push(ThreadItem::new(
-                super::order::skill_id(id),
-                thread_id.into(),
-                saved.turn_id.into(),
-                revision,
-                revision,
-                at,
-                at,
-                ThreadItemState::Skill(pl_protocol::ThreadSkillItem::new(activation)),
-            ));
+            ThreadToolState::Running(pl_protocol::RunningThreadTool::new(progress.into()))
         }
-        let mut invocation = ThreadToolInvocation::new(
-            id.into(),
-            saved.call.tool_id.clone(),
-            saved.call.arguments.content().into(),
+    } else {
+        ThreadToolState::Queued(pl_protocol::QueuedThreadTool)
+    };
+    if let Some(delivery) = delivery
+        && delivery.tool_id == "skill_view"
+        && matches!(delivery.outcome, ToolOutcome::Succeeded)
+        && let Ok(Some(mut activation)) = pl_tool::skill::saved_skill_activation(
+            delivery.output.payload(),
+            turn_id.into(),
+            pl_protocol::SkillActivationCause::Tool {
+                tool_call_id: id.into(),
+            },
         )
-        .with_provider_identity(Some(id.into()), None);
-        if let Some(task) = task {
-            invocation = invocation.with_task_id(task.id.clone());
-        }
+    {
+        activation.activated_at = updated_at;
         items.push(ThreadItem::new(
-            super::order::tool_id(id),
+            super::order::skill_id(id),
             thread_id.into(),
-            saved.turn_id.into(),
-            saved.sequence,
+            turn_id.into(),
+            0,
             revision,
-            saved.at,
-            at,
-            ThreadItemState::Tool(ThreadToolItem::new(invocation, state)),
+            updated_at,
+            updated_at,
+            ThreadItemState::Skill(pl_protocol::ThreadSkillItem::new(activation)),
         ));
     }
+    let mut invocation = ThreadToolInvocation::new(
+        id.into(),
+        call.tool_id.clone(),
+        call.arguments.content().into(),
+    )
+    .with_provider_identity(Some(id.into()), None);
+    if let Some(task) = task {
+        invocation = invocation.with_task_id(task.id.clone());
+    }
+    items.push(ThreadItem::new(
+        super::order::tool_id(id),
+        thread_id.into(),
+        turn_id.into(),
+        0,
+        revision,
+        at,
+        updated_at,
+        ThreadItemState::Tool(ThreadToolItem::new(invocation, state)),
+    ));
     Ok(items)
 }
 

@@ -268,9 +268,6 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                                   Expanded(child: _Header(state: header)),
                                 ],
                               ),
-                              if (chrome.configRecoveryNotice
-                                  case final notice?)
-                                _ConfigRecoveryBanner(notice: notice),
                               if (chrome.persistenceState.needsAttention)
                                 _PersistenceBanner(
                                   snapshot: chrome.persistenceState,

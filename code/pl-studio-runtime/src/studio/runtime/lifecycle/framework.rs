@@ -109,13 +109,22 @@ impl StudioRuntime {
             return Err(ThreadCloseFailures(thread_failures).into());
         }
         self.thread_observations.finish().await?;
+        // 收束完成后再释放 residency 的 cold timeline access：停止待建索引 worker 并关闭只读
+        // reader，避免关机后仍有连接与后台任务存活。此步位于「已禁新工作、owner 已收束」之后、
+        // 持久化 flush 之前，失败由 runtime 状态机保留可重试（design/15 §15.5、design/17 §17.2）。
+        self.residency.timeline.stop_all().await;
         Ok(())
     }
 
     /// 排空 agent framework 的 write-behind 队列并停止 writer。
     pub(super) async fn flush_persistence(&self) -> Result<()> {
-        self.store
-            .sessions()
+        // Flush every open per-Thread writer, then drain and close each store.
+        let sessions = self.store.sessions();
+        sessions
+            .flush()
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        sessions
             .shutdown()
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;

@@ -31,7 +31,7 @@ directory command 发布 canonical delta。
 
 ## 18.3 Activation
 
-启动只等待数据库、配置、项目目录和本地预置资源就绪。历史会话与 worktree 审计由 runtime
+启动只等待目录库、配置、项目目录和本地预置资源就绪，不打开全部会话库。恢复候选摘要与 worktree 审计由 runtime
 持有的后台任务完成，Recovery 使用现有 ObservedResource 发布 loading、ready 和失败状态，
 显式 `recovery.retry` 重新发起审计，`recovery.read` 只读取当前状态。关闭先停止并等待审计，
 再关闭会话与持久化。启动阶段通过 typed snapshot 向 bridge 提供存储打开、配置读取、
@@ -40,10 +40,12 @@ directory command 发布 canonical delta。
 活动、正在准备或关闭的 owner 不接受后台恢复写入。冷激活在发布 owner 前完成 durable
 settlement。审计结果按当前 lease revision 和已清理问题过滤，不能覆盖后续用户操作。
 
-选择冷 Thread、提交输入或后台 child 继续时显式 activation。runtime 在一致读视图中校验
+选择冷 Thread 只建立历史观察并读取窗口，不触发 activation。提交输入或后台 child 继续时
+才显式 activation。runtime 在一致读视图中校验
 并加载 Thread、working state、transcript window 与 pending Interaction，全部成功后一次
 安装 owner。Mode snapshot 和 workflow projection 与 session 同时恢复，不存在独立任务
-runtime 恢复扫描。冷读取仅重放 journal；产品交互回答前按保存的父子顺序激活所需 Thread。
+runtime 恢复扫描。冷展示读取持久化派生索引，不重放 journal；产品交互回答前按保存的
+父子顺序激活所需 Thread。完整历史审计仅由显式命令触发，不在启动后台扫描全部日志。
 
 创建根会话是可失败的类型化命令，请求同时携带 Mode 与会话工作区模式。`worktree` 模式在发布
 Thread 之前完成仓库解析、worktree 创建与 lease 落库；任一阶段失败都让命令失败、不留下已发布

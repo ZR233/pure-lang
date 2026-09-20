@@ -1,10 +1,7 @@
 //! Committed context reductions are distinct from auxiliary inference accounting.
 use super::{ProjectionError, order};
-use pl_core::thread::{
-    ContextReplacementReason, ThreadSnapshot, extensions::ExtensionChange, journal::ThreadCommit,
-};
+use pl_core::thread::extensions::ExtensionRecord;
 use pl_protocol::{ThreadContextCompactionItem, ThreadItem, ThreadItemState};
-use std::sync::Arc;
 
 pub(super) fn receipt(
     payload: &pl_core::context::OpaquePayload,
@@ -20,59 +17,47 @@ pub(super) fn receipt(
     Ok(Some(serde_json::from_str(payload.content())?))
 }
 
-pub(super) fn project_compactions(
+/// Builds one compaction item from a saved receipt, or nothing when the commit was not an actual
+/// context replacement or the receipt records no implementation.
+pub(super) fn compaction_item(
     thread_id: &str,
-    snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadCommit>],
-) -> Result<Vec<ThreadItem>, ProjectionError> {
-    let mut items = Vec::new();
-    for commit in journal
-        .iter()
-        .filter(|commit| commit.sequence <= snapshot.commit_sequence)
-    {
-        if !commit
-            .replacements
-            .iter()
-            .any(|replacement| replacement.reason == ContextReplacementReason::Compaction)
-        {
-            continue;
-        }
-        for extension in commit.extensions.iter() {
-            let ExtensionChange::Put { id, record } = extension else {
-                continue;
-            };
-            let (turn_id, state) = match receipt(&record.payload) {
-                Ok(Some(receipt)) if receipt.implementation.is_some() => (
-                    receipt.turn_id,
-                    ThreadItemState::ContextCompaction(ThreadContextCompactionItem::new(
-                        None,
-                        None,
-                        commit.committed_at,
-                    )),
-                ),
-                Ok(Some(_)) | Ok(None) => continue,
-                Err(error) => (
-                    String::new(),
-                    ThreadItemState::Raw(pl_protocol::ThreadRawItem {
-                        payloads: vec![super::raw_payload(&record.payload)],
-                        notice: error.to_string(),
-                        recorded_at: commit.committed_at,
-                    }),
-                ),
-            };
-            items.push(ThreadItem::new(
-                order::compaction_id(id),
-                thread_id.into(),
-                turn_id,
-                0,
-                record.revision,
-                commit.committed_at,
-                commit.committed_at,
-                state,
-            ));
-        }
+    id: &str,
+    record: &ExtensionRecord,
+    committed_at: i64,
+    compaction: bool,
+) -> Result<Option<ThreadItem>, ProjectionError> {
+    if !compaction {
+        return Ok(None);
     }
-    Ok(items)
+    let (turn_id, state) = match receipt(&record.payload) {
+        Ok(Some(receipt)) if receipt.implementation.is_some() => (
+            receipt.turn_id,
+            ThreadItemState::ContextCompaction(ThreadContextCompactionItem::new(
+                None,
+                None,
+                committed_at,
+            )),
+        ),
+        Ok(Some(_)) | Ok(None) => return Ok(None),
+        Err(error) => (
+            String::new(),
+            ThreadItemState::Raw(pl_protocol::ThreadRawItem {
+                payloads: vec![super::raw_payload(&record.payload)],
+                notice: error.to_string(),
+                recorded_at: committed_at,
+            }),
+        ),
+    };
+    Ok(Some(ThreadItem::new(
+        order::compaction_id(id),
+        thread_id.into(),
+        turn_id,
+        0,
+        record.revision,
+        committed_at,
+        committed_at,
+        state,
+    )))
 }
 
 #[cfg(test)]
@@ -85,7 +70,7 @@ mod tests {
             PreparedModelCall,
         },
         thread::{
-            ReplaceContext, StepInput, ThreadHandle,
+            ContextReplacementReason, ReplaceContext, StepInput, ThreadHandle,
             context_preparation::{
                 ContextPreparation, ContextPreparationHook, ContextPreparationRequest,
                 ContextPreparer,
@@ -195,7 +180,17 @@ mod tests {
             .unwrap();
         let snapshot = thread.snapshot();
         let journal = thread.journal().await.unwrap();
-        let items = project_compactions("projection", &snapshot, &journal).unwrap();
+        let items = crate::studio::thread_projection::ProjectionState::rebuild(
+            "projection",
+            None,
+            &snapshot,
+            &journal,
+        )
+        .unwrap()
+        .materialize()
+        .into_iter()
+        .filter(|item| matches!(item.state(), ThreadItemState::ContextCompaction(_)))
+        .collect::<Vec<_>>();
         assert_eq!(items.len(), 1);
         let ThreadItemState::ContextCompaction(item) = items[0].state() else {
             panic!("expected compaction timeline item");

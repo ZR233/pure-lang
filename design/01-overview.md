@@ -34,8 +34,8 @@ HTTP → pl-studio-server ───┘                                  ↓
 运行时事实支持完整替换与按 source 原子 patch：独立生产者只 patch 自己的 source，空内容清除该
 source，遗漏 source 保持不变；两者都在 owner 串行边界执行，存在待交付工具调用时拒绝修改。
 
-活动 Thread 的内存快照是唯一可写执行事实源。`sessions.sqlite` 可选保存通用 journal 与不可变资源；
-`studio.sqlite` 保存项目、配置关联和产品目录，两库不共享业务事务。UI snapshot 与 Turn 分页从同一
+活动 Thread 的内存快照是唯一可写执行事实源。`sessions/<thread-id>.sqlite` 保存通用 journal 与不可变资源；
+TOML 保存用户、模型与工作空间声明，`studio.sqlite` 保存动态项目状态与产品目录，各存储不共享业务事务。UI snapshot 与 Turn 分页从同一
 日志水位生成；历史模型正文使用保存时的上下文，不调用当前工具重建。
 
 ## 1.4 恢复与关闭

@@ -68,7 +68,7 @@ impl StudioRuntime {
         })?;
         drop(reset_timing);
         let database_timing = crate::startup_timing::Stage::new("open_database");
-        let store = StudioStore::open(resolved.paths.database())
+        let store = StudioStore::open_at(&resolved.paths)
             .await
             .map_err(|error| {
                 tracing::error!(error = %error, "failed to open Studio storage");

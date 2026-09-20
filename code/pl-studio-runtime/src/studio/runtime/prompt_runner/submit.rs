@@ -178,7 +178,8 @@ impl StudioRuntime {
         // Resource bytes are retained before admission; failures never delete user drafts or replay effects.
         self.agent_facility
             .product_events
-            .record_attachments(attachments.clone())?;
+            .record_attachments(attachments.clone())
+            .await?;
         let accepted = thread
             .submit_input_and_continue(
                 pl_core::thread::input::ThreadInput {

@@ -2,156 +2,177 @@
 use super::{ProjectionError, content::text_content};
 use pl_core::{
     context::ContextContent,
-    model::ModelStepOutput,
-    thread::{AttemptOutcome, ThreadSnapshot, journal::ThreadCommit},
+    model::{ActiveModelProgress, ModelStepOutput},
+    thread::AttemptOutcome,
 };
 use pl_protocol::{
     ThreadContentLifecycle, ThreadItem, ThreadItemState, ThreadTextChannel, ThreadTextItem,
     ThreadThinkingItem,
 };
-use std::{collections::BTreeMap, sync::Arc};
 
-pub(in crate::studio) fn project_responses(
+/// Builds the timeline items one model attempt produces: always its inference record, plus the
+/// reasoning and text items the saved outcome actually yields.
+///
+/// A running attempt uses only the ephemeral `model_progress` preview matched on attempt identity;
+/// a terminal or unsupported result never reads a preview, so a stale preview cannot reopen it.
+pub(super) fn response_items(
     thread_id: &str,
-    snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadCommit>],
+    attempt: &pl_core::thread::RequestAttempt,
+    created_at: i64,
+    updated_at: i64,
+    revision: u64,
+    model_progress: Option<&ActiveModelProgress>,
 ) -> Result<Vec<ThreadItem>, ProjectionError> {
-    let mut stamps = BTreeMap::new();
-    for commit in journal
-        .iter()
-        .filter(|commit| commit.sequence <= snapshot.commit_sequence)
-    {
-        if let Some(attempt) = &commit.attempt {
-            let stamp = stamps.entry(attempt.attempt_id.as_str()).or_insert((
-                commit.sequence,
-                commit.committed_at,
-                commit.sequence,
-                commit.committed_at,
-            ));
-            stamp.2 = commit.sequence;
-            stamp.3 = commit.committed_at;
-        }
-    }
     let mut items = Vec::new();
-    for attempt in snapshot.attempts.iter() {
-        let &(ordinal, created_at, revision, updated_at) = stamps
-            .get(attempt.attempt_id.as_str())
-            .ok_or_else(|| ProjectionError::MissingAttempt(attempt.attempt_id.clone()))?;
-        items.push(inference_item(
-            thread_id, attempt, created_at, updated_at, revision,
-        )?);
-        let output = match &attempt.outcome {
-            AttemptOutcome::Committed(output)
-            | AttemptOutcome::Rejected { output, .. }
-            | AttemptOutcome::Cancelled { result: Ok(output) } => Some(output),
-            AttemptOutcome::Running
-            | AttemptOutcome::Interrupted
-            | AttemptOutcome::Failed(_)
-            | AttemptOutcome::Cancelled { result: Err(_) } => None,
-        };
-        let decoding_error = attempt
+    items.push(inference_item(
+        thread_id, attempt, created_at, updated_at, revision,
+    )?);
+    let output = match &attempt.outcome {
+        AttemptOutcome::Committed(output)
+        | AttemptOutcome::Rejected { output, .. }
+        | AttemptOutcome::Cancelled { result: Ok(output) } => Some(output),
+        AttemptOutcome::Running
+        | AttemptOutcome::Interrupted
+        | AttemptOutcome::Failed(_)
+        | AttemptOutcome::Cancelled { result: Err(_) } => None,
+    };
+    let decoding_error = attempt
+        .request_metadata
+        .as_ref()
+        .and_then(|payload| pl_model::runtime::model_request_receipt(payload).err())
+        .map(|error| error.to_string())
+        .or_else(|| {
+            output
+                .and_then(|output| response_content(output).err())
+                .map(|error| error.to_string())
+        });
+    if let Some(notice) = decoding_error {
+        let mut payloads = attempt
             .request_metadata
-            .as_ref()
-            .and_then(|payload| pl_model::runtime::model_request_receipt(payload).err())
-            .map(|error| error.to_string())
-            .or_else(|| {
-                output
-                    .and_then(|output| response_content(output).err())
-                    .map(|error| error.to_string())
-            });
-        if let Some(notice) = decoding_error {
-            let mut payloads = attempt
-                .request_metadata
-                .iter()
-                .map(super::raw_payload)
-                .collect::<Vec<_>>();
-            if let Some(output) = output {
-                for content in &output.content {
-                    payloads.push(match content {
-                        ContextContent::Text { text } => pl_protocol::ThreadRawPayload {
-                            format: "text/plain".into(),
-                            version: 1,
-                            content: text.to_string(),
-                        },
-                        ContextContent::Opaque { payload } => super::raw_payload(payload),
-                        ContextContent::Resource { reference } => pl_protocol::ThreadRawPayload {
-                            format: "pl.resource-reference".into(),
-                            version: 1,
-                            content: serde_json::to_string(reference)?,
-                        },
-                    });
-                }
+            .iter()
+            .map(super::raw_payload)
+            .collect::<Vec<_>>();
+        if let Some(output) = output {
+            for content in &output.content {
+                payloads.push(match content {
+                    ContextContent::Text { text } => pl_protocol::ThreadRawPayload {
+                        format: "text/plain".into(),
+                        version: 1,
+                        content: text.to_string(),
+                    },
+                    ContextContent::Opaque { payload } => super::raw_payload(payload),
+                    ContextContent::Resource { reference } => pl_protocol::ThreadRawPayload {
+                        format: "pl.resource-reference".into(),
+                        version: 1,
+                        content: serde_json::to_string(reference)?,
+                    },
+                });
             }
-            items.push(ThreadItem::new(
-                super::order::response_id(&attempt.attempt_id, "text"),
-                thread_id.into(),
-                attempt.turn_id.clone(),
-                ordinal,
-                revision,
-                created_at,
-                updated_at,
-                ThreadItemState::Raw(pl_protocol::ThreadRawItem {
-                    payloads,
-                    notice,
-                    recorded_at: updated_at,
-                }),
-            ));
-            continue;
         }
-        let (response, lifecycle, channel) = match &attempt.outcome {
-            AttemptOutcome::Committed(output) => (
-                response_content(output)?, ThreadContentLifecycle::completed(updated_at),
-                if output.tool_calls.is_empty() { ThreadTextChannel::Final } else { ThreadTextChannel::Commentary },
+        items.push(ThreadItem::new(
+            super::order::response_id(&attempt.attempt_id, "text"),
+            thread_id.into(),
+            attempt.turn_id.clone(),
+            0,
+            revision,
+            created_at,
+            updated_at,
+            ThreadItemState::Raw(pl_protocol::ThreadRawItem {
+                payloads,
+                notice,
+                recorded_at: updated_at,
+            }),
+        ));
+        return Ok(items);
+    }
+    let (response, lifecycle, channel) = match &attempt.outcome {
+        AttemptOutcome::Committed(output) => (
+            response_content(output)?,
+            ThreadContentLifecycle::completed(updated_at),
+            if output.tool_calls.is_empty() {
+                ThreadTextChannel::Final
+            } else {
+                ThreadTextChannel::Commentary
+            },
+        ),
+        AttemptOutcome::Rejected { output, reason } => (
+            response_content(output)?,
+            ThreadContentLifecycle::failed(updated_at, reason.to_string()),
+            ThreadTextChannel::Commentary,
+        ),
+        AttemptOutcome::Cancelled { result: Ok(output) } => (
+            response_content(output)?,
+            ThreadContentLifecycle::cancelled(
+                updated_at,
+                "The model returned after cancellation; this output was not committed to context."
+                    .into(),
             ),
-            AttemptOutcome::Rejected { output, reason } => (
-                response_content(output)?, ThreadContentLifecycle::failed(updated_at, reason.to_string()), ThreadTextChannel::Commentary,
-            ),
-            AttemptOutcome::Cancelled { result: Ok(output) } => (
-                response_content(output)?, ThreadContentLifecycle::cancelled(updated_at, "The model returned after cancellation; this output was not committed to context.".into()), ThreadTextChannel::Commentary,
-            ),
-            AttemptOutcome::Running => {
-                let Some(preview) = snapshot.model_progress.as_ref().filter(|preview| preview.attempt_id == attempt.attempt_id) else { continue; };
-                let reasoning = preview.progress.reasoning.as_ref().map(|payload| {
-                    if payload.format() != "text/plain" || payload.version() != 1 { return Err(ProjectionError::UnsupportedOutput("unsupported live reasoning format".into())); }
+            ThreadTextChannel::Commentary,
+        ),
+        AttemptOutcome::Running => {
+            let Some(preview) =
+                model_progress.filter(|preview| preview.attempt_id == attempt.attempt_id)
+            else {
+                return Ok(items);
+            };
+            let reasoning = preview
+                .progress
+                .reasoning
+                .as_ref()
+                .map(|payload| {
+                    if payload.format() != "text/plain" || payload.version() != 1 {
+                        return Err(ProjectionError::UnsupportedOutput(
+                            "unsupported live reasoning format".into(),
+                        ));
+                    }
                     Ok(payload.content().to_owned())
-                }).transpose()?;
-                (ResponseContent { text: text_content(&preview.progress.content), reasoning }, ThreadContentLifecycle::streaming(), ThreadTextChannel::Commentary)
-            }
-            AttemptOutcome::Interrupted | AttemptOutcome::Failed(_) | AttemptOutcome::Cancelled { result: Err(_) } => continue,
-        };
-        if let Some(reasoning) = response.reasoning.filter(|text| !text.is_empty()) {
-            items.push(ThreadItem::new(
-                super::order::response_id(&attempt.attempt_id, "reasoning"),
-                thread_id.into(),
-                attempt.turn_id.clone(),
-                ordinal,
-                revision,
-                created_at,
-                updated_at,
-                ThreadItemState::Thinking(ThreadThinkingItem::new(
-                    Vec::new(),
-                    vec![reasoning],
-                    lifecycle.clone(),
-                )),
-            ));
+                })
+                .transpose()?;
+            (
+                ResponseContent {
+                    text: text_content(&preview.progress.content),
+                    reasoning,
+                },
+                ThreadContentLifecycle::streaming(),
+                ThreadTextChannel::Commentary,
+            )
         }
-        if !response.text.is_empty() {
-            items.push(ThreadItem::new(
-                super::order::response_id(&attempt.attempt_id, "text"),
-                thread_id.into(),
-                attempt.turn_id.clone(),
-                ordinal,
-                revision,
-                created_at,
-                updated_at,
-                ThreadItemState::Text(ThreadTextItem::new(
-                    channel,
-                    response.text,
-                    Vec::new(),
-                    lifecycle,
-                )),
-            ));
-        }
+        AttemptOutcome::Interrupted
+        | AttemptOutcome::Failed(_)
+        | AttemptOutcome::Cancelled { result: Err(_) } => return Ok(items),
+    };
+    if let Some(reasoning) = response.reasoning.filter(|text| !text.is_empty()) {
+        items.push(ThreadItem::new(
+            super::order::response_id(&attempt.attempt_id, "reasoning"),
+            thread_id.into(),
+            attempt.turn_id.clone(),
+            0,
+            revision,
+            created_at,
+            updated_at,
+            ThreadItemState::Thinking(ThreadThinkingItem::new(
+                Vec::new(),
+                vec![reasoning],
+                lifecycle.clone(),
+            )),
+        ));
+    }
+    if !response.text.is_empty() {
+        items.push(ThreadItem::new(
+            super::order::response_id(&attempt.attempt_id, "text"),
+            thread_id.into(),
+            attempt.turn_id.clone(),
+            0,
+            revision,
+            created_at,
+            updated_at,
+            ThreadItemState::Text(ThreadTextItem::new(
+                channel,
+                response.text,
+                Vec::new(),
+                lifecycle,
+            )),
+        ));
     }
     Ok(items)
 }

@@ -5,7 +5,7 @@ use pl_protocol::Thread;
 
 use crate::studio::merged_page::{HotColdEntry, merge_page_desc};
 use crate::studio::store::directory::{
-    DirectoryDelta, RegisteredChildThread, ThreadDirectoryCursor,
+    DirectoryDelta, RegisteredChildThread, ThreadDirectoryCursor, ThreadStateUpdate,
 };
 use crate::{
     StudioProductEventEnvelope, StudioProductEventKind, StudioThreadDirectoryData,
@@ -31,16 +31,15 @@ impl HotColdEntry for Thread {
 }
 
 impl ProductEventBus {
-    pub(in crate::studio) fn record_attachments(
+    pub(in crate::studio) async fn record_attachments(
         &self,
         records: Vec<crate::studio::AttachmentRecord>,
     ) -> Result<()> {
         for record in records {
-            self.store.sessions().register_resource(
-                &record.thread_id,
-                &record.id,
-                record.session_payload()?,
-            )?;
+            self.store
+                .sessions()
+                .register_resource(&record.thread_id, &record.id, record.session_payload()?)
+                .await?;
         }
         Ok(())
     }
@@ -462,6 +461,17 @@ impl ProductEventBus {
             .lock()
             .expect("thread index lock poisoned")
             .remove(thread_id);
+    }
+
+    /// 落库一次运行状态摘要：只写线程行的 `state_json` 与 `updated_at`。
+    ///
+    /// 热集合与目录变更事件已由目录 owner 在同一观察路径发布；这里是可重建的耐久缓存，
+    /// 供不经 journal 重放的冷目录读取消费，写入失败由 write-behind 保留重试。
+    pub(in crate::studio) fn record_directory_state(&self, update: ThreadStateUpdate) {
+        self.writer.record_directory(DirectoryDelta {
+            thread_states: vec![update],
+            ..Default::default()
+        });
     }
 
     /// 热集合中属于指定 root 的全部条目（树归档时叠加尚未落库的 child）。

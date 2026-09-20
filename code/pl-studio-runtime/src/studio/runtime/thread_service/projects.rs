@@ -27,59 +27,69 @@ impl StudioRuntime {
         {
             return Ok(project);
         }
-        let name = crate::studio::paths::project_name(path);
         let now = crate::studio::unix_seconds();
-        // 聚合冷加载：按 path 找到既有行或分配新 id，然后内存先行提交目录 delta。
+        // The declaration file is the sole persistent source: resolve or create it first,
+        // and never publish a directory mutation when the declaration write fails.
+        let declaration = self
+            .store
+            .workspaces()
+            .declaration_for_path(&path_text, None);
+        // 聚合冷加载：按 path 找到既有行以复用身份，然后内存先行提交目录 delta。
         let existing = self.store.find_project_by_path(&path_text, None).await?;
-        let (record, delta_record) = match existing {
-            Some(existing) => {
-                let name = existing.name.clone();
-                let delta_record = ProjectDirectoryRecord {
-                    id: existing.id.clone(),
-                    name: name.clone(),
-                    path: path_text.clone(),
-                    ssh_alias: None,
-                    created_at: existing.created_at,
-                    updated_at: now,
-                    last_opened_at: Some(now),
-                    closed: false,
-                };
-                let public = ProjectRecord {
-                    id: existing.id.clone(),
-                    name,
-                    path: path_text,
-                    ssh_alias: None,
-                    updated_at: now,
-                };
-                (public, delta_record)
-            }
-            None => {
-                let id = crate::studio::ids::new_id("project");
-                let delta_record = ProjectDirectoryRecord {
-                    id: id.clone(),
-                    name: name.clone(),
-                    path: path_text.clone(),
-                    ssh_alias: None,
-                    created_at: now,
-                    updated_at: now,
-                    last_opened_at: Some(now),
-                    closed: false,
-                };
-                let public = ProjectRecord {
-                    id,
-                    name,
-                    path: path_text,
-                    ssh_alias: None,
-                    updated_at: now,
-                };
-                (public, delta_record)
-            }
+        let (id, name, created_at) = match (&declaration, &existing) {
+            (Some(declaration), existing) => (
+                declaration.id.clone(),
+                declaration.name.clone(),
+                existing.as_ref().map_or(now, |row| row.created_at),
+            ),
+            (None, Some(row)) => (row.id.clone(), row.name.clone(), row.created_at),
+            (None, None) => (
+                crate::studio::ids::new_id("project"),
+                crate::studio::paths::project_name(path),
+                now,
+            ),
         };
+        self.store
+            .workspaces()
+            .declare(&crate::config::WorkspaceDeclaration::new(
+                id.clone(),
+                name.clone(),
+                path_text.clone(),
+                None,
+            ))?;
         self.agent_facility
             .product_events
-            .commit_directory(DirectoryDelta::upsert_project(delta_record))
+            .record_project_fact(crate::studio::product_event_bus::ProjectFact {
+                id: id.clone(),
+                name: name.clone(),
+                path: path_text.clone(),
+                ssh_alias: None,
+                created_at,
+                updated_at: now,
+                last_opened_at: Some(now),
+                closed: false,
+            })
+            .await;
+        self.agent_facility
+            .product_events
+            .commit_directory(DirectoryDelta::upsert_project(ProjectDirectoryRecord {
+                id: id.clone(),
+                name: name.clone(),
+                path: path_text.clone(),
+                ssh_alias: None,
+                created_at,
+                updated_at: now,
+                last_opened_at: Some(now),
+                closed: false,
+            }))
             .await?;
-        Ok(record)
+        Ok(ProjectRecord {
+            id,
+            name,
+            path: path_text,
+            ssh_alias: None,
+            updated_at: now,
+        })
     }
 
     /// Renames the project label without changing its filesystem identity.
@@ -90,35 +100,63 @@ impl StudioRuntime {
             !name.is_empty() && name.chars().count() <= 80,
             "project name must contain 1 to 80 characters"
         );
-        let mut project = self
+        // Runtime reads/edits consume the canonical in-memory fact; the database is only
+        // the asynchronous search index.
+        let existing = self
             .agent_facility
             .product_events
-            .project_snapshot()
+            .project_fact(id)
             .await
-            .into_iter()
-            .find(|project| project.id == id)
             .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
-        project.name = name.to_string();
         let now = crate::studio::unix_seconds();
-        project.updated_at = now;
+        let fact = crate::studio::product_event_bus::ProjectFact {
+            name: name.to_string(),
+            updated_at: now,
+            ..existing
+        };
+        // The canonical declaration is written before the directory mutation is published;
+        // a failed declaration write leaves the snapshot and directory untouched.
+        self.store
+            .workspaces()
+            .declare(&crate::config::WorkspaceDeclaration::new(
+                fact.id.clone(),
+                fact.name.clone(),
+                fact.path.clone(),
+                fact.ssh_alias.clone(),
+            ))?;
+        self.agent_facility
+            .product_events
+            .record_project_fact(fact.clone())
+            .await;
         self.agent_facility
             .product_events
             .commit_directory(DirectoryDelta::upsert_project(ProjectDirectoryRecord {
-                id: project.id.clone(),
-                name: project.name.clone(),
-                path: project.path.clone(),
-                ssh_alias: project.ssh_alias.clone(),
-                created_at: now,
-                updated_at: now,
-                last_opened_at: Some(now),
-                closed: false,
+                id: fact.id.clone(),
+                name: fact.name.clone(),
+                path: fact.path.clone(),
+                ssh_alias: fact.ssh_alias.clone(),
+                created_at: fact.created_at,
+                updated_at: fact.updated_at,
+                last_opened_at: fact.last_opened_at,
+                closed: fact.closed,
             }))
             .await?;
-        Ok(project)
+        Ok(fact.projection())
     }
 
     pub async fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
         Ok(self.agent_facility.product_events.project_snapshot().await)
+    }
+
+    /// Explicitly applies external declaration edits: validate the whole set, then publish
+    /// atomically. A failed reload keeps the previously published canonical snapshot.
+    pub async fn reload_workspaces(&self) -> Result<Vec<ProjectRecord>> {
+        let _guard = self.lifecycle_lock.lock().await;
+        self.agent_facility
+            .product_events
+            .reload_project_declarations()
+            .await?;
+        self.list_projects().await
     }
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
@@ -153,6 +191,19 @@ impl StudioRuntime {
             }
         }
         self.retire_archived_thread_tree(&thread_ids).await?;
+        // Keep the in-memory fact closed so a later reload cannot revive it.
+        if let Some(mut fact) = self
+            .agent_facility
+            .product_events
+            .project_fact(project_id)
+            .await
+        {
+            fact.closed = true;
+            self.agent_facility
+                .product_events
+                .record_project_fact(fact)
+                .await;
+        }
         self.agent_facility
             .product_events
             .commit_directory(DirectoryDelta {

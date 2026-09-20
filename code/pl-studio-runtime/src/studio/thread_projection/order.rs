@@ -1,9 +1,11 @@
 //! One deterministic timeline order, derived from immutable fact admission rather than current rendering.
 use super::ProjectionError;
-use pl_core::thread::{AttemptOutcome, input::InputChange, journal::ThreadCommit};
+use pl_core::thread::{
+    AttemptOutcome, extensions::ExtensionChange, input::InputChange, journal::ThreadCommit,
+};
 use std::{collections::BTreeMap, sync::Arc};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub(super) struct Position {
     pub ordinal: u64,
     pub created_at: i64,
@@ -34,13 +36,88 @@ pub(super) fn response_id(id: &str, kind: &str) -> String {
     format!("model:{}:{id}:{kind}", id.len())
 }
 
+/// Reserves the slots first admitted by one commit, in the canonical admission order:
+/// accepted inputs, inbox messages, the Turn, compaction extension writes, tool deliveries,
+/// model attempts and finally the tool calls committed by a successful model step.
+///
+/// Hidden or empty projections keep their slot: an ordinal is fixed the first time its identity
+/// appears and never shifts when later content is written.
+pub(super) fn reserve_commit(
+    commit: &ThreadCommit,
+    positions: &mut BTreeMap<String, Position>,
+    next_ordinal: &mut u64,
+) -> Result<Vec<String>, ProjectionError> {
+    // Reserve atomically: a counter overflow leaves the caller's positions and counter untouched.
+    let ordinal_before = *next_ordinal;
+    let mut added = Vec::new();
+    let mut overflow = false;
+    {
+        let mut insert = |id: String| {
+            if let std::collections::btree_map::Entry::Vacant(entry) = positions.entry(id) {
+                match next_ordinal.checked_add(1) {
+                    Some(next) => {
+                        *next_ordinal = next;
+                        let id = entry.key().clone();
+                        entry.insert(Position {
+                            ordinal: next,
+                            created_at: commit.committed_at,
+                        });
+                        added.push(id);
+                    }
+                    None => overflow = true,
+                }
+            }
+        };
+        for input in commit.inputs.iter() {
+            if let InputChange::Accepted(record) = input {
+                insert(record.input.id.clone());
+            }
+        }
+        for record in commit.inbox.iter() {
+            insert(message_id(&record.message.id));
+        }
+        if let Some(turn) = &commit.turn {
+            insert(turn_id(&turn.turn_id));
+        }
+        for change in commit.extensions.iter() {
+            if let ExtensionChange::Put { id, record } = change
+                && record.payload.format() == "pl.studio.compaction"
+            {
+                insert(compaction_id(id));
+            }
+        }
+        for delivery in commit.deliveries.iter() {
+            insert(skill_id(&delivery.call_id));
+            insert(completion_id(&delivery.call_id));
+        }
+        if let Some(attempt) = &commit.attempt {
+            insert(response_id(&attempt.attempt_id, "inference"));
+            insert(response_id(&attempt.attempt_id, "reasoning"));
+            insert(response_id(&attempt.attempt_id, "text"));
+            if let AttemptOutcome::Committed(output) = &attempt.outcome {
+                for call in &output.tool_calls {
+                    insert(tool_id(&call.call_id));
+                }
+            }
+        }
+    }
+    if overflow {
+        for key in added.drain(..) {
+            positions.remove(&key);
+        }
+        *next_ordinal = ordinal_before;
+        return Err(ProjectionError::Count);
+    }
+    Ok(added)
+}
+
 /// Reserved slots include hidden/empty projections so later schema interpretation cannot shift history.
 pub(super) fn positions(
     journal: &[Arc<ThreadCommit>],
     through: u64,
 ) -> Result<BTreeMap<String, Position>, ProjectionError> {
     let mut positions = BTreeMap::new();
-    let mut ordinal = 0_u64;
+    let mut next_ordinal = 0_u64;
     let mut next_sequence = 1;
     let mut owner_id = None;
     for commit in journal.iter().filter(|commit| commit.sequence <= through) {
@@ -49,48 +126,7 @@ pub(super) fn positions(
         }
         owner_id = Some(commit.thread_id.as_str());
         next_sequence = next_sequence.checked_add(1).ok_or(ProjectionError::Count)?;
-        let mut insert = |id: String| -> Result<(), ProjectionError> {
-            if let std::collections::btree_map::Entry::Vacant(entry) = positions.entry(id) {
-                ordinal = ordinal.checked_add(1).ok_or(ProjectionError::Count)?;
-                entry.insert(Position {
-                    ordinal,
-                    created_at: commit.committed_at,
-                });
-            }
-            Ok(())
-        };
-        for input in commit.inputs.iter() {
-            if let InputChange::Accepted(record) = input {
-                insert(record.input.id.clone())?;
-            }
-        }
-        for record in commit.inbox.iter() {
-            insert(message_id(&record.message.id))?;
-        }
-        if let Some(turn) = &commit.turn {
-            insert(turn_id(&turn.turn_id))?;
-        }
-        for change in commit.extensions.iter() {
-            if let pl_core::thread::extensions::ExtensionChange::Put { id, record } = change
-                && record.payload.format() == "pl.studio.compaction"
-            {
-                insert(compaction_id(id))?;
-            }
-        }
-        for delivery in commit.deliveries.iter() {
-            insert(skill_id(&delivery.call_id))?;
-            insert(completion_id(&delivery.call_id))?;
-        }
-        if let Some(attempt) = &commit.attempt {
-            insert(response_id(&attempt.attempt_id, "inference"))?;
-            insert(response_id(&attempt.attempt_id, "reasoning"))?;
-            insert(response_id(&attempt.attempt_id, "text"))?;
-            if let AttemptOutcome::Committed(output) = &attempt.outcome {
-                for call in &output.tool_calls {
-                    insert(tool_id(&call.call_id))?;
-                }
-            }
-        }
+        reserve_commit(commit, &mut positions, &mut next_ordinal)?;
     }
     if through != next_sequence - 1 {
         return Err(ProjectionError::JournalOrder);

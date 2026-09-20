@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use sea_orm::sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};
 use sea_orm::{
     ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement,
     TransactionTrait,
@@ -78,8 +79,11 @@ impl SessionStoreError {
 
 pub(super) async fn open(
     options: Option<SqliteSessionOptions>,
+    require_existing: bool,
 ) -> Result<DatabaseConnection, SessionStoreError> {
-    let url = if let Some(options) = options {
+    // `fresh` is true only when the backing file did not exist before this open, so an
+    // existing empty/garbage file is never silently initialized as a new database.
+    let fresh = if let Some(options) = options {
         if let Some(parent) = options.path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -88,22 +92,39 @@ pub(super) async fn open(
                 "session database path must be absolute".into(),
             ));
         }
+        let existed = tokio::fs::try_exists(&options.path).await?;
+        if require_existing && !existed {
+            return Err(SessionStoreError::Invalid(format!(
+                "session database does not exist: {}",
+                options.path.display()
+            )));
+        }
         let mut url = url::Url::parse("sqlite:///")
             .map_err(|error| SessionStoreError::Invalid(error.to_string()))?;
         url.set_path(options.path.to_str().ok_or_else(|| {
             SessionStoreError::Invalid("session database path is not UTF-8".into())
         })?);
-        url.set_query(Some("mode=rwc"));
-        url.to_string()
+        url.set_query(Some(if existed { "mode=rw" } else { "mode=rwc" }));
+        (!existed, url.to_string())
     } else {
-        "sqlite::memory:".to_owned()
+        (true, "sqlite::memory:".to_owned())
     };
+    let (fresh, url) = fresh;
     let mut options = ConnectOptions::new(url);
     options
         .max_connections(1)
-        .connect_timeout(Duration::from_secs(10));
+        .connect_timeout(Duration::from_secs(10))
+        // SQLite applies these per connection, so they must be set as connect options rather
+        // than once with a PRAGMA statement (which would only touch a single pooled connection).
+        .map_sqlx_sqlite_opts(|options| {
+            options
+                .journal_mode(SqliteJournalMode::Wal)
+                .synchronous(SqliteSynchronous::Full)
+                .busy_timeout(Duration::from_secs(5))
+                .foreign_keys(true)
+        });
     let db = Database::connect(options).await?;
-    if let Err(initialization) = initialize(&db).await {
+    if let Err(initialization) = initialize(&db, fresh).await {
         return match db.close().await {
             Ok(()) => Err(initialization),
             Err(cleanup) => Err(SessionStoreError::InitializationCleanup {
@@ -115,7 +136,66 @@ pub(super) async fn open(
     Ok(db)
 }
 
-async fn initialize(db: &DatabaseConnection) -> Result<(), SessionStoreError> {
+/// Opens an existing session database read-only, without hydrating or writing anything.
+///
+/// It starts no writer and does not run `initialize` (no WAL/table/version writes); a
+/// missing, empty, non-regular or unsupported-version file is a typed error and is preserved.
+pub(super) async fn open_read_only(
+    path: &std::path::Path,
+) -> Result<DatabaseConnection, SessionStoreError> {
+    if !path.is_absolute() {
+        return Err(SessionStoreError::Invalid(
+            "session database path must be absolute".into(),
+        ));
+    }
+    let metadata = tokio::fs::symlink_metadata(path).await?;
+    if !metadata.is_file() {
+        return Err(SessionStoreError::Invalid(
+            "session database is not a regular file".into(),
+        ));
+    }
+    if metadata.len() == 0 {
+        return Err(SessionStoreError::UnsupportedSchema {
+            found: 0,
+            supported: super::SESSION_SCHEMA_VERSION,
+        });
+    }
+    let mut url = url::Url::parse("sqlite:///")
+        .map_err(|error| SessionStoreError::Invalid(error.to_string()))?;
+    url.set_path(
+        path.to_str().ok_or_else(|| {
+            SessionStoreError::Invalid("session database path is not UTF-8".into())
+        })?,
+    );
+    url.set_query(Some("mode=ro"));
+    let mut options = ConnectOptions::new(url.to_string());
+    options
+        .max_connections(1)
+        .connect_timeout(Duration::from_secs(10))
+        // A read-only connection must not attempt to change the journal mode; it still gets
+        // a busy timeout so concurrent readers wait instead of failing immediately.
+        .map_sqlx_sqlite_opts(|options| {
+            options
+                .busy_timeout(Duration::from_secs(5))
+                .foreign_keys(true)
+        });
+    let db = Database::connect(options).await?;
+    let version = db
+        .query_one_raw(statement("PRAGMA user_version", vec![]))
+        .await?
+        .ok_or_else(|| SessionStoreError::Invalid("missing SQLite schema version".into()))?
+        .try_get::<i64>("", "user_version")?;
+    if version != super::SESSION_SCHEMA_VERSION {
+        let _ = db.close().await;
+        return Err(SessionStoreError::UnsupportedSchema {
+            found: version,
+            supported: super::SESSION_SCHEMA_VERSION,
+        });
+    }
+    Ok(db)
+}
+
+async fn initialize(db: &DatabaseConnection, fresh: bool) -> Result<(), SessionStoreError> {
     let version = db
         .query_one_raw(statement("PRAGMA user_version", vec![]))
         .await?
@@ -128,21 +208,17 @@ async fn initialize(db: &DatabaseConnection) -> Result<(), SessionStoreError> {
         });
     }
     if version == 0 {
-        let existing = db.query_one_raw(statement(
-            "SELECT name FROM sqlite_schema WHERE type='table' AND substr(name,1,7)<>'sqlite_' LIMIT 1",
-            vec![],
-        )).await?;
-        if existing.is_some() {
+        // Only a database file that did not exist may be initialized; an existing
+        // unversioned/empty file is preserved and rejected instead of being overwritten.
+        if !fresh {
             return Err(SessionStoreError::UnsupportedSchema {
                 found: 0,
                 supported: super::SESSION_SCHEMA_VERSION,
             });
         }
     }
-    db.execute_unprepared(
-        "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;",
-    )
-    .await?;
+    // WAL, synchronous, busy timeout and foreign keys are configured per connection through
+    // the connect options above; no PRAGMA is issued here.
     if version == super::SESSION_SCHEMA_VERSION {
         return Ok(());
     }
@@ -249,7 +325,14 @@ pub(super) async fn apply(
             ))
             .await?;
         if let Some(previous) = previous {
-            if decode_row(previous)? != **entry {
+            let previous = decode_row(previous)?;
+            // Immutability is a property of the content; a re-admitted record (for example
+            // after reopening a store that no longer caches journal rows) keeps the stored
+            // row and only its freshly computed metadata is ignored.
+            if previous.type_id != entry.type_id
+                || previous.schema_version != entry.schema_version
+                || previous.payload != entry.payload
+            {
                 return Err(SessionStoreError::Invalid(format!(
                     "immutable resource {} changed",
                     entry.id
@@ -267,4 +350,118 @@ pub(super) async fn apply(
     }
     tx.commit().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::SessionEntry;
+    use std::sync::Arc;
+
+    fn record(payload: &str, created_at: i64) -> SessionEntry {
+        SessionEntry {
+            session_id: "thread".into(),
+            id: "pl.resource.record".into(),
+            type_id: "pl.core.record".into(),
+            schema_version: 1,
+            ordinal: 1,
+            revision: 1,
+            turn_id: None,
+            created_at,
+            updated_at: created_at,
+            payload: payload.into(),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_second_connection_waits_on_the_busy_timeout_instead_of_failing_busy() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("concurrent.sqlite");
+        let first = open(Some(SqliteSessionOptions { path: path.clone() }), false)
+            .await
+            .unwrap();
+        let second = open(Some(SqliteSessionOptions { path: path.clone() }), true)
+            .await
+            .unwrap();
+
+        // The busy timeout is a per-connection option and must be present on this connection.
+        let timeout = second
+            .query_one_raw(statement("PRAGMA busy_timeout", vec![]))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get::<i64>("", "timeout")
+            .unwrap();
+        assert_eq!(timeout, 5000);
+
+        // `first` holds a write transaction; `second` must wait for it rather than fail.
+        let tx = first.begin().await.unwrap();
+        tx.execute_unprepared(
+            "INSERT INTO session_entries(session_id,id,type_id,ordinal,turn_id,envelope,payload_hash) \
+             VALUES('thread','pl.resource.a','t',1,NULL,'{}','h')",
+        )
+        .await
+        .unwrap();
+        let writer = tokio::spawn(async move {
+            let tx = second.begin().await.unwrap();
+            tx.execute_unprepared(
+                "INSERT INTO session_entries(session_id,id,type_id,ordinal,turn_id,envelope,payload_hash) \
+                 VALUES('thread','pl.resource.b','t',2,NULL,'{}','h')",
+            )
+            .await
+        });
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        tx.commit().await.unwrap();
+        let result = writer.await.unwrap();
+        assert!(
+            result.is_ok(),
+            "second writer must wait, not fail BUSY: {result:?}"
+        );
+
+        // Without the connect options a fresh connection has busy_timeout = 0 and fails
+        // immediately while the lock is held (the failure mode the options prevent).
+        let plain = Database::connect(format!("sqlite://{}?mode=rw", path.display()))
+            .await
+            .unwrap();
+        let held = first.begin().await.unwrap();
+        held.execute_unprepared(
+            "INSERT INTO session_entries(session_id,id,type_id,ordinal,turn_id,envelope,payload_hash) \
+             VALUES('thread','pl.resource.c','t',3,NULL,'{}','h')",
+        )
+        .await
+        .unwrap();
+        let immediate = plain
+            .execute_unprepared(
+                "INSERT INTO session_entries(session_id,id,type_id,ordinal,turn_id,envelope,payload_hash) \
+                 VALUES('thread','pl.resource.d','t',4,NULL,'{}','h')",
+            )
+            .await;
+        assert!(
+            immediate.is_err(),
+            "a connection without a busy timeout fails immediately"
+        );
+        held.rollback().await.unwrap();
+        first.close().await.unwrap();
+        plain.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn readmission_keeps_the_stored_row_but_changed_content_is_rejected() {
+        let db = open(None, false).await.unwrap();
+        apply(&db, &[Arc::new(record("A", 1))]).await.unwrap();
+        // Same content with fresh metadata (fresh created_at) is idempotent: the stored row
+        // is kept and the new metadata is ignored.
+        apply(&db, &[Arc::new(record("A", 99))]).await.unwrap();
+        let rows = entries(&db, "thread", None).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].created_at, 1);
+        assert_eq!(rows[0].payload, "A");
+        // The same id with different content must still be rejected.
+        let error = apply(&db, &[Arc::new(record("B", 100))]).await.unwrap_err();
+        assert!(matches!(error, SessionStoreError::Invalid(_)), "{error}");
+        assert_eq!(entries(&db, "thread", None).await.unwrap()[0].payload, "A");
+        db.close().await.unwrap();
+    }
 }

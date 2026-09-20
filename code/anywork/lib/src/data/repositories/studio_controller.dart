@@ -254,12 +254,6 @@ class StudioController extends _$StudioController {
     );
   }
 
-  void dismissConfigRecoveryNotice() {
-    final current = state.value;
-    if (current == null || current.configRecoveryNotice == null) return;
-    state = AsyncData(current.copyWith(configRecoveryNotice: null));
-  }
-
   /// Adds explicitly queried cold directory identities without replacing live facts
   /// or applying a project-scoped cursor to the global directory window.
   void includeDirectoryThreads(List<StudioThread> threads) {

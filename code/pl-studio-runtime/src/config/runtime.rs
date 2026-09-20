@@ -4,7 +4,7 @@ use crate::studio::unix_seconds;
 use crate::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
-use super::{ConfigRecoveryReport, ConfigStore, StudioConfig};
+use super::{ConfigStore, StudioConfig};
 
 /// Settings desired state 的唯一进程内 owner。
 ///
@@ -14,7 +14,6 @@ pub struct ConfigRuntime {
     store: ConfigStore,
     command_lock: Arc<Mutex<()>>,
     state: Arc<RwLock<ConfigRuntimeSnapshot>>,
-    startup_recovery: Option<ConfigRecoveryReport>,
 }
 
 /// 已校验 Studio 配置及其单调 revision。
@@ -71,21 +70,16 @@ impl From<ConfigRuntimeError> for PureError {
 impl ConfigRuntime {
     /// 从磁盘加载并校验初始 desired config。
     pub fn initialize(store: ConfigStore) -> ConfigRuntimeResult<Self> {
-        let startup = store.load_for_startup()?;
+        let config = store.load_or_default()?;
         Ok(Self {
             store,
             command_lock: Arc::new(Mutex::new(())),
             state: Arc::new(RwLock::new(ConfigRuntimeSnapshot {
                 revision: 1,
                 updated_at: unix_seconds(),
-                config: startup.config,
+                config,
             })),
-            startup_recovery: startup.recovery,
         })
-    }
-
-    pub(crate) fn startup_recovery(&self) -> Option<ConfigRecoveryReport> {
-        self.startup_recovery.clone()
     }
 
     /// 返回内存 canonical snapshot，不访问磁盘。
@@ -264,26 +258,28 @@ mod tests {
     }
 
     #[test]
-    fn initialize_retains_the_startup_recovery_report() {
+    fn initialize_rejects_incompatible_config_and_preserves_file() {
         let home = tempfile::Builder::new()
-            .prefix("config-runtime-recovery-")
+            .prefix("config-runtime-incompatible-")
             .tempdir()
             .unwrap()
             .keep();
-        let store = ConfigStore::new(ConfigPaths::from_home(home));
+        let store = ConfigStore::new(ConfigPaths::from_home(home.clone()));
         std::fs::create_dir_all(store.paths().config_dir()).unwrap();
         let legacy = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
             .replace("schema_version = 18", "schema_version = 14");
-        std::fs::write(store.paths().config_file(), legacy).unwrap();
+        std::fs::write(store.paths().config_file(), &legacy).unwrap();
 
-        let runtime = ConfigRuntime::initialize(store).unwrap();
+        let error = ConfigRuntime::initialize(store)
+            .err()
+            .expect("incompatible config must fail initialization");
 
+        assert!(error.to_string().contains("schema version"), "{error}");
         assert_eq!(
-            runtime.read().unwrap().config,
-            StudioConfig::default_config()
+            std::fs::read_to_string(home.join(".anywork").join("config.toml")).unwrap(),
+            legacy
         );
-        assert!(runtime.startup_recovery().unwrap().backup_path().exists());
     }
 
     #[test]

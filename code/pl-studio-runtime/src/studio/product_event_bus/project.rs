@@ -1,5 +1,7 @@
 //! Project 目录：启动基线装载、目录读取与 Project 事实的内存应用与移除。
 
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 
 use crate::studio::ids::unix_seconds;
@@ -11,6 +13,35 @@ use crate::{
 
 use super::ProductEventBus;
 
+/// Complete internal Project fact: canonical declaration fields plus full dynamic state.
+///
+/// It is the runtime source of truth for Project reads and edits; the product database is
+/// only the startup baseline and the asynchronous search index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::studio) struct ProjectFact {
+    pub(in crate::studio) id: String,
+    pub(in crate::studio) name: String,
+    pub(in crate::studio) path: String,
+    pub(in crate::studio) ssh_alias: Option<String>,
+    pub(in crate::studio) created_at: i64,
+    pub(in crate::studio) updated_at: i64,
+    pub(in crate::studio) last_opened_at: Option<i64>,
+    pub(in crate::studio) closed: bool,
+}
+
+impl ProjectFact {
+    /// The public (open-only) Project projection of this fact.
+    pub(in crate::studio) fn projection(&self) -> crate::ProjectRecord {
+        crate::ProjectRecord {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            path: self.path.clone(),
+            ssh_alias: self.ssh_alias.clone(),
+            updated_at: self.updated_at,
+        }
+    }
+}
+
 impl ProductEventBus {
     /// 启动命令显式建立目录初始 revision 与 Project 小集合；普通 read 不改变 revision。
     ///
@@ -20,19 +51,120 @@ impl ProductEventBus {
         self.initialize_revision(&self.revisions.project);
         self.initialize_revision(&self.revisions.thread);
         self.initialize_revision(&self.revisions.agent);
-        let durable_projects = self.store.list_projects().await?;
-        let mut projects = self.project_snapshot.lock().await;
-        for project in durable_projects {
-            if !projects.iter().any(|hot| hot.id == project.id) {
-                projects.push(project);
-            }
+        // The declaration files are the canonical Project source. The product directory is
+        // exported once before the layout is published; afterwards the files are loaded as
+        // the published set, never overwritten from the database.
+        let directory = self.store.list_project_directory_rows().await?;
+        self.store
+            .workspaces()
+            .initialize(&directory)
+            .map_err(crate::studio::workspace_declarations::declared_workspace_dir_error)?;
+        self.rebuild_project_directory().await
+    }
+
+    /// Rebuilds the canonical memory Project set from published declarations plus dynamic
+    /// directory state. It never writes or overwrites a declaration file.
+    pub(in crate::studio) async fn rebuild_project_directory(&self) -> Result<()> {
+        let declarations = self.store.workspaces().snapshot();
+        let dynamic = self.store.list_project_dynamic().await?;
+        let now = unix_seconds();
+        let mut facts = BTreeMap::new();
+        for (id, declaration) in &declarations {
+            let dynamic = dynamic.get(id);
+            facts.insert(
+                id.clone(),
+                ProjectFact {
+                    id: id.clone(),
+                    name: declaration.name.clone(),
+                    path: declaration.path.clone(),
+                    ssh_alias: declaration.ssh_alias.clone(),
+                    created_at: dynamic.map_or(now, |dynamic| dynamic.created_at),
+                    updated_at: dynamic.map_or(now, |dynamic| dynamic.updated_at),
+                    last_opened_at: dynamic.and_then(|dynamic| dynamic.last_opened_at),
+                    closed: dynamic.is_some_and(|dynamic| dynamic.closed != 0),
+                },
+            );
         }
+        *self.project_facts.lock().await = facts;
+        self.publish_project_projection().await;
+        Ok(())
+    }
+
+    /// Publishes the public Project projection from the canonical in-memory facts.
+    async fn publish_project_projection(&self) {
+        let mut projects: Vec<crate::ProjectRecord> = self
+            .project_facts
+            .lock()
+            .await
+            .values()
+            .filter(|fact| !fact.closed)
+            .map(ProjectFact::projection)
+            .collect();
         projects.sort_by(|left, right| {
             right
                 .updated_at
                 .cmp(&left.updated_at)
                 .then_with(|| right.id.cmp(&left.id))
         });
+        *self.project_snapshot.lock().await = projects;
+    }
+
+    /// Records one canonical Project fact (declaration fields + dynamic state) in memory.
+    pub(in crate::studio) async fn record_project_fact(&self, fact: ProjectFact) {
+        self.project_facts
+            .lock()
+            .await
+            .insert(fact.id.clone(), fact);
+        self.publish_project_projection().await;
+    }
+
+    /// Reads one canonical in-memory Project fact; runtime reads never touch the database.
+    pub(in crate::studio) async fn project_fact(&self, id: &str) -> Option<ProjectFact> {
+        self.project_facts.lock().await.get(id).cloned()
+    }
+
+    /// Explicit reload: re-read declarations from disk, then atomically publish the rebuilt
+    /// set. A failed reload keeps the previously published snapshot.
+    pub(in crate::studio) async fn reload_project_declarations(&self) -> Result<()> {
+        // Prepare: read and validate the whole file set without publishing anything.
+        let candidate = self
+            .store
+            .workspaces()
+            .load_candidate()
+            .map_err(crate::studio::workspace_declarations::declared_workspace_dir_error)?;
+        // Keep the full dynamic state from the in-memory owner; a reload never re-reads the
+        // database, so it cannot overwrite unsaved facts, revive a closed Project, or diverge
+        // from the declaration snapshot.
+        let current = self.project_facts.lock().await.clone();
+        let now = unix_seconds();
+        let mut facts = BTreeMap::new();
+        for (id, declaration) in &candidate {
+            let mut fact = current.get(id).cloned().unwrap_or(ProjectFact {
+                id: id.clone(),
+                name: declaration.name.clone(),
+                path: declaration.path.clone(),
+                ssh_alias: declaration.ssh_alias.clone(),
+                created_at: now,
+                updated_at: now,
+                last_opened_at: None,
+                closed: false,
+            });
+            fact.name = declaration.name.clone();
+            fact.path = declaration.path.clone();
+            fact.ssh_alias = declaration.ssh_alias.clone();
+            facts.insert(id.clone(), fact);
+        }
+        // Commit: declaration marker (file gate) first, then one atomic publish of the full
+        // fact set and its projection, then exactly one event.
+        self.store
+            .workspaces()
+            .commit_snapshot(candidate)
+            .map_err(crate::studio::workspace_declarations::declared_workspace_dir_error)?;
+        *self.project_facts.lock().await = facts;
+        self.publish_project_projection().await;
+        self.bump(&self.revisions.project);
+        let state = self.read_project_directory().await?;
+        self.emit(StudioProductEventKind::ProjectDirectoryChanged(state));
         Ok(())
     }
 
@@ -120,6 +252,7 @@ mod tests {
     use crate::studio::store::directory::ProjectDirectoryRecord;
 
     use super::super::tests::{memory_bus, seed_project};
+    use super::ProjectFact;
 
     #[tokio::test]
     async fn project_directory_changes_only_when_the_memory_owner_applies_a_fact() {
@@ -181,5 +314,112 @@ mod tests {
             kinds[0],
             StudioProductEventKind::ProjectDirectoryChanged(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn reload_keeps_a_closed_project_closed() {
+        let (store, bus) = memory_bus().await;
+        let project = seed_project(&store).await;
+        store
+            .workspaces()
+            .declare(&crate::config::WorkspaceDeclaration::new(
+                project.id.clone(),
+                project.name.clone(),
+                project.path.clone(),
+                project.ssh_alias.clone(),
+            ))
+            .unwrap();
+        bus.rebuild_project_directory().await.unwrap();
+        assert!(
+            bus.project_snapshot()
+                .await
+                .iter()
+                .any(|entry| entry.id == project.id)
+        );
+
+        let mut fact = bus.project_fact(&project.id).await.unwrap();
+        fact.closed = true;
+        bus.record_project_fact(fact).await;
+        assert!(
+            !bus.project_snapshot()
+                .await
+                .iter()
+                .any(|entry| entry.id == project.id)
+        );
+
+        bus.reload_project_declarations().await.unwrap();
+        assert!(
+            !bus.project_snapshot()
+                .await
+                .iter()
+                .any(|entry| entry.id == project.id),
+            "a reload must not revive a closed Project"
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_reads_see_a_declared_project_before_it_reaches_the_database() {
+        let (store, bus) = memory_bus().await;
+        bus.initialize_directories().await.unwrap();
+        bus.record_project_fact(ProjectFact {
+            id: "project-hot".into(),
+            name: "Hot".into(),
+            path: "/tmp/hot".into(),
+            ssh_alias: None,
+            created_at: 5,
+            updated_at: 5,
+            last_opened_at: None,
+            closed: false,
+        })
+        .await;
+
+        // The database index has not been written yet, but runtime reads see the fact.
+        assert!(
+            store
+                .list_project_dynamic()
+                .await
+                .unwrap()
+                .get("project-hot")
+                .is_none()
+        );
+        assert_eq!(bus.project_fact("project-hot").await.unwrap().name, "Hot");
+        let mut renamed = bus.project_fact("project-hot").await.unwrap();
+        renamed.name = "Renamed".into();
+        bus.record_project_fact(renamed).await;
+        assert_eq!(
+            bus.project_fact("project-hot").await.unwrap().name,
+            "Renamed"
+        );
+        assert!(
+            bus.project_snapshot()
+                .await
+                .iter()
+                .any(|entry| entry.name == "Renamed")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_reload_leaves_both_snapshots_unchanged() {
+        let (store, bus) = memory_bus().await;
+        let project = seed_project(&store).await;
+        store
+            .workspaces()
+            .declare(&crate::config::WorkspaceDeclaration::new(
+                project.id.clone(),
+                project.name.clone(),
+                project.path.clone(),
+                project.ssh_alias.clone(),
+            ))
+            .unwrap();
+        bus.rebuild_project_directory().await.unwrap();
+        let before_fact = bus.project_fact(&project.id).await;
+        let before_projection = bus.project_snapshot().await;
+
+        // Corrupt the declaration set so `load_candidate` fails after validating the files.
+        let path = store.workspaces().declaration_path(&project.id).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(bus.reload_project_declarations().await.is_err());
+        assert_eq!(bus.project_fact(&project.id).await, before_fact);
+        assert_eq!(bus.project_snapshot().await, before_projection);
     }
 }

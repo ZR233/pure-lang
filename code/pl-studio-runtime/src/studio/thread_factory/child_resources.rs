@@ -187,7 +187,12 @@ impl StudioChildResources for StudioThreadFactory {
             resources: ResourceAccess::new(store),
             capacity: Default::default(),
             cold_store: Some(pl_core::thread::cold::ColdStoreHandle::new(
-                self.services.store.sessions().clone(),
+                self.services
+                    .store
+                    .sessions()
+                    .open_thread(&request.id)
+                    .await
+                    .map_err(|error| resource_error("open child Thread session store", error))?,
             )),
         };
         Ok(prepared_tools.tools.install(spec))

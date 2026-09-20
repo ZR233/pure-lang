@@ -14,20 +14,17 @@ use crate::studio::store::StudioStore;
 use pl_protocol::ThreadModeId;
 
 impl StudioStore {
+    /// Directory status is a product-directory fact, never a per-row journal replay.
+    ///
+    /// The `threads` row already carries the maintained status, error and update time
+    /// (`mappers::thread_record` decodes them from `state_json`), so a cold directory read consumes
+    /// only that row. A missing historical database therefore yields the stable directory state
+    /// instead of a journal scan; it is still never reported as empty history
+    /// (design/17 §17.2, design/18 §18.1).
     pub(in crate::studio) async fn with_session_status(
         &self,
-        mut record: ThreadRecord,
+        record: ThreadRecord,
     ) -> Result<ThreadRecord> {
-        let journal = self.sessions().read_thread_journal(&record.id).await?;
-        if let Some(last) = journal.last() {
-            let snapshot = pl_core::thread::journal::replay(&journal)?;
-            record.status = crate::studio::thread_projection::status(&snapshot);
-            record.runtime_updated_at = Some(last.committed_at);
-            // Cold directory reads preserve metadata for unknown codecs; activation validates them.
-            if let Ok(Some(mode)) = crate::studio::thread_projection::saved_mode(&snapshot) {
-                record.mode = mode;
-            }
-        }
         Ok(record)
     }
     /// 测试 seed 入口：直接同步创建 root Thread 行。
@@ -74,6 +71,9 @@ impl StudioStore {
         }
         .insert(&self.db)
         .await?;
+        // A created Thread owns its own session database; create it here so later
+        // directory reads never confuse "no history yet" with "history missing".
+        self.sessions().open_thread(&model.id).await?;
         thread_record(model)
     }
 
@@ -87,11 +87,7 @@ impl StudioStore {
             .order_by_desc(thread::Column::Id)
             .all(&self.db)
             .await?;
-        let mut records = Vec::with_capacity(threads.len());
-        for thread in threads {
-            records.push(self.with_session_status(thread_record(thread)?).await?);
-        }
-        Ok(records)
+        threads.into_iter().map(thread_record).collect()
     }
 
     /// Archive selection reads only directory facts, not historical journals.
@@ -134,13 +130,10 @@ impl StudioStore {
     }
 
     /// Runtime observation needs replayed status; archiving uses the directory-only variant.
+    ///
+    /// Directory rows already carry the maintained status, so this is the same directory-only read.
     pub async fn list_threads_for_root(&self, root_thread_id: &str) -> Result<Vec<ThreadRecord>> {
-        let threads = self.list_threads_for_archive(root_thread_id).await?;
-        let mut records = Vec::with_capacity(threads.len());
-        for thread in threads {
-            records.push(self.with_session_status(thread).await?);
-        }
-        Ok(records)
+        self.list_threads_for_archive(root_thread_id).await
     }
 
     /// Cold baseline for explicit archive restoration, including archived descendants.
@@ -154,11 +147,7 @@ impl StudioStore {
             .order_by_asc(thread::Column::CreatedAt)
             .all(&self.db)
             .await?;
-        let mut records = Vec::with_capacity(rows.len());
-        for row in rows {
-            records.push(self.with_session_status(thread_record(row)?).await?);
-        }
-        Ok(records)
+        rows.into_iter().map(thread_record).collect()
     }
 
     /// Project 归档 activation 一次性装载其完整 Thread 目录。
@@ -170,11 +159,7 @@ impl StudioStore {
             .order_by_asc(thread::Column::Id)
             .all(&self.db)
             .await?;
-        let mut records = Vec::with_capacity(threads.len());
-        for thread in threads {
-            records.push(self.with_session_status(thread_record(thread)?).await?);
-        }
-        Ok(records)
+        threads.into_iter().map(thread_record).collect()
     }
 
     pub async fn list_project_thread_ids(&self, project_id: &str) -> Result<Vec<String>> {
@@ -242,7 +227,9 @@ mod tests {
         let thread =
             ThreadHandle::start(record.id.clone(), DynModelSession::new(NoExecution)).unwrap();
         thread
-            .attach_storage(ColdStoreHandle::new(store.sessions().clone()))
+            .attach_storage(ColdStoreHandle::new(
+                store.sessions().open_thread(&record.id).await.unwrap(),
+            ))
             .await
             .unwrap();
         let original =
@@ -259,9 +246,51 @@ mod tests {
         let restored = store.read_thread(&record.id).await.unwrap().unwrap();
         assert_eq!(restored.mode, record.mode);
         assert_eq!(restored.title, record.title);
-        assert_eq!(restored.status, pl_protocol::ThreadStatus::Closed);
+        // Status is a product-directory fact: a cold directory read never replays the Thread
+        // journal to derive it. An unknown saved mode payload is therefore never decoded here and
+        // cannot clobber the known directory metadata (design/17 §17.2, design/18 §18.1).
+        assert_eq!(restored.status, pl_protocol::ThreadStatus::Idle);
         let replayed = store.sessions().replay_thread(&record.id).await.unwrap();
         assert_eq!(replayed.extensions["studio.mode"].payload, original);
         store.sessions().shutdown().await.unwrap();
+    }
+
+    /// A directory read is served from the product directory row alone.
+    ///
+    /// Removing each Thread's historical database must neither fail the listing nor silently drop
+    /// the row: the cold directory scan never opens a journal (design/17 §17.2).
+    #[tokio::test]
+    async fn directory_listing_never_reads_a_thread_journal() {
+        let home = tempfile::tempdir().unwrap();
+        let store = StudioStore::open(home.path().join("studio.sqlite"))
+            .await
+            .unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let project = store.upsert_project(workspace.path()).await.unwrap();
+        let first = store
+            .create_thread(&project.id, "first", ThreadModeId::simple())
+            .await
+            .unwrap();
+        let second = store
+            .create_thread(&project.id, "second", ThreadModeId::simple())
+            .await
+            .unwrap();
+        // Release every per-Thread connection, then delete the historical databases so that any
+        // journal read on the listing path would deterministically fail.
+        store.sessions().shutdown().await.unwrap();
+        for thread in [&first, &second] {
+            let path = store
+                .sessions()
+                .sessions_dir()
+                .expect("a file-backed store routes sessions on disk")
+                .join(format!("{}.sqlite", thread.id));
+            std::fs::remove_file(&path).unwrap();
+        }
+        let listed = store.list_root_threads(&project.id).await.unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(
+            store.read_thread(&first.id).await.unwrap().unwrap().title,
+            first.title
+        );
     }
 }

@@ -261,11 +261,6 @@ impl StudioRuntime {
         settings_api::settings_snapshot(state)
     }
 
-    /// 返回本次启动构造阶段产生的配置恢复报告。
-    pub fn startup_config_recovery(&self) -> Option<crate::config::ConfigRecoveryReport> {
-        self.config_runtime.startup_recovery()
-    }
-
     /// 立即重试待落库事实；查询和停止路径不需要调用本命令。
     pub async fn retry_persistence(&self) -> Result<crate::PersistenceStateSnapshot> {
         let persistence = self.agent_facility.persistence.lock().await.clone();

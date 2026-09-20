@@ -12,12 +12,16 @@ mod recovery_registry;
 mod runtime;
 mod runtime_lock;
 mod runtime_state;
+mod session_layout;
 mod session_migration;
+mod session_store;
 mod store;
 mod store_support;
 pub(crate) mod thread;
 mod thread_factory;
 pub(crate) mod thread_projection;
+mod timeline_store;
+mod workspace_declarations;
 
 pub(crate) use ids::{new_id, unix_seconds};
 pub use persistence::*;

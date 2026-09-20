@@ -74,6 +74,24 @@ impl SqliteSessionStore {
     /// # Errors
     /// Returns filesystem, database or schema errors without rebuilding an existing database.
     pub async fn open(options: SqliteSessionOptions) -> Result<Self, SessionStoreError> {
+        Self::open_locked(options, false).await
+    }
+
+    /// Opens an existing database without ever creating or initializing a new file.
+    ///
+    /// A missing, empty, unversioned or unsupported-version file is a typed error and is
+    /// preserved: the read/existing path must never fabricate an empty history database.
+    ///
+    /// # Errors
+    /// Returns filesystem, database or schema errors without creating a database.
+    pub async fn open_existing(options: SqliteSessionOptions) -> Result<Self, SessionStoreError> {
+        Self::open_locked(options, true).await
+    }
+
+    async fn open_locked(
+        options: SqliteSessionOptions,
+        require_existing: bool,
+    ) -> Result<Self, SessionStoreError> {
         let path = options.path.clone();
         let lock = tokio::task::spawn_blocking(move || {
             if let Some(parent) = path.parent() {
@@ -95,7 +113,11 @@ impl SqliteSessionStore {
         })
         .await
         .map_err(|_| SessionStoreError::Panicked)??;
-        Self::start(sqlite::open(Some(options)).await?, Some(lock)).await
+        Self::start(
+            sqlite::open(Some(options), require_existing).await?,
+            Some(lock),
+        )
+        .await
     }
 
     /// Opens an ephemeral SQLite database with the same commit semantics.
@@ -103,7 +125,7 @@ impl SqliteSessionStore {
     /// # Errors
     /// Returns a database initialization error.
     pub async fn open_memory() -> Result<Self, SessionStoreError> {
-        Self::start(sqlite::open(None).await?, None).await
+        Self::start(sqlite::open(None, false).await?, None).await
     }
 
     async fn start(
@@ -115,7 +137,12 @@ impl SqliteSessionStore {
             let mut resources = BTreeMap::new();
             for row in db
                 .query_all_raw(sqlite::statement(
-                    "SELECT * FROM session_entries WHERE substr(id,1,12)='pl.resource.'",
+                    // Only genuinely registered resources are hydrated. Thread-commit
+                    // journal rows are read on demand (history / journal paths) and must
+                    // never be loaded into memory just because a session is opened.
+                    "SELECT * FROM session_entries \
+                     WHERE substr(id,1,12)='pl.resource.' \
+                       AND id NOT LIKE 'pl.resource.thread-commit.%'",
                     vec![],
                 ))
                 .await?

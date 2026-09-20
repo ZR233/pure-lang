@@ -70,42 +70,6 @@ class _ApplicationRecoveryBanner extends StatelessWidget {
   }
 }
 
-class _ConfigRecoveryBanner extends ConsumerWidget {
-  const _ConfigRecoveryBanner({required this.notice});
-
-  final ConfigRecoveryNotice notice;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return ColoredBox(
-      key: const ValueKey('config-recovery-banner'),
-      color: context.statusColors.warningContainer,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-        child: Row(
-          children: [
-            const Icon(Icons.warning_amber_rounded, size: 18),
-            const SizedBox(width: 8),
-            Expanded(
-              child: SelectableText(
-                '${context.l10n.configRecoveryMessage}\n'
-                '${context.l10n.configRecoveryBackupPath(notice.backupPath)}',
-              ),
-            ),
-            IconButton(
-              key: const ValueKey('config-recovery-dismiss'),
-              onPressed: () => ref
-                  .read(studioControllerProvider.notifier)
-                  .dismissConfigRecoveryNotice(),
-              icon: const Icon(Icons.close, size: 18),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _PersistenceBanner extends ConsumerStatefulWidget {
   const _PersistenceBanner({required this.snapshot});
 

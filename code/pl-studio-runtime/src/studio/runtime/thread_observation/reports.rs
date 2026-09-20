@@ -6,7 +6,8 @@ use pl_core::{
     thread::{ThreadSnapshot, TurnRecord, TurnState, journal::ThreadCommit},
 };
 use pl_protocol::{Thread, ThreadTextChannel};
-use std::sync::Arc;
+
+use crate::studio::thread_projection::engine::ProjectionState;
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,13 +36,14 @@ struct MessageIdentity<'a> {
 pub(super) async fn publish(
     services: &ObservationServices,
     thread: &Thread,
-    history: &[Arc<ThreadCommit>],
+    state: &ProjectionState,
+    snapshot: &ThreadSnapshot,
+    commit: &ThreadCommit,
+    opening: (u64, u64),
+    consumed_through: u64,
     wake: bool,
 ) -> Result<()> {
     let Some(parent) = thread.parent_thread_id.as_deref() else {
-        return Ok(());
-    };
-    let Some(commit) = history.last() else {
         return Ok(());
     };
     let Some(turn) = commit
@@ -51,15 +53,7 @@ pub(super) async fn publish(
     else {
         return Ok(());
     };
-    if history[..history.len() - 1].iter().any(|commit| {
-        commit.turn.as_ref().is_some_and(|previous| {
-            previous.turn_id == turn.turn_id && previous.state != TurnState::Running
-        })
-    }) {
-        return Ok(());
-    }
-    let snapshot = pl_core::thread::journal::replay(history)?;
-    let report = report(thread, turn, &snapshot, history)?;
+    let report = report(thread, turn, state, snapshot, commit, opening, consumed_through)?;
     let content = serde_json::to_string(&report)?;
     services
         .threads
@@ -88,15 +82,13 @@ pub(super) async fn publish(
 fn report<'a>(
     thread: &'a Thread,
     turn: &'a TurnRecord,
+    state: &ProjectionState,
     snapshot: &'a ThreadSnapshot,
-    history: &[Arc<ThreadCommit>],
+    commit: &ThreadCommit,
+    opening: (u64, u64),
+    consumed_through: u64,
 ) -> Result<TurnReport<'a>> {
-    let items = crate::studio::thread_projection::project_items(
-        &thread.id,
-        thread.parent_thread_id.as_deref(),
-        snapshot,
-        history,
-    )?;
+    let items = state.materialize();
     let mut finals = Vec::new();
     let mut commentary = Vec::new();
     for item in &items {
@@ -130,27 +122,8 @@ fn report<'a>(
     }
     // Capture the opening inbox watermark before this Turn, even if model preparation failed
     // before consuming its triggering messages. Include later messages only when actually consumed.
-    let opening = history
-        .iter()
-        .position(|commit| {
-            commit
-                .turn
-                .as_ref()
-                .is_some_and(|record| record.turn_id == turn.turn_id)
-        })
-        .unwrap_or(0);
-    let before = &history[..opening];
-    let consumed_before = before
-        .iter()
-        .filter_map(|commit| commit.consumed_messages)
-        .next_back()
-        .unwrap_or(0);
-    let wake_before = before
-        .iter()
-        .filter_map(|commit| commit.wake_messages_through)
-        .next_back()
-        .unwrap_or(0);
-    let through = wake_before.max(snapshot.consumed_messages);
+    let (consumed_before, wake_before) = opening;
+    let through = wake_before.max(consumed_through);
     let messages = snapshot
         .inbox
         .iter()
@@ -164,7 +137,7 @@ fn report<'a>(
         .collect();
     Ok(TurnReport {
         child_id: &thread.id,
-        commit_sequence: snapshot.commit_sequence,
+        commit_sequence: commit.sequence,
         turn,
         message,
         messages,

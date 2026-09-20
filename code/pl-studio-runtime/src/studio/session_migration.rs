@@ -46,6 +46,9 @@ pub(super) async fn prepare(product: &Path, _owner: &RuntimeLock) -> Result<()> 
     if matches!(product_version, Some(20 | 21)) {
         migrate_product(product, parent).await?;
     }
+    // Split the legacy aggregate into per-Thread databases and publish the layout
+    // marker. A fresh install without a legacy aggregate is a no-op.
+    super::session_layout::migrate_layout(product, parent).await?;
     Ok(())
 }
 
@@ -125,7 +128,7 @@ async fn inspect(path: &Path) -> Result<Option<i64>> {
     finish_connection(db, result).await
 }
 
-async fn backup_database(source: &Path, destination: &Path) -> Result<()> {
+pub(in crate::studio) async fn backup_database(source: &Path, destination: &Path) -> Result<()> {
     if tokio::fs::try_exists(destination).await? {
         inspect(destination)
             .await?
@@ -220,7 +223,7 @@ fn sidecar(path: &Path, suffix: &str) -> PathBuf {
     name.into()
 }
 
-async fn sync_directory(path: &Path) -> Result<()> {
+pub(in crate::studio) async fn sync_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         let path = path.to_owned();

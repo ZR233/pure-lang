@@ -50,7 +50,6 @@ class StudioState {
     required this.providerUsageState,
     this.modelPerformance = const ModelPerformanceSnapshotView(),
     required this.updaterState,
-    this.configRecoveryNotice,
     this.persistenceState = const PersistenceStateSnapshot.ready(),
     this.workspacesByThread = const {},
     this.workspaceUiByThread = const {},
@@ -84,7 +83,6 @@ class StudioState {
   final ProviderUsageStateSnapshot providerUsageState;
   final ModelPerformanceSnapshotView modelPerformance;
   final UpdaterStateSnapshot updaterState;
-  final ConfigRecoveryNotice? configRecoveryNotice;
   final PersistenceStateSnapshot persistenceState;
 
   List<StudioProject> get projects => projectDirectory.values;
@@ -331,7 +329,6 @@ class StudioState {
     ProviderUsageStateSnapshot? providerUsageState,
     ModelPerformanceSnapshotView? modelPerformance,
     UpdaterStateSnapshot? updaterState,
-    Object? configRecoveryNotice = _studioStateUnset,
     PersistenceStateSnapshot? persistenceState,
   }) {
     return StudioState(
@@ -363,9 +360,6 @@ class StudioState {
       providerUsageState: providerUsageState ?? this.providerUsageState,
       modelPerformance: modelPerformance ?? this.modelPerformance,
       updaterState: updaterState ?? this.updaterState,
-      configRecoveryNotice: identical(configRecoveryNotice, _studioStateUnset)
-          ? this.configRecoveryNotice
-          : configRecoveryNotice as ConfigRecoveryNotice?,
       persistenceState: persistenceState ?? this.persistenceState,
     );
   }

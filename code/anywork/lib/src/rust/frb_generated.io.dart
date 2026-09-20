@@ -156,10 +156,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeClosingAgent dco_decode_box_autoadd_bridge_closing_agent(dynamic raw);
 
   @protected
-  BridgeConfigRecoveryReport
-  dco_decode_box_autoadd_bridge_config_recovery_report(dynamic raw);
-
-  @protected
   BridgeDegradedResource dco_decode_box_autoadd_bridge_degraded_resource(
     dynamic raw,
   );
@@ -671,11 +667,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeClosingAgent dco_decode_bridge_closing_agent(dynamic raw);
-
-  @protected
-  BridgeConfigRecoveryReport dco_decode_bridge_config_recovery_report(
-    dynamic raw,
-  );
 
   @protected
   BridgeCustomModelSettingsDto dco_decode_bridge_custom_model_settings_dto(
@@ -1630,10 +1621,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
-  BridgeConfigRecoveryReport?
-  dco_decode_opt_box_autoadd_bridge_config_recovery_report(dynamic raw);
-
-  @protected
   BridgeModelPricing? dco_decode_opt_box_autoadd_bridge_model_pricing(
     dynamic raw,
   );
@@ -1925,12 +1912,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeClosingAgent sse_decode_box_autoadd_bridge_closing_agent(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeConfigRecoveryReport
-  sse_decode_box_autoadd_bridge_config_recovery_report(
     SseDeserializer deserializer,
   );
 
@@ -2578,11 +2559,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeClosingAgent sse_decode_bridge_closing_agent(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeConfigRecoveryReport sse_decode_bridge_config_recovery_report(
     SseDeserializer deserializer,
   );
 
@@ -3783,12 +3759,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
-  BridgeConfigRecoveryReport?
-  sse_decode_opt_box_autoadd_bridge_config_recovery_report(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   BridgeModelPricing? sse_decode_opt_box_autoadd_bridge_model_pricing(
     SseDeserializer deserializer,
   );
@@ -4145,12 +4115,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_closing_agent(
     BridgeClosingAgent self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_box_autoadd_bridge_config_recovery_report(
-    BridgeConfigRecoveryReport self,
     SseSerializer serializer,
   );
 
@@ -4895,12 +4859,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_closing_agent(
     BridgeClosingAgent self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_config_recovery_report(
-    BridgeConfigRecoveryReport self,
     SseSerializer serializer,
   );
 
@@ -6367,12 +6325,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_opt_box_autoadd_bridge_config_recovery_report(
-    BridgeConfigRecoveryReport? self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_opt_box_autoadd_bridge_model_pricing(

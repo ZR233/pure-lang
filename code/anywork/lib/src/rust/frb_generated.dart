@@ -3541,13 +3541,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeConfigRecoveryReport
-  dco_decode_box_autoadd_bridge_config_recovery_report(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_config_recovery_report(raw);
-  }
-
-  @protected
   BridgeDegradedResource dco_decode_box_autoadd_bridge_degraded_resource(
     dynamic raw,
   ) {
@@ -4634,17 +4627,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       turnId: dco_decode_opt_String(arr[0]),
       error: dco_decode_opt_box_autoadd_bridge_state_error(arr[1]),
     );
-  }
-
-  @protected
-  BridgeConfigRecoveryReport dco_decode_bridge_config_recovery_report(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return BridgeConfigRecoveryReport(backupPath: dco_decode_String(arr[0]));
   }
 
   @protected
@@ -6509,13 +6491,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
     return BridgeStudioStartupResult(
       runtime: dco_decode_runtime_snapshot(arr[0]),
-      configRecovery: dco_decode_opt_box_autoadd_bridge_config_recovery_report(
-        arr[1],
-      ),
     );
   }
 
@@ -8619,15 +8598,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeConfigRecoveryReport?
-  dco_decode_opt_box_autoadd_bridge_config_recovery_report(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw == null
-        ? null
-        : dco_decode_box_autoadd_bridge_config_recovery_report(raw);
-  }
-
-  @protected
   BridgeModelPricing? dco_decode_opt_box_autoadd_bridge_model_pricing(
     dynamic raw,
   ) {
@@ -9404,15 +9374,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_closing_agent(deserializer));
-  }
-
-  @protected
-  BridgeConfigRecoveryReport
-  sse_decode_box_autoadd_bridge_config_recovery_report(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_config_recovery_report(deserializer));
   }
 
   @protected
@@ -10689,15 +10650,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_turnId = sse_decode_opt_String(deserializer);
     var var_error = sse_decode_opt_box_autoadd_bridge_state_error(deserializer);
     return BridgeClosingAgent(turnId: var_turnId, error: var_error);
-  }
-
-  @protected
-  BridgeConfigRecoveryReport sse_decode_bridge_config_recovery_report(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_backupPath = sse_decode_String(deserializer);
-    return BridgeConfigRecoveryReport(backupPath: var_backupPath);
   }
 
   @protected
@@ -13111,12 +13063,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_runtime = sse_decode_runtime_snapshot(deserializer);
-    var var_configRecovery =
-        sse_decode_opt_box_autoadd_bridge_config_recovery_report(deserializer);
-    return BridgeStudioStartupResult(
-      runtime: var_runtime,
-      configRecovery: var_configRecovery,
-    );
+    return BridgeStudioStartupResult(runtime: var_runtime);
   }
 
   @protected
@@ -15974,22 +15921,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeConfigRecoveryReport?
-  sse_decode_opt_box_autoadd_bridge_config_recovery_report(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    if (sse_decode_bool(deserializer)) {
-      return (sse_decode_box_autoadd_bridge_config_recovery_report(
-        deserializer,
-      ));
-    } else {
-      return null;
-    }
-  }
-
-  @protected
   BridgeModelPricing? sse_decode_opt_box_autoadd_bridge_model_pricing(
     SseDeserializer deserializer,
   ) {
@@ -17000,15 +16931,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_closing_agent(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_config_recovery_report(
-    BridgeConfigRecoveryReport self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_config_recovery_report(self, serializer);
   }
 
   @protected
@@ -18265,15 +18187,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_opt_String(self.turnId, serializer);
     sse_encode_opt_box_autoadd_bridge_state_error(self.error, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_config_recovery_report(
-    BridgeConfigRecoveryReport self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.backupPath, serializer);
   }
 
   @protected
@@ -20099,10 +20012,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_runtime_snapshot(self.runtime, serializer);
-    sse_encode_opt_box_autoadd_bridge_config_recovery_report(
-      self.configRecovery,
-      serializer,
-    );
   }
 
   @protected
@@ -22444,19 +22353,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_String(self, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_opt_box_autoadd_bridge_config_recovery_report(
-    BridgeConfigRecoveryReport? self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    sse_encode_bool(self != null, serializer);
-    if (self != null) {
-      sse_encode_box_autoadd_bridge_config_recovery_report(self, serializer);
     }
   }
 

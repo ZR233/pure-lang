@@ -11,8 +11,9 @@ anywork 使用独立产品身份，默认仅访问 `~/.anywork`，凭据服务�
 仍遵循既有参数优先级。
 
 配置文件固定为 `~/.anywork/config.toml`（Windows 下 `%USERPROFILE%\.anywork\config.toml`）。
-桌面产品状态保存在 `~/.anywork/studio/studio.sqlite`，Thread 通用事实由 core 保存到同目录
-`sessions.sqlite` 的不可变 journal 中（双库合同见 [17](./17-studio-storage.md)）。用户
+桌面产品目录及动态状态保存在 `~/.anywork/studio/studio.sqlite`，Thread 通用事实由 core
+保存到 `studio/sessions/<thread-id>.sqlite` 的不可变 journal 中（分层合同见
+[17](./17-studio-storage.md)）。工作空间声明在 `workspaces/<project-id>.toml`。用户
 Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代码常量为准。
 
 配置运行时在 Studio 启动时读取配置；此后普通对话和设置查询只读内存 canonical snapshot；
@@ -20,8 +21,8 @@ Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代�
 普通设置项在用户修改后即时写入配置；独立新增/编辑页面保留本地草稿，必须点击页面内保存
 按钮才写入，取消则丢弃草稿。
 
-配置版本演进必须满足以下迁移契约；当前实现缺口集中见
-[17.6](./17-studio-storage.md#176-迁移契约的实现缺口)，不能据此假定已实现自动迁移。
+配置版本演进必须满足以下迁移契约；支持路径与剩余边界见
+[17.6](./17-studio-storage.md#176-已实现迁移与剩余边界)，不能据此假定支持任意旧版本。
 
 - 启动时在产品发布前识别配置版本，使用明确的版本转换路径将 anywork 历史配置与用户
   Agent Profile 转为当前结构，支持跨版本升级；保留用户选择、provider 身份与凭据关联。
@@ -43,6 +44,21 @@ Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代�
 时保留当前 canonical 状态，不覆盖新配置。
 
 ## 20.2 配置职责
+
+工作空间声明以一个 Project 一个 TOML 对象保存稳定 ID、名称、路径、本地/SSH 关联与
+声明版本；文件名与 ID 必须一致且通过路径安全校验。最近打开时间、关闭状态、会话目录
+和 worktree ownership 不属于声明，不写入这些文件。产品库中的声明检索列可重建，声明
+文件是唯一持久配置源，运行期由内存 canonical snapshot 发布。保存采用校验和原子替换，
+外部编辑通过显式重载应用，失败保持已发布状态并保留原文件。已创建会话的 workspace_path
+是冻结事实，不因声明编辑而变化；lease 继续由独立资源 owner 管理。数据库到 TOML 的
+首次转换纳入 [17](./17-studio-storage.md) 的布局迁移，不清空项目或重建 ID。
+
+跨文件的声明提交使用持久 intent：先记录目标 ID、旧/新内容指纹与阶段，再原子替换声明
+文件，最后更新布局标记；标记绑定每个声明文件的内容指纹，而不只是 ID 集合。中断后启动
+只按 intent 重试完成或明确报告失败现场，未登记 intent 的额外声明文件一律拒绝而不是
+自动采纳；同一 ID 的声明内容变化必须被标记校验发现。只有显式重载接受外部编辑，成功后
+刷新标记指纹与 intent 基线。声明目录、控制文件与每个已存在祖先都拒绝链接或 reparse，
+未知字段与未知材料明确失败，不静默跳过或被下次保存丢弃。
 
 pl-model 拥有产品无关的模型配置值对象：角色路由配置（provider/model/effort 校验与解析）、
 provider 配置与模型路由配置，负责把路由解析为运行时 endpoint 和唯一选中的不可变模型信息。

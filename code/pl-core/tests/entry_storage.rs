@@ -338,3 +338,174 @@ async fn old_business_session_schema_is_rejected_without_rewriting_history() {
     ));
     assert_eq!(std::fs::read(path).unwrap(), before);
 }
+
+#[tokio::test]
+async fn thread_journal_page_reads_are_ordered_bounded_and_non_overlapping() {
+    use pl_core::context::ContextContent;
+    use pl_core::model::DynModelSession;
+    use pl_core::thread::{StepInput, ThreadHandle, cold::ColdStoreHandle};
+    use std::num::NonZeroUsize;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use tokio_util::sync::CancellationToken;
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let store = SqliteSessionStore::open_memory().await.unwrap();
+    let thread = ThreadHandle::start(
+        "thread".into(),
+        DynModelSession::new(JournalModel(calls.clone())),
+    )
+    .unwrap();
+    thread
+        .attach_storage(ColdStoreHandle::new(store.clone()))
+        .await
+        .unwrap();
+    thread
+        .step(StepInput {
+            turn_id: "turn-1".into(),
+            attempt_id: "attempt-1".into(),
+            content: vec![ContextContent::Text {
+                text: Arc::from("page me"),
+            }],
+            cancellation: CancellationToken::new(),
+        })
+        .await
+        .unwrap();
+    thread.close().await.unwrap();
+    drop(thread);
+
+    let full = store.read_thread_journal("thread").await.unwrap();
+    assert!(!full.is_empty());
+    let limit = NonZeroUsize::new(1).unwrap();
+    let mut paged: Vec<std::sync::Arc<pl_core::thread::journal::ThreadCommit>> = Vec::new();
+    loop {
+        let after = paged.last().map_or(0, |commit| commit.sequence);
+        let page = store
+            .read_thread_journal_page("thread", after, limit)
+            .await
+            .unwrap();
+        if page.is_empty() {
+            break;
+        }
+        paged.extend(page);
+    }
+    let full_encoded = full
+        .iter()
+        .map(|commit| commit.encode().unwrap().content().to_string())
+        .collect::<Vec<_>>();
+    let paged_encoded = paged
+        .iter()
+        .map(|commit| commit.encode().unwrap().content().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(paged_encoded, full_encoded);
+    // A watermark at the head yields an empty page rather than replaying the prefix.
+    assert!(
+        store
+            .read_thread_journal_page("thread", full.last().unwrap().sequence, limit)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    store.shutdown().await.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn journal_rows_are_not_hydrated_as_resources_and_a_read_only_reader_pages_them() {
+    use pl_core::model::DynModelSession;
+    use pl_core::persistence::open_journal_reader;
+    use pl_core::thread::cold::ColdStoreHandle;
+    use pl_core::thread::input::ThreadInput;
+    use pl_core::thread::{ThreadHandle, journal::ThreadCommit};
+    use std::num::NonZeroUsize;
+    use std::sync::{Arc, atomic::AtomicUsize};
+
+    let directory = tempfile::tempdir().unwrap();
+    let options = SqliteSessionOptions {
+        path: directory.path().join("journal.sqlite"),
+    };
+    let store = SqliteSessionStore::open(options.clone()).await.unwrap();
+    let thread = ThreadHandle::start(
+        "thread".into(),
+        DynModelSession::new(JournalModel(Arc::new(AtomicUsize::new(0)))),
+    )
+    .unwrap();
+    thread
+        .attach_storage(ColdStoreHandle::new(store.clone()))
+        .await
+        .unwrap();
+    thread
+        .submit_input(ThreadInput {
+            id: "pending".into(),
+            payload: OpaquePayload::new("future.input", 1, "raw").unwrap(),
+            context: Vec::new(),
+        })
+        .await
+        .unwrap();
+    store
+        .register_resource(
+            "thread",
+            "attachment",
+            OpaquePayload::new("studio.attachment", 1, "{}").unwrap(),
+        )
+        .unwrap();
+    thread.close().await.unwrap();
+    store.flush().await.unwrap();
+    let encode = |commits: &[Arc<ThreadCommit>]| {
+        commits
+            .iter()
+            .map(|commit| commit.encode().unwrap().content().to_string())
+            .collect::<Vec<_>>()
+    };
+    let expected = encode(&store.read_thread_journal("thread").await.unwrap());
+    assert!(expected.len() >= 2, "non-empty journal expected");
+    store.shutdown().await.unwrap();
+    drop(thread);
+    drop(store);
+
+    // Reopening must not pull the journal into the in-memory resource map.
+    let reopened = SqliteSessionStore::open(options.clone()).await.unwrap();
+    assert!(
+        reopened
+            .resources("thread", "pl.core.thread-commit")
+            .is_empty(),
+        "journal rows must not be hydrated as resources"
+    );
+    assert_eq!(
+        reopened.resources("thread", "studio.attachment").len(),
+        1,
+        "registered resources remain available"
+    );
+    assert_eq!(
+        encode(&reopened.read_thread_journal("thread").await.unwrap()),
+        expected,
+        "journal is still readable on demand"
+    );
+
+    // A read-only, non-hydrating reader returns the same pages without writing.
+    let before = std::fs::read(&options.path).unwrap();
+    let reader = open_journal_reader(options.clone()).await.unwrap();
+    let mut paged: Vec<Arc<ThreadCommit>> = Vec::new();
+    loop {
+        let after = paged.last().map_or(0, |commit| commit.sequence);
+        let page = reader
+            .read_page("thread", after, NonZeroUsize::new(1).unwrap())
+            .await
+            .unwrap();
+        if page.is_empty() {
+            break;
+        }
+        paged.extend(page);
+    }
+    reader.close().await.unwrap();
+    assert_eq!(encode(&paged), expected);
+    reopened.shutdown().await.unwrap();
+    drop(reopened);
+    assert_eq!(
+        std::fs::read(&options.path).unwrap(),
+        before,
+        "the read-only reader must not write the database"
+    );
+}

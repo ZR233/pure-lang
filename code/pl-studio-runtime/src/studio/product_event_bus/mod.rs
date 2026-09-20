@@ -8,6 +8,8 @@ mod project;
 mod snapshots;
 mod thread_directory;
 
+pub(in crate::studio) use project::ProjectFact;
+
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{
     Arc,
@@ -40,6 +42,9 @@ pub struct ProductEventBus {
     sequence: Arc<AtomicU64>,
     revisions: Arc<ProductStateRevisions>,
     project_snapshot: Arc<Mutex<Vec<crate::ProjectRecord>>>,
+    /// Canonical Project facts (declaration fields + full dynamic state) held in memory;
+    /// the database is only the startup baseline and the asynchronous search index.
+    project_facts: Arc<Mutex<BTreeMap<String, project::ProjectFact>>>,
     persistence_snapshot: Arc<std::sync::Mutex<PersistenceStateSnapshot>>,
     agents: Arc<Mutex<BTreeMap<String, StudioAgentDirectoryEntry>>>,
     /// 活动热集合（thread id → 列表元数据）：驻留、钉住或
@@ -70,6 +75,7 @@ impl ProductEventBus {
             sequence: Arc::new(AtomicU64::new(0)),
             revisions: Arc::new(ProductStateRevisions::default()),
             project_snapshot: Arc::new(Mutex::new(Vec::new())),
+            project_facts: Arc::new(Mutex::new(BTreeMap::new())),
             persistence_snapshot: Arc::new(std::sync::Mutex::new(
                 PersistenceStateSnapshot::default(),
             )),
