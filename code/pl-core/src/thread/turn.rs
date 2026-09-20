@@ -275,7 +275,7 @@ mod tests {
                     attempt_id: request.attempt_id,
                     base_context_revision: request.context.revision,
                     content: Vec::new(),
-                    tool_calls: if count <= 70 {
+                    tool_calls: if count <= 520 {
                         vec![ModelToolCall {
                             call_id: format!("call-{count}"),
                             tool_id: "continue".into(),
@@ -308,16 +308,16 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn unlimited_turn_passes_64_steps_and_remains_cancellable_while_limited_turn_pauses() {
+    async fn unlimited_turn_remains_cancellable_and_limited_turn_refreshes_its_allowance() {
         for (limit, cancel, expected) in [
             (
                 ModelStepLimit::Unlimited,
                 None,
                 Some(TurnOutcome::Completed),
             ),
-            (ModelStepLimit::Unlimited, Some(66), None),
+            (ModelStepLimit::Unlimited, Some(258), None),
             (
-                ModelStepLimit::Limited(std::num::NonZeroU32::new(64).unwrap()),
+                ModelStepLimit::Limited(std::num::NonZeroU32::new(256).unwrap()),
                 None,
                 Some(TurnOutcome::StepLimit),
             ),
@@ -357,13 +357,32 @@ mod tests {
                     assert_eq!(
                         result.model_steps,
                         if outcome == TurnOutcome::Completed {
-                            71
+                            521
                         } else {
-                            64
+                            256
                         }
                     );
                 }
                 None => assert!(matches!(result, Err(ThreadError::Cancelled))),
+            }
+            if expected == Some(TurnOutcome::StepLimit) {
+                for (turn_id, outcome, steps) in [
+                    ("second", TurnOutcome::StepLimit, 256),
+                    ("third", TurnOutcome::Completed, 9),
+                ] {
+                    let result = thread
+                        .run_turn(TurnInput {
+                            turn_id: turn_id.into(),
+                            attempt_prefix: turn_id.into(),
+                            content: Vec::new(),
+                            max_model_steps: limit,
+                            cancellation: CancellationToken::new(),
+                        })
+                        .await
+                        .unwrap();
+                    assert_eq!(result.outcome, outcome);
+                    assert_eq!(result.model_steps, steps);
+                }
             }
             thread.close().await.unwrap();
         }
