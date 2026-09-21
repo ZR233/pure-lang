@@ -2,7 +2,7 @@
 mod activation;
 mod agent_services;
 mod agents;
-mod observation;
+pub(crate) mod observation;
 pub use activation::{StudioActivationFactory, ThreadActivation, ThreadPreparation};
 mod interaction_key;
 mod user_input;
@@ -35,9 +35,8 @@ use pl_core::{
     context::ResourceAccess,
     model::ModelFactory,
     thread::{
-        ContextCapacity, ThreadError, ThreadHandle, ThreadLifecycle,
+        ContextCapacity, ThreadCheckpoint, ThreadError, ThreadHandle, ThreadLifecycle,
         cold::ColdStoreHandle,
-        journal::{self, ThreadCommit},
     },
     tool::opaque::Registration,
 };
@@ -65,7 +64,7 @@ pub struct StudioThreadSpec {
     /// False publishes the owner without a physical model until a later deferred update succeeds.
     pub model_available: bool,
     pub hosted_tools: Vec<pl_model::runtime::HostedTool>,
-    pub history: Vec<Arc<ThreadCommit>>,
+    pub checkpoint: Option<ThreadCheckpoint>,
     /// Initial instructions and records for a new Thread only; never used to re-render recovery.
     pub initial_context: Vec<pl_core::context::ContextRecord>,
     pub initial_extensions: BTreeMap<String, pl_core::context::OpaquePayload>,
@@ -81,7 +80,13 @@ impl std::fmt::Debug for StudioThreadSpec {
             .debug_struct("StudioThreadSpec")
             .field("id", &self.id)
             .field("parent_id", &self.parent_id)
-            .field("history_records", &self.history.len())
+            .field(
+                "checkpoint_revision",
+                &self
+                    .checkpoint
+                    .as_ref()
+                    .map(|checkpoint| checkpoint.state_revision),
+            )
             .field("tools", &self.tools.len())
             .finish_non_exhaustive()
     }
@@ -119,6 +124,10 @@ pub enum ThreadAssemblyError {
     InitialContextOnRecovery,
     #[error("Thread identity is already owned or has an invalid parent: {0}")]
     Identity(String),
+    #[error("message identity {0} conflicts with an accepted delivery")]
+    MessageConflict(String),
+    #[error("message identity {0} is already accepted with an unverifiable body")]
+    MessageUnverifiable(String),
     #[error("Thread {thread_id} workspace is unavailable: {reason}")]
     Workspace { thread_id: String, reason: String },
     #[error("Thread is still being assembled: {0}")]
@@ -247,7 +256,7 @@ impl StudioThreadAssembler {
         {
             return Err(ThreadAssemblyError::Identity(spec.id));
         }
-        if !spec.history.is_empty() && !spec.initial_context.is_empty() {
+        if spec.checkpoint.is_some() && !spec.initial_context.is_empty() {
             return Err(ThreadAssemblyError::InitialContextOnRecovery);
         }
         pl_core::context::ContextSnapshot {
@@ -256,11 +265,10 @@ impl StudioThreadAssembler {
         }
         .validate_complete()
         .map_err(ThreadError::from)?;
-        journal::replay(&spec.history)?;
         if spec
-            .history
-            .first()
-            .is_some_and(|commit| commit.thread_id != spec.id)
+            .checkpoint
+            .as_ref()
+            .is_some_and(|checkpoint| checkpoint.thread_id != spec.id)
         {
             return Err(ThreadAssemblyError::Identity(spec.id));
         }
@@ -277,13 +285,13 @@ impl StudioThreadAssembler {
             let runtime = ModelRuntime::from_route(&spec.route)?;
             let model = ThreadModel::new(runtime, spec.route.reasoning_config())
                 .with_hosted_tools(spec.hosted_tools);
-            ThreadHandle::restore(
+            ThreadHandle::resume(
                 spec.id.clone(),
                 ModelFactory::new(model).open_session().await?,
-                spec.history,
+                spec.checkpoint,
             )?
         } else {
-            ThreadHandle::restore_without_model(spec.id.clone(), spec.history)?
+            ThreadHandle::resume_without_model(spec.id.clone(), spec.checkpoint)?
         };
         self.0.state().entries.insert(
             spec.id.clone(),
@@ -376,7 +384,7 @@ impl StudioThreadAssembler {
         caller: &pl_core::tool::opaque::CallContext,
         inheritance: pl_core::context::ContextInheritance,
     ) -> Result<ThreadHandle, ThreadAssemblyError> {
-        if spec.parent_id.as_deref() != Some(caller.thread_id.as_str()) || !spec.history.is_empty()
+        if spec.parent_id.as_deref() != Some(caller.thread_id.as_str()) || spec.checkpoint.is_some()
         {
             return Err(ThreadAssemblyError::Identity(spec.id));
         }
@@ -714,11 +722,13 @@ impl StudioThreadAssembler {
         let Some((incarnation, thread)) = thread else {
             return Ok(());
         };
-        if thread.snapshot().lifecycle != ThreadLifecycle::Closed
-            && let Err(error) = thread.close().await
-            && thread.snapshot().lifecycle != ThreadLifecycle::Closed
-        {
-            return Err(error.into());
+        if thread.snapshot().lifecycle != ThreadLifecycle::Closed {
+            let closed = thread.close().await;
+            if let Err(error) = closed
+                && thread.snapshot().lifecycle != ThreadLifecycle::Closed
+            {
+                return Err(error.into());
+            }
         }
         self.drain_observation(id).await?;
         self.close_published_resources(id, &incarnation).await?;
@@ -880,7 +890,7 @@ mod tests {
                 effort: None,
             },
             model_available: true,
-            history: Vec::new(),
+            checkpoint: None,
             initial_context: Vec::new(),
             initial_extensions: BTreeMap::new(),
             tools: Vec::new(),
@@ -912,17 +922,19 @@ mod tests {
             thread.snapshot().context.records.as_ref(),
             std::slice::from_ref(&initial)
         );
-        let history = thread.journal().await.unwrap();
+        let checkpoint = thread
+            .checkpoint(thread.snapshot().commit_sequence)
+            .unwrap();
         assembler.close("instructions").await.unwrap();
         let mut restore = spec("instructions", None, directory.path());
-        restore.history = history.clone();
+        restore.checkpoint = Some(checkpoint.clone());
         restore.initial_context.push(initial);
         assert!(matches!(
             assembler.assemble(restore).await,
             Err(ThreadAssemblyError::InitialContextOnRecovery)
         ));
         let mut restore = spec("instructions", None, directory.path());
-        restore.history = history;
+        restore.checkpoint = Some(checkpoint);
         let restored = assembler.assemble(restore).await.unwrap();
         assert_eq!(restored.snapshot().context, thread.snapshot().context);
         assert!(assembler.close_all().await.is_empty());
@@ -949,6 +961,7 @@ mod tests {
                         .push((id, thread.snapshot().commit_sequence));
                 },
                 |_| Box::pin(async { Ok(()) }),
+                None,
             )
             .unwrap();
         let thread = assembler

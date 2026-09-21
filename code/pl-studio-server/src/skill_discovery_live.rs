@@ -213,8 +213,8 @@ async fn run_case(
         &format!("{base_url}/api/v1/threads/{}", created.thread.id),
     )
     .await?;
-    let activations = snapshot
-        .items
+    let items = thread_items(client, base_url, &created.thread.id).await?;
+    let activations = items
         .iter()
         .filter_map(|item| match item.state() {
             ThreadItemState::Skill(skill) => Some(skill.activation()),
@@ -226,8 +226,7 @@ async fn run_case(
         .as_ref()
         .map(|runtime| runtime.active_skills.as_slice())
         .unwrap_or_default();
-    let final_text = snapshot
-        .items
+    let final_text = items
         .iter()
         .filter_map(|item| match item.state() {
             ThreadItemState::Text(text) if text.channel() == ThreadTextChannel::Final => {
@@ -297,6 +296,36 @@ async fn run_case(
         final_marker,
         elapsed_millis: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
     })
+}
+
+/// Collects the durable timeline items in chronological order from the Turn page API.
+async fn thread_items(
+    client: &reqwest::Client,
+    base_url: &str,
+    thread_id: &str,
+) -> Result<Vec<pl_protocol::ThreadItem>> {
+    let mut cursor: Option<String> = None;
+    let mut turns = Vec::new();
+    loop {
+        let url = match &cursor {
+            Some(cursor) => {
+                format!("{base_url}/api/v1/threads/{thread_id}/turns?limit=200&cursor={cursor}")
+            }
+            None => format!("{base_url}/api/v1/threads/{thread_id}/turns?limit=200"),
+        };
+        let page: ThreadTurnPage = get_json(client, &url).await?;
+        let next = page.next_cursor.clone();
+        turns.extend(page.turns);
+        match next {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    turns.reverse();
+    Ok(turns
+        .into_iter()
+        .flat_map(|history| history.items)
+        .collect())
 }
 
 async fn wait_for_completed_input(

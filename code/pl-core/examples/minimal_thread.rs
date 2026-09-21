@@ -5,7 +5,7 @@ use pl_core::model::{
     DynModelSession, ModelError, ModelRequest, ModelSession, ModelStepOutput, ModelToolCall,
     PreparedModelCall,
 };
-use pl_core::thread::{ThreadHandle, TurnInput, journal};
+use pl_core::thread::{ThreadHandle, TurnInput};
 use pl_core::tool::{
     ToolOutput,
     opaque::{CallContext, Registration, Tool, ToolError},
@@ -84,22 +84,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             cancellation: CancellationToken::new(),
         })
         .await?;
-    let commits = thread.journal().await?;
-    let encoded = commits
+    let checkpoint = thread.checkpoint(thread.snapshot().commit_sequence)?;
+    assert_eq!(checkpoint.state.context, thread.snapshot().context);
+    let deliveries = thread
+        .effects()
+        .await?
         .iter()
-        .map(|commit| commit.encode())
-        .collect::<Result<Vec<_>, _>>()?;
-    let decoded = encoded
-        .iter()
-        .map(|payload| journal::ThreadCommit::decode(payload).map(Arc::new))
-        .collect::<Result<Vec<_>, _>>()?;
-    let replayed = journal::replay(&decoded)?;
-    assert_eq!(replayed.context, thread.snapshot().context);
+        .map(|effect| effect.deliveries.len())
+        .sum::<usize>();
     println!(
         "{} model steps, {} tool deliveries, {} commits",
-        completed.model_steps,
-        replayed.deliveries.len(),
-        replayed.commit_sequence
+        completed.model_steps, deliveries, checkpoint.state_revision
     );
     thread.close().await?;
     Ok(())

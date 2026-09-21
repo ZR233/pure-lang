@@ -621,7 +621,7 @@ mod tests {
                     parent_id: None,
                     route,
                     model_available: true,
-                    history: Vec::new(),
+                    checkpoint: None,
                     initial_context: Vec::new(),
                     initial_extensions: Default::default(),
                     tools: Vec::new(),

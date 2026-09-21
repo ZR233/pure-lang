@@ -13,7 +13,19 @@ import 'turn_models.dart';
 
 part 'agent_workspace_view.freezed.dart';
 
-enum AgentWorkspaceSyncState { loading, ready, reconnecting, stale, failed }
+/// 工作区同步状态。
+///
+/// `idle` 表示“已选中但尚未打开”：会话状态、history 数据库与历史条目都还没有加载，
+/// 需要一次显式用户交互才会打开（见 controller 的 openThread/openSelectedThread）。
+/// 打开只读取一次当前状态并建立订阅，不重发模型请求、不重跑工具、不续跑未完成工作流。
+enum AgentWorkspaceSyncState {
+  idle,
+  loading,
+  ready,
+  reconnecting,
+  stale,
+  failed,
+}
 
 enum AgentComposerMode { editable, runtimeDriven }
 

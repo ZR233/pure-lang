@@ -19,7 +19,7 @@ pub fn specification(
         route,
         model_available: true,
         hosted_tools: vec![],
-        history: vec![],
+        checkpoint: None,
         initial_context: vec![],
         initial_extensions: Default::default(),
         tools: vec![],

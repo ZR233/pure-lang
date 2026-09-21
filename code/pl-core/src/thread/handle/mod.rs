@@ -8,12 +8,13 @@ pub(super) use commands::Command;
 /// A bounded command handle; mutable Thread state is owned exclusively by its actor.
 #[derive(Debug, Clone)]
 pub struct ThreadHandle {
+    thread_id: String,
     _lifetime: Arc<HandleLifetime>,
     commands: mpsc::Sender<Command>,
     mailbox: mpsc::Sender<super::mailbox::MailboxCommand>,
     interrupt: cancellation::InterruptHandle,
     snapshots: watch::Receiver<ThreadSnapshot>,
-    history: Arc<std::sync::RwLock<Vec<Arc<journal::ThreadCommit>>>>,
+    effect_window: Arc<EffectWindow>,
 }
 
 #[derive(Debug)]

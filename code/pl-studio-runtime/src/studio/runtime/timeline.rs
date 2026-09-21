@@ -1,129 +1,9 @@
-//! Rebuildable item index owned by Thread residency; pages never replay a hot journal.
+//! Durable timeline pages backed by one independently owned SQLite database per Thread.
 use super::StudioRuntime;
-use anyhow::{Result, bail};
+use crate::studio::storage::history::HistoryStore;
+use anyhow::Result;
 use pl_protocol::{ThreadItem, TimelinePage, TimelineQuery, TimelineTurn};
-use std::collections::{BTreeMap, BTreeSet};
-
-#[derive(Default)]
-pub(super) struct TimelineIndex {
-    watermark: u64,
-    items: BTreeMap<u64, ThreadItem>,
-    positions: BTreeMap<String, u64>,
-    turns: Vec<TimelineTurn>,
-}
-
-impl TimelineIndex {
-    pub(super) fn update(
-        &mut self,
-        watermark: u64,
-        items: &[ThreadItem],
-        turns: Vec<TimelineTurn>,
-    ) {
-        if watermark < self.watermark {
-            return;
-        }
-        // Items are immutable identities. A new projection updates admitted/changed
-        // entries only; absence in a preview is not a deletion.
-        for item in items {
-            // Ephemeral preview order is subscription-local. History pages do
-            // not arbitrate competing previews at the same committed watermark.
-            if watermark == self.watermark && self.items.contains_key(&item.ordinal) {
-                continue;
-            }
-            if self.items.get(&item.ordinal) != Some(item) {
-                self.positions.insert(item.id.clone(), item.ordinal);
-                self.items.insert(item.ordinal, item.clone());
-            }
-        }
-        self.watermark = watermark;
-        self.turns = turns;
-    }
-
-    fn page(&self, thread_id: &str, query: &TimelineQuery, limit: usize) -> Result<TimelinePage> {
-        let limit = limit.clamp(1, 100);
-        let cursor = match query {
-            TimelineQuery::Latest => None,
-            TimelineQuery::Before { item_id } | TimelineQuery::After { item_id } | TimelineQuery::Around { item_id } => {
-                Some(*self.positions.get(item_id).ok_or_else(|| anyhow::anyhow!("timeline query.itemId does not belong to this Thread; reload latest or choose an available item"))?)
-            }
-        };
-        let items: Vec<_> = match (query, cursor) {
-            (TimelineQuery::Latest, _) => self
-                .items
-                .values()
-                .rev()
-                .take(limit)
-                .rev()
-                .cloned()
-                .collect(),
-            (TimelineQuery::Before { .. }, Some(position)) => {
-                let mut items: Vec<_> = self
-                    .items
-                    .range(..position)
-                    .rev()
-                    .take(limit)
-                    .map(|(_, item)| item.clone())
-                    .collect();
-                items.reverse();
-                items
-            }
-            (TimelineQuery::After { .. }, Some(position)) => self
-                .items
-                .range((
-                    std::ops::Bound::Excluded(position),
-                    std::ops::Bound::Unbounded,
-                ))
-                .take(limit)
-                .map(|(_, item)| item.clone())
-                .collect(),
-            (TimelineQuery::Around { .. }, Some(position)) => {
-                let start = self
-                    .items
-                    .range(..position)
-                    .rev()
-                    .take(limit / 2)
-                    .last()
-                    .map_or(position, |(ordinal, _)| *ordinal);
-                self.items
-                    .range(start..)
-                    .take(limit)
-                    .map(|(_, item)| item.clone())
-                    .collect()
-            }
-            _ => bail!("timeline query has no cursor"),
-        };
-        let ids: BTreeSet<_> = items.iter().map(|item| item.turn_id.as_str()).collect();
-        Ok(TimelinePage {
-            thread_id: thread_id.into(),
-            watermark: self.watermark,
-            older_cursor: items
-                .first()
-                .filter(|item| self.items.range(..item.ordinal).next().is_some())
-                .map(|item| item.id.clone()),
-            newer_cursor: items
-                .last()
-                .filter(|item| {
-                    self.items
-                        .range((
-                            std::ops::Bound::Excluded(item.ordinal),
-                            std::ops::Bound::Unbounded,
-                        ))
-                        .next()
-                        .is_some()
-                })
-                .map(|item| item.id.clone()),
-            first_item_id: items.first().map(|item| item.id.clone()),
-            last_item_id: items.last().map(|item| item.id.clone()),
-            turns: self
-                .turns
-                .iter()
-                .filter(|entry| ids.contains(entry.turn.id.as_str()))
-                .cloned()
-                .collect(),
-            items,
-        })
-    }
-}
+use std::collections::BTreeMap;
 
 impl StudioRuntime {
     /// Returns an item page, including related Turn metadata, without executing the Thread.
@@ -136,207 +16,125 @@ impl StudioRuntime {
         query: TimelineQuery,
         limit: usize,
     ) -> Result<TimelinePage> {
-        let thread = self.read_owned_thread(thread_id).await?;
-        let hot = self
-            .threads
-            .observed_threads()
-            .into_iter()
-            .find(|(id, _)| id == thread_id);
-        let watermark = hot
-            .as_ref()
-            .map(|(_, handle)| handle.snapshot().commit_sequence);
-        {
-            let indexes = self.residency.timelines.lock().await;
-            if let Some(index) = indexes.get(thread_id)
-                && watermark.is_none_or(|watermark| watermark == index.watermark)
-            {
-                return index.page(thread_id, &query, limit);
-            }
-        }
-        let (state, journal) = self.read_thread_facts(thread_id).await?;
-        let items = crate::studio::thread_projection::project_items(
-            thread_id,
-            thread.parent_thread_id.as_deref(),
-            &state,
-            &journal,
-        )?;
-        self.index_timeline(thread_id, &state, &items).await;
-        let mut indexes = self.residency.timelines.lock().await;
-        if hot.is_none() && !self.residency.is_pinned(thread_id) {
-            // A cold read has no resident owner: release its rebuildable index
-            // with this request instead of accumulating cold Threads forever.
-            return indexes
-                .remove(thread_id)
-                .ok_or_else(|| anyhow::anyhow!("Thread timeline was evicted; retry the page"))?
-                .page(thread_id, &query, limit);
-        }
-        indexes
-            .get(thread_id)
-            .ok_or_else(|| anyhow::anyhow!("Thread timeline was evicted; retry the page"))?
-            .page(thread_id, &query, limit)
+        self.read_owned_thread(thread_id).await?;
+        let history = self.ensure_timeline_history(thread_id).await?;
+        history.page(&query, limit).await
     }
 
-    pub(super) async fn index_timeline(
+    /// Reads one complete timeline item by identity, bypassing the page preview budget.
+    ///
+    /// 普通分页仍然只走 SQL 并把超大条目压成同身份预览；本入口用于按 identity 直接读取完整
+    /// payload。它不激活 owner、不 flush writer，也不触发恢复，冷热 Thread 走同一条只读路径。
+    ///
+    /// # Errors
+    /// Fails on unknown Thread/item identity or canonical storage failure.
+    pub async fn read_timeline_item(
         &self,
         thread_id: &str,
-        state: &pl_core::thread::ThreadSnapshot,
-        items: &[ThreadItem],
-    ) {
-        let ends: BTreeMap<_, _> = items
-            .iter()
-            .filter(|item| item.kind() != pl_protocol::ThreadItemKind::ContextCompaction)
-            .map(|item| (item.turn_id.as_str(), item.id.as_str()))
-            .collect();
-        let turns = items.iter().filter_map(|item| {
-            let pl_protocol::ThreadItemState::Turn(turn) = item.state() else {
-                return None;
-            };
-            Some(pl_protocol::Turn {
-                id: item.turn_id.clone(),
-                thread_id: thread_id.into(),
-                input_id: turn.input_id().map(str::to_owned),
-                revision: item.revision,
-                state: turn.state().clone(),
-                updated_at: item.updated_at,
-            })
-        });
-        let rolled_back = super::history::rolled_back_turns(state);
-        let turns = turns
-            .filter_map(|turn| {
-                let last = ends.get(turn.id.as_str())?;
-                Some(TimelineTurn {
-                    context_disposition: if rolled_back.contains(&turn.id) {
-                        pl_protocol::ThreadContextDisposition::RolledBack
-                    } else {
-                        pl_protocol::ThreadContextDisposition::Active
-                    },
-                    turn,
-                    last_item_id: (*last).into(),
-                })
-            })
-            .collect();
-        self.residency
-            .timelines
-            .lock()
-            .await
-            .entry(thread_id.into())
-            .or_default()
-            .update(state.commit_sequence, items, turns);
+        item_id: &str,
+    ) -> Result<pl_protocol::TimelineItemRead> {
+        self.read_owned_thread(thread_id).await?;
+        let history = self.ensure_timeline_history(thread_id).await?;
+        history.read_item(item_id).await
+    }
+
+    /// 只读地打开一个 Thread 的 history 数据库，供普通滚动分页使用。
+    ///
+    /// 关键约束：不激活 owner、不 flush writer、不触发恢复。需要的持久化栅栏直接来自
+    /// 已落盘的 checkpoint（`history_fence`），因此冷 Thread 与热 Thread 走同一条只读路径。
+    pub(super) async fn ensure_timeline_history(&self, thread_id: &str) -> Result<HistoryStore> {
+        let history = self.store.history(thread_id).await?;
+        let thread = self.read_protocol_thread(thread_id).await?;
+        let fence = crate::studio::thread_factory::recovery::load_checkpoint(&self.store, &thread)
+            .await?
+            .map_or(0, |checkpoint| checkpoint.history_fence);
+        if history.watermark().await? >= fence {
+            return Ok(history);
+        }
+        anyhow::bail!(
+            "Thread history is behind its durable checkpoint fence; pending persistence must recover first"
+        )
+    }
+
+    /// 该 Thread 的唯一有序历史写者句柄，供实时订阅做 ordinal 预留。
+    ///
+    /// 它与同一 Thread 的 effect commit 是同一个写者（同一连接状态），实时预留因此不再是一条独立
+    /// 的 SQLite writer。订阅的**读**仍走 [`Self::ensure_timeline_history`] 返回的只读句柄，长写事务
+    /// 不会把分页或实时读堵在这一条写连接上；没有活跃持有者时这里只登记新句柄（`HistoryStore::open`
+    /// 不做 IO），不会创建也不升级数据库。
+    pub(super) async fn ensure_timeline_history_writer(
+        &self,
+        thread_id: &str,
+    ) -> Result<HistoryStore> {
+        self.store.history_writer(thread_id).await
+    }
+
+    /// 订阅/重连的固定持久化屏障。
+    ///
+    /// 调用时机固定在事件接收端注册之后、首个历史窗口读取之前：先把活跃 owner 的当前
+    /// 草稿推进 writer 并等待固定 ticket 落盘，再确认数据库水位覆盖 owner 已提交的
+    /// revision。只有屏障通过后，`list_timeline_items(Latest)` 才是权威且无缺口的窗口。
+    pub(in crate::studio) async fn await_timeline_barrier(&self, thread_id: &str) -> Result<()> {
+        let history = self.store.history(thread_id).await?;
+        let thread = self.read_protocol_thread(thread_id).await?;
+        let desired = match self.threads.thread(thread_id) {
+            Some(handle) => {
+                // 固定目标必须在 flush 之前取样：`flush` 处理命令时才冻结自己的 ticket，因此它
+                // 保证的 durable 水位一定覆盖这里取到的 revision。若先 flush 再取 snapshot，
+                // flush 期间被受理的新 effect 会把 `desired` 抬到屏障覆盖范围之外，让一次成功的
+                // 持久化反而被判定成“待恢复的持久化失败”。屏障之后受理的 effect 本来就不在这
+                // 个窗口里：订阅已在屏障之前注册，它们按 live 事件到达。
+                let desired = handle.snapshot().commit_sequence;
+                handle.flush().await?;
+                desired
+            }
+            None => crate::studio::thread_factory::recovery::load_checkpoint(&self.store, &thread)
+                .await?
+                .map_or(0, |checkpoint| checkpoint.state_revision),
+        };
+        anyhow::ensure!(
+            history.watermark().await? >= desired,
+            "Thread history is behind its checkpoint fence; pending persistence must recover first"
+        );
+        Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pl_protocol::{ThreadContentLifecycle, ThreadItemState, ThreadTextChannel, ThreadTextItem};
-    use pretty_assertions::assert_eq;
-
-    fn items(count: u64) -> Vec<ThreadItem> {
-        (0..count)
-            .map(|ordinal| {
-                ThreadItem::new(
-                    format!("item-{ordinal}"),
-                    "thread".into(),
-                    "one-large-turn".into(),
-                    ordinal,
-                    1,
-                    1,
-                    1,
-                    ThreadItemState::Text(ThreadTextItem::new(
-                        ThreadTextChannel::Final,
-                        format!("line {ordinal}\n代码 \\n"),
-                        Vec::new(),
-                        ThreadContentLifecycle::completed(1),
-                    )),
-                )
-            })
-            .collect()
-    }
-
-    #[test]
-    fn large_turn_can_be_read_in_both_directions_without_gaps_or_repeated_pages() {
-        let expected = items(1103);
-        let mut index = TimelineIndex::default();
-        index.update(1, &expected, Vec::new());
-        let mut query = TimelineQuery::Latest;
-        let mut collected = Vec::new();
-        loop {
-            let page = index.page("thread", &query, 100).unwrap();
-            assert!(page.items.len() <= 100);
-            let mut previous = page.items.clone();
-            previous.extend(collected);
-            collected = previous;
-            let Some(item_id) = page.older_cursor else {
-                break;
+pub(in crate::studio) fn timeline_turns(
+    thread_id: &str,
+    state: &pl_core::thread::ThreadSnapshot,
+    items: &[ThreadItem],
+) -> Vec<TimelineTurn> {
+    let ends: BTreeMap<_, _> = items
+        .iter()
+        .filter(|item| item.kind() != pl_protocol::ThreadItemKind::ContextCompaction)
+        .map(|item| (item.turn_id.as_str(), item.id.as_str()))
+        .collect();
+    let rolled_back = super::history::rolled_back_turns(state);
+    items
+        .iter()
+        .filter_map(|item| {
+            let pl_protocol::ThreadItemState::Turn(turn) = item.state() else {
+                return None;
             };
-            query = TimelineQuery::Before { item_id };
-        }
-        assert_eq!(collected, expected);
-        let mut collected = Vec::new();
-        let mut query = TimelineQuery::Around {
-            item_id: "item-0".into(),
-        };
-        loop {
-            let page = index.page("thread", &query, 100).unwrap();
-            collected.extend(page.items);
-            let Some(item_id) = page.newer_cursor else {
-                break;
-            };
-            query = TimelineQuery::After { item_id };
-        }
-        assert_eq!(collected, expected);
-        assert!(
-            index
-                .page(
-                    "thread",
-                    &TimelineQuery::Before {
-                        item_id: "other-thread-item".into()
-                    },
-                    100
-                )
-                .is_err()
-        );
-        assert!(
-            index
-                .page(
-                    "thread",
-                    &TimelineQuery::Before {
-                        item_id: "item-0".into()
-                    },
-                    100
-                )
-                .unwrap()
-                .items
-                .is_empty()
-        );
-        let around = index
-            .page(
-                "thread",
-                &TimelineQuery::Around {
-                    item_id: "item-500".into(),
+            let id = item.turn_id.clone();
+            let last_item_id = ends.get(id.as_str())?;
+            Some(TimelineTurn {
+                turn: pl_protocol::Turn {
+                    id: id.clone(),
+                    thread_id: thread_id.into(),
+                    input_id: turn.input_id().map(str::to_owned),
+                    revision: item.revision,
+                    state: turn.state().clone(),
+                    updated_at: item.updated_at,
                 },
-                100,
-            )
-            .unwrap();
-        assert_eq!(around.items, expected[450..550]);
-    }
-
-    #[test]
-    fn incremental_updates_keep_older_items_and_reject_an_older_watermark() {
-        let mut index = TimelineIndex::default();
-        let expected = items(4);
-        index.update(2, &expected[..3], Vec::new());
-        index.update(3, &expected[3..], Vec::new());
-        index.update(1, &items(8), Vec::new());
-        let page = index.page("thread", &TimelineQuery::Latest, 100).unwrap();
-        assert_eq!(page.watermark, 3);
-        assert_eq!(page.items, expected);
-        assert_eq!(
-            TimelineIndex::default()
-                .page("thread", &TimelineQuery::Latest, 100)
-                .unwrap()
-                .items,
-            Vec::new()
-        );
-    }
+                last_item_id: (*last_item_id).into(),
+                context_disposition: if rolled_back.contains(&id) {
+                    pl_protocol::ThreadContextDisposition::RolledBack
+                } else {
+                    pl_protocol::ThreadContextDisposition::Active
+                },
+            })
+        })
+        .collect()
 }

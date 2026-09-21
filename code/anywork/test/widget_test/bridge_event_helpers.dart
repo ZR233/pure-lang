@@ -1,7 +1,9 @@
 part of '../widget_test.dart';
 
 ThreadSnapshotFrame _threadSnapshotFrame(StudioState state, String threadId) {
-  return ThreadSnapshotFrame(workspace: state.workspacesByThread[threadId]!);
+  return ThreadSnapshotFrame(
+    workspace: _currentStateOnly(state.workspacesByThread[threadId]!),
+  );
 }
 
 ThreadNotificationFrame _threadItemFrame({

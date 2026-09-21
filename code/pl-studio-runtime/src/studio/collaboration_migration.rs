@@ -1,8 +1,8 @@
 //! Historical producer payload conversion, used only by the offline database migration.
-use pl_core::{persistence::SessionStoreError, thread::journal::ThreadCommit};
+use pl_core::{persistence::SessionStoreError, thread::ThreadEffectBatch};
 use serde_json::Value;
 
-pub(super) fn convert(commit: &mut ThreadCommit) -> Result<(), SessionStoreError> {
+pub(super) fn convert(commit: &mut ThreadEffectBatch) -> Result<(), SessionStoreError> {
     // Walking the typed envelope never parses user text or unknown opaque payload content.
     // Original tool IDs, arguments and provider bindings remain historical execution facts.
     let mut encoded = serde_json::to_value(&*commit)?;

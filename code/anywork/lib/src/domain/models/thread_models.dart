@@ -27,6 +27,13 @@ enum AgentMessageChannel { commentary, finalAnswer }
 
 enum ThreadTextChannel { user, parentAgent, commentary, finalAnswer }
 
+/// 单条流式正文在客户端的渲染/内存预算（UTF-16 code units）。
+///
+/// canonical 全文仍由 Rust 持久化，并继续作为下一次模型上下文的完整事实；客户端
+/// 只为渲染与序列化保留有界的实时预览（最近的尾部），超出的部分只能经由 canonical
+/// item id 显式回源。这样单次 delta 的处理开销与 delta 同阶，整条流不再 O(n²)。
+const int kTimelineItemBodyBudget = 8 * 1024;
+
 class ThreadAttachmentView {
   const ThreadAttachmentView({
     required this.id,
@@ -149,11 +156,18 @@ final class ThreadThinkingItemStateView extends ThreadItemStateView {
     required this.summary,
     required this.content,
     required this.lifecycle,
+    this.summaryChunkBase = 0,
+    this.contentChunkBase = 0,
   });
 
   final List<String> summary;
   final List<String> content;
   final ThreadContentLifecycleView lifecycle;
+
+  /// 生产者 chunkIndex 是**逻辑**下标：本地列表因正文预算丢弃最旧整块后，下标整体
+  /// 前移，必须靠 base 还原，后续 delta 才会写进正确的分块而不是错位或伪造缺口。
+  final int summaryChunkBase;
+  final int contentChunkBase;
 }
 
 final class ThreadSkillItemStateView extends ThreadItemStateView {
@@ -510,6 +524,8 @@ class ThreadItemView {
     required this.updatedAt,
     required this.state,
     this.contextDisposition = ThreadContextDisposition.active,
+    this.bodyOmittedUnits = 0,
+    this.bodyLoaded = false,
   });
 
   final String id;
@@ -521,6 +537,15 @@ class ThreadItemView {
   final DateTime updatedAt;
   final ThreadItemStateView state;
   final ThreadContextDisposition contextDisposition;
+
+  /// 正文被客户端预算省略的 code units；0 表示内存里的正文是完整的。
+  final int bodyOmittedUnits;
+
+  /// 只有用户显式回源（`loadItemBody`）后为 true：完整正文才会驻留并整篇渲染。
+  final bool bodyLoaded;
+
+  /// 条目正文超过预算、只以有界预览驻留：需要显式回源完整正文。
+  bool get bodyPreviewed => bodyOmittedUnits > 0 && !bodyLoaded;
 
   ThreadItemKind get kind => switch (state) {
     ThreadTextItemStateView(:final channel) =>
@@ -758,8 +783,10 @@ class ThreadItemView {
     if (nextRevision <= revision) {
       return this;
     }
-    final nextState = switch ((state, delta)) {
-      (
+    ThreadItemStateView? nextState;
+    var nextOmittedUnits = bodyOmittedUnits;
+    switch ((state, delta)) {
+      case (
         ThreadTextItemStateView(
           :final channel,
           :final text,
@@ -767,66 +794,115 @@ class ThreadItemView {
           lifecycle: StreamingThreadContentView(),
         ),
         ThreadTextDeltaView(:final delta),
-      ) =>
-        ThreadTextItemStateView(
+      ):
+        final bounded = _boundedBodyAppend(text, delta, bodyOmittedUnits);
+        nextState = ThreadTextItemStateView(
           channel: channel,
-          text: '$text$delta',
+          text: bounded.text,
           attachments: attachments,
           lifecycle: const StreamingThreadContentView(),
-        ),
-      (
+        );
+        nextOmittedUnits = bounded.omittedUnits;
+      case (
         ThreadThinkingItemStateView(
           :final summary,
           :final content,
+          :final summaryChunkBase,
+          :final contentChunkBase,
           lifecycle: StreamingThreadContentView(),
         ),
         ThreadThinkingSummaryDeltaView(:final chunkIndex, :final delta),
-      ) =>
-        ThreadThinkingItemStateView(
-          summary: _appendChunk(summary, chunkIndex, delta),
+      ):
+        final bounded = _boundedReasoningAppend(
+          summary: summary,
+          summaryChunkBase: summaryChunkBase,
           content: content,
+          contentChunkBase: contentChunkBase,
+          toSummary: true,
+          chunkIndex: chunkIndex,
+          delta: delta,
+          omittedUnits: bodyOmittedUnits,
+        );
+        nextState = ThreadThinkingItemStateView(
+          summary: bounded.summary,
+          content: bounded.content,
+          summaryChunkBase: bounded.summaryChunkBase,
+          contentChunkBase: bounded.contentChunkBase,
           lifecycle: const StreamingThreadContentView(),
-        ),
-      (
+        );
+        nextOmittedUnits = bounded.omittedUnits;
+      case (
         ThreadThinkingItemStateView(
           :final summary,
           :final content,
+          :final summaryChunkBase,
+          :final contentChunkBase,
           lifecycle: StreamingThreadContentView(),
         ),
         ThreadThinkingContentDeltaView(:final chunkIndex, :final delta),
-      ) =>
-        ThreadThinkingItemStateView(
+      ):
+        final bounded = _boundedReasoningAppend(
           summary: summary,
-          content: _appendChunk(content, chunkIndex, delta),
+          summaryChunkBase: summaryChunkBase,
+          content: content,
+          contentChunkBase: contentChunkBase,
+          toSummary: false,
+          chunkIndex: chunkIndex,
+          delta: delta,
+          omittedUnits: bodyOmittedUnits,
+        );
+        nextState = ThreadThinkingItemStateView(
+          summary: bounded.summary,
+          content: bounded.content,
+          summaryChunkBase: bounded.summaryChunkBase,
+          contentChunkBase: bounded.contentChunkBase,
           lifecycle: const StreamingThreadContentView(),
-        ),
-      (
+        );
+        nextOmittedUnits = bounded.omittedUnits;
+      case (
         ThreadToolItemStateView(
           :final invocation,
           lifecycle: StartedThreadToolView() || StreamingThreadToolView(),
         ),
         ThreadToolArgumentsDeltaView(:final delta),
-      ) =>
-        ThreadToolItemStateView(
-          invocation: invocation.withArguments('${invocation.arguments}$delta'),
+      ):
+        final bounded = _boundedBodyAppend(
+          invocation.arguments,
+          delta,
+          bodyOmittedUnits,
+        );
+        nextState = ThreadToolItemStateView(
+          invocation: invocation.withArguments(bounded.text),
           lifecycle: const StreamingThreadToolView(),
-        ),
-      (
+        );
+        nextOmittedUnits = bounded.omittedUnits;
+      case (
         ThreadToolItemStateView(
           :final invocation,
           lifecycle: RunningThreadToolView(:final streamedOutput),
         ),
         ThreadToolResultDeltaView(:final delta),
-      ) =>
-        ThreadToolItemStateView(
+      ):
+        final bounded = _boundedBodyAppend(
+          streamedOutput,
+          delta,
+          bodyOmittedUnits,
+        );
+        nextState = ThreadToolItemStateView(
           invocation: invocation,
-          lifecycle: RunningThreadToolView('$streamedOutput$delta'),
-        ),
-      _ => null,
-    };
+          lifecycle: RunningThreadToolView(bounded.text),
+        );
+        nextOmittedUnits = bounded.omittedUnits;
+      default:
+        nextState = null;
+    }
     return nextState == null
         ? null
-        : copyWith(revision: nextRevision, state: nextState);
+        : copyWith(
+            revision: nextRevision,
+            state: nextState,
+            bodyOmittedUnits: nextOmittedUnits,
+          );
   }
 
   ThreadItemView copyWith({
@@ -835,6 +911,8 @@ class ThreadItemView {
     DateTime? updatedAt,
     ThreadItemStateView? state,
     ThreadContextDisposition? contextDisposition,
+    int? bodyOmittedUnits,
+    bool? bodyLoaded,
   }) {
     return ThreadItemView(
       id: id,
@@ -846,6 +924,8 @@ class ThreadItemView {
       updatedAt: updatedAt ?? this.updatedAt,
       state: state ?? this.state,
       contextDisposition: contextDisposition ?? this.contextDisposition,
+      bodyOmittedUnits: bodyOmittedUnits ?? this.bodyOmittedUnits,
+      bodyLoaded: bodyLoaded ?? this.bodyLoaded,
     );
   }
 }
@@ -858,59 +938,50 @@ class ThreadWorkspace {
     required this.interactions,
     required this.runtime,
     this.activeTurn,
-    this.observedLastTurn,
+    this.latestTurn,
     this.cachedItems = const {},
     this.latestItemIds = const [],
     this.timelineTurns = const {},
     this.todo,
   });
 
+  /// Thread 身份；由 Thread directory 重绑，不作为 mode/role/status 的事实源。
   final StudioThread thread;
+
+  /// 当前状态 revision（snapshot 与实时事件共用）；历史页 watermark 不属于它。
   final int revision;
+
+  /// 有界 Timeline 窗口：只由历史页与实时事件维护，snapshot 不携带条目。
   final List<ThreadItemView> items;
   final List<PendingInteraction> interactions;
   final ThreadRuntimeView runtime;
+
+  /// 当前执行中的 Turn；Terminal Turn 不留在当前状态里。
   final StudioTurnView? activeTurn;
-  final StudioTurnView? observedLastTurn;
+
+  /// 最近一次已知 Turn 事实（live turn 通知或历史页 turn 摘要）。
+  final StudioTurnView? latestTurn;
+
+  /// 窗口与实时尾部条目的载荷；窗口外可回源，实时尾部用于回到最新。
   final Map<String, ThreadItemView> cachedItems;
+
+  /// 窗口之外的实时条目（detached 期间追加），按 ordinal 升序。
   final List<String> latestItemIds;
+
+  /// 窗口覆盖的 Turn 摘要（来自历史页），用于行投影与终态行去重。
   final Map<String, TimelineTurnView> timelineTurns;
   List<ThreadItemView> get latestItems => [
     for (final id in latestItemIds) ?cachedItems[id],
   ];
   final TimelineTodoListUpdate? todo;
 
-  /// Canonical latest turn, including terminal facts carried by thread items.
+  /// 最近 Turn 事实：当前执行的 Turn 不早于已观测到的终态 Turn。
   StudioTurnView? get lastTurn {
-    var observed = observedLastTurn;
+    final observed = latestTurn;
     final active = activeTurn;
-    if (active != null &&
-        (observed == null || active.revision > observed.revision)) {
-      observed = active;
-    }
-    ThreadItemView? latest;
-    for (final item in items) {
-      if (item.state is ThreadTurnItemStateView &&
-          (latest == null ||
-              item.ordinal > latest.ordinal ||
-              (item.ordinal == latest.ordinal &&
-                  item.revision > latest.revision))) {
-        latest = item;
-      }
-    }
-    if (latest == null ||
-        (observed != null && observed.revision >= latest.revision)) {
-      return observed;
-    }
-    final state = latest.state as ThreadTurnItemStateView;
-    return StudioTurnView(
-      inputId: state.inputId,
-      turnId: latest.turnId,
-      threadId: latest.threadId,
-      revision: latest.revision,
-      state: state.state,
-      updatedAt: latest.updatedAt,
-    );
+    if (active == null) return observed;
+    if (observed == null || active.revision >= observed.revision) return active;
+    return observed;
   }
 
   ThreadWorkspace copyWith({
@@ -920,7 +991,7 @@ class ThreadWorkspace {
     List<PendingInteraction>? interactions,
     ThreadRuntimeView? runtime,
     Object? activeTurn = _workspaceUnset,
-    Object? observedLastTurn = _workspaceUnset,
+    Object? latestTurn = _workspaceUnset,
     Map<String, ThreadItemView>? cachedItems,
     List<String>? latestItemIds,
     Map<String, TimelineTurnView>? timelineTurns,
@@ -938,9 +1009,9 @@ class ThreadWorkspace {
       activeTurn: identical(activeTurn, _workspaceUnset)
           ? this.activeTurn
           : activeTurn as StudioTurnView?,
-      observedLastTurn: identical(observedLastTurn, _workspaceUnset)
-          ? this.observedLastTurn
-          : observedLastTurn as StudioTurnView?,
+      latestTurn: identical(latestTurn, _workspaceUnset)
+          ? this.latestTurn
+          : latestTurn as StudioTurnView?,
       todo: identical(todo, _workspaceUnset)
           ? this.todo
           : todo as TimelineTodoListUpdate?,
@@ -1023,6 +1094,13 @@ class ThreadHistoryWindow {
     this.newerError,
     this.detached = false,
     this.anchor,
+    this.databaseId = '',
+    this.appliedWriteSequence = 0,
+    this.previewedItemIds = const {},
+    this.loadingItemIds = const {},
+    this.itemBodyErrors = const {},
+    this.pendingItemBodyIds = const {},
+    this.unavailableItemIds = const {},
   });
   final bool hasOlder;
   final bool hasNewer;
@@ -1035,6 +1113,30 @@ class ThreadHistoryWindow {
   final String? newerError;
   final bool detached;
   final TimelineAnchor? anchor;
+
+  /// 当前窗口来自哪个 history 数据库实体；与页的 databaseId 不一致表示窗口过期。
+  final String databaseId;
+
+  /// 当前窗口已采纳的 applied write sequence；比它更旧的历史页必须拒绝。
+  final int appliedWriteSequence;
+
+  /// 窗口内因超单条预览预算而只以预览呈现的条目 ID。
+  final Set<String> previewedItemIds;
+
+  /// 正在按 item identity 回源完整正文的条目 ID。
+  final Set<String> loadingItemIds;
+
+  /// 回源完整正文失败的条目 ID 与其错误文案；下次成功回源时清除。
+  final Map<String, String> itemBodyErrors;
+
+  /// 回源请求已发出、但完整正文尚未可取（例如历史事务尚未 durable）的条目 ID。
+  ///
+  /// 这类条目**仍然可见可重试**：数据源没有给出完整正文，也没说身份不存在，因此只是
+  /// “在途/尚未落盘”，不能像 [unavailableItemIds] 那样永久禁用入口。
+  final Set<String> pendingItemBodyIds;
+
+  /// 数据源明确无法解析该身份（真正缺席）的条目 ID；这些条目不再假装可回源。
+  final Set<String> unavailableItemIds;
   ThreadHistoryWindow copyWith({
     bool? hasOlder,
     bool? hasNewer,
@@ -1047,6 +1149,13 @@ class ThreadHistoryWindow {
     Object? newerError = _workspaceUnset,
     bool? detached,
     Object? anchor = _workspaceUnset,
+    String? databaseId,
+    int? appliedWriteSequence,
+    Set<String>? previewedItemIds,
+    Set<String>? loadingItemIds,
+    Map<String, String>? itemBodyErrors,
+    Set<String>? pendingItemBodyIds,
+    Set<String>? unavailableItemIds,
   }) => ThreadHistoryWindow(
     hasOlder: hasOlder ?? this.hasOlder,
     hasNewer: hasNewer ?? this.hasNewer,
@@ -1069,21 +1178,327 @@ class ThreadHistoryWindow {
     anchor: identical(anchor, _workspaceUnset)
         ? this.anchor
         : anchor as TimelineAnchor?,
+    databaseId: databaseId ?? this.databaseId,
+    appliedWriteSequence: appliedWriteSequence ?? this.appliedWriteSequence,
+    previewedItemIds: previewedItemIds ?? this.previewedItemIds,
+    loadingItemIds: loadingItemIds ?? this.loadingItemIds,
+    itemBodyErrors: itemBodyErrors ?? this.itemBodyErrors,
+    pendingItemBodyIds: pendingItemBodyIds ?? this.pendingItemBodyIds,
+    unavailableItemIds: unavailableItemIds ?? this.unavailableItemIds,
   );
 }
 
 const _workspaceUnset = Object();
 
-List<String> _appendChunk(List<String> current, int chunkIndex, String delta) {
-  if (chunkIndex < 0 || chunkIndex > current.length) {
+/// 把一条从历史页/流进入客户端的条目收敛到客户端预算。
+///
+/// [previewOmittedUnits] 是该页声明的既有省略量（协议单条预览）：正文本身没有
+/// 超过预算时它归零（该页已给出完整正文），超过预算时保留尾部并按实际丢弃量累计。
+/// 已由用户显式回源（`bodyLoaded`）的条目保持完整正文，绝不被再次压缩。
+ThreadItemView boundThreadItemBody(
+  ThreadItemView item, {
+  int previewOmittedUnits = 0,
+}) {
+  if (item.bodyLoaded) return item;
+  switch (item.state) {
+    case ThreadTextItemStateView(
+      :final channel,
+      :final text,
+      :final attachments,
+      :final lifecycle,
+    ):
+      final bounded = _boundedTail(text, previewOmittedUnits);
+      return item.copyWith(
+        state: ThreadTextItemStateView(
+          channel: channel,
+          text: bounded.text,
+          attachments: attachments,
+          lifecycle: lifecycle,
+        ),
+        bodyOmittedUnits: bounded.omittedUnits,
+      );
+    case ThreadThinkingItemStateView(
+      :final summary,
+      :final content,
+      :final lifecycle,
+    ):
+      // 页/终态载荷是权威的完整分块序列：逻辑下标从 0 重新计算，两通道共享预算。
+      final bounded = _boundedReasoningChannels(
+        summary: summary,
+        summaryChunkBase: 0,
+        content: content,
+        contentChunkBase: 0,
+        omittedUnits: previewOmittedUnits,
+      );
+      return item.copyWith(
+        state: ThreadThinkingItemStateView(
+          summary: bounded.summary,
+          content: bounded.content,
+          summaryChunkBase: bounded.summaryChunkBase,
+          contentChunkBase: bounded.contentChunkBase,
+          lifecycle: lifecycle,
+        ),
+        bodyOmittedUnits: bounded.omittedUnits,
+      );
+    case ThreadToolItemStateView(:final invocation, :final lifecycle):
+      final boundedArguments = _boundedTail(
+        invocation.arguments,
+        previewOmittedUnits,
+      );
+      final boundedCall = _boundToolLifecycle(lifecycle);
+      return item.copyWith(
+        state: ThreadToolItemStateView(
+          invocation: invocation.withArguments(boundedArguments.text),
+          lifecycle: boundedCall.lifecycle,
+        ),
+        bodyOmittedUnits:
+            boundedArguments.omittedUnits + boundedCall.omittedUnits,
+      );
+    default:
+      return item;
+  }
+}
+
+({ThreadToolLifecycleView lifecycle, int omittedUnits}) _boundToolLifecycle(
+  ThreadToolLifecycleView lifecycle,
+) {
+  switch (lifecycle) {
+    case RunningThreadToolView(:final streamedOutput):
+      final bounded = _boundedTail(streamedOutput, 0);
+      return (
+        lifecycle: RunningThreadToolView(bounded.text),
+        omittedUnits: bounded.omittedUnits,
+      );
+    case CancellingThreadToolView(:final streamedOutput):
+      final bounded = _boundedTail(streamedOutput, 0);
+      return (
+        lifecycle: CancellingThreadToolView(bounded.text),
+        omittedUnits: bounded.omittedUnits,
+      );
+    case SucceededThreadToolView(:final completedAt, :final output):
+      final bounded = _boundedTail(output.result, 0);
+      return (
+        lifecycle: SucceededThreadToolView(
+          completedAt,
+          ThreadToolOutputView(
+            result: bounded.text,
+            attachments: output.attachments,
+            outputArtifacts: output.outputArtifacts,
+            exitCode: output.exitCode,
+          ),
+        ),
+        omittedUnits: bounded.omittedUnits,
+      );
+    case FailedThreadToolView(:final failedAt, :final failure, :final output):
+      final bounded = _boundedTail(output?.result ?? '', 0);
+      return (
+        lifecycle: FailedThreadToolView(
+          failedAt,
+          failure,
+          output == null
+              ? null
+              : ThreadToolOutputView(
+                  result: bounded.text,
+                  attachments: output.attachments,
+                  outputArtifacts: output.outputArtifacts,
+                  exitCode: output.exitCode,
+                ),
+        ),
+        omittedUnits: bounded.omittedUnits,
+      );
+    default:
+      return (lifecycle: lifecycle, omittedUnits: 0);
+  }
+}
+
+/// 保留 [text] 的尾部并在 [baseOmittedUnits] 之上累计丢弃量。
+({String text, int omittedUnits}) _boundedTail(
+  String text,
+  int baseOmittedUnits,
+) {
+  final drop = text.length - kTimelineItemBodyBudget;
+  if (drop <= 0) return (text: text, omittedUnits: baseOmittedUnits);
+  var start = drop;
+  while (start < text.length && _isLowSurrogate(text.codeUnitAt(start))) {
+    start += 1;
+  }
+  return (text: text.substring(start), omittedUnits: baseOmittedUnits + start);
+}
+
+/// 流式追加：先拼接再收敛，因此内存/渲染/序列化只与 delta 和预算同阶。
+({String text, int omittedUnits}) _boundedBodyAppend(
+  String current,
+  String delta,
+  int omittedUnits,
+) {
+  final combined = current.isEmpty ? delta : '$current$delta';
+  final drop = combined.length - kTimelineItemBodyBudget;
+  if (drop <= 0) return (text: combined, omittedUnits: omittedUnits);
+  var start = drop;
+  while (start < combined.length &&
+      _isLowSurrogate(combined.codeUnitAt(start))) {
+    start += 1;
+  }
+  return (text: combined.substring(start), omittedUnits: omittedUnits + start);
+}
+
+/// 推理条目的流式追加：summary/content 共享一个正文预算。
+///
+/// 生产者 chunkIndex 是逻辑下标；本地列表只保留最近的尾部，靠 `*ChunkBase` 还原
+/// 下标，因此被丢弃分块之后的 delta 仍然写进正确分块，也不会把缺块误判成新块。
+/// 属于已丢弃分块的 delta 只累计省略量（内容仍在 canonical 历史里，可回源）。
+({
+  List<String> summary,
+  int summaryChunkBase,
+  List<String> content,
+  int contentChunkBase,
+  int omittedUnits,
+})
+_boundedReasoningAppend({
+  required List<String> summary,
+  required int summaryChunkBase,
+  required List<String> content,
+  required int contentChunkBase,
+  required bool toSummary,
+  required int chunkIndex,
+  required String delta,
+  required int omittedUnits,
+}) {
+  var nextSummary = summary;
+  var nextContent = content;
+  var omitted = omittedUnits;
+  final appended = _appendChunkAt(
+    toSummary ? summary : content,
+    toSummary ? summaryChunkBase : contentChunkBase,
+    chunkIndex,
+    delta,
+  );
+  if (appended == null) {
+    omitted += delta.length;
+  } else if (toSummary) {
+    nextSummary = appended;
+  } else {
+    nextContent = appended;
+  }
+  return _boundedReasoningChannels(
+    summary: nextSummary,
+    summaryChunkBase: summaryChunkBase,
+    content: nextContent,
+    contentChunkBase: contentChunkBase,
+    omittedUnits: omitted,
+  );
+}
+
+/// 把 delta 写入逻辑 [chunkIndex] 对应的本地分块。
+///
+/// 返回 null 表示该逻辑分块已不在保留窗口内（内容只累计省略量）；逻辑下标超出本地
+/// 列表尾部意味着生产者真的缺块，仍抛出以保持既有缺口保护。
+List<String>? _appendChunkAt(
+  List<String> chunks,
+  int chunkBase,
+  int chunkIndex,
+  String delta,
+) {
+  final local = chunkIndex - chunkBase;
+  if (local < 0) return null;
+  if (local > chunks.length) {
     throw StateError('Thread Item delta skipped an earlier chunk');
   }
-  if (chunkIndex == current.length) {
-    return [...current, delta];
+  if (local == chunks.length) {
+    return [...chunks, delta];
   }
   return [
-    ...current.take(chunkIndex),
-    '${current[chunkIndex]}$delta',
-    ...current.skip(chunkIndex + 1),
+    ...chunks.take(local),
+    '${chunks[local]}$delta',
+    ...chunks.skip(local + 1),
   ];
 }
+
+/// summary 与 content 合计不得超过 [kTimelineItemBodyBudget]。
+///
+/// 超出时从保留内容更多的一侧先丢弃最旧内容（整块优先，再裁首块头部），两个通道
+/// 都保留最近的尾部，省略量精确累计。
+({
+  List<String> summary,
+  int summaryChunkBase,
+  List<String> content,
+  int contentChunkBase,
+  int omittedUnits,
+})
+_boundedReasoningChannels({
+  required List<String> summary,
+  required int summaryChunkBase,
+  required List<String> content,
+  required int contentChunkBase,
+  required int omittedUnits,
+}) {
+  var nextSummary = summary;
+  var nextSummaryBase = summaryChunkBase;
+  var nextContent = content;
+  var nextContentBase = contentChunkBase;
+  var omitted = omittedUnits;
+  while (true) {
+    final summaryLength = _chunksLength(nextSummary);
+    final contentLength = _chunksLength(nextContent);
+    final excess = summaryLength + contentLength - kTimelineItemBodyBudget;
+    if (excess <= 0) break;
+    if (summaryLength >= contentLength && summaryLength > 0) {
+      final dropped = _dropChunksHead(nextSummary, nextSummaryBase, excess);
+      nextSummary = dropped.chunks;
+      nextSummaryBase = dropped.chunkBase;
+      omitted += dropped.droppedUnits;
+    } else if (contentLength > 0) {
+      final dropped = _dropChunksHead(nextContent, nextContentBase, excess);
+      nextContent = dropped.chunks;
+      nextContentBase = dropped.chunkBase;
+      omitted += dropped.droppedUnits;
+    } else {
+      break;
+    }
+  }
+  return (
+    summary: nextSummary,
+    summaryChunkBase: nextSummaryBase,
+    content: nextContent,
+    contentChunkBase: nextContentBase,
+    omittedUnits: omitted,
+  );
+}
+
+({List<String> chunks, int chunkBase, int droppedUnits}) _dropChunksHead(
+  List<String> chunks,
+  int chunkBase,
+  int units,
+) {
+  var remaining = units;
+  var dropped = 0;
+  var index = 0;
+  while (index < chunks.length && remaining >= chunks[index].length) {
+    remaining -= chunks[index].length;
+    dropped += chunks[index].length;
+    index += 1;
+  }
+  var kept = chunks.sublist(index);
+  if (remaining > 0 && kept.isNotEmpty) {
+    final head = kept.first;
+    var start = remaining;
+    while (start < head.length && _isLowSurrogate(head.codeUnitAt(start))) {
+      start += 1;
+    }
+    if (start > head.length) start = head.length;
+    dropped += start;
+    kept = [head.substring(start), ...kept.skip(1)];
+  }
+  return (chunks: kept, chunkBase: chunkBase + index, droppedUnits: dropped);
+}
+
+int _chunksLength(List<String> chunks) {
+  var total = 0;
+  for (final chunk in chunks) {
+    total += chunk.length;
+  }
+  return total;
+}
+
+/// 代理对不能被切开：按 code unit 截断时跳过落在低位代理上的起点。
+bool _isLowSurrogate(int codeUnit) => codeUnit >= 0xDC00 && codeUnit <= 0xDFFF;

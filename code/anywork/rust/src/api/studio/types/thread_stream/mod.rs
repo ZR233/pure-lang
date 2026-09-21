@@ -21,6 +21,10 @@ pub enum BridgeThreadSubscriptionUpdate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeThreadNotificationEnvelope {
     pub thread_id: String,
+    /// 生产端一次连续广播生命周期的标识；与上一条不一致时客户端丢弃旧帧。
+    pub epoch: u64,
+    /// 本通知之前的状态水位；与客户端已知水位不一致即表示缺口。
+    pub base_revision: u64,
     pub revision: u64,
     pub emitted_at: i64,
     pub notification: BridgeThreadNotification,
@@ -63,11 +67,6 @@ pub struct BridgeThreadSnapshot {
     pub revision: u64,
     pub thread: BridgeThread,
     pub active_turn: Option<BridgeTurn>,
-    pub items: Vec<BridgeThreadItem>,
-    pub timeline_turns: Vec<super::BridgeTimelineTurn>,
-    pub last_turn: Option<BridgeTurn>,
-    /// 更旧历史的回源锚点（窗口首 item 的 id，before 语义）；None 表示无更旧内容。
-    pub history_cursor: Option<String>,
     pub interactions: Vec<BridgeInteractionRequest>,
     pub runtime: Option<BridgeThreadRuntimeSnapshot>,
     pub runtime_availability: BridgeThreadRuntimeAvailability,

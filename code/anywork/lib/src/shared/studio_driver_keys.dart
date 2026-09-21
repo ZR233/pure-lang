@@ -5,6 +5,16 @@ import 'package:flutter/foundation.dart';
 abstract final class StudioDriverKeys {
   static const shell = ValueKey<String>('studio-shell');
   static const startPage = ValueKey<String>('studio-start-page');
+
+  /// 已选中但尚未打开的会话占位；首屏恢复的选择不自动打开会话（§6.1）。
+  static const unopenedThread = ValueKey<String>('studio-unopened-thread');
+
+  /// 未打开会话的显式打开入口（与具体 thread id 无关，便于驱动/测试定位）。
+  static const openSelectedThread = ValueKey<String>(
+    'studio-open-selected-thread',
+  );
+  static ValueKey<String> openThread(String id) =>
+      ValueKey<String>('studio-open-thread-$id');
   static const sidebar = ValueKey<String>('studio-sidebar');
   static const timeline = ValueKey<String>('timeline-scrollable');
   static ValueKey<String> timelineRow(String id) =>
@@ -199,6 +209,22 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> timelineSkillActivation(String id) =>
       ValueKey<String>('timeline-skill-activation-$id');
+
+  /// 页面只返回预览的超大条目：按 identity 回源完整正文的入口。
+  static ValueKey<String> timelineItemBodyNotice(String id) =>
+      ValueKey<String>('timeline-item-body-notice-$id');
+  static ValueKey<String> timelineItemBodyLoad(String id) =>
+      ValueKey<String>('timeline-item-body-load-$id');
+  static ValueKey<String> timelineItemBodyRetry(String id) =>
+      ValueKey<String>('timeline-item-body-retry-$id');
+
+  /// 持久化队列压力诊断块（状态/history/calls 水位、字节、年龄、压力、错误）。
+  static const persistenceQueueDiagnostics = ValueKey<String>(
+    'persistence-queue-diagnostics',
+  );
+  static const persistenceQueueRefresh = ValueKey<String>(
+    'persistence-queue-refresh',
+  );
 
   static ValueKey<String> statusActiveSkill(String name) =>
       ValueKey<String>('status-active-skill-$name');

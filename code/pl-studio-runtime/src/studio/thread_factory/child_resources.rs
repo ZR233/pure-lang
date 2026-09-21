@@ -79,12 +79,7 @@ impl StudioChildResources for StudioThreadFactory {
             }
         })
         .with_lsp_runtime(Some(self.services.lsp_runtime.clone()));
-        let store = FileResourceStore::new(
-            self.services
-                .store
-                .attachments_dir()
-                .join("thread-resources"),
-        );
+        let store = FileResourceStore::new(self.services.store.session_resources_dir(&request.id));
         let prepared_tools = self
             .prepare_thread_tools(super::thread_tools::ThreadToolAssembly {
                 thread_id: &request.id,
@@ -170,6 +165,15 @@ impl StudioChildResources for StudioThreadFactory {
                 .record(lease)
                 .map_err(|error| resource_error("activate workspace lease", error))?;
         }
+        let persisted_thread = self
+            .services
+            .product_events
+            .thread_snapshot(&request.id)
+            .ok_or_else(|| ThreadAssemblyError::Identity(request.id.clone()))?;
+        let persistence = crate::studio::storage::thread_writer::ThreadStorageSink::new(
+            self.services.store.clone(),
+            persisted_thread,
+        );
         let spec = StudioThreadSpec {
             context_preparation: crate::compaction::preparer(
                 &profile.route,
@@ -184,15 +188,13 @@ impl StudioChildResources for StudioThreadFactory {
             route: profile.route.clone(),
             model_available: true,
             hosted_tools: prepared_tools.hosted,
-            history: Vec::new(),
+            checkpoint: None,
             tools: Vec::new(),
             initial_context,
             initial_extensions,
             resources: ResourceAccess::new(store),
             capacity: Default::default(),
-            cold_store: Some(pl_core::thread::cold::ColdStoreHandle::new(
-                self.services.store.sessions().clone(),
-            )),
+            cold_store: Some(pl_core::thread::cold::ColdStoreHandle::new(persistence)),
         };
         Ok(prepared_tools.tools.install(spec))
     }
@@ -434,6 +436,5 @@ mod tests {
             WorktreeLeaseState::Cleaned
         );
         writer.shutdown().await.unwrap();
-        store.sessions().shutdown().await.unwrap();
     }
 }

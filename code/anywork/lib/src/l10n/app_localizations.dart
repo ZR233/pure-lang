@@ -332,24 +332,6 @@ abstract class AppLocalizations {
   /// **'Retry'**
   String get runtimeFatalRetry;
 
-  /// No description provided for @configRecoveryMessage.
-  ///
-  /// In en, this message translates to:
-  /// **'An incompatible configuration was backed up and replaced with current defaults.'**
-  String get configRecoveryMessage;
-
-  /// No description provided for @configRecoveryBackupPath.
-  ///
-  /// In en, this message translates to:
-  /// **'Backup: {path}'**
-  String configRecoveryBackupPath(String path);
-
-  /// No description provided for @configRecoveryDismissTooltip.
-  ///
-  /// In en, this message translates to:
-  /// **'Dismiss configuration recovery notice'**
-  String get configRecoveryDismissTooltip;
-
   /// No description provided for @persistenceDegraded.
   ///
   /// In en, this message translates to:
@@ -373,6 +355,108 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Retry saving'**
   String get persistenceRetry;
+
+  /// No description provided for @threadUnopenedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Session not opened yet'**
+  String get threadUnopenedTitle;
+
+  /// No description provided for @threadUnopenedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This session is only selected. Open it to load its current state and history; nothing resumes until you send a message.'**
+  String get threadUnopenedBody;
+
+  /// No description provided for @threadOpenAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Open session'**
+  String get threadOpenAction;
+
+  /// No description provided for @timelineItemBodyLoad.
+  ///
+  /// In en, this message translates to:
+  /// **'Load full content'**
+  String get timelineItemBodyLoad;
+
+  /// No description provided for @timelineItemBodyTruncated.
+  ///
+  /// In en, this message translates to:
+  /// **'This page shows a truncated preview of a large item.'**
+  String get timelineItemBodyTruncated;
+
+  /// No description provided for @timelineItemBodyLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading full content…'**
+  String get timelineItemBodyLoading;
+
+  /// No description provided for @timelineItemBodyPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Full content is not durable yet; retry shortly.'**
+  String get timelineItemBodyPending;
+
+  /// No description provided for @timelineItemBodyRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get timelineItemBodyRetry;
+
+  /// No description provided for @timelineItemBodyUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Full content is unavailable from this data source.'**
+  String get timelineItemBodyUnavailable;
+
+  /// No description provided for @persistenceQueueTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Persistence diagnostics'**
+  String get persistenceQueueTitle;
+
+  /// No description provided for @persistenceQueueUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue pressure is unavailable from this data source.'**
+  String get persistenceQueueUnavailable;
+
+  /// No description provided for @persistenceQueuePending.
+  ///
+  /// In en, this message translates to:
+  /// **'Queued: {operations} operation(s), {bytes} byte(s)'**
+  String persistenceQueuePending(int operations, int bytes);
+
+  /// No description provided for @persistenceQueueInFlight.
+  ///
+  /// In en, this message translates to:
+  /// **'Writing: {bytes} byte(s)'**
+  String persistenceQueueInFlight(int bytes);
+
+  /// No description provided for @persistenceQueueOldestAge.
+  ///
+  /// In en, this message translates to:
+  /// **'Oldest unsaved: {millis} ms'**
+  String persistenceQueueOldestAge(int millis);
+
+  /// No description provided for @persistenceQueuePressurePaused.
+  ///
+  /// In en, this message translates to:
+  /// **'New inference admission is paused under storage pressure.'**
+  String get persistenceQueuePressurePaused;
+
+  /// No description provided for @persistenceQueueError.
+  ///
+  /// In en, this message translates to:
+  /// **'Last error: {message}'**
+  String persistenceQueueError(String message);
+
+  /// No description provided for @persistenceQueueRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh diagnostics'**
+  String get persistenceQueueRefresh;
 
   /// No description provided for @recoveryGlobalWarning.
   ///

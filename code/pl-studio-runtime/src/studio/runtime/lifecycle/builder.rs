@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::config::{ConfigPaths, ConfigRuntime, ConfigStore};
+use crate::config::{ConfigRuntime, ConfigStore};
 use crate::studio::agent_host::ThreadWriteBehindWriter;
 use crate::studio::runtime_lock::{RuntimeLock, RuntimeLockOwner};
 use crate::studio::{ProductEventBus, StudioRuntimeState, StudioStore};
@@ -49,12 +49,13 @@ impl StudioRuntime {
                     pl_protocol::studio::StudioError::internal()
                 })??;
         drop(lock_timing);
-        let reset_path = resolved.paths.database();
-        // Once reset starts, its task retains the exclusive owner through every backup/marker IO.
-        // Dropping the startup waiter must not release the lock while blocking filesystem work runs.
+        let migration_paths = resolved.paths.clone();
+        // Once migration starts, its task retains the exclusive owner through every backup/marker
+        // IO. Dropping the startup waiter must not release the lock while blocking filesystem work
+        // runs.
         let reset_timing = crate::startup_timing::Stage::new("inspect_storage_versions");
         let instance_lock = tokio::spawn(async move {
-            crate::studio::session_migration::prepare(&reset_path, &instance_lock).await?;
+            crate::studio::session_migration::prepare(migration_paths, &instance_lock).await?;
             Ok::<_, anyhow::Error>(instance_lock)
         })
         .await
@@ -77,9 +78,7 @@ impl StudioRuntime {
         drop(database_timing);
         observer(crate::StudioStartupStage::LoadingConfiguration);
         let config_store = match host {
-            crate::StudioHostKind::Test => ConfigStore::new(ConfigPaths::from_config_dir(
-                resolved.paths.home().to_path_buf(),
-            )),
+            crate::StudioHostKind::Test => ConfigStore::new(resolved.paths.config_paths()),
             crate::StudioHostKind::Desktop | crate::StudioHostKind::HttpServer => {
                 ConfigStore::for_studio_home(resolved.paths.home().to_path_buf())
             }
@@ -119,8 +118,7 @@ impl StudioRuntime {
         // ThreadRepository 共用同一 write-behind 队列。
         let writer = ThreadWriteBehindWriter::new(store.clone());
         let product_events = ProductEventBus::new(store.clone(), writer.clone());
-        let model_performance =
-            ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events.clone());
+        let model_performance = ModelPerformanceOwner::new(store.clone(), product_events.clone());
         let ssh_manager = std::sync::Arc::new(crate::worker_assets::ssh_manager());
         let worktrees =
             crate::studio::agent_host::worktree_lease::WorktreeLeaseOwner::new(writer.clone());
@@ -130,8 +128,7 @@ impl StudioRuntime {
         let updater = StudioUpdateRuntime::new(store.clone(), product_events.clone())?;
         let mcp_state = McpStateRuntime::new();
         let lsp_state = LspStateRuntime::new(product_events.clone());
-        let attachment_drafts =
-            AttachmentDraftRuntime::new(store.attachments_dir().join("drafts"))?;
+        let attachment_drafts = AttachmentDraftRuntime::new(store.attachment_drafts_dir())?;
         let thread_modes = crate::mode::ThreadModeManager::default();
         crate::studio::thread::register_builtins(&thread_modes)?;
         let mcp = McpRuntime::new(McpConnector::default()).handle();

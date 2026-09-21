@@ -1,46 +1,103 @@
-use std::collections::{BTreeMap, VecDeque};
-use std::sync::Arc;
+//! 模型性能/费用的产品投影。
+//!
+//! 每次推理事实以调用身份登记到全局 `calls.sqlite`（单一逻辑 writer 队列，冻结 binding、
+//! 用量、价格、时延），调用库的 `(thread_id, call_id)` 唯一约束是持久 idempotency 的权威来源。
+//! 性能历史、按模型汇总与会话费用都从调用库查询/聚合投影读取，不再从 studio.sqlite 的
+//! `ModelPerformanceState` 历史、无界 fingerprint 集合或内部回执恢复或持久化。
+//!
+//! 进程内只保留固定上限的缓存：单调 revision、更新时间与最近 inference 身份窗口（256 条，
+//! 且不持久化）。执行恢复（`load_cache`）只读取产品对象缓存，完全不读取调用库。
 
-use crate::hash::merge_costs;
-use pl_protocol::{
-    InferenceBillingRecord, InferenceModelObservation, ModelMatchState, RuntimeCostAmount,
-};
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use pl_protocol::{InferenceBillingRecord, InferenceModelObservation, ModelMatchState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::Mutex;
 
-use crate::studio::store::object::{PersistedStudioObject, load_object};
+use crate::studio::storage::calls::{
+    CallRetention, PerformanceSampleRow, PerformanceSummaryRow, PurposeCostRollup,
+    SessionCostRollup,
+};
+use crate::studio::store::object::{PersistedStudioObject, load_object, put_object};
 use crate::studio::{ProductEventBus, StudioStore, unix_seconds};
 use crate::{
     PureError, StudioModelPerformanceSample, StudioModelPerformanceSnapshot,
     StudioModelPerformanceSummary, StudioSessionCostSnapshot,
 };
 
-use super::super::agent_host::ThreadWriteBehindWriter;
-
 pub(in crate::studio) const MODEL_PERFORMANCE_OWNER_ID: &str = "global";
-const CACHE_VERSION: u32 = 3;
+const CACHE_VERSION: u32 = 4;
 const LEGACY_CACHE_VERSION: u32 = 2;
+/// 产品快照返回的性能历史窗口上限；历史事实源是调用库。
 const HISTORY_LIMIT: usize = 1_000;
+/// 内存中保留的最近 inference 身份窗口上限。
+///
+/// 持久 idempotency 已由 `calls.sqlite` 的调用身份唯一约束承担；这里只用于抑制同一
+/// 进程内重复投递，因此必须有界，且不参与持久化。
+const RECENT_IDENTITY_LIMIT: usize = 256;
 
 #[derive(Clone)]
 pub(crate) struct ModelPerformanceOwner {
     state: Arc<Mutex<ModelPerformanceState>>,
     store: StudioStore,
-    writer: ThreadWriteBehindWriter,
     product_events: ProductEventBus,
+    /// 已有刷新任务在跑；避免每次推理都重复整库聚合。
+    refreshing: Arc<AtomicBool>,
+    /// 已受理的最高调用库计费 ticket；刷新与快照只等待这个固定目标。
+    billing_ticket: Arc<AtomicU64>,
+    /// 已持久化的产品对象 revision，避免同一 revision 重复写盘。
+    persisted_revision: Arc<AtomicU64>,
+    /// 串行化产品对象写入，避免刷新任务与显式快照并发写同一 revision。
+    persist_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
+/// 最近 inference 身份窗口（固定上限、不持久化）。
+#[derive(Debug, Clone, Default)]
+struct RecentIdentities {
+    fingerprints: BTreeMap<(String, String), String>,
+    order: VecDeque<(String, String)>,
+}
+
+impl RecentIdentities {
+    fn get(&self, root_thread_id: &str, identity: &str) -> Option<&String> {
+        self.fingerprints
+            .get(&(root_thread_id.to_owned(), identity.to_owned()))
+    }
+
+    fn insert(&mut self, root_thread_id: &str, identity: &str, fingerprint: String) {
+        let key = (root_thread_id.to_owned(), identity.to_owned());
+        if self.fingerprints.insert(key.clone(), fingerprint).is_none() {
+            self.order.push_back(key);
+        }
+        while self.order.len() > RECENT_IDENTITY_LIMIT {
+            if let Some(oldest) = self.order.pop_front() {
+                self.fingerprints.remove(&oldest);
+            }
+        }
+    }
+
+    fn remove_root(&mut self, root_thread_id: &str) {
+        self.fingerprints
+            .retain(|(root, _), _| root != root_thread_id);
+        self.order.retain(|(root, _)| root != root_thread_id);
+    }
+}
+
+/// 模型性能领域的固定上限缓存。
+///
+/// 只保留版本、单调 revision、更新时间与最近身份窗口：历史、汇总、fingerprint 集合与内部
+/// 回执都不在这里持久化，也不从这里恢复（历史/汇总从 `calls.sqlite` 读取，持久幂等由调用身份
+/// 唯一约束承担）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::studio) struct ModelPerformanceState {
     version: u32,
     revision: u64,
     updated_at: i64,
-    #[serde(default)]
-    sessions: BTreeMap<String, SessionCostState>,
-    #[serde(default)]
-    history: VecDeque<PerformanceSample>,
+    #[serde(skip)]
+    recent: RecentIdentities,
 }
 
 /// 仅在 persistence worker 内存在的 object 编码 DTO。
@@ -54,8 +111,7 @@ impl Default for ModelPerformanceState {
             version: CACHE_VERSION,
             revision: 0,
             updated_at: 0,
-            sessions: BTreeMap::new(),
-            history: VecDeque::new(),
+            recent: RecentIdentities::default(),
         }
     }
 }
@@ -80,97 +136,6 @@ impl PersistedStudioObject for ModelPerformanceState {
     }
 }
 
-impl ModelPerformanceState {
-    pub(in crate::studio) const fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    pub(in crate::studio) const fn updated_at(&self) -> i64 {
-        self.updated_at
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionCostState {
-    #[serde(default)]
-    estimated_costs: Vec<RuntimeCostAmount>,
-    #[serde(default)]
-    purpose_costs: Vec<PurposeCostState>,
-    #[serde(default)]
-    has_unpriced_usage: bool,
-    #[serde(default)]
-    inference_fingerprints: BTreeMap<String, String>,
-    #[serde(default)]
-    internal_billing: pl_protocol::TurnBillingRecord,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PurposeCostState {
-    purpose: Option<String>,
-    estimated_costs: Vec<RuntimeCostAmount>,
-    has_unpriced_usage: bool,
-}
-
-impl SessionCostState {
-    fn purpose_costs(&self) -> Vec<PurposeCostState> {
-        if self.purpose_costs.is_empty()
-            && (!self.estimated_costs.is_empty() || self.has_unpriced_usage)
-        {
-            vec![PurposeCostState {
-                purpose: None,
-                estimated_costs: self.estimated_costs.clone(),
-                has_unpriced_usage: self.has_unpriced_usage,
-            }]
-        } else {
-            self.purpose_costs.clone()
-        }
-    }
-
-    fn record_accounting(&mut self, billing: &InferenceBillingRecord) {
-        self.purpose_costs = self.purpose_costs();
-        let index = self
-            .purpose_costs
-            .iter()
-            .position(|cost| cost.purpose == billing.purpose)
-            .unwrap_or_else(|| {
-                self.purpose_costs.push(PurposeCostState {
-                    purpose: billing.purpose.clone(),
-                    ..Default::default()
-                });
-                self.purpose_costs.len() - 1
-            });
-        let costs = billing.accounting.estimated_costs();
-        let unpriced = billing.accounting.has_unpriced_usage();
-        merge_costs(&mut self.estimated_costs, &costs);
-        self.has_unpriced_usage |= unpriced;
-        merge_costs(&mut self.purpose_costs[index].estimated_costs, &costs);
-        self.purpose_costs[index].has_unpriced_usage |= unpriced;
-        self.purpose_costs
-            .sort_by(|left, right| left.purpose.cmp(&right.purpose));
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PerformanceSample {
-    thread_id: String,
-    inference_id: String,
-    completed_at: i64,
-    provider_instance_id: String,
-    provider_display_name: String,
-    model: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    model_observation: Option<InferenceModelObservation>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    reasoning_effort: Option<String>,
-    completion_tokens: u64,
-    ttft_millis: u64,
-    decode_millis: u64,
-    total_response_millis: u64,
-}
-
 #[derive(Clone, Copy)]
 enum BillingRetention {
     Turn,
@@ -178,51 +143,59 @@ enum BillingRetention {
 }
 
 impl ModelPerformanceOwner {
-    pub(in crate::studio) fn new(
-        store: StudioStore,
-        writer: ThreadWriteBehindWriter,
-        product_events: ProductEventBus,
-    ) -> Self {
+    pub(in crate::studio) fn new(store: StudioStore, product_events: ProductEventBus) -> Self {
         Self {
             state: Arc::new(Mutex::new(ModelPerformanceState::default())),
             store,
-            writer,
             product_events,
+            refreshing: Arc::new(AtomicBool::new(false)),
+            billing_ticket: Arc::new(AtomicU64::new(0)),
+            persisted_revision: Arc::new(AtomicU64::new(0)),
+            persist_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
+    /// 恢复固定上限缓存；不读取调用库，执行恢复不依赖 calls。
     pub(crate) async fn load_cache(&self) -> Result<(), PureError> {
-        let Some(mut restored) =
+        let Some(restored) =
             load_object::<ModelPerformanceState>(self.store.database(), MODEL_PERFORMANCE_OWNER_ID)
                 .await
                 .map_err(|error| PureError::MemoryError(error.to_string()))?
         else {
             return Ok(());
         };
-        match restored.version {
-            CACHE_VERSION => {}
-            LEGACY_CACHE_VERSION => {
-                restored.version = CACHE_VERSION;
-                for session in restored.sessions.values_mut() {
-                    session.internal_billing.version = pl_protocol::TurnBillingRecord::VERSION;
-                }
-            }
-            version => {
-                return Err(PureError::MemoryError(format!(
-                    "unsupported model performance cache version {version}"
-                )));
-            }
+        if restored.version < LEGACY_CACHE_VERSION || restored.version > CACHE_VERSION {
+            return Err(PureError::MemoryError(format!(
+                "unsupported model performance cache version {}",
+                restored.version
+            )));
         }
-        while restored.history.len() > HISTORY_LIMIT {
-            restored.history.pop_front();
-        }
-        *self.state.lock().unwrap_or_else(|error| error.into_inner()) = restored;
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        *state = ModelPerformanceState {
+            version: CACHE_VERSION,
+            revision: restored.revision,
+            updated_at: restored.updated_at,
+            recent: RecentIdentities::default(),
+        };
+        self.persisted_revision
+            .store(restored.revision, Ordering::Release);
         Ok(())
     }
 
+    /// 产品快照：历史、汇总与会话费用来自调用库查询/聚合投影。
     pub(crate) async fn snapshot(&self) -> StudioModelPerformanceSnapshot {
-        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        public_snapshot(&state)
+        match self.read_snapshot().await {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::warn!(error = %error, "model performance snapshot read failed");
+                let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+                StudioModelPerformanceSnapshot {
+                    revision: state.revision,
+                    updated_at: state.updated_at,
+                    ..StudioModelPerformanceSnapshot::default()
+                }
+            }
+        }
     }
 
     pub(crate) fn record_inference(
@@ -273,228 +246,257 @@ impl ModelPerformanceOwner {
                 "model performance inference is missing Thread identity".to_string(),
             ));
         }
-        let identity = format!("{thread_id}:{}", billing.inference_id);
         let fingerprint = billing_fingerprint(billing)?;
-        let snapshot = {
-            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            let mut next = state.clone();
-            let session = next.sessions.entry(root_thread_id.to_string()).or_default();
-            if let Some(existing) = session.inference_fingerprints.get(&identity) {
-                if existing == &fingerprint {
-                    return Ok(());
-                }
-                let reason = format!(
-                    "inference {} conflicts with the model performance owner",
-                    billing.inference_id
-                );
-                self.writer.block(&reason);
-                return Err(PureError::MemoryError(reason));
+        let conflict = {
+            let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            match state.recent.get(root_thread_id, &billing.inference_id) {
+                Some(existing) if existing == &fingerprint => return Ok(()),
+                Some(_) => true,
+                None => false,
             }
-            match retention {
-                BillingRetention::Turn => {}
-                BillingRetention::Internal => {
-                    session
-                        .internal_billing
-                        .append(billing.clone())
-                        .map_err(PureError::MemoryError)?;
-                }
-            }
-            session.inference_fingerprints.insert(identity, fingerprint);
-            session.record_accounting(billing);
-
-            if let Some(sample) = performance_sample(thread_id, billing) {
-                next.history.push_back(sample);
-                while next.history.len() > HISTORY_LIMIT {
-                    next.history.pop_front();
-                }
-            }
-            next.revision = next.revision.saturating_add(1);
-            next.updated_at = unix_seconds();
-            let snapshot = public_snapshot(&next);
-            *state = next;
-            self.writer.record_model_performance(state.clone());
-            snapshot
         };
-        self.product_events.emit_model_performance_state(snapshot);
-        Ok(())
-    }
-
-    pub(crate) async fn remove_session(&self, root_thread_id: &str) -> Result<(), PureError> {
-        let update = {
-            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            if !state.sessions.contains_key(root_thread_id) {
-                return Ok(());
-            }
-            let mut next = state.clone();
-            next.sessions.remove(root_thread_id);
-            next.revision = next.revision.saturating_add(1);
-            next.updated_at = unix_seconds();
-            let snapshot = public_snapshot(&next);
-            *state = next;
-            self.writer.record_model_performance(state.clone());
-            Some(snapshot)
-        };
-        if let Some(snapshot) = update {
-            self.product_events.emit_model_performance_state(snapshot);
+        if conflict {
+            // 同一推理身份携带不同内容，是调用方重复投递被拒，而不是已受理事实的持久化失败：
+            // 这次请求从未进入调用库队列，所以只明确拒绝本次请求，绝不把它升级为写者终态。
+            // 终端 `Blocked` 只留给调用库真实不可恢复的持久化冲突，避免一次应用级拒绝让整个
+            // Studio 的写者健康永久失效。已受理事实与写者健康都不因这次拒绝改变。
+            return Err(PureError::MemoryError(format!(
+                "inference {} conflicts with the model performance owner",
+                billing.inference_id
+            )));
         }
+        // 调用库是唯一 writer：计费观察同步受理进调用库有界队列，durability 由这里固定的
+        // ticket 在刷新快照 / Thread 关闭 / Studio shutdown 时等待，绝不在受理时提前确认。
+        let ticket = self
+            .store
+            .calls()
+            .admit_billing(
+                root_thread_id,
+                thread_id,
+                billing,
+                call_retention(retention),
+            )
+            .map_err(|error| PureError::MemoryError(error.to_string()))?;
+        {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state
+                .recent
+                .insert(root_thread_id, &billing.inference_id, fingerprint);
+            state.revision = state.revision.saturating_add(1);
+            state.updated_at = unix_seconds();
+        }
+        self.billing_ticket.fetch_max(ticket, Ordering::AcqRel);
+        self.emit_snapshot_after_flush();
         Ok(())
     }
-}
 
-fn performance_sample(
-    thread_id: &str,
-    billing: &InferenceBillingRecord,
-) -> Option<PerformanceSample> {
-    let timing = billing
-        .timing
-        .filter(|timing| timing.has_throughput_sample())?;
-    let model = billing
-        .model_observation
-        .as_ref()
-        .map_or_else(|| billing.model.clone(), |value| value.sent_model.clone());
-    if billing.provider_instance_id.is_empty() || model.is_empty() {
-        return None;
+    /// 归档/删除会话后丢弃该 root 的进程内身份窗口并发布一次领域更新。
+    pub(crate) async fn remove_session(&self, root_thread_id: &str) -> Result<(), PureError> {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state.recent.remove_root(root_thread_id);
+            state.revision = state.revision.saturating_add(1);
+            state.updated_at = unix_seconds();
+        }
+        // 归档/删除的可见性由调用库 + 目录过滤保证；缓存写盘失败不回滚归档动作。
+        if let Err(error) = self.persist_state().await {
+            tracing::warn!(error = %error, "model performance cache persist failed");
+        }
+        self.emit_snapshot_after_flush();
+        Ok(())
     }
-    Some(PerformanceSample {
-        thread_id: thread_id.to_string(),
-        inference_id: billing.inference_id.clone(),
-        completed_at: billing.recorded_at,
-        provider_instance_id: billing.provider_instance_id.clone(),
-        provider_display_name: billing.provider.clone(),
-        model,
-        model_observation: billing.model_observation.clone(),
-        reasoning_effort: billing.reasoning_effort.clone(),
-        completion_tokens: billing.accounting.usage.totals().completion_tokens,
-        ttft_millis: timing.ttft_millis,
-        decode_millis: timing.decode_millis,
-        total_response_millis: timing.total_millis,
-    })
-}
 
-fn public_snapshot(state: &ModelPerformanceState) -> StudioModelPerformanceSnapshot {
-    let session_costs = state
-        .sessions
-        .iter()
-        .map(|(root_thread_id, session)| StudioSessionCostSnapshot {
-            root_thread_id: root_thread_id.clone(),
-            purpose_costs: session
-                .purpose_costs()
-                .into_iter()
-                .map(|cost| crate::StudioPurposeCostSnapshot {
-                    purpose: cost.purpose,
-                    estimated_costs: cost.estimated_costs,
-                    has_unpriced_usage: cost.has_unpriced_usage,
-                })
+    async fn read_snapshot(&self) -> Result<StudioModelPerformanceSnapshot, PureError> {
+        let calls = self.store.calls();
+        // 统计只读取稳定的调用库投影：先等待受理时固定的 ticket 变为 durable，再查询。
+        calls
+            .flush_through(self.billing_ticket.load(Ordering::Acquire))
+            .await
+            .map_err(memory_error)?;
+        // 产品对象只保留有界 revision/更新时间缓存；写盘失败不影响本次统计读取。
+        if let Err(error) = self.persist_state().await {
+            tracing::warn!(error = %error, "model performance cache persist failed");
+        }
+        let costs = calls.session_cost_rollups().await.map_err(memory_error)?;
+        let samples = calls
+            .recent_performance_samples(history_limit())
+            .await
+            .map_err(memory_error)?;
+        let summaries = calls
+            .performance_summary_rows()
+            .await
+            .map_err(memory_error)?;
+        let (revision, updated_at) = {
+            let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            (state.revision, state.updated_at)
+        };
+        // 归档/删除会话后不再对产品暴露其会话级统计；模型级汇总仍是全局用量事实。
+        let archived = self.archived_roots();
+        Ok(StudioModelPerformanceSnapshot {
+            revision,
+            updated_at,
+            session_costs: costs
+                .iter()
+                .filter(|rollup| !archived.contains(&rollup.root_thread_id))
+                .map(session_cost_snapshot)
                 .collect(),
-            estimated_costs: session.estimated_costs.clone(),
-            has_unpriced_usage: session.has_unpriced_usage,
+            summaries: summaries.iter().map(summary_snapshot).collect(),
+            history: samples.iter().map(history_sample).collect(),
         })
-        .collect();
-    let history = state.history.iter().rev().map(public_sample).collect();
-    StudioModelPerformanceSnapshot {
-        revision: state.revision,
-        updated_at: state.updated_at,
-        session_costs,
-        summaries: performance_summaries(&state.history),
-        history,
+    }
+
+    /// 把进程内有界缓存（revision/更新时间）前移写盘；同 revision 幂等，旧 revision 不回写。
+    async fn persist_state(&self) -> Result<(), PureError> {
+        let _guard = self.persist_lock.lock().await;
+        let (revision, updated_at, snapshot) = {
+            let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            (state.revision, state.updated_at, state.clone())
+        };
+        if revision == 0 || revision <= self.persisted_revision.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        put_object(
+            self.store.database(),
+            MODEL_PERFORMANCE_OWNER_ID,
+            &snapshot,
+            updated_at,
+        )
+        .await
+        .map_err(|error| PureError::MemoryError(error.to_string()))?;
+        self.persisted_revision.store(revision, Ordering::Release);
+        Ok(())
+    }
+
+    /// 目录中已归档（产品不可见）的会话 root 集合；未登记 root 不在此集合，保持兼容。
+    fn archived_roots(&self) -> std::collections::HashSet<String> {
+        self.store
+            .catalog()
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.archived)
+            .map(|entry| entry.id)
+            .collect()
+    }
+
+    /// 待调用写入 durable 后重新读取调用库并发布 canonical 快照。
+    ///
+    /// 事件载荷是调用库查询结果，而不是本地增量账本；慢消费者可从 `read_state` 重新同步。
+    /// 同一时刻只允许一个刷新任务，避免每次推理都重复整库聚合；若刷新期间又有新事实，
+    /// 任务按 revision 收敛再退出。
+    fn emit_snapshot_after_flush(&self) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        if self.refreshing.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let owner = self.clone();
+        handle.spawn(async move {
+            loop {
+                let observed = owner.revision();
+                // 刷新只等待本 owner 已受理的调用事实 durable；`read_snapshot` 内部同样收敛。
+                match owner.read_snapshot().await {
+                    // 广播发生在 `emit` 内部并返回 envelope；刷新任务只关心副作用，显式丢弃返回值。
+                    Ok(snapshot) => {
+                        let _ = owner.product_events.emit_model_performance_state(snapshot);
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %error, "model performance snapshot read failed");
+                        break;
+                    }
+                }
+                if owner.revision() == observed {
+                    break;
+                }
+            }
+            owner.refreshing.store(false, Ordering::Release);
+        });
+    }
+
+    fn revision(&self) -> u64 {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.revision
     }
 }
 
-fn public_sample(sample: &PerformanceSample) -> StudioModelPerformanceSample {
+fn memory_error(error: anyhow::Error) -> PureError {
+    PureError::MemoryError(error.to_string())
+}
+
+fn history_limit() -> u32 {
+    u32::try_from(HISTORY_LIMIT).unwrap_or(u32::MAX)
+}
+
+fn session_cost_snapshot(rollup: &SessionCostRollup) -> StudioSessionCostSnapshot {
+    StudioSessionCostSnapshot {
+        root_thread_id: rollup.root_thread_id.clone(),
+        purpose_costs: rollup
+            .purpose_costs
+            .iter()
+            .map(purpose_cost_snapshot)
+            .collect(),
+        estimated_costs: rollup.estimated_costs.clone(),
+        has_unpriced_usage: rollup.has_unpriced_usage,
+    }
+}
+
+fn purpose_cost_snapshot(rollup: &PurposeCostRollup) -> crate::StudioPurposeCostSnapshot {
+    crate::StudioPurposeCostSnapshot {
+        purpose: rollup.purpose.clone(),
+        estimated_costs: rollup.estimated_costs.clone(),
+        has_unpriced_usage: rollup.has_unpriced_usage,
+    }
+}
+
+fn summary_snapshot(row: &PerformanceSummaryRow) -> StudioModelPerformanceSummary {
+    let samples = row.sample_count as f64;
+    StudioModelPerformanceSummary {
+        provider_instance_id: row.provider_instance_id.clone(),
+        provider_display_name: row.provider_display_name.clone(),
+        model: row.sent_model.clone(),
+        reasoning_effort: row.reasoning_effort.clone(),
+        sample_count: row.sample_count,
+        completion_tokens: row.completion_tokens,
+        total_ttft_millis: row.total_ttft_millis,
+        total_decode_millis: row.total_decode_millis,
+        total_response_millis: row.total_response_millis,
+        tokens_per_second: throughput(row.completion_tokens, row.total_decode_millis),
+        average_ttft_millis: row.total_ttft_millis as f64 / samples,
+        average_response_millis: row.total_response_millis as f64 / samples,
+    }
+}
+
+fn history_sample(row: &PerformanceSampleRow) -> StudioModelPerformanceSample {
+    let observation =
+        row.configured_model
+            .as_ref()
+            .map(|configured_model| InferenceModelObservation {
+                configured_model: configured_model.clone(),
+                sent_model: row.sent_model.clone(),
+                reported_model: row.reported_model.clone(),
+            });
     StudioModelPerformanceSample {
-        completed_at: sample.completed_at,
-        provider_instance_id: sample.provider_instance_id.clone(),
-        provider_display_name: sample.provider_display_name.clone(),
-        model: sample.model.clone(),
-        configured_model: sample
-            .model_observation
+        completed_at: row.completed_at,
+        provider_instance_id: row.provider_instance_id.clone(),
+        provider_display_name: row.provider_display_name.clone(),
+        model: row.sent_model.clone(),
+        configured_model: observation
             .as_ref()
             .map(|value| value.configured_model.clone()),
-        sent_model: sample
-            .model_observation
-            .as_ref()
-            .map(|value| value.sent_model.clone()),
-        reported_model: sample
-            .model_observation
+        sent_model: observation.as_ref().map(|value| value.sent_model.clone()),
+        reported_model: observation
             .as_ref()
             .and_then(|value| value.reported_model.clone()),
-        model_match_state: sample
-            .model_observation
+        model_match_state: observation
             .as_ref()
             .map_or(ModelMatchState::LegacyUnknown, |value| value.match_state()),
-        reasoning_effort: sample.reasoning_effort.clone(),
-        completion_tokens: sample.completion_tokens,
-        ttft_millis: sample.ttft_millis,
-        decode_millis: sample.decode_millis,
-        total_response_millis: sample.total_response_millis,
-        tokens_per_second: throughput(sample.completion_tokens, sample.decode_millis),
+        reasoning_effort: row.reasoning_effort.clone(),
+        completion_tokens: row.completion_tokens,
+        ttft_millis: row.ttft_millis,
+        decode_millis: row.decode_millis,
+        total_response_millis: row.response_millis,
+        tokens_per_second: throughput(row.completion_tokens, row.decode_millis),
     }
-}
-
-#[derive(Default)]
-struct SummaryAccumulator {
-    provider_display_name: String,
-    sample_count: u64,
-    completion_tokens: u64,
-    total_ttft_millis: u64,
-    total_decode_millis: u64,
-    total_response_millis: u64,
-}
-
-fn performance_summaries(
-    history: &VecDeque<PerformanceSample>,
-) -> Vec<StudioModelPerformanceSummary> {
-    let mut groups = BTreeMap::<(String, String, Option<String>), SummaryAccumulator>::new();
-    for sample in history {
-        let aggregate = groups
-            .entry((
-                sample.provider_instance_id.clone(),
-                sample.model.clone(),
-                sample.reasoning_effort.clone(),
-            ))
-            .or_default();
-        aggregate
-            .provider_display_name
-            .clone_from(&sample.provider_display_name);
-        aggregate.sample_count = aggregate.sample_count.saturating_add(1);
-        aggregate.completion_tokens = aggregate
-            .completion_tokens
-            .saturating_add(sample.completion_tokens);
-        aggregate.total_ttft_millis = aggregate
-            .total_ttft_millis
-            .saturating_add(sample.ttft_millis);
-        aggregate.total_decode_millis = aggregate
-            .total_decode_millis
-            .saturating_add(sample.decode_millis);
-        aggregate.total_response_millis = aggregate
-            .total_response_millis
-            .saturating_add(sample.total_response_millis);
-    }
-    groups
-        .into_iter()
-        .map(
-            |((provider_instance_id, model, reasoning_effort), aggregate)| {
-                let sample_count = aggregate.sample_count as f64;
-                StudioModelPerformanceSummary {
-                    provider_instance_id,
-                    provider_display_name: aggregate.provider_display_name,
-                    model,
-                    reasoning_effort,
-                    sample_count: aggregate.sample_count,
-                    completion_tokens: aggregate.completion_tokens,
-                    total_ttft_millis: aggregate.total_ttft_millis,
-                    total_decode_millis: aggregate.total_decode_millis,
-                    total_response_millis: aggregate.total_response_millis,
-                    tokens_per_second: throughput(
-                        aggregate.completion_tokens,
-                        aggregate.total_decode_millis,
-                    ),
-                    average_ttft_millis: aggregate.total_ttft_millis as f64 / sample_count,
-                    average_response_millis: aggregate.total_response_millis as f64 / sample_count,
-                }
-            },
-        )
-        .collect()
 }
 
 fn throughput(completion_tokens: u64, decode_millis: u64) -> f64 {
@@ -506,14 +508,25 @@ fn billing_fingerprint(billing: &InferenceBillingRecord) -> Result<String, PureE
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
+fn call_retention(retention: BillingRetention) -> CallRetention {
+    match retention {
+        BillingRetention::Turn => CallRetention::Turn,
+        BillingRetention::Internal => CallRetention::Internal,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use pl_protocol::{
         InferenceModelObservation, InferenceOrchestrationMetrics, InferenceTiming, ModelMatchState,
+        RuntimeCostAmount,
     };
 
     use super::*;
     use crate::StudioProductEventKind;
+    use crate::studio::agent_host::ThreadWriteBehindWriter;
 
     async fn memory_owner() -> (
         ModelPerformanceOwner,
@@ -526,7 +539,7 @@ mod tests {
         let product_events = ProductEventBus::new(store.clone(), writer.clone());
         let receiver = product_events.subscribe();
         (
-            ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events),
+            ModelPerformanceOwner::new(store.clone(), product_events),
             store,
             writer,
             receiver,
@@ -572,6 +585,7 @@ mod tests {
             .record_inference("root", "child-2", &unmeasured)
             .expect("unmeasured billing");
 
+        writer.flush().await.expect("flush call facts");
         let snapshot = owner.snapshot().await;
         assert_eq!(snapshot.session_costs.len(), 1);
         assert_eq!(snapshot.session_costs[0].root_thread_id, "root");
@@ -605,6 +619,7 @@ mod tests {
             .record_inference("root", "child", &child)
             .expect("priced child billing");
 
+        writer.flush().await.expect("flush call facts");
         let snapshot = owner.snapshot().await;
         assert_eq!(snapshot.session_costs.len(), 1);
         assert_eq!(snapshot.session_costs[0].root_thread_id, "root");
@@ -681,6 +696,7 @@ mod tests {
             )
             .expect("isolated provider sample");
 
+        writer.flush().await.expect("flush call facts");
         let snapshot = owner.snapshot().await;
         assert_eq!(snapshot.summaries.len(), 3);
         let aggregate = snapshot
@@ -753,6 +769,7 @@ mod tests {
             )
             .expect("explicit-none sample");
 
+        writer.flush().await.expect("flush call facts");
         let snapshot = owner.snapshot().await;
         assert_eq!(snapshot.summaries.len(), 2);
         assert!(
@@ -774,7 +791,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn history_keeps_only_the_latest_thousand_samples() {
+    async fn history_limits_only_the_returned_window() {
         let (owner, _, writer, _) = memory_owner().await;
         for index in 0..=HISTORY_LIMIT {
             owner
@@ -793,6 +810,7 @@ mod tests {
                 .expect("history sample");
         }
 
+        writer.flush().await.expect("flush call facts");
         let snapshot = owner.snapshot().await;
         assert_eq!(snapshot.history.len(), HISTORY_LIMIT);
         assert_eq!(snapshot.history.first().unwrap().completed_at, 1_000);
@@ -802,125 +820,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn memory_event_precedes_flush_and_cache_restores_without_backfill() {
-        let (owner, store, writer, mut receiver) = memory_owner().await;
-        let billing = billing_record("inference", "provider-a", "model-a", 15, 100, 7);
-
-        owner
-            .record_inference("root", "child", &billing)
-            .expect("record inference");
-        assert_eq!(owner.snapshot().await.revision, 1);
-        let event = receiver.recv().await.expect("performance product event");
-        assert!(matches!(
-            event.kind,
-            StudioProductEventKind::ModelPerformanceStateChanged(snapshot)
-                if snapshot.revision == 1
-        ));
-
-        // An internal title request has no Turn transcript, so its full receipt is retained here.
-        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut reader = tokio::io::BufReader::new(&mut socket);
-            let mut content_length = 0;
-            loop {
-                let mut header = String::new();
-                assert!(reader.read_line(&mut header).await.unwrap() > 0);
-                if header == "\r\n" {
-                    break;
-                }
-                if let Some((name, value)) = header.split_once(':')
-                    && name.eq_ignore_ascii_case("content-length")
-                {
-                    content_length = value.trim().parse::<usize>().unwrap();
-                }
-            }
-            reader
-                .read_exact(&mut vec![0; content_length])
-                .await
-                .unwrap();
-            drop(reader);
-            let body = concat!(
-                "data: {\"choices\":[{\"delta\":{\"content\":\"Session title\"},\"finish_reason\":\"stop\"}]}\n\n",
-                "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":10,\"total_tokens\":110,\"prompt_tokens_details\":{\"cached_tokens\":20}}}\n\n",
-                "data: [DONE]\n\n"
-            );
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            socket.write_all(response.as_bytes()).await.unwrap();
-        });
-        let model = pl_model::runtime::ModelRuntime::new(
-            pl_model::provider::ProviderEndpoint::compatible(
-                "title",
-                format!("http://{address}/v1"),
-            ),
-            pl_model::model::ModelInfo::compatible("title-model"),
-        )
-        .unwrap()
-        .with_pricing_mode(pl_protocol::PricingMode::Disabled);
-        let title = model
-            .complete(
-                pl_model::completion::CompletionRequest::builder()
-                    .instructions("Name this session")
-                    .build(),
-                Default::default(),
-            )
-            .await
-            .unwrap();
-        server.await.unwrap();
-        assert_eq!(title.content.as_deref(), Some("Session title"));
-        let mut internal = billing_record("title", "provider-a", "title-model", 10, 100, 8);
-        internal.accounting = title.accounting;
-        owner
-            .record_internal_inference("root", &internal)
-            .await
-            .unwrap();
-        owner
-            .record_internal_inference("root", &internal)
-            .await
-            .unwrap();
-
-        writer.flush().await.expect("flush observed state");
-        assert!(
-            load_object::<ModelPerformanceState>(store.database(), MODEL_PERFORMANCE_OWNER_ID,)
-                .await
-                .unwrap()
-                .is_some()
-        );
-
-        let product_events = ProductEventBus::new(store.clone(), writer.clone());
-        let restored = ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events);
-        restored.load_cache().await.expect("restore cache");
-        assert_eq!(restored.snapshot().await, owner.snapshot().await);
-        let restored_receipts = restored.state.lock().unwrap().sessions["root"]
-            .internal_billing
-            .clone();
-        assert_eq!(restored_receipts.inferences, vec![internal]);
-
-        let empty_store = StudioStore::open_memory().await.expect("empty store");
-        let empty_writer = ThreadWriteBehindWriter::new(empty_store.clone());
-        let product_events = ProductEventBus::new(empty_store.clone(), empty_writer.clone());
-        let empty = ModelPerformanceOwner::new(empty_store, empty_writer.clone(), product_events);
-        empty.load_cache().await.expect("load empty cache");
-        assert_eq!(
-            empty.snapshot().await,
-            StudioModelPerformanceSnapshot::default()
-        );
-
-        writer.shutdown().await.expect("writer shutdown");
-        empty_writer
-            .shutdown()
-            .await
-            .expect("empty writer shutdown");
-    }
-
-    #[tokio::test]
     async fn inference_identity_is_idempotent_and_rejects_conflicts() {
-        let (owner, _, _, _) = memory_owner().await;
+        let (owner, _, writer, _) = memory_owner().await;
         let billing = billing_record("same", "provider-a", "model-a", 10, 100, 1);
         owner
             .record_inference("root", "child", &billing)
@@ -936,7 +837,12 @@ mod tests {
         assert!(owner.record_inference("root", "child", &conflict).is_err());
         let snapshot = owner.snapshot().await;
         assert_eq!(snapshot.revision, 1);
+
+        writer.flush().await.expect("flush call facts");
+        let snapshot = owner.snapshot().await;
         assert_eq!(snapshot.history.len(), 1);
+
+        writer.shutdown().await.expect("writer shutdown");
     }
 
     #[tokio::test]
@@ -953,6 +859,7 @@ mod tests {
         owner
             .record_inference("root", "root", &billing)
             .expect("mismatch sample");
+        writer.flush().await.expect("flush call facts");
         let snapshot = owner.snapshot().await;
 
         assert_eq!(snapshot.summaries[0].model, "wire-model");
@@ -970,29 +877,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn v2_cache_migrates_without_guessing_model_identity() {
+    async fn cached_revision_survives_reload_without_reading_calls() {
+        let (owner, store, writer, _) = memory_owner().await;
+        let billing = billing_record("cached", "provider-a", "model-a", 10, 100, 5);
+        owner
+            .record_inference("root", "root", &billing)
+            .expect("record inference");
+        writer.flush().await.expect("flush call facts");
+        let billed = owner.snapshot().await;
+        assert_eq!(billed.revision, 1);
+
+        let events = ProductEventBus::new(store.clone(), writer.clone());
+        let restored = ModelPerformanceOwner::new(store.clone(), events);
+        restored.load_cache().await.expect("restore cache");
+        assert_eq!(restored.snapshot().await, billed);
+
+        writer.shutdown().await.expect("writer shutdown");
+    }
+
+    #[tokio::test]
+    async fn legacy_cache_version_upgrades_without_restoring_history() {
         use crate::studio::store::object::put_object;
 
         let (owner, store, writer, _) = memory_owner().await;
         let legacy = ModelPerformanceState {
-            version: LEGACY_CACHE_VERSION,
+            version: LEGACY_CACHE_VERSION + 1,
             revision: 7,
             updated_at: 9,
-            sessions: BTreeMap::new(),
-            history: VecDeque::from([PerformanceSample {
-                thread_id: "thread-1".into(),
-                inference_id: "inference-1".into(),
-                completed_at: 9,
-                provider_instance_id: "provider-1".into(),
-                provider_display_name: "Provider 1".into(),
-                model: "legacy-model".into(),
-                model_observation: None,
-                reasoning_effort: None,
-                completion_tokens: 10,
-                ttft_millis: 5,
-                decode_millis: 100,
-                total_response_millis: 105,
-            }]),
+            recent: RecentIdentities::default(),
         };
         put_object(
             store.database(),
@@ -1003,74 +915,91 @@ mod tests {
         .await
         .unwrap();
 
-        owner.load_cache().await.expect("migrate v2 cache");
+        owner.load_cache().await.expect("migrate cache");
         let state = owner.state.lock().unwrap().clone();
-        let snapshot = owner.snapshot().await;
         assert_eq!(state.version, CACHE_VERSION);
-        assert_eq!(snapshot.history[0].model, "legacy-model");
-        assert_eq!(snapshot.history[0].configured_model, None);
-        assert_eq!(snapshot.history[0].sent_model, None);
-        assert_eq!(snapshot.history[0].reported_model, None);
-        assert_eq!(
-            snapshot.history[0].model_match_state,
-            ModelMatchState::LegacyUnknown
-        );
+        assert_eq!(state.revision, 7);
+        assert_eq!(state.updated_at, 9);
 
         writer.shutdown().await.expect("writer shutdown");
     }
 
     #[test]
-    fn performance_cache_defaults_missing_effort_and_round_trips_explicit_none() {
-        let legacy = serde_json::json!({
-            "version": LEGACY_CACHE_VERSION,
-            "revision": 1,
-            "updatedAt": 2,
-            "sessions": {},
-            "history": [{
-                "threadId": "thread-1",
-                "inferenceId": "inference-1",
-                "completedAt": 2,
-                "providerInstanceId": "provider-1",
-                "providerDisplayName": "Provider 1",
-                "model": "model-1",
-                "completionTokens": 10,
-                "ttftMillis": 5,
-                "decodeMillis": 100,
-                "totalResponseMillis": 105
-            }]
-        });
-        let restored: ModelPerformanceState =
-            serde_json::from_value(legacy).expect("legacy performance cache");
-        assert_eq!(restored.history[0].reasoning_effort, None);
-        assert_eq!(restored.history[0].model_observation, None);
+    fn performance_cache_payload_keeps_no_history_or_fingerprints() {
+        let encoded =
+            serde_json::to_value(ModelPerformanceState::default()).expect("encode cache payload");
+        assert!(encoded.get("history").is_none());
+        assert!(encoded.get("sessions").is_none());
+        assert!(encoded.get("recent").is_none());
+        assert_eq!(encoded.get("revision"), Some(&serde_json::json!(0)));
+    }
 
-        let explicit_none = serde_json::json!({
-            "version": CACHE_VERSION,
-            "revision": 2,
-            "updatedAt": 3,
-            "sessions": {},
-            "history": [{
-                "threadId": "thread-1",
-                "inferenceId": "inference-2",
-                "completedAt": 3,
-                "providerInstanceId": "provider-1",
-                "providerDisplayName": "Provider 1",
-                "model": "model-1",
-                "reasoningEffort": "none",
-                "completionTokens": 10,
-                "ttftMillis": 5,
-                "decodeMillis": 100,
-                "totalResponseMillis": 105
-            }]
-        });
-        let restored: ModelPerformanceState =
-            serde_json::from_value(explicit_none).expect("new performance cache");
+    #[tokio::test]
+    async fn product_event_publishes_call_backed_snapshot_after_durability() {
+        let (owner, _, writer, mut receiver) = memory_owner().await;
+        let billing = billing_record("event", "provider-a", "model-a", 10, 100, 3);
+        owner
+            .record_inference("root", "child", &billing)
+            .expect("record inference");
+        let event = loop {
+            let event = tokio::time::timeout(Duration::from_secs(30), receiver.recv())
+                .await
+                .expect("model performance event within timeout")
+                .expect("model performance event");
+            if matches!(
+                event.kind,
+                StudioProductEventKind::ModelPerformanceStateChanged(_)
+            ) {
+                break event;
+            }
+        };
+        assert!(matches!(
+            event.kind,
+            StudioProductEventKind::ModelPerformanceStateChanged(snapshot)
+                if snapshot.revision == 1 && snapshot.history.len() == 1
+        ));
+        writer.shutdown().await.expect("writer shutdown");
+    }
+
+    #[tokio::test]
+    async fn purpose_costs_preserve_totals_and_do_not_double_count_replayed_inferences() {
+        let (owner, _, writer, _) = memory_owner().await;
+        let mut main = billing_record("main", "provider", "model", 20, 100, 1);
+        main.purpose = Some("main".into());
+        main.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: cost("USD", 1.0),
+            cache_savings: None,
+        };
+        let mut review = main.clone();
+        review.inference_id = "review".into();
+        review.purpose = Some("review".into());
+        review.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: cost("USD", 2.0),
+            cache_savings: None,
+        };
+        owner.record_inference("root", "root", &main).unwrap();
+        owner
+            .record_auxiliary_inference("root", "child", &review)
+            .unwrap();
+        owner
+            .record_auxiliary_inference("root", "child", &review)
+            .unwrap();
+        writer.flush().await.expect("flush call facts");
+        let snapshot = owner.snapshot().await;
+        let session = &snapshot.session_costs[0];
+        assert_eq!(session.estimated_costs, vec![cost("USD", 3.0)]);
         assert_eq!(
-            restored.history[0].reasoning_effort.as_deref(),
-            Some("none")
+            session
+                .purpose_costs
+                .iter()
+                .map(|cost| (cost.purpose.as_deref(), cost.estimated_costs.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some("main"), vec![cost("USD", 1.0)]),
+                (Some("review"), vec![cost("USD", 2.0)])
+            ]
         );
-        let encoded = serde_json::to_value(restored).expect("performance cache encoding");
-        assert_eq!(encoded["history"][0]["reasoningEffort"], "none");
+        writer.shutdown().await.unwrap();
     }
 
     fn billing_record(
@@ -1146,66 +1075,5 @@ mod tests {
             currency: currency.to_string(),
             amount,
         }
-    }
-    #[tokio::test]
-    async fn purpose_costs_preserve_totals_and_do_not_double_count_replayed_inferences() {
-        let (owner, _, writer, _) = memory_owner().await;
-        let mut main = billing_record("main", "provider", "model", 20, 100, 1);
-        main.purpose = Some("main".into());
-        main.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
-            cost: cost("USD", 1.0),
-            cache_savings: None,
-        };
-        let mut review = main.clone();
-        review.inference_id = "review".into();
-        review.purpose = Some("review".into());
-        review.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
-            cost: cost("USD", 2.0),
-            cache_savings: None,
-        };
-        owner.record_inference("root", "root", &main).unwrap();
-        owner
-            .record_auxiliary_inference("root", "child", &review)
-            .unwrap();
-        owner
-            .record_auxiliary_inference("root", "child", &review)
-            .unwrap();
-        let snapshot = owner.snapshot().await;
-        let session = &snapshot.session_costs[0];
-        assert_eq!(session.estimated_costs, vec![cost("USD", 3.0)]);
-        assert_eq!(
-            session
-                .purpose_costs
-                .iter()
-                .map(|cost| (cost.purpose.as_deref(), cost.estimated_costs.clone()))
-                .collect::<Vec<_>>(),
-            vec![
-                (Some("main"), vec![cost("USD", 1.0)]),
-                (Some("review"), vec![cost("USD", 2.0)])
-            ]
-        );
-        writer.shutdown().await.unwrap();
-    }
-
-    #[test]
-    fn historical_cost_without_purpose_remains_unknown_when_new_usage_arrives() {
-        let mut state = SessionCostState {
-            estimated_costs: vec![cost("USD", 4.0)],
-            ..Default::default()
-        };
-        let mut review = billing_record("review", "provider", "model", 20, 100, 1);
-        review.purpose = Some("review".into());
-        review.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
-            cost: cost("USD", 2.0),
-            cache_savings: None,
-        };
-        state.record_accounting(&review);
-        assert_eq!(state.estimated_costs, vec![cost("USD", 6.0)]);
-        assert_eq!(state.purpose_costs[0].purpose, None);
-        assert_eq!(
-            state.purpose_costs[0].estimated_costs,
-            vec![cost("USD", 4.0)]
-        );
-        assert_eq!(state.purpose_costs[1].purpose.as_deref(), Some("review"));
     }
 }

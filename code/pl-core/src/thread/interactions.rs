@@ -58,6 +58,30 @@ pub struct InteractionCancellation {
     pub expected_revision: u64,
 }
 
+/// Resolves one interaction identity to its canonical record, preferring the still-pending map and
+/// falling back to the newest committed interaction inside the bounded live effect window.
+///
+/// A settled interaction is committed history, so the owner keeps no checkpoint-visible ledger for
+/// it. The exact committed record still answers an identical repeated resolve/cancel while its
+/// commit is inside the bounded window; older identities are answered by the host's durable
+/// identity index, never by treating the repeat as a new interaction.
+fn interaction_record(
+    window: &EffectWindow,
+    state: &ThreadSnapshot,
+    id: &str,
+) -> Option<InteractionRecord> {
+    state.interactions.get(id).cloned().or_else(|| {
+        recent_effect_fact(window, |effect| {
+            effect
+                .interactions
+                .iter()
+                .rev()
+                .find(|record| record.request.id == id)
+                .cloned()
+        })
+    })
+}
+
 impl Owner {
     pub(super) fn request_interaction(
         &mut self,
@@ -69,9 +93,9 @@ impl Owner {
         if request.id.is_empty() || request.turn_id.is_empty() {
             return Err(ThreadError::InvalidIdentity);
         }
-        if let Some(record) = self.state.interactions.get(&request.id) {
+        if let Some(record) = interaction_record(&self.effect_window, &self.state, &request.id) {
             return if record.request == request {
-                Ok(record.clone())
+                Ok(record)
             } else {
                 Err(ThreadError::InvalidIdentity)
             };
@@ -113,10 +137,7 @@ impl Owner {
         if !self.pending.is_empty() {
             return Err(ThreadError::PendingTools);
         }
-        let previous = self
-            .state
-            .interactions
-            .get(&cancellation.id)
+        let previous = interaction_record(&self.effect_window, &self.state, &cancellation.id)
             .ok_or(ThreadError::InvalidIdentity)?;
         if previous.state == InteractionState::Cancelled
             && cancellation.expected_revision.checked_add(1) == Some(previous.revision)
@@ -161,7 +182,7 @@ impl Owner {
             return Err(ThreadError::PendingTools);
         }
         let mut candidate = self.state.clone();
-        let record = stage_resolution(&mut candidate, resolution)?;
+        let record = stage_resolution(&mut candidate, &self.effect_window, resolution)?;
         self.state = candidate;
         self.publish();
         Ok(record)
@@ -170,6 +191,7 @@ impl Owner {
 
 fn stage_resolution(
     state: &mut ThreadSnapshot,
+    window: &EffectWindow,
     resolution: InteractionResolution,
 ) -> Result<InteractionRecord, ThreadError> {
     let InteractionResolution {
@@ -190,10 +212,7 @@ fn stage_resolution(
     }) {
         return Err(ThreadError::InvalidIdentity);
     }
-    let previous = state
-        .interactions
-        .get(&id)
-        .ok_or(ThreadError::InvalidIdentity)?;
+    let previous = interaction_record(window, state, &id).ok_or(ThreadError::InvalidIdentity)?;
     if let InteractionState::Resolved(existing) = &previous.state
         && existing == &response
         && previous.extension_mutations == mutations

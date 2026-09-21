@@ -82,7 +82,16 @@ void main() {
 
     expect(find.byKey(StudioDriverKeys.shell), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.sidebar), findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.timeline), findsOneWidget);
+    // §6.1: the first screen only restores the selection, so it shows the
+    // explicit open affordance and the timeline is not rendered yet.
+    expect(find.byKey(StudioDriverKeys.unopenedThread), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.timeline), findsNothing);
+
+    // Opening the selected Thread is what establishes the subscription and the
+    // first history window that renders the timeline.
+    await tester.tap(find.byKey(StudioDriverKeys.openSelectedThread));
+    await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.timeline));
+    expect(find.byKey(StudioDriverKeys.unopenedThread), findsNothing);
 
     await tester.tap(find.byKey(StudioDriverKeys.settingsOpen));
     await tester.pumpAndSettle();

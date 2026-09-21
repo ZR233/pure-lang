@@ -24,58 +24,6 @@ pub struct ConfigStore {
     credentials: Arc<dyn CredentialStore>,
 }
 
-/// Studio 启动时自动恢复不兼容配置所生成的报告。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConfigRecoveryReport {
-    backup_path: PathBuf,
-}
-
-impl ConfigRecoveryReport {
-    /// 返回不兼容配置逐字备份的绝对路径。
-    pub fn backup_path(&self) -> &Path {
-        &self.backup_path
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct StartupConfigLoad {
-    pub config: StudioConfig,
-    pub recovery: Option<ConfigRecoveryReport>,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ConfigIncompatibilityKind {
-    Parse,
-    InlineCredential,
-    Validation,
-}
-
-impl ConfigIncompatibilityKind {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Parse => "parse",
-            Self::InlineCredential => "inlineCredential",
-            Self::Validation => "validation",
-        }
-    }
-}
-
-#[derive(Debug)]
-struct IncompatibleConfig {
-    kind: ConfigIncompatibilityKind,
-    error: PureError,
-}
-
-impl IncompatibleConfig {
-    fn new(kind: ConfigIncompatibilityKind, error: PureError) -> Self {
-        Self { kind, error }
-    }
-
-    fn into_error(self) -> PureError {
-        self.error
-    }
-}
-
 impl std::fmt::Debug for ConfigStore {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -148,34 +96,48 @@ impl ConfigStore {
         &self.paths
     }
 
-    pub fn config_exists(&self) -> bool {
-        self.paths.config_file().exists()
+    /// 判断 `config.toml` 是否真实缺失。
+    ///
+    /// 只认路径条目本身不存在（`NotFound`）为缺失；权限、元数据或符号链接异常一律返回
+    /// `Err`，避免把“存在但不可访问/已损坏”的配置误判为缺失，从而静默落入默认配置或
+    /// 在保存路径上覆盖未知文件。
+    fn config_absent(&self) -> Result<bool> {
+        match fs::symlink_metadata(self.paths.config_file()) {
+            Ok(_) => Ok(false),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(true),
+            Err(error) => Err(self.config_path_error(error.into())),
+        }
     }
 
     pub fn load_or_default(&self) -> Result<StudioConfig> {
-        if !self.config_exists() {
+        if self.config_absent()? {
             let mut config = StudioConfig::default_config();
             self.hydrate_credentials(&mut config)?;
             return Ok(config);
         }
-        let content = fs::read_to_string(self.paths.config_file())?;
-        let mut config = parse_current_config(&content)?;
+        let content = fs::read_to_string(self.paths.config_file())
+            .map_err(|error| self.config_path_error(error.into()))?;
+        let mut config =
+            parse_current_config(&content).map_err(|error| self.config_path_error(error))?;
         self.hydrate_credentials(&mut config)?;
         Ok(config)
     }
 
-    pub(crate) fn load_for_startup(&self) -> Result<StartupConfigLoad> {
-        if !self.config_exists() {
+    /// 启动期读取并校验配置。
+    ///
+    /// 只有 `config.toml` 缺失时才采用内存默认配置。其余任何未知/未来版本、不可解析、
+    /// 当前 schema 校验失败或含内联凭据的输入都保留原字节并返回错误，不重写文件、
+    /// 也不替换为默认配置；已知 18/19 版本走数据保全式迁移路径。
+    pub(crate) fn load_for_startup(&self) -> Result<StudioConfig> {
+        if self.config_absent()? {
             let mut config = StudioConfig::default_config();
             self.hydrate_credentials(&mut config)?;
-            return Ok(StartupConfigLoad {
-                config,
-                recovery: None,
-            });
+            return Ok(config);
         }
-        let content = fs::read(self.paths.config_file())?;
-        // Version dispatch precedes the legacy recovery path: a failed supported migration
-        // must preserve the source config and credentials instead of resetting them.
+        let content = fs::read(self.paths.config_file())
+            .map_err(|error| self.config_path_error(error.into()))?;
+        // Version dispatch precedes the strict parse so the supported 18/19 configs reach
+        // their data-preserving migration instead of failing current-schema validation.
         #[derive(serde::Deserialize)]
         struct Version {
             schema_version: u32,
@@ -186,17 +148,34 @@ impl ConfigStore {
             .map(|version| version.schema_version)
             .filter(|version| matches!(version, 18 | 19))
         {
-            return self.migrate_legacy_config_for_startup(&content, version);
+            return self
+                .migrate_legacy_config_for_startup(&content, version)
+                .map_err(|error| self.config_path_error(error));
         }
-        match parse_startup_config(&content) {
-            Ok(mut config) => {
-                self.hydrate_credentials(&mut config)?;
-                Ok(StartupConfigLoad {
-                    config,
-                    recovery: None,
-                })
-            }
-            Err(incompatible) => self.replace_incompatible_for_startup(&content, incompatible),
+        // Unknown/future versions, malformed TOML and current-schema validation failures
+        // all fail closed here: the original bytes stay on disk untouched.
+        let mut config =
+            parse_startup_config(&content).map_err(|error| self.config_path_error(error))?;
+        self.hydrate_credentials(&mut config)?;
+        Ok(config)
+    }
+
+    /// 为配置文件错误附上 `config.toml` 路径以便定位。保持 `Io` 类别不变，只消化
+    /// `PureError` 文本，不引入任何配置内容、token 或凭据。
+    fn config_path_error(&self, error: PureError) -> PureError {
+        match error {
+            PureError::Io(error) => PureError::Io(std::io::Error::new(
+                error.kind(),
+                format!(
+                    "failed to access Studio config {}: {error}",
+                    self.paths.config_file().display()
+                ),
+            )),
+            PureError::ConfigError(message) => PureError::ConfigError(format!(
+                "failed to load Studio config {}: {message}",
+                self.paths.config_file().display()
+            )),
+            other => other,
         }
     }
 
@@ -204,7 +183,7 @@ impl ConfigStore {
         &self,
         original: &[u8],
         source_version: u32,
-    ) -> Result<StartupConfigLoad> {
+    ) -> Result<StudioConfig> {
         self.migrate_legacy_config_for_startup_with(original, source_version, |path, content| {
             pl_tool::workspace::write_file_atomically(path, content).map_err(Into::into)
         })
@@ -215,12 +194,12 @@ impl ConfigStore {
         original: &[u8],
         source_version: u32,
         replace: impl FnOnce(&Path, &[u8]) -> Result<()>,
-    ) -> Result<StartupConfigLoad> {
+    ) -> Result<StudioConfig> {
         let text = std::str::from_utf8(original).map_err(|error| {
             PureError::ConfigError(format!("invalid schema {source_version} UTF-8: {error}"))
         })?;
-        let mut config = parse_typed_config(text).map_err(IncompatibleConfig::into_error)?;
-        reject_inline_credentials(&config).map_err(IncompatibleConfig::into_error)?;
+        let mut config = parse_typed_config(text)?;
+        reject_inline_credentials(&config)?;
         if source_version == 18 {
             config.disabled_system_agents.remove("planner");
         }
@@ -250,15 +229,14 @@ impl ConfigStore {
             target_version = super::STUDIO_CONFIG_SCHEMA_VERSION,
             "migrated Studio config"
         );
-        Ok(StartupConfigLoad {
-            config,
-            recovery: None,
-        })
+        Ok(config)
     }
 
     pub fn load(&self) -> Result<StudioConfig> {
-        let content = fs::read_to_string(self.paths.config_file())?;
-        let mut config = parse_current_config(&content)?;
+        let content = fs::read_to_string(self.paths.config_file())
+            .map_err(|error| self.config_path_error(error.into()))?;
+        let mut config =
+            parse_current_config(&content).map_err(|error| self.config_path_error(error))?;
         self.hydrate_credentials(&mut config)?;
         Ok(config)
     }
@@ -279,7 +257,7 @@ impl ConfigStore {
     }
 
     pub fn init_default(&self) -> Result<StudioConfig> {
-        if self.config_exists() {
+        if !self.config_absent()? {
             return Err(PureError::ConfigError(format!(
                 "config already exists: {}",
                 self.paths.config_file().display()
@@ -297,51 +275,14 @@ impl ConfigStore {
         Ok(())
     }
 
-    fn replace_incompatible_for_startup(
-        &self,
-        original: &[u8],
-        incompatible: IncompatibleConfig,
-    ) -> Result<StartupConfigLoad> {
-        self.replace_incompatible_for_startup_with(
-            original,
-            incompatible,
-            |config_path, persisted| {
-                pl_tool::workspace::write_file_atomically(config_path, persisted)
-                    .map_err(Into::into)
-            },
-        )
-    }
-
-    fn replace_incompatible_for_startup_with(
-        &self,
-        original: &[u8],
-        incompatible: IncompatibleConfig,
-        replace: impl FnOnce(&Path, &[u8]) -> Result<()>,
-    ) -> Result<StartupConfigLoad> {
-        let mut config = StudioConfig::default_config();
-        config.validate()?;
-        let persisted = serialize_persisted_config(&config)?;
-        self.hydrate_credentials(&mut config)?;
-        let backup_path = write_rejected_backup(self.paths.config_file(), original)?;
-        replace(self.paths.config_file(), persisted.as_bytes())?;
-        tracing::warn!(
-            config_path = %self.paths.config_file().display(),
-            backup_path = %backup_path.display(),
-            incompatibility = incompatible.kind.as_str(),
-            "replaced incompatible Studio config with current defaults"
-        );
-        Ok(StartupConfigLoad {
-            config,
-            recovery: Some(ConfigRecoveryReport { backup_path }),
-        })
-    }
-
     fn persisted_provider_ids(&self) -> Result<BTreeSet<String>> {
-        if !self.config_exists() {
+        if self.config_absent()? {
             return Ok(BTreeSet::new());
         }
-        let content = fs::read_to_string(self.paths.config_file())?;
-        let persisted = parse_current_config(&content)?;
+        let content = fs::read_to_string(self.paths.config_file())
+            .map_err(|error| self.config_path_error(error.into()))?;
+        let persisted =
+            parse_current_config(&content).map_err(|error| self.config_path_error(error))?;
         Ok(persisted
             .models
             .providers
@@ -409,57 +350,69 @@ impl ConfigStore {
 }
 
 fn parse_current_config(content: &str) -> Result<StudioConfig> {
-    parse_config(content).map_err(IncompatibleConfig::into_error)
+    parse_config(content)
 }
 
-fn parse_startup_config(content: &[u8]) -> std::result::Result<StudioConfig, IncompatibleConfig> {
+fn parse_startup_config(content: &[u8]) -> Result<StudioConfig> {
     let content = std::str::from_utf8(content).map_err(|error| {
-        IncompatibleConfig::new(
-            ConfigIncompatibilityKind::Parse,
-            PureError::ConfigError(format!("failed to parse Studio config as UTF-8: {error}")),
-        )
+        PureError::ConfigError(format!("failed to parse Studio config as UTF-8: {error}"))
     })?;
     parse_config(content)
 }
 
-fn parse_config(content: &str) -> std::result::Result<StudioConfig, IncompatibleConfig> {
+fn parse_config(content: &str) -> Result<StudioConfig> {
     let config = parse_typed_config(content)?;
     reject_inline_credentials(&config)?;
-    config
-        .validate()
-        .map_err(|error| IncompatibleConfig::new(ConfigIncompatibilityKind::Validation, error))?;
+    config.validate()?;
     Ok(config)
 }
 
-fn parse_typed_config(content: &str) -> std::result::Result<StudioConfig, IncompatibleConfig> {
+fn parse_typed_config(content: &str) -> Result<StudioConfig> {
+    // 第一遍只做 TOML 语法解析；语法诊断由解析器生成，不含文档内容。
+    if let Err(error) = toml::from_str::<toml::Table>(content) {
+        return Err(PureError::ConfigError(format!(
+            "invalid Studio config TOML{}",
+            toml_error_location(content, &error)
+        )));
+    }
+    // 第二遍做结构/类型解码；serde 诊断可能回显字段值，因此只保留类别与行/列位置。
     toml::from_str(content).map_err(|error| {
-        IncompatibleConfig::new(
-            ConfigIncompatibilityKind::Parse,
-            PureError::ConfigError(format!("failed to parse Studio config: {error}")),
-        )
+        PureError::ConfigError(format!(
+            "Studio config TOML does not match the current schema{}",
+            toml_error_location(content, &error)
+        ))
     })
 }
 
-fn reject_inline_credentials(config: &StudioConfig) -> std::result::Result<(), IncompatibleConfig> {
+/// 仅按错误的字节 span 计算 1-based 行/列用于定位；刻意不回显任何原文或字段值。
+fn toml_error_location(content: &str, error: &toml::de::Error) -> String {
+    let Some(span) = error.span() else {
+        return String::new();
+    };
+    let Some(prefix) = content.get(..span.start) else {
+        return String::new();
+    };
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = prefix
+        .rfind('\n')
+        .map_or(prefix.len(), |newline| prefix.len() - newline - 1)
+        + 1;
+    format!(" at line {line}, column {column}")
+}
+
+fn reject_inline_credentials(config: &StudioConfig) -> Result<()> {
     if config
         .models
         .providers
         .values()
         .any(|provider| provider.bearer_token.is_some())
     {
-        return Err(IncompatibleConfig::new(
-            ConfigIncompatibilityKind::InlineCredential,
-            PureError::ConfigError(
-                "current schema forbids inline provider bearer_token; use the Studio credential store"
-                    .to_string(),
-            ),
+        return Err(PureError::ConfigError(
+            "current schema forbids inline provider bearer_token; use the Studio credential store"
+                .to_string(),
         ));
     }
     Ok(())
-}
-
-fn write_rejected_backup(config_path: &Path, content: &[u8]) -> Result<PathBuf> {
-    write_config_backup(config_path, content, "rejected")
 }
 
 fn write_config_backup(config_path: &Path, content: &[u8], kind: &str) -> Result<PathBuf> {
@@ -468,11 +421,6 @@ fn write_config_backup(config_path: &Path, content: &[u8], kind: &str) -> Result
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     write_config_backup_at(config_path, content, kind, stamp)
-}
-
-#[cfg(test)]
-fn write_rejected_backup_at(config_path: &Path, content: &[u8], stamp: u128) -> Result<PathBuf> {
-    write_config_backup_at(config_path, content, "rejected", stamp)
 }
 
 fn write_config_backup_at(
@@ -503,11 +451,6 @@ fn write_config_backup_at(
     Err(PureError::ConfigError(
         "could not allocate a unique Studio config backup path".to_string(),
     ))
-}
-
-#[cfg(test)]
-fn rejected_backup_path(config_path: &Path, stamp: u128, collision: u32) -> PathBuf {
-    config_backup_path(config_path, "rejected", stamp, collision)
 }
 
 fn config_backup_path(config_path: &Path, kind: &str, stamp: u128, collision: u32) -> PathBuf {
@@ -573,30 +516,8 @@ mod tests {
         )
     }
 
-    fn assert_recovered_with_backup(
-        store: &ConfigStore,
-        startup: &StartupConfigLoad,
-        original: &[u8],
-    ) {
-        assert_eq!(startup.config, StudioConfig::default_config());
-        let report = startup.recovery.as_ref().unwrap();
-        assert_eq!(
-            report.backup_path().parent(),
-            Some(store.paths().config_dir())
-        );
-        assert!(
-            report
-                .backup_path()
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with("config.toml.rejected.")
-        );
-        assert_eq!(fs::read(report.backup_path()).unwrap(), original);
-        assert_eq!(store.load().unwrap(), StudioConfig::default_config());
-    }
-
-    fn rejected_backups(store: &ConfigStore) -> Vec<PathBuf> {
+    fn config_backups(store: &ConfigStore, kind: &str) -> Vec<PathBuf> {
+        let prefix = format!("config.toml.{kind}.");
         fs::read_dir(store.paths().config_dir())
             .into_iter()
             .flatten()
@@ -604,9 +525,18 @@ mod tests {
             .map(|entry| entry.path())
             .filter(|path| {
                 path.file_name()
-                    .is_some_and(|name| name.to_string_lossy().starts_with("config.toml.rejected."))
+                    .is_some_and(|name| name.to_string_lossy().starts_with(&prefix))
             })
             .collect()
+    }
+
+    /// 启动失败后原字节必须逐字保留，且不得产生任何“拒绝/迁移”备份或改写。
+    fn assert_startup_failed_closed(store: &ConfigStore, original: &[u8]) {
+        let error = store.load_for_startup().unwrap_err().to_string();
+        assert!(!error.is_empty());
+        assert_eq!(fs::read(store.paths().config_file()).unwrap(), original);
+        assert!(config_backups(store, "rejected").is_empty());
+        assert!(config_backups(store, "migrated").is_empty());
     }
 
     fn legacy_config(schema_version: u32) -> String {
@@ -679,8 +609,7 @@ mod tests {
             ]);
             store.hydrate_credentials(&mut expected).unwrap();
             let loaded = store.load_for_startup().unwrap();
-            assert!(loaded.recovery.is_none());
-            assert_eq!(loaded.config, expected);
+            assert_eq!(loaded, expected);
             assert_eq!(store.load().unwrap(), expected);
             let backups: Vec<_> = fs::read_dir(store.paths().config_dir())
                 .unwrap()
@@ -690,7 +619,7 @@ mod tests {
             assert_eq!(backups.len(), 1);
             assert_eq!(fs::read_to_string(&backups[0]).unwrap(), original);
             let persisted = fs::read(store.paths().config_file()).unwrap();
-            assert_eq!(store.load_for_startup().unwrap().config, expected);
+            assert_eq!(store.load_for_startup().unwrap(), expected);
             assert_eq!(fs::read(store.paths().config_file()).unwrap(), persisted);
             assert_eq!(
                 store.credentials.load(&provider_id).unwrap().as_deref(),
@@ -713,7 +642,8 @@ mod tests {
             fs::read_to_string(store.paths().config_file()).unwrap(),
             invalid
         );
-        assert!(rejected_backups(&store).is_empty());
+        assert!(config_backups(&store, "rejected").is_empty());
+        assert!(config_backups(&store, "migrated").is_empty());
 
         old.disabled_system_agents.remove("unknown");
         let original = toml::to_string_pretty(&old).unwrap();
@@ -732,8 +662,12 @@ mod tests {
             fs::read_to_string(store.paths().config_file()).unwrap(),
             original
         );
+        // The migration backs up before the atomic replace; a failed replace keeps both.
+        let backups = config_backups(&store, "migrated");
+        assert_eq!(backups.len(), 1);
+        assert_eq!(fs::read_to_string(&backups[0]).unwrap(), original);
         assert!(store.load().is_err()); // Explicit reload never migrates.
-        assert!(store.load_for_startup().unwrap().recovery.is_none());
+        assert!(store.load_for_startup().is_ok());
         assert!(
             !store
                 .load()
@@ -762,14 +696,13 @@ mod tests {
             let original = toml::to_string_pretty(&document).unwrap();
             fs::create_dir_all(store.paths().config_dir()).unwrap();
             fs::write(store.paths().config_file(), &original).unwrap();
-            let startup = store.load_for_startup().unwrap();
-            assert!(startup.recovery.is_none());
+            let loaded = store.load_for_startup().unwrap();
             assert_eq!(
                 fs::read_to_string(store.paths().config_file()).unwrap(),
                 original
             );
-            assert_eq!(startup.config, expected);
-            store.save(&startup.config).unwrap();
+            assert_eq!(loaded, expected);
+            store.save(&loaded).unwrap();
             let persisted: toml::Value =
                 toml::from_str(&fs::read_to_string(store.paths().config_file()).unwrap()).unwrap();
             assert!(persisted["ui"].get("follow_system_theme").is_none());
@@ -798,98 +731,139 @@ mod tests {
     }
 
     #[test]
-    fn old_schemas_are_backed_up_and_replaced_before_current_settings_reload() {
-        for schema_version in [15, 16, 17] {
-            let store = test_store(&format!("schema-{schema_version}"));
+    fn missing_config_uses_in_memory_default_without_writing_a_file() {
+        let store = test_store("missing-config");
+
+        let config = store.load_for_startup().unwrap();
+
+        assert_eq!(config, StudioConfig::default_config());
+        assert!(!store.paths().config_file().exists());
+        assert!(!store.paths().config_dir().exists());
+    }
+
+    #[test]
+    fn unsupported_schema_versions_fail_closed_and_preserve_original() {
+        // 15/16/17 and 21 have no versioned conversion path; `u32::MAX` models a future schema.
+        for schema_version in [15, 16, 17, 21, u32::MAX] {
+            let store = test_store(&format!("unsupported-schema-{schema_version}"));
             fs::create_dir_all(store.paths().config_dir()).unwrap();
-            let legacy = legacy_config(schema_version);
-            fs::write(store.paths().config_file(), &legacy).unwrap();
-            let startup = store.load_for_startup().unwrap();
-            assert_eq!(startup.config, StudioConfig::default_config());
-            let backup = startup.recovery.unwrap().backup_path;
-            assert_eq!(fs::read(backup).unwrap(), legacy.as_bytes());
-            assert_eq!(store.load().unwrap(), startup.config);
+            let unsupported = legacy_config(schema_version);
+            fs::write(store.paths().config_file(), &unsupported).unwrap();
+
+            let error = store.load_for_startup().unwrap_err().to_string();
+
+            assert!(error.contains("schema version"), "{error}");
+            assert_startup_failed_closed(&store, unsupported.as_bytes());
         }
     }
 
     #[test]
-    fn future_schema_is_backed_up_and_replaced_during_startup() {
-        let store = test_store("future-schema");
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        let future = toml::to_string_pretty(&StudioConfig::default_config())
-            .unwrap()
-            .replace("schema_version = 20", "schema_version = 4294967295");
-        fs::write(store.paths().config_file(), &future).unwrap();
-
-        let startup = store.load_for_startup().unwrap();
-
-        assert_recovered_with_backup(&store, &startup, future.as_bytes());
-    }
-
-    #[test]
-    fn malformed_config_is_backed_up_and_replaced_during_startup() {
+    fn malformed_config_fails_closed_and_preserves_original() {
         let store = test_store("malformed");
         fs::create_dir_all(store.paths().config_dir()).unwrap();
         fs::write(store.paths().config_file(), "not-toml").unwrap();
 
-        let startup = store.load_for_startup().unwrap();
+        let error = store.load_for_startup().unwrap_err().to_string();
 
-        assert_recovered_with_backup(&store, &startup, b"not-toml");
+        assert!(error.contains("invalid Studio config TOML"), "{error}");
+        assert!(error.contains("config.toml"), "{error}");
+        assert!(!error.contains("not-toml"), "{error}");
+        assert_startup_failed_closed(&store, b"not-toml");
     }
 
     #[test]
-    fn inline_bearer_token_is_backed_up_without_accessing_legacy_credentials() {
+    fn parse_failures_do_not_leak_config_content_or_secrets() {
+        let secret = "sk-live-do-not-log-0123456789abcdef";
+
+        // 语法错误行内嵌明文 token：`toml` 的默认 Display 会回显出错整行。
+        let syntax_store = test_store("leak-syntax");
+        fs::create_dir_all(syntax_store.paths().config_dir()).unwrap();
+        let malformed =
+            format!("[models.providers.deepseek]\nbearer_token = \"{secret}\" trailing-junk\n");
+        fs::write(syntax_store.paths().config_file(), &malformed).unwrap();
+
+        let syntax_error = syntax_store.load_for_startup().unwrap_err().to_string();
+
+        assert!(!syntax_error.contains(secret), "{syntax_error}");
+        assert!(!syntax_error.contains("trailing-junk"), "{syntax_error}");
+        assert!(syntax_error.contains("config.toml"), "{syntax_error}");
+        assert!(
+            syntax_error.contains("invalid Studio config TOML"),
+            "{syntax_error}"
+        );
+        assert_eq!(
+            fs::read_to_string(syntax_store.paths().config_file()).unwrap(),
+            malformed
+        );
+
+        // 结构/类型错误把明文放进字段值：serde 诊断会回显该值。
+        let typed_store = test_store("leak-typed");
+        fs::create_dir_all(typed_store.paths().config_dir()).unwrap();
+        let wrong_type = format!("schema_version = \"{secret}\"\n");
+        fs::write(typed_store.paths().config_file(), &wrong_type).unwrap();
+
+        let typed_error = typed_store.load_for_startup().unwrap_err().to_string();
+
+        assert!(!typed_error.contains(secret), "{typed_error}");
+        assert!(typed_error.contains("config.toml"), "{typed_error}");
+        assert!(
+            typed_error.contains("does not match the current schema"),
+            "{typed_error}"
+        );
+        assert_eq!(
+            fs::read_to_string(typed_store.paths().config_file()).unwrap(),
+            wrong_type
+        );
+    }
+
+    #[test]
+    fn non_utf8_config_fails_closed_and_preserves_original() {
+        let store = test_store("non-utf8");
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        let original = [0xff, 0xfe, 0x00, 0x01];
+        fs::write(store.paths().config_file(), original).unwrap();
+
+        let error = store.load_for_startup().unwrap_err().to_string();
+
+        assert!(error.contains("UTF-8"), "{error}");
+        assert_startup_failed_closed(&store, &original);
+    }
+
+    #[test]
+    fn invalid_current_schema_config_fails_closed_and_preserves_original() {
+        let store = test_store("invalid-current-schema");
+        let mut invalid = StudioConfig::default_config();
+        invalid.models.providers.clear();
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        let original = toml::to_string_pretty(&invalid).unwrap();
+        fs::write(store.paths().config_file(), &original).unwrap();
+
+        let error = store.load_for_startup().unwrap_err().to_string();
+
+        assert!(error.contains("provider"), "{error}");
+        assert_startup_failed_closed(&store, original.as_bytes());
+    }
+
+    #[test]
+    fn inline_bearer_token_fails_closed_without_touching_credentials() {
         let credentials = Arc::new(RecordingCredentialStore::default());
         let store = ConfigStore::with_credential_store(
             ConfigPaths::from_home(temp_home("inline-secret")),
             credentials.clone(),
         );
-        let mut config = config_with_provider_secret("legacy-provider", "forbidden-secret");
-        config
-            .models
-            .providers
-            .values_mut()
-            .next()
-            .unwrap()
-            .bearer_token = Some("forbidden-secret".to_string());
+        let config = config_with_provider_secret("legacy-provider", "forbidden-secret");
         fs::create_dir_all(store.paths().config_dir()).unwrap();
-        fs::write(
-            store.paths().config_file(),
-            toml::to_string_pretty(&config).unwrap(),
-        )
-        .unwrap();
+        let original = toml::to_string_pretty(&config).unwrap();
+        fs::write(store.paths().config_file(), &original).unwrap();
 
-        let original = fs::read(store.paths().config_file()).unwrap();
-        let startup = store.load_for_startup().unwrap();
-        let persisted = fs::read_to_string(store.paths().config_file()).unwrap();
+        let error = store.load_for_startup().unwrap_err().to_string();
 
-        assert_eq!(startup.config, StudioConfig::default_config());
-        assert_eq!(
-            fs::read(startup.recovery.unwrap().backup_path()).unwrap(),
-            original
-        );
-        assert!(!persisted.contains("forbidden-secret"));
-        assert!(!persisted.contains("bearer_token ="));
-        assert_eq!(
-            credentials.loads.lock().unwrap().as_slice(),
-            ["deepseek".to_string()]
-        );
+        assert!(error.contains("bearer_token"), "{error}");
+        assert_startup_failed_closed(&store, original.as_bytes());
+        // 内联明文凭据被拒绝时不得读取、写入或删除系统凭据。
+        assert!(credentials.loads.lock().unwrap().is_empty());
         assert!(credentials.saves.lock().unwrap().is_empty());
         assert!(credentials.deletes.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn invalid_current_schema_config_is_backed_up_and_replaced_during_startup() {
-        let store = test_store("invalid-current-schema");
-        let mut invalid = StudioConfig::default_config();
-        invalid.models.providers.clear();
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        let invalid_toml = toml::to_string_pretty(&invalid).unwrap();
-        fs::write(store.paths().config_file(), &invalid_toml).unwrap();
-
-        let startup = store.load_for_startup().unwrap();
-
-        assert_recovered_with_backup(&store, &startup, invalid_toml.as_bytes());
     }
 
     #[test]
@@ -897,43 +871,81 @@ mod tests {
         let store = test_store("config-read-failure");
         fs::create_dir_all(store.paths().config_file()).unwrap();
 
-        let error = store.load_for_startup().unwrap_err();
+        let error = store.load_for_startup().unwrap_err().to_string();
 
-        assert!(!error.to_string().is_empty());
+        assert!(!error.is_empty());
+        assert!(error.contains("config.toml"), "{error}");
         assert!(store.paths().config_file().is_dir());
+        assert!(config_backups(&store, "rejected").is_empty());
+        assert!(config_backups(&store, "migrated").is_empty());
+    }
+
+    // `Path::exists()` follows symlinks and reports `false` for a dangling link, so startup used
+    // to treat a present-but-broken `config.toml` as missing and fall back to the in-memory
+    // defaults. The entry exists, so every path must fail closed instead.
+    #[cfg(unix)]
+    #[test]
+    fn broken_config_symlink_fails_closed_instead_of_using_defaults() {
+        use std::os::unix::fs::symlink;
+
+        let store = test_store("broken-config-symlink");
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        symlink("missing-config-target", store.paths().config_file()).unwrap();
+
+        // Startup, explicit reload and the default-writing paths must all refuse the broken link.
+        let startup_error = store.load_for_startup().unwrap_err().to_string();
+        assert!(startup_error.contains("config.toml"), "{startup_error}");
+        assert!(store.load_or_default().is_err());
+        assert!(store.load().is_err());
+        assert!(store.init_default().is_err());
+        assert!(store.save(&StudioConfig::default_config()).is_err());
+
+        // The link entry itself is untouched and no replacement/backup file was written.
+        assert!(
+            fs::symlink_metadata(store.paths().config_file())
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(config_backups(&store, "rejected").is_empty());
+        assert!(config_backups(&store, "migrated").is_empty());
     }
 
     #[test]
-    fn default_credential_failure_preserves_incompatible_config() {
-        let credentials = Arc::new(ReadbackFailingCredentialStore::default());
+    fn failing_startup_preserves_existing_provider_credentials() {
+        let credentials = Arc::new(MemoryCredentialStore::default());
         let store = ConfigStore::with_credential_store(
-            ConfigPaths::from_home(temp_home("replacement-credential-failure")),
+            ConfigPaths::from_home(temp_home("startup-credential-preservation")),
             credentials.clone(),
         );
+        credentials.save("custom-provider", "kept-secret").unwrap();
         fs::create_dir_all(store.paths().config_dir()).unwrap();
-        fs::write(store.paths().config_file(), "not-toml").unwrap();
-        credentials.reads_until_failure.lock().unwrap().replace(0);
+        let future = toml::to_string_pretty(&StudioConfig::default_config())
+            .unwrap()
+            .replace("schema_version = 20", "schema_version = 21");
+        fs::write(store.paths().config_file(), &future).unwrap();
 
         let error = store.load_for_startup().unwrap_err().to_string();
 
-        assert!(error.contains("readback failure"));
+        assert!(error.contains("schema version"), "{error}");
+        assert_startup_failed_closed(&store, future.as_bytes());
+        // provider 身份与其 keyring 关联必须原样保留，不产生孤儿密钥。
         assert_eq!(
-            fs::read_to_string(store.paths().config_file()).unwrap(),
-            "not-toml"
+            credentials.load("custom-provider").unwrap().as_deref(),
+            Some("kept-secret")
         );
-        assert!(rejected_backups(&store).is_empty());
     }
 
     #[test]
     fn backup_writer_uses_a_non_overwriting_collision_suffix() {
         let home = temp_home("backup-collision");
         let config_path = home.join("config.toml");
-        let first = rejected_backup_path(&config_path, 42, 0);
+        let first = config_backup_path(&config_path, "migrated", 42, 0);
         fs::write(&first, "existing").unwrap();
 
-        let backup = write_rejected_backup_at(&config_path, b"original", 42).unwrap();
+        let backup = write_config_backup_at(&config_path, b"original", "migrated", 42).unwrap();
 
-        assert_eq!(backup, rejected_backup_path(&config_path, 42, 1));
+        assert_eq!(backup, config_backup_path(&config_path, "migrated", 42, 1));
         assert_eq!(fs::read_to_string(first).unwrap(), "existing");
         assert_eq!(fs::read(backup).unwrap(), b"original");
     }
@@ -943,40 +955,10 @@ mod tests {
         let home = temp_home("backup-failure");
         let missing = home.join("missing").join("config.toml");
 
-        let error = write_rejected_backup_at(&missing, b"original", 42).unwrap_err();
+        let error = write_config_backup_at(&missing, b"original", "migrated", 42).unwrap_err();
 
         assert!(!error.to_string().is_empty());
-        assert!(!rejected_backup_path(&missing, 42, 0).exists());
-    }
-
-    #[test]
-    fn atomic_replacement_failure_preserves_original_after_backup() {
-        let store = test_store("replacement-failure");
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        let original = b"not-toml";
-        fs::write(store.paths().config_file(), original).unwrap();
-        let incompatible = IncompatibleConfig::new(
-            ConfigIncompatibilityKind::Parse,
-            PureError::ConfigError("invalid test config".to_string()),
-        );
-
-        let error = store
-            .replace_incompatible_for_startup_with(
-                original,
-                incompatible,
-                |_config_path, _persisted| {
-                    Err(PureError::ConfigError(
-                        "injected replacement failure".to_string(),
-                    ))
-                },
-            )
-            .unwrap_err();
-
-        assert!(error.to_string().contains("injected replacement failure"));
-        assert_eq!(fs::read(store.paths().config_file()).unwrap(), original);
-        let backups = rejected_backups(&store);
-        assert_eq!(backups.len(), 1);
-        assert_eq!(fs::read(&backups[0]).unwrap(), original);
+        assert!(!config_backup_path(&missing, "migrated", 42, 0).exists());
     }
 
     #[test]
@@ -1050,7 +1032,7 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("failed to parse Studio config"));
+        assert!(error.contains("invalid Studio config TOML"), "{error}");
         assert_eq!(
             fs::read_to_string(store.paths().config_file()).unwrap(),
             "not-toml"

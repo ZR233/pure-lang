@@ -3,8 +3,13 @@ use anyhow::{Context, Result};
 use crate::studio::records::DirectoryState;
 
 use crate::studio::entity as entities;
-use crate::studio::records::{ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility};
+#[cfg(test)]
+use crate::studio::records::ProjectRecord;
+use crate::studio::records::{ThreadKind, ThreadRecord, ThreadVisibility};
 
+/// Retired per-product `projects` row conversion. Only the `#[cfg(test)]` seeding path still needs it;
+/// production Project/Workspace facts come from `workspaces.toml`.
+#[cfg(test)]
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
     ProjectRecord {
         id: model.id,

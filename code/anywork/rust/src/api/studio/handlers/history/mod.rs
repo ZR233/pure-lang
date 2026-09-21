@@ -75,11 +75,13 @@ pub async fn list_thread_turns(
     })
 }
 
-/// Reads a bounded, bidirectional item page from the canonical journal projection.
+/// Reads a bounded, bidirectional item page from the durable per-Thread history database.
 pub async fn list_timeline_items(
     request: super::super::types::ListTimelineItemsRequest,
 ) -> Result<super::super::types::BridgeTimelinePage, BridgeError> {
-    use super::super::types::{BridgeTimelinePage, BridgeTimelineQuery, BridgeTimelineTurn};
+    use super::super::types::{
+        BridgeTimelineItemPreview, BridgeTimelinePage, BridgeTimelineQuery, BridgeTimelineTurn,
+    };
     let bridge = active_bridge().await?;
     let query = match request.query {
         BridgeTimelineQuery::Latest => pl_protocol::TimelineQuery::Latest,
@@ -93,6 +95,7 @@ pub async fn list_timeline_items(
         .await?;
     Ok(BridgeTimelinePage {
         thread_id: page.thread_id,
+        database_id: page.database_id,
         watermark: page.watermark,
         items: page
             .items
@@ -104,6 +107,19 @@ pub async fn list_timeline_items(
             .collect(),
         first_item_id: page.first_item_id,
         last_item_id: page.last_item_id,
+        truncated: page.truncated,
+        previews: page
+            .previews
+            .into_iter()
+            .map(|entry| BridgeTimelineItemPreview {
+                item_id: entry.item_id,
+                ordinal: entry.ordinal,
+                revision: entry.revision,
+                total_bytes: entry.total_bytes,
+                preview_bytes: entry.preview_bytes,
+                omitted_bytes: entry.omitted_bytes,
+            })
+            .collect(),
         older_cursor: page.older_cursor,
         newer_cursor: page.newer_cursor,
         turns: page
@@ -122,6 +138,35 @@ pub async fn list_timeline_items(
                 },
             })
             .collect(),
+    })
+}
+
+/// 按 item identity 直接读取一条完整条目正文，绕过页面的单条预览预算。
+///
+/// 返回与分页一致的 item、database identity 与 watermark，使客户端能按 identity 把
+/// 完整载荷合并进既有窗口并替换同身份的预览条目。
+pub async fn read_timeline_item(
+    thread_id: String,
+    item_id: String,
+) -> Result<super::super::types::BridgeTimelinePage, BridgeError> {
+    let bridge = active_bridge().await?;
+    let read = bridge
+        .studio
+        .read_timeline_item(&thread_id, &item_id)
+        .await?;
+    let item = bridge_thread_item(read.item)?;
+    Ok(super::super::types::BridgeTimelinePage {
+        thread_id: read.thread_id,
+        database_id: read.database_id,
+        watermark: read.watermark,
+        first_item_id: item.as_ref().map(|item| item.id.clone()),
+        last_item_id: item.as_ref().map(|item| item.id.clone()),
+        items: item.into_iter().collect(),
+        older_cursor: None,
+        newer_cursor: None,
+        truncated: false,
+        previews: Vec::new(),
+        turns: Vec::new(),
     })
 }
 

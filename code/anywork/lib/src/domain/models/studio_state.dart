@@ -50,10 +50,10 @@ class StudioState {
     required this.providerUsageState,
     this.modelPerformance = const ModelPerformanceSnapshotView(),
     required this.updaterState,
-    this.configRecoveryNotice,
     this.persistenceState = const PersistenceStateSnapshot.ready(),
     this.workspacesByThread = const {},
     this.workspaceUiByThread = const {},
+    this.openedThreadIds = const {},
     this.newThreadComposerByProject = const {},
     this.newThreadModeByProject = const {},
     this.newThreadWorkspaceModeByProject = const {},
@@ -64,6 +64,12 @@ class StudioState {
 
   final Map<String, ThreadWorkspace> workspacesByThread;
   final Map<String, WorkspaceUiState> workspaceUiByThread;
+
+  /// 已被用户显式打开过的会话。
+  ///
+  /// 首屏恢复的上次选择只表达选择，不在此集合中（§6.1）：打开是显式用户动作，
+  /// 只有打开过的会话才建立订阅、读取当前状态与首个历史窗口。
+  final Set<String> openedThreadIds;
   final Map<String, ComposerThreadState> newThreadComposerByProject;
   final Map<String, ThreadModeId> newThreadModeByProject;
 
@@ -84,7 +90,6 @@ class StudioState {
   final ProviderUsageStateSnapshot providerUsageState;
   final ModelPerformanceSnapshotView modelPerformance;
   final UpdaterStateSnapshot updaterState;
-  final ConfigRecoveryNotice? configRecoveryNotice;
   final PersistenceStateSnapshot persistenceState;
 
   List<StudioProject> get projects => projectDirectory.values;
@@ -120,9 +125,12 @@ class StudioState {
 
   WorkspaceUiState get selectedWorkspaceUi {
     final id = selectedThreadId;
+    // 选中但从未打开过的会话没有 workspace UI 条目：按 `idle`（未打开）而不是
+    // 默认的 `loading` 处理，避免首屏把“尚未打开”显示成永久加载中。
     return id == null
         ? const WorkspaceUiState()
-        : workspaceUiByThread[id] ?? const WorkspaceUiState();
+        : workspaceUiByThread[id] ??
+              const WorkspaceUiState(syncState: AgentWorkspaceSyncState.idle);
   }
 
   StudioTurnView? get turn => selectedWorkspace?.activeTurn;
@@ -315,6 +323,7 @@ class StudioState {
   StudioState copyWith({
     Map<String, ThreadWorkspace>? workspacesByThread,
     Map<String, WorkspaceUiState>? workspaceUiByThread,
+    Set<String>? openedThreadIds,
     Map<String, ComposerThreadState>? newThreadComposerByProject,
     Map<String, ThreadModeId>? newThreadModeByProject,
     Map<String, ThreadWorkspaceMode>? newThreadWorkspaceModeByProject,
@@ -333,12 +342,12 @@ class StudioState {
     ProviderUsageStateSnapshot? providerUsageState,
     ModelPerformanceSnapshotView? modelPerformance,
     UpdaterStateSnapshot? updaterState,
-    Object? configRecoveryNotice = _studioStateUnset,
     PersistenceStateSnapshot? persistenceState,
   }) {
     return StudioState(
       workspacesByThread: workspacesByThread ?? this.workspacesByThread,
       workspaceUiByThread: workspaceUiByThread ?? this.workspaceUiByThread,
+      openedThreadIds: openedThreadIds ?? this.openedThreadIds,
       newThreadComposerByProject:
           newThreadComposerByProject ?? this.newThreadComposerByProject,
       newThreadModeByProject:
@@ -365,9 +374,6 @@ class StudioState {
       providerUsageState: providerUsageState ?? this.providerUsageState,
       modelPerformance: modelPerformance ?? this.modelPerformance,
       updaterState: updaterState ?? this.updaterState,
-      configRecoveryNotice: identical(configRecoveryNotice, _studioStateUnset)
-          ? this.configRecoveryNotice
-          : configRecoveryNotice as ConfigRecoveryNotice?,
       persistenceState: persistenceState ?? this.persistenceState,
     );
   }

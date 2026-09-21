@@ -74,7 +74,7 @@ void registerThreadStreamTests() {
     }
   });
 
-  test('authoritative Thread snapshot replaces accumulated delta', () async {
+  test('authoritative history window replaces accumulated delta', () async {
     final base = _emptyState();
     final api = _FakeStudioApi(base);
     final container = ProviderContainer(
@@ -84,6 +84,7 @@ void registerThreadStreamTests() {
 
     await container.read(studioControllerProvider.future);
     await pumpEventQueue();
+    await _openSelectedThread(container);
     final thread = base.threads.single;
     final started = _threadItemFixture(
       id: 'item-1',
@@ -95,11 +96,10 @@ void registerThreadStreamTests() {
       status: 'streaming',
     );
     api.emitThreadFrame(
-      ThreadSnapshotFrame(
-        workspace: base.selectedWorkspace!.copyWith(
-          revision: 1,
-          items: [started],
-        ),
+      _threadItemFrame(
+        threadId: thread.id,
+        workspaceRevision: 1,
+        item: started,
       ),
     );
     api.emitThreadFrame(
@@ -112,28 +112,36 @@ void registerThreadStreamTests() {
         delta: 'partial',
       ),
     );
-    api.emitThreadFrame(
-      ThreadSnapshotFrame(
-        workspace: base.selectedWorkspace!.copyWith(
-          revision: 3,
-          items: [
-            _threadItemFixture(
-              id: started.id,
-              threadId: started.threadId,
-              turnId: started.turnId,
-              ordinal: started.ordinal,
-              revision: 2,
-              status: 'streaming',
-              text: 'authoritative',
-            ),
-          ],
-        ),
-      ),
+    await pumpEventQueue();
+    expect(
+      container
+          .read(studioControllerProvider)
+          .requireValue
+          .selectedWorkspace!
+          .items
+          .single
+          .text,
+      'partial',
     );
+
+    // 历史数据库是窗口正文的事实源：回到最新会用更新的 revision 覆盖累积 delta。
+    api.timelineDb[thread.id] = [
+      _threadItemFixture(
+        id: started.id,
+        threadId: started.threadId,
+        turnId: started.turnId,
+        ordinal: started.ordinal,
+        revision: 2,
+        status: 'streaming',
+        text: 'authoritative',
+      ),
+    ];
+    await container
+        .read(studioControllerProvider.notifier)
+        .jumpToLatest(thread.id);
     await pumpEventQueue();
 
     final state = container.read(studioControllerProvider).requireValue;
-    expect(state.selectedWorkspace!.revision, 3);
     expect(state.selectedWorkspace!.items.single.text, 'authoritative');
   });
 
@@ -203,6 +211,7 @@ void registerThreadStreamTests() {
 
     await container.read(studioControllerProvider.future);
     await pumpEventQueue();
+    await _openSelectedThread(container);
     api.emitThreadFrame(_threadSnapshotFrame(base, 'session-1'));
     api.emitThreadFrame(
       _threadRuntimeFrame(
@@ -242,6 +251,7 @@ void registerThreadStreamTests() {
 
     await container.read(studioControllerProvider.future);
     await pumpEventQueue();
+    await _openSelectedThread(container);
     api.emitThreadFrame(_threadSnapshotFrame(base, 'session-1'));
     api.emitThreadFrame(
       _threadTurnFrame(
@@ -299,6 +309,7 @@ void registerThreadStreamTests() {
 
     await container.read(studioControllerProvider.future);
     await pumpEventQueue();
+    await _openSelectedThread(container);
     api.emitThreadFrame(_threadSnapshotFrame(base, 'session-1'));
     final started = _threadItemFixture(
       id: 'item-1',

@@ -32,10 +32,10 @@ pub use pl_tool::remote::{
 pub use pl_tool::skill::{SkillCatalog, SkillMetadata, SkillResourceBase, SkillSourceKind};
 
 pub use config::{
-    ConfigPaths, ConfigRecoveryReport, ConfigRuntimeError, ConfigRuntimeSnapshot, ConfigStore,
-    DeepSeekWebSearchConfig, ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION,
-    StudioConfig, StudioMcpConfig, StudioRole, StudioUiConfig, UserAgentProfile,
-    WebSearchContextSize, WebSearchLocation, WebSearchMode,
+    ConfigPaths, ConfigRuntimeError, ConfigRuntimeSnapshot, ConfigStore, DeepSeekWebSearchConfig,
+    ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioMcpConfig,
+    StudioRole, StudioUiConfig, UserAgentProfile, WebSearchContextSize, WebSearchLocation,
+    WebSearchMode,
 };
 pub use config_editor::{
     ModeRouteEdit, ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit,
@@ -75,6 +75,9 @@ pub use studio::{
     StudioRuntimeStateKind, StudioStartNewThreadResponse, StudioStore, StudioThreadSubscription,
     StudioUpdateStateSnapshot, StudioWorktreeRecoveryPreview, ThreadRecord,
 };
+// Explicit, operator-invoked one-time conversion of a pre-`catalog.toml` installation. It shares the
+// coordinator's phase machine with normal startup and never starts the runtime.
+pub use studio::session_migration::{LegacyMigrationOutcome, migrate_legacy_storage};
 pub use updater::{
     StudioUpdate, StudioUpdateAsset, StudioUpdateCancellation, StudioUpdateCheck,
     StudioUpdateError, StudioUpdateErrorCode, StudioUpdateEvent, StudioUpdater,

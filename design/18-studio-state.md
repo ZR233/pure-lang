@@ -10,13 +10,14 @@ Studio 使用 Command Query Separation。查询只读取 owner 已发布的 cano
 初始化、激活、扫描 Skill/Profile、修复、重连和关闭只能由明确 typed command 触发。
 Widget rebuild、stream resync 与 `read*` 查询不得写 SQLite/配置、访问网络或创建 runtime
 owner。进程运行期间 Project、Thread、Agent、Workflow、Recovery 和服务目录的内存 owner
-是活动事实源；SQLite 仅提供 activation 基线、历史冷分页与异步持久化。
+是活动事实源；`state.toml` 仅提供 activation 基线，SQLite 只承担历史/调用查询与异步持久化。
 
 ## 18.2 公共 snapshot
 
 StudioState 聚合 projectDirectory、threadDirectory、agentDirectory、modeCatalog、settings、
-recovery、MCP/LSP、provider usage、model performance 与 updater。Thread workspace 单独包含 timeline、pending
-Interaction、ThreadRuntimeView 和 workflow 投影；不存在 taskDirectory。Thread 目录条目携带
+recovery、MCP/LSP、provider usage、model performance 与 updater。Thread workspace 单独包含当前
+状态、pending Interaction、ThreadRuntimeView、workflow 投影和有界 Timeline 窗口；不存在
+taskDirectory。Thread 目录条目携带
 会话工作区模式（`local | worktree`）与会话工作区地址 `workspacePath`，只读投影为侧栏与会话
 展示的 canonical 事实，GUI 不推导、不本地改写，也不按模式分别取 Project 路径或工作树路径。
 Settings snapshot 以 `modeModelRoutes` 暴露全局 Mode 默认 selector，并继续以 `roles` 暴露四个
@@ -28,7 +29,7 @@ ThreadDirectoryChanged、AgentDirectoryChanged、ModeCatalogChanged、ThreadRunt
 等。Dart reducer 拒绝旧 revision，并可用一次全量 snapshot 从 stream lag 恢复；它不自行
 推导 workflow transition。一次目录命令可以同时改变 Project 与 Thread，但每个实际变化的
 领域最多发布一次事件；空 delta 不得提升 revision 或发布空事件。冷记录进入驻留/归档命令
-的内存索引属于 owner 准备步骤，不单独形成产品事实或广播。归档只装载目录，不重放冷历史
+的内存索引属于 owner 准备步骤，不单独形成产品事实或广播。归档只装载目录，不读取冷历史
 或激活冷 owner；最终业务 mutation 才通过
 directory command 发布 canonical delta。
 
@@ -37,8 +38,9 @@ directory command 发布 canonical delta。
 
 ## 18.3 Activation
 
-启动只等待数据库、配置、项目目录和本地预置资源就绪。历史会话与 worktree 审计由 runtime
-持有的后台任务完成，Recovery 使用现有 ObservedResource 发布 loading、ready 和失败状态，
+启动只等待迁移、全局 TOML、轻量目录和本地预置资源就绪。启动不打开会话数据库、不读取会话
+checkpoint，也不调度全部会话恢复。全局 worktree/数据根审计由 runtime 持有的后台任务完成，
+Recovery 使用现有 ObservedResource 发布 loading、ready 和失败状态，
 显式 `recovery.retry` 重新发起审计，`recovery.read` 只读取当前状态。关闭先停止并等待审计，
 再关闭会话与持久化。启动阶段通过 typed snapshot 向 bridge 提供存储打开、配置读取、
 目录读取、资源准备及终态，不依赖普通产品订阅已经建立。
@@ -47,9 +49,9 @@ directory command 发布 canonical delta。
 settlement。审计结果按当前 lease revision 和已清理问题过滤，不能覆盖后续用户操作。
 
 选择冷 Thread、提交输入或后台 child 继续时显式 activation。runtime 在一致读视图中校验
-并加载 Thread、working state、transcript window 与 pending Interaction，全部成功后一次
-安装 owner。Mode snapshot 和 workflow projection 与 session 同时恢复，不存在独立任务
-runtime 恢复扫描。冷读取仅重放 journal；产品交互回答前按保存的父子顺序激活所需 Thread。
+并加载 Thread checkpoint、working state 与 pending Interaction，全部成功后一次安装 owner。
+Mode snapshot 和 workflow projection 与 session 同时恢复，不存在独立任务 runtime 恢复扫描。
+Timeline 首窗在订阅建立后由 HistoryReader 查询；产品交互回答前按保存的父子顺序激活所需 Thread。
 
 创建根会话是可失败的类型化命令，请求同时携带 Mode 与会话工作区模式。`worktree` 模式在发布
 Thread 之前完成仓库解析、worktree 创建与 lease 落库；任一阶段失败都让命令失败、不留下已发布
@@ -133,7 +135,7 @@ unspecified。Thread runtime 的上下文容量与模型身份来自最新模型
 取消或历史回放而沿用旧模型值；该容量沿可选 wire 字段传给 GUI，UI 不重新解析模型目录，
 辅助推理的容量不覆盖主 Thread 上下文容量。
 
-产品时间线 ordinal 从原始 commit 内的输入、Turn、模型尝试和工具调用顺序统一分配；
+产品时间线 ordinal 在 effect 首次创建 Item 时从输入、Turn、模型尝试和工具调用顺序统一分配；
 隐藏或暂时为空的投影保留槽位，后续正文出现或终态更新不能挤动已有条目；各投影的当前
 输出集合不作为历史排序的事实源。工具时间线从已提交模型调用恢复原参数，从任务/许可
 事实投影执行状态，从 delivery 读取实际交付内容；业务 payload 只作原始事实保存，不能被
@@ -143,14 +145,14 @@ UI 投影当作 exit code、审批或成功状态来源。成功且具有已保�
 持有非空 accepted input identity 时才消费对应 Turn 的提交结果；启动确认清除关联后，
 后续执行失败只留在时间线，不能把空 identity 相等误判为当前输入失败。
 
-Studio 拥有 Thread 产品观察任务：按快照固定水位读取不可变 journal，投影 Agent/Thread
-目录、显式进展和模型计费。计费使用回执中的冻结模型绑定、价格和用量，冷恢复以
-inference identity 幂等重放；父级通知只处理观察注册后的新增事实，使用稳定消息 identity
+Studio 拥有 Thread 产品观察任务：直接消费 owner 发布的不可变 effect，投影 Agent/Thread
+目录、显式进展和模型计费，并把历史/调用事实交给各自 writer。计费使用回执中的冻结模型绑定、
+价格和用量，恢复从调用库按 inference identity 幂等读取；父级通知只处理观察注册后的新增事实，使用稳定消息 identity
 防止失败重试重复送达；观察失败保留可重试状态，由同步屏障返回错误；关闭等待最终
 commit 的投影、目录保存及计费保存完成。观察者更新产品目录时仅在目录 owner 的锁内修改
 运行状态和更新时间，不重写预先读取的完整 Thread；并发标题、Mode 与归档操作保持当前
 事实，已移出热目录的条目不被迟到观察结果重新插入。Agent 查询仅允许读取自身或同树
-后代，不通过查询激活冷 Thread；会话及进展分页游标冻结 journal 水位，进展保留每次显式
+后代，不通过查询激活冷 Thread；会话及进展分页游标绑定数据库 ID 与 applied write 水位，进展保留每次显式
 提交的完整 detail，超大单条以带字节位置的 UTF-8 JSON 分片继续读取，不能截断正文。
 冷目录读取遇到未知 mode payload 保留已有目录元数据；只读历史展示原始载荷，真正激活
 仍严格校验所需 producer codec。

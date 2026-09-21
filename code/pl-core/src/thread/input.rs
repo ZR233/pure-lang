@@ -10,6 +10,26 @@ pub struct ThreadInput {
     pub context: Vec<ContextContent>,
 }
 
+impl ThreadInput {
+    /// Content digest used by the bounded identity ledger for duplicate submission checks.
+    ///
+    /// The digest covers the immutable host-authored body, never the framework routing receipt.
+    pub fn digest(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(self.id.as_bytes());
+        hasher.update([0]);
+        hasher.update(self.payload.format().as_bytes());
+        hasher.update([0]);
+        hasher.update(self.payload.content().as_bytes());
+        for content in &self.context {
+            hasher.update([0]);
+            hasher.update(serde_json::to_vec(content).unwrap_or_default());
+        }
+        format!("sha256:{:x}", hasher.finalize())
+    }
+}
+
 /// Host-selected input routing policy, evaluated atomically by the Thread owner.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum InputPolicy {
@@ -71,10 +91,76 @@ pub struct InputRecord {
     pub state: InputState,
 }
 
+/// Minimal resident identity of an admitted input that already reached a terminal state.
+///
+/// The body and framework routing facts stay in the durable effect history; this record is the
+/// only thing the live owner keeps so a repeated submission can still be answered idempotently.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputIdentity {
+    /// Content digest of the originally accepted body.
+    pub digest: String,
+    pub delivery: InputDelivery,
+    pub id: String,
+    pub ordinal: u64,
+    pub revision: u64,
+    pub state: InputState,
+}
+
+impl InputIdentity {
+    /// Projects one terminal input record into its minimal durable identity.
+    ///
+    /// The Studio runtime persists this record in the per-Thread history identity index so a
+    /// repeated submission can be answered after the resident terminal input has left core state.
+    pub fn from_record(record: &InputRecord) -> Self {
+        Self {
+            digest: record.input.digest(),
+            delivery: record.delivery.clone(),
+            id: record.input.id.clone(),
+            ordinal: record.ordinal,
+            revision: record.revision,
+            state: record.state.clone(),
+        }
+    }
+
+    /// Rebuilds the framework receipt for a repeated, content-identical submission.
+    pub fn receipt(&self, input: ThreadInput, accepted_sequence: u64) -> InputRecord {
+        InputRecord {
+            accepted_sequence,
+            delivery: self.delivery.clone(),
+            input,
+            ordinal: self.ordinal,
+            revision: self.revision,
+            state: self.state.clone(),
+        }
+    }
+}
+
+/// Builds the minimal durable identity of a terminal input record.
+///
+/// Host layers use this to persist the identity index entry alongside the effect that settled the
+/// input; core keeps only the pending queue and never re-reads the durable history.
+pub fn input_identity(record: &InputRecord) -> InputIdentity {
+    InputIdentity::from_record(record)
+}
+
+/// Rebuilds one framework receipt from a stored identity.
+///
+/// The caller passes the watermark that answers the repeat (the current commit for a live owner,
+/// or the durable write sequence for a cold Thread), so a repeated submission returns a receipt
+/// without re-admission.
+pub fn input_receipt(
+    identity: &InputIdentity,
+    input: ThreadInput,
+    accepted_sequence: u64,
+) -> InputRecord {
+    identity.receipt(input, accepted_sequence)
+}
+
 impl InputRecord {
-    /// Returns the framework context identity used when this input was actually admitted to a model call.
-    /// A queued or metadata-only input has no model-visible record. Compaction may remove the record
-    /// from current context while the original request and journal retain it.
+    /// Returns the framework context identity used when this input was actually admitted to a
+    /// model call. A queued or metadata-only input has no model-visible record. Compaction may
+    /// remove the record from current context while the original request and journal retain it.
     pub fn context_record_id(&self) -> Option<String> {
         let InputState::Consumed {
             turn_id,
@@ -307,17 +393,8 @@ impl Owner {
         if input.id.is_empty() {
             return Err(ThreadError::InvalidIdentity);
         }
-        if let Some(previous) = self
-            .state
-            .inputs
-            .iter()
-            .find(|record| record.input.id == input.id)
-        {
-            return if previous.input == input {
-                Ok(previous.clone())
-            } else {
-                Err(ThreadError::InvalidIdentity)
-            };
+        if let Some(receipt) = self.duplicate_input_receipt(&input)? {
+            return Ok(receipt);
         }
         if self.state.lifecycle != ThreadLifecycle::Open || self.interrupt.is_closing() {
             return Err(ThreadError::Closed);
@@ -359,6 +436,17 @@ impl Owner {
         let record = stage_input_with_delivery(&mut self.state, input, delivery)?;
         self.publish();
         Ok(record)
+    }
+
+    /// Answers a repeated submission from bounded current state.
+    ///
+    /// A still-pending input keeps its full record; an already-consumed or discarded input is
+    /// answered from its identity ledger entry by comparing the immutable content digest.
+    fn duplicate_input_receipt(
+        &self,
+        input: &ThreadInput,
+    ) -> Result<Option<InputRecord>, ThreadError> {
+        duplicate_input_receipt(&self.state, input)
     }
 
     pub(super) fn discard_input(&mut self, id: &str) -> Result<InputRecord, ThreadError> {
@@ -478,12 +566,21 @@ impl Owner {
         attempt_id: &str,
     ) -> Result<(), ThreadError> {
         for id in self.active_inputs.clone() {
-            let previous = self
+            let Some(previous) = self
                 .state
                 .inputs
                 .iter()
                 .find(|record| record.input.id == id)
-                .ok_or(ThreadError::InvalidIdentity)?;
+            else {
+                // The input already reached a terminal state and left the bounded resident queue
+                // when an earlier step of this Turn consumed it. Its durable receipt stays the
+                // authority: a consumption attributed to this Turn completes normally, while any
+                // other terminal state stays an input conflict.
+                if active_input_already_consumed(&self.state, &id, turn_id) {
+                    continue;
+                }
+                return Err(ThreadError::InputConsumed);
+            };
             match &previous.state {
                 InputState::Pending => {
                     self.change_input(
@@ -537,7 +634,7 @@ impl Owner {
 /// Validates queue changes against the same commit's request, without invoking a decoder or executor.
 pub(super) fn replay(
     state: &mut ThreadSnapshot,
-    commit: &journal::ThreadCommit,
+    commit: &ThreadEffectBatch,
 ) -> Result<(), ThreadError> {
     let mut inputs = state.inputs.to_vec();
     let mut changes = state.input_changes.to_vec();
@@ -659,12 +756,70 @@ pub(super) fn replay(
         }
     }
     state.inputs = inputs.into();
+    let newest_ordinal = state
+        .inputs
+        .iter()
+        .map(|record| record.ordinal)
+        .max()
+        .unwrap_or(0);
+    let watermark = state.input_ordinal;
+    state.input_ordinal = watermark.max(newest_ordinal);
     state.input_changes = changes.into();
     Ok(())
 }
 
 fn steering_record_id(turn_id: &str, input_id: &str) -> String {
     format!("steer:{}:{turn_id}{input_id}", turn_id.len())
+}
+
+/// Answers a repeated input submission from bounded current state.
+///
+/// A still-pending input keeps its full record; a terminal input is answered from the bounded
+/// identity window by comparing the immutable content digest. An identity older than that window
+/// is answered by the host's durable identity index, so core never accumulates history.
+/// A repeated id with a different body stays an identity conflict.
+pub(super) fn duplicate_input_receipt(
+    state: &ThreadSnapshot,
+    input: &ThreadInput,
+) -> Result<Option<InputRecord>, ThreadError> {
+    if let Some(previous) = state
+        .inputs
+        .iter()
+        .find(|record| record.input.id == input.id)
+    {
+        if previous.input != *input {
+            return Err(ThreadError::InvalidIdentity);
+        }
+        return Ok(Some(previous.clone()));
+    }
+    let Some(identity) = state
+        .terminal_inputs
+        .iter()
+        .find(|identity| identity.id == input.id)
+    else {
+        return Ok(None);
+    };
+    if identity.digest != input.digest() {
+        return Err(ThreadError::InvalidIdentity);
+    }
+    Ok(Some(identity.receipt(input.clone(), state.commit_sequence)))
+}
+
+/// Reports whether bounded durable state already records `id` as consumed by `turn_id`.
+///
+/// A consumed input leaves the resident queue as soon as its commit publishes, so a later step of
+/// the same Turn sees only its durable receipt. An identity that already left the bounded window is
+/// accepted as this Turn's own admission receipt: the owner lists only inputs it admitted into the
+/// active batch, discarding an in-use input is refused, and Turns are serial, so a listed input that
+/// is no longer resident can only have been consumed by this Turn.
+fn active_input_already_consumed(state: &ThreadSnapshot, id: &str, turn_id: &str) -> bool {
+    state
+        .terminal_inputs
+        .iter()
+        .find(|identity| identity.id == id)
+        .is_none_or(|identity| {
+            matches!(&identity.state, InputState::Consumed { turn_id: consumed, .. } if consumed == turn_id)
+        })
 }
 
 /// Stages input as part of an already-admitted control transaction, without starting execution.
@@ -697,10 +852,11 @@ fn stage_input_with_delivery(
     if state.lifecycle != ThreadLifecycle::Open {
         return Err(ThreadError::Closed);
     }
-    let ordinal = u64::try_from(state.inputs.len())
-        .ok()
-        .and_then(|count| count.checked_add(1))
+    let ordinal = state
+        .input_ordinal
+        .checked_add(1)
         .ok_or(ThreadError::RevisionExhausted)?;
+    state.input_ordinal = ordinal;
     let record = InputRecord {
         accepted_sequence: state
             .commit_sequence
@@ -725,6 +881,7 @@ fn stage_input_with_delivery(
 mod tests {
     use super::*;
     use crate::model::{ModelSession, PreparedModelCall};
+    use crate::thread::tests::history_snapshot;
     use pretty_assertions::assert_eq;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::Notify;
@@ -835,8 +992,10 @@ mod tests {
         let mut subscription = thread.subscribe();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                let snapshot = subscription.next().await.expect("owner stays live");
-                if matches!(snapshot.inputs[1].state, InputState::Consumed { .. }) {
+                subscription.next().await.expect("owner stays live");
+                // A consumed input leaves the bounded live queue; observe the committed projection.
+                let committed = history_snapshot(&thread).await;
+                if matches!(committed.inputs[1].state, InputState::Consumed { .. }) {
                     break;
                 }
             }
@@ -851,7 +1010,7 @@ mod tests {
                 .is_none()
         );
         assert_eq!(executed.load(Ordering::SeqCst), 2);
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(snapshot.inputs[0].input, submitted("first"));
         assert_eq!(
             snapshot.inputs[0].state,
@@ -867,8 +1026,7 @@ mod tests {
                 attempt_id: snapshot.attempts[1].attempt_id.clone()
             }
         );
-        let history = thread.journal().await.unwrap();
-        assert_eq!(journal::replay(&history).unwrap().inputs, snapshot.inputs);
+        let history = thread.effects().await.unwrap();
         let consumption = history
             .iter()
             .find(|commit| {
@@ -892,22 +1050,6 @@ mod tests {
                 .content()
                 .contains("future.input")
         );
-        let mut corrupt = history.clone();
-        let index = consumption.sequence as usize - 1;
-        let mut commit = (*corrupt[index]).clone();
-        let mut changes = commit.inputs.to_vec();
-        if let InputChange::Transition {
-            state: InputState::Consumed { attempt_id, .. },
-            ..
-        } = &mut changes[0]
-        {
-            *attempt_id = "not-admitted".into();
-        } else {
-            panic!("expected a consumed input transition");
-        }
-        commit.inputs = changes.into();
-        corrupt[index] = Arc::new(commit);
-        assert!(journal::replay(&corrupt).is_err());
         thread.close().await.unwrap();
     }
 
@@ -956,19 +1098,26 @@ mod tests {
                 .all(|record| record.state == InputState::Pending)
         );
         assert_eq!(
-            thread.snapshot().turns[0].input_id.as_deref(),
+            history_snapshot(&thread).await.turns[0].input_id.as_deref(),
             Some("first")
         );
-        assert!(thread.snapshot().inputs[0].context_record_id().is_none());
+        assert!(
+            history_snapshot(&thread).await.inputs[0]
+                .context_record_id()
+                .is_none()
+        );
+        let checkpoint = thread
+            .checkpoint(thread.snapshot().commit_sequence)
+            .unwrap();
         thread.close().await.unwrap();
-        let restored = ThreadHandle::restore(
+        let restored = ThreadHandle::resume(
             "queue".into(),
             DynModelSession::new(Probe {
                 executed: executed.clone(),
                 preparing: Arc::new(Notify::new()),
                 release: None,
             }),
-            thread.journal().await.unwrap(),
+            Some(checkpoint),
         )
         .unwrap();
         assert_eq!(restored.snapshot().inputs, thread.snapshot().inputs);
@@ -979,20 +1128,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(executed.load(Ordering::SeqCst), 1);
-        let snapshot = restored.snapshot();
+        // A resumed owner keeps no pre-restore Turn history, so its committed projection holds only
+        // the refreshed execution of the still-pending input.
+        let snapshot = history_snapshot(&restored).await;
+        assert_eq!(snapshot.turns.len(), 1);
         assert_eq!(snapshot.turns[0].input_id.as_deref(), Some("first"));
-        assert_eq!(snapshot.turns[1].input_id.as_deref(), Some("first"));
-        let context_id = snapshot.inputs[0].context_record_id().unwrap();
+        // The refreshed execution admitted the pending input into model context.
         let context = snapshot
             .context
             .records
             .iter()
-            .find(|record| record.id == context_id)
-            .unwrap();
+            .find(|record| record.content == submitted("first").context)
+            .expect("the refreshed execution admits the pending input into context");
         assert_eq!(context.content, submitted("first").context);
-        assert_eq!(restored.snapshot().inputs[1].state, InputState::Pending);
+        // A terminal input leaves the bounded live queue, so identify the still-pending input by
+        // identity instead of by index.
+        assert!(
+            restored.snapshot().inputs.iter().any(|record| {
+                record.input.id == "second" && record.state == InputState::Pending
+            })
+        );
         restored.discard_input("second".into()).await.unwrap();
-        assert_eq!(restored.snapshot().inputs[1].state, InputState::Discarded);
+        assert!(restored.effects().await.unwrap().iter().any(|effect| {
+            effect.inputs.iter().any(|change| {
+                matches!(
+                    change,
+                    InputChange::Transition {
+                        id,
+                        state: InputState::Discarded,
+                        ..
+                    } if id.as_str() == "second"
+                )
+            })
+        }));
         assert!(
             restored
                 .run_next_input(execution("empty", CancellationToken::new()))
@@ -1062,16 +1230,19 @@ mod tests {
             .unwrap();
         assert!(matches!(duplicate.state, InputState::Consumed { .. }));
         thread.submit_input(submitted("third")).await.unwrap();
-        thread.journal().await.unwrap();
+        thread.effects().await.unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert_eq!(thread.snapshot().inputs[1].state, InputState::Pending);
-        assert_eq!(thread.snapshot().inputs[2].state, InputState::Pending);
+        // Consumed inputs leave the bounded live queue, so the admitted order comes from the
+        // committed projection.
+        let committed = history_snapshot(&thread).await;
+        assert_eq!(committed.inputs[1].state, InputState::Pending);
+        assert_eq!(committed.inputs[2].state, InputState::Pending);
         thread.resume_inputs(options).await.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 let snapshot = subscription.next().await.unwrap();
-                if snapshot.attempts.len() == 2
-                    && matches!(snapshot.input_execution, InputExecution::Failed { .. })
+                if matches!(snapshot.input_execution, InputExecution::Failed { .. })
+                    && history_snapshot(&thread).await.attempts.len() == 2
                 {
                     break;
                 }
@@ -1080,7 +1251,10 @@ mod tests {
         .await
         .expect("explicit resume drives one new request then pauses again");
         assert_eq!(calls.load(Ordering::SeqCst), 2);
-        assert_eq!(thread.snapshot().inputs[2].state, InputState::Pending);
+        assert_eq!(
+            history_snapshot(&thread).await.inputs[2].state,
+            InputState::Pending
+        );
         thread.close().await.unwrap();
     }
     struct RedirectProbe {
@@ -1178,8 +1352,10 @@ mod tests {
         let mut updates = thread.subscribe();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                let state = updates.next().await.unwrap();
-                if state
+                updates.next().await.unwrap();
+                // A finished Turn is a history fact: settle on the committed projection.
+                let committed = history_snapshot(&thread).await;
+                if committed
                     .turns
                     .last()
                     .is_some_and(|turn| turn.state == TurnState::Finished(TurnOutcome::Completed))
@@ -1190,7 +1366,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let state = thread.snapshot();
+        let state = history_snapshot(&thread).await;
         assert_eq!(state.turns.len(), 2);
         assert_eq!(state.turns[0].state, TurnState::Interrupted);
         assert!(state.inputs.iter().all(|input| matches!(&input.state, InputState::Consumed { turn_id, .. } if turn_id == &state.turns[1].turn_id)));
@@ -1208,13 +1384,12 @@ mod tests {
             ]
             .concat()
         );
-        let history = thread.journal().await.unwrap();
-        assert_eq!(journal::replay(&history).unwrap().inputs, state.inputs);
+        assert!(thread.snapshot().inputs.is_empty());
         thread
             .submit_input_and_continue(submitted("second"), options)
             .await
             .unwrap();
-        assert_eq!(thread.snapshot().turns.len(), 2);
+        assert_eq!(history_snapshot(&thread).await.turns.len(), 2);
         thread.close().await.unwrap();
     }
 
@@ -1295,8 +1470,10 @@ mod tests {
         let mut updates = thread.subscribe();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                let state = updates.next().await.unwrap();
-                if state
+                updates.next().await.unwrap();
+                // A finished Turn is a history fact: settle on the committed projection.
+                let committed = history_snapshot(&thread).await;
+                if committed
                     .turns
                     .last()
                     .is_some_and(|turn| turn.state == TurnState::Finished(TurnOutcome::Completed))
@@ -1307,7 +1484,7 @@ mod tests {
         })
         .await
         .expect("a cancelled execution must not fault the input driver");
-        let state = thread.snapshot();
+        let state = history_snapshot(&thread).await;
         assert_eq!(
             state.turns.len(),
             2,

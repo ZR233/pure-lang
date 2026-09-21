@@ -12,7 +12,8 @@ anywork 是 Flutter 桌面应用，使用 Material 3、Riverpod、go_router 与 
 bridge 访问 Studio 运行时，不读取 SQLite、Agent TOML 或 Skill 文件。Flutter Web 只用于 demo
 integration 验收，不能伪造原生 provider、文件系统或进程能力。
 
-data 层负责 FRB DTO 到 domain 的一次转换；reducer 只接收 canonical snapshot/notification；
+data 层负责 FRB DTO 到 domain 的一次转换；reducer 接收小型 canonical state snapshot、历史 page
+和增量 notification；
 Widget 只负责展示与发命令。窗口关闭必须等待 typed shutdown 完成并回收 Flutter、DTD、
 MCP/LSP 和 child process tree。
 
@@ -42,7 +43,7 @@ snapshot 恢复 UI。Thread Mode 不出现在普通 Skills 设置和按需调用
 已建会话的工作区模式只读来自 canonical 目录事实，GUI 不推导、不本地改写，也不把选择当作
 第二份持久状态。
 
-Thread runtime 只向 GUI 暴露状态栏需要的通用 workflow 投影：mode、run、revision、lifecycle
+Thread runtime state snapshot 只向 GUI 暴露状态栏需要的通用 workflow 投影：mode、run、revision、lifecycle
 与当前阶段。未开始的图模式显示"未开始"；Simple 只显示 Mode。GUI 不提供完整 graph、
 history、展开详情或人工 transition，也不根据阶段 ID 推演动作；状态变更只来自 bridge
 snapshot，不执行本地乐观 transition。
@@ -301,12 +302,27 @@ running 状态来推测最近 Turn。计划摘要与活动块按内容高度参�
 重同步重新建立订阅并消费首帧，不并行回灌单次快照；跳到最新立即采用缓存尾部并作废旧
 窗口请求。
 
+历史页只走 `history.sqlite` 的 keyset 分页（latest/around/before/after），不经过 Thread owner、
+不读取驻留内存历史；增量事件按版本化封套（`epoch`/`base_revision`/`revision`）判连续，item
+delta 还要求命中当前未终态 Item 且 revision 严格递增，缺口或 `lagged` 时重新订阅并从数据库窗口
+重建（见 [07](./07-streaming.md)、[17](./17-studio-storage.md) §17.4）。
+
+客户端为渲染保留有界的实时预览：单条正文最多 `kTimelineItemBodyBudget = 8 * 1024`（UTF-16
+code units，保留最近的尾部），reasoning 的 summary 与 content 合计同样受限。超出预览的部分
+只经 canonical item identity 显式回源：`loadItemBody` 通过 `readTimelineItem` 读取完整条目
+（测试替身退化为围绕该身份的 `around` 一页），按同一 database identity 与水位合并，窗口过期时
+重读权威窗口而不是拼接旧载荷。回源请求已发出但正文尚未 durable 时，条目进入
+`pendingItemBodyIds`：仍然可见、可为重试，不当作身份缺席。Rust 实时 FRB 传输仍发送完整 delta，
+上述预算只是客户端渲染/内存约束，**不**代表 transport 本身有字节上限。
+
 沿滚动方向距边缘 1.5 个视口时预取；不足一屏自动补齐，直到填满、到端或失败。向旧加载
 淘汰远端新条目，向新加载淘汰远端旧条目；可见条目与阅读锚点优先保留。失败保留正文，
 在对应边缘提供显式重试，另一方向不受影响；超过 150ms 才显示不占正文高度的加载提示。
 
 位置由 item 身份、条目内偏移和跟随末尾状态表达。切回优先显示缓存，插入、淘汰、窗口
-变化和图片展开均按同一可见锚点校正，不根据总滚动高度差猜测。历史浏览只提示新内容，
+变化和图片展开均按同一可见锚点校正，不根据总滚动高度差猜测。GUI 只保留当前可见页、前后少量
+预取页、当前流式尾部和少量尚未确认落盘的条目，远离窗口的 page 与非选中 Thread workspace 可
+释放。历史浏览只提示新内容，
 流式末尾跟随按帧合并，不反复启动动画。Markdown 展示可按内容版本复用，不改变原始文本。
 
 ## 19.11 运行中发送消息

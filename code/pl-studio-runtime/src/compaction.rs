@@ -280,13 +280,43 @@ mod tests {
             })
             .await
             .unwrap();
-        let snapshot = thread.snapshot();
+        // Finished attempts and context replacements leave the bounded current snapshot, so the
+        // committed effect stream is the authority for what this Turn actually recorded.
+        let effects = thread.effects().await.unwrap();
+        let mut attempts: Vec<pl_core::thread::journal::AttemptUpdate> = Vec::new();
+        for effect in &effects {
+            let Some(update) = effect.attempt.as_ref() else {
+                continue;
+            };
+            match attempts
+                .iter()
+                .position(|previous| previous.attempt_id == update.attempt_id)
+            {
+                Some(index) => attempts[index] = update.clone(),
+                None => attempts.push(update.clone()),
+            }
+        }
         assert_eq!(
-            snapshot.attempts.len(),
+            attempts.len(),
             1,
             "summary accounting is not a normal turn inference"
         );
-        assert_eq!(snapshot.context_replacements.len(), 2);
+        assert_eq!(attempts[0].attempt_id, "attempt");
+        assert_eq!(attempts[0].turn_id, "turn");
+        assert!(
+            attempts
+                .iter()
+                .all(|attempt| !attempt.attempt_id.contains("studio.compaction"))
+        );
+        assert_eq!(
+            effects
+                .iter()
+                .map(|effect| effect.replacements.len())
+                .sum::<usize>(),
+            2,
+            "the rebuild and the compaction replacement are both committed"
+        );
+        let snapshot = thread.snapshot();
         let receipt: CompactionReceipt = serde_json::from_str(
             snapshot
                 .extensions

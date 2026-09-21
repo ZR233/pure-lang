@@ -109,8 +109,10 @@ async fn main() -> Result<()> {
         println!("Observing real API execution for {seconds}s. Artifacts: {}. No automatic pass/fail verdict.",artifacts.display());
         let deadline = tokio::time::Instant::now() + Duration::from_secs(seconds);
         while tokio::time::Instant::now() < deadline {
-            let snapshot = runtime.thread_snapshot(&thread.id).await?;
-            for tool in snapshot.items.iter().filter_map(pl_protocol::ThreadItem::tool) {
+            let page = runtime
+                .list_timeline_items(&thread.id, pl_protocol::TimelineQuery::Latest, 200)
+                .await?;
+            for tool in page.items.iter().filter_map(pl_protocol::ThreadItem::tool) {
                 if tool.invocation().name() != "spawn_agent" { continue; }
                 if let pl_protocol::ThreadToolState::Succeeded(done) = tool.state() {
                     let receipt: serde_json::Value = serde_json::from_str(done.output().result())?;

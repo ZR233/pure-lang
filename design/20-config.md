@@ -11,9 +11,10 @@ anywork 使用独立产品身份，默认仅访问 `~/.anywork`，凭据服务�
 仍遵循既有参数优先级。
 
 配置文件固定为 `~/.anywork/config.toml`（Windows 下 `%USERPROFILE%\.anywork\config.toml`）。
-桌面产品状态保存在 `~/.anywork/studio/studio.sqlite`，Thread 通用事实由 core 保存到同目录
-`sessions.sqlite` 的不可变 journal 中（双库合同见 [17](./17-studio-storage.md)）。用户
-Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代码常量为准。
+桌面产品库保存在 `~/.anywork/studio/studio.sqlite`，每会话状态与历史保存在应用 home 根下的
+`~/.anywork/sessions/<storage-key>/`（`state.toml` / `history.sqlite`），全局调用库在
+`~/.anywork/calls/calls.sqlite`（存储合同见 [17](./17-studio-storage.md)）。用户 Agent Profile
+单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代码常量为准。
 
 配置运行时在 Studio 启动时读取配置；此后普通对话和设置查询只读内存 canonical snapshot；
 配置文件不存在时设置页展示内存中的默认配置；外部文件变化只有显式重载命令才能应用。
@@ -21,7 +22,7 @@ Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代�
 按钮才写入，取消则丢弃草稿。
 
 配置版本演进必须满足以下迁移契约；当前实现缺口集中见
-[17.6](./17-studio-storage.md#176-已实现迁移与剩余边界)，不能据此假定已实现自动迁移。
+[17.7](./17-studio-storage.md#177-迁移实现状态与剩余边界)，不能据此假定已实现自动迁移。
 
 - 启动时在产品发布前识别配置版本，使用明确的版本转换路径将 anywork 历史配置与用户
   Agent Profile 转为当前结构，支持跨版本升级；保留用户选择、provider 身份与凭据关联。
@@ -31,7 +32,12 @@ Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代�
 - 新增字段只能使用该版本迁移明确规定的默认值；旧字段在迁移边界转换，不能用重建整份
   默认配置、猜测模型路由或运行时兼容补齐代替迁移。正常读写只使用当前 schema。
 - 未来或未知版本、无法解析、无效引用、缺失迁移路径、凭据或 IO 失败时，保留原文件与
-  关联凭据并报告原因，不自动恢复默认值。只有配置文件不存在时才采用内存默认配置。
+  关联凭据并报告原因，明确失败关闭（fail closed）：不自动恢复默认值，也不把原文件
+  改写成默认配置后继续启动。只有配置文件不存在时才采用内存默认配置；缺失判定只依据
+  路径条目本身，权限、元数据或符号链接异常一律 fail closed，不落入默认配置，也不覆盖
+  未知文件。当前实现只在 18→19→20 有明确的版本转换路径，其余版本一律 fail closed；
+  启动期已不存在“备份后替换默认”的降级通道。解析失败的诊断只包含配置文件路径、错误
+  类别与行/列位置等元信息，不回显原始配置内容、token 或凭据。
 - 中断后可安全重试或恢复一致状态；运行期显式重载只接受当前有效结构，失败保留已有
   canonical snapshot，不在查询或重载中隐式迁移。迁移结果与失败通过脱敏诊断报告。
 
@@ -42,7 +48,8 @@ Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代�
 保留五条模型路由、其他设置和 provider 凭据关联。19→20 迁移把旧 `planner` route 复制为
 `mode.simple` 与 `mode.task` 的默认 route，从 `models.routes` 删除 `planner`，并保留四个系统
 子代理 route、provider、其他设置和凭据关联。两步都先校验和备份，再原子替换；迁移失败
-保留原文件，不进入默认配置恢复路径。正常运行不接受禁用主智能体或以该标识保存用户 Profile。
+保留原文件并 fail closed，不触发默认配置替换。已知版本之外的旧配置（例如 15/16/17）
+没有转换路径，同样保留原字节并报错。正常运行不接受禁用主智能体或以该标识保存用户 Profile。
 
 所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整设置状态快照，
 由 Flutter 原子替换 Settings 领域；不得返回聚合状态、raw JSON 或 raw map。CAS 或校验失败

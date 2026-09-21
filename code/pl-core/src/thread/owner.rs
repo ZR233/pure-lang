@@ -10,6 +10,17 @@ pub(super) struct PendingCall {
     pub(super) executor: crate::tool::opaque::FrozenTool,
 }
 
+pub(super) struct PendingEffect {
+    pub(super) write: cold::ThreadWrite,
+    /// Encoded byte length of this effect, measured at most once while it stays pending.
+    ///
+    /// Pressure admission must not re-serialize the whole still-pending queue on every model step:
+    /// that made a long Turn quadratic in its commit count. The measurement is memoized here, so an
+    /// effect is serialized once no matter how many admission checks observe it, and a Thread with
+    /// an attached store (whose queue drains on every publish) never serializes it here at all.
+    pub(super) encoded_bytes: Option<u64>,
+}
+
 pub(super) struct Owner {
     pub(super) model_identity: Option<String>,
     pub(super) pending_model_update: Option<super::model_update::DeferredModelUpdate>,
@@ -33,9 +44,8 @@ pub(super) struct Owner {
     pub(super) id: String,
     pub(super) model: Option<DynModelSession>,
     pub(super) capacity: ContextCapacity,
-    pub(super) journal: Vec<Arc<journal::ThreadCommit>>,
-    pub(super) history: Arc<std::sync::RwLock<Vec<Arc<journal::ThreadCommit>>>>,
-    pub(super) encoded_journal: Vec<Result<OpaquePayload, Arc<journal::JournalCodecError>>>,
+    pub(super) effect_window: Arc<EffectWindow>,
+    pub(super) pending_effects: std::collections::VecDeque<PendingEffect>,
     pub(super) cold: Option<cold::ColdStoreHandle>,
     pub(super) cold_error: Option<Arc<cold::ColdStoreError>>,
     pub(super) resources: Option<crate::context::ResourceAccess>,
@@ -369,23 +379,30 @@ impl Owner {
                     .get(id)
                     .is_some_and(|task| task.status == task::TaskStatus::Running)
         });
-        let sequence = self.journal.len() as u64 + 1;
-        if let Some(commit) =
-            journal::ThreadCommit::between(&self.id, &self.published, &self.state, sequence)
-        {
-            self.encoded_journal.push(commit.encode().map_err(Arc::new));
-            let commit = Arc::new(commit);
-            self.journal.push(commit.clone());
-            // Publish immutable history before the watch snapshot advertising its watermark.
-            // No IO, callbacks or await occurs under this append-only observation lock.
-            self.history
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(commit);
-            self.state.commit_sequence = sequence;
-            self.published = self.state.clone();
-            self.admit_cold();
-            self.publish_snapshot();
-        }
+        let sequence = self.state.commit_sequence.saturating_add(1);
+        let Some(effect) =
+            ThreadEffectBatch::between(&self.id, &self.published, &self.state, sequence)
+        else {
+            return;
+        };
+        let effect = Arc::new(effect);
+        self.state.commit_sequence = sequence;
+        // The effect above is the only copy of this commit's facts: the write below persists a
+        // transfer state that still carries them so the writer projects the effect without reading
+        // back a pruned checkpoint; the resident state drops the same facts right after.
+        let checkpoint =
+            ThreadCheckpoint::capture_transfer(self.id.clone(), sequence, self.state.clone());
+        self.state.retain_live_facts();
+        self.published = self.state.clone();
+        self.pending_effects.push_back(PendingEffect {
+            write: cold::ThreadWrite {
+                effect: effect.clone(),
+                checkpoint,
+            },
+            encoded_bytes: None,
+        });
+        self.effect_window.push(effect);
+        self.admit_cold();
+        self.publish_snapshot();
     }
 }

@@ -5,7 +5,7 @@ mod actor;
 mod fixture;
 use pl_core::{
     context::{ContextContent, OpaquePayload},
-    thread::{TurnInput, TurnOutcome},
+    thread::{ThreadEffectBatch, TurnInput, TurnOutcome, journal::ContextChange},
     tool::{
         ToolOutput,
         opaque::{CallContext, Registration, Tool, ToolError},
@@ -95,8 +95,8 @@ async fn assembled_turn_executes_tools_once_preserves_full_history_and_retains_e
         }
     );
     let snapshot = thread.snapshot();
-    let usage = snapshot
-        .attempts
+    let effects = thread.effects().await.unwrap();
+    let usage = committed_attempts(&effects)
         .iter()
         .map(|attempt| match &attempt.outcome {
             pl_core::thread::AttemptOutcome::Committed(output) => {
@@ -112,9 +112,37 @@ async fn assembled_turn_executes_tools_once_preserves_full_history_and_retains_e
         })
         .collect::<Vec<_>>();
     assert_eq!(usage, vec![Some(10), Some(20)]);
-    assert_eq!(snapshot.deliveries.len(), 1);
-    let replay = pl_core::thread::journal::replay(&thread.journal().await.unwrap()).unwrap();
-    assert_eq!(replay.context, snapshot.context);
+    // A delivered result leaves the bounded current snapshot as soon as it reaches model context,
+    // so the committed effect stream is the authority for the single delivery this Turn produced.
+    let deliveries = effects
+        .iter()
+        .flat_map(|effect| effect.deliveries.iter())
+        .collect::<Vec<_>>();
+    assert_eq!(deliveries.len(), 1, "one call executes and delivers once");
+    assert_eq!(deliveries[0].call_id, "call-1");
+    assert_eq!(
+        deliveries[0].delivered_context,
+        vec![ContextContent::Text { text: "1".into() }]
+    );
+    assert!(
+        matches!(
+            deliveries[0].outcome,
+            pl_core::thread::ToolOutcome::Succeeded
+        ),
+        "{:?}",
+        deliveries[0].outcome
+    );
+    // Committed context history keeps the delivered result and the final answer of this Turn.
+    assert!(
+        snapshot.context.records.iter().any(|record| {
+            record.turn_id.as_deref() == Some("first")
+                && record.content.iter().any(|content| {
+                    matches!(content, ContextContent::Text { text } if text.as_ref() == "1")
+                })
+        }),
+        "the delivered tool result remains in the committed context history"
+    );
+    assert_eq!(thread.snapshot().context, snapshot.context);
     owner.close("roundtrip").await.unwrap();
     server.await.unwrap();
 }
@@ -161,12 +189,18 @@ async fn route_replacement_changes_frozen_model_parameters_without_rewriting_pri
             .requested_model,
         "new-model"
     );
+    // A finished Turn leaves the bounded current snapshot, so reconstruct the second request's
+    // frozen input from the committed effect stream: its input revision is exact committed history.
+    let effects = thread.effects().await.unwrap();
+    let second = committed_attempts(&effects)
+        .into_iter()
+        .find(|attempt| attempt.turn_id == "second")
+        .expect("the replacement Turn committed its request");
     assert!(
-        thread.snapshot().attempts[1]
-            .input
-            .records
+        context_at_revision(&effects, second.input_revision)
             .iter()
-            .any(|record| record.turn_id.as_deref() == Some("first"))
+            .any(|record| record.turn_id.as_deref() == Some("first")),
+        "the second request keeps the first Turn's output in its frozen input"
     );
     owner.close("refresh").await.unwrap();
     server.await.unwrap();
@@ -198,6 +232,50 @@ fn sse(delta: serde_json::Value, finish: &str, input: u64) -> String {
         "data: {}\n\ndata: [DONE]\n\n",
         serde_json::json!({"choices":[{"delta":delta,"finish_reason":finish}],"usage":{"prompt_tokens":input,"completion_tokens":2,"total_tokens":input+2}})
     )
+}
+
+/// One committed request attempt per identity, in commit order, with its newest outcome.
+///
+/// `ThreadSnapshot::attempts` keeps only unfinished execution, so per-request receipts and frozen
+/// inputs are read from the committed effect stream instead of a resident ledger.
+fn committed_attempts(
+    effects: &[Arc<ThreadEffectBatch>],
+) -> Vec<pl_core::thread::journal::AttemptUpdate> {
+    let mut attempts: Vec<pl_core::thread::journal::AttemptUpdate> = Vec::new();
+    for effect in effects {
+        let Some(update) = effect.attempt.as_ref() else {
+            continue;
+        };
+        match attempts
+            .iter()
+            .position(|previous| previous.attempt_id == update.attempt_id)
+        {
+            Some(index) => attempts[index] = update.clone(),
+            None => attempts.push(update.clone()),
+        }
+    }
+    attempts
+}
+
+/// Reconstructs the context records frozen at `revision` from the committed effect stream.
+fn context_at_revision(
+    effects: &[Arc<ThreadEffectBatch>],
+    revision: u64,
+) -> Vec<pl_core::context::ContextRecord> {
+    let mut records = Vec::new();
+    for effect in effects {
+        match effect.context.as_ref() {
+            Some(ContextChange::Append {
+                revision: appended,
+                records: added,
+            }) if *appended <= revision => records.extend(added.iter().cloned()),
+            Some(ContextChange::Replace(snapshot)) if snapshot.revision <= revision => {
+                records = snapshot.records.to_vec();
+            }
+            _ => {}
+        }
+    }
+    records
 }
 
 #[tokio::test]
@@ -329,9 +407,7 @@ async fn provider_tool_tasks_preserve_native_optimizations_and_account_for_the_c
             result.last_output.content[0],
             ContextContent::Text { text: "4".into() }
         );
-        let snapshot = thread.snapshot();
-        let receipts = snapshot
-            .attempts
+        let receipts = committed_attempts(&thread.effects().await.unwrap())
             .iter()
             .map(|attempt| match &attempt.outcome {
                 pl_core::thread::AttemptOutcome::Committed(output) => {
@@ -340,6 +416,7 @@ async fn provider_tool_tasks_preserve_native_optimizations_and_account_for_the_c
                 outcome => panic!("unexpected native attempt: {outcome:?}"),
             })
             .collect::<Vec<_>>();
+        assert_eq!(receipts.len(), 2, "both model steps are committed attempts");
         let tokens = receipts
             .iter()
             .map(|receipt| receipt.response.accounting.usage.totals().total_tokens)

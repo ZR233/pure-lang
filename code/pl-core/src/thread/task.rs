@@ -77,12 +77,20 @@ impl Owner {
     }
 
     pub(super) fn cancel_task(&mut self, id: &str) -> Result<TaskCancellationReceipt, ThreadError> {
-        let mut record = self
-            .state
-            .tasks
-            .get(id)
-            .cloned()
-            .ok_or_else(|| ThreadError::TaskNotFound { task_id: id.into() })?;
+        let Some(mut record) = self.state.tasks.get(id).cloned() else {
+            // A finished task left the resident set; its cancellation receipt is answered from the
+            // bounded terminal fact instead of reviving the task or reporting it as unknown.
+            return if self
+                .state
+                .terminal_tasks
+                .iter()
+                .any(|record| record.id == id)
+            {
+                Ok(TaskCancellationReceipt::AlreadyFinished)
+            } else {
+                Err(ThreadError::TaskNotFound { task_id: id.into() })
+            };
+        };
         if record.status != TaskStatus::Running {
             return Ok(TaskCancellationReceipt::AlreadyFinished);
         }
@@ -139,7 +147,7 @@ pub(super) fn record_change(state: &mut ThreadSnapshot, record: TaskRecord) {
 
 pub(super) fn replay(
     state: &mut ThreadSnapshot,
-    commit: &journal::ThreadCommit,
+    commit: &ThreadEffectBatch,
 ) -> Result<(), ThreadError> {
     for record in commit.tasks.iter() {
         if record.id != format!("task:{}", record.call_id)

@@ -27,7 +27,7 @@ mod state_query;
 mod thread_mode;
 mod thread_service;
 mod thread_stream;
-mod timeline;
+pub(in crate::studio) mod timeline;
 mod tool_refresh;
 pub use thread_stream::StudioThreadSubscription;
 mod thread_observation;
@@ -35,7 +35,6 @@ mod thread_title;
 mod updater;
 
 pub(crate) use model_performance::ModelPerformanceOwner;
-pub(in crate::studio) use model_performance::{MODEL_PERFORMANCE_OWNER_ID, ModelPerformanceState};
 pub(crate) use provider_usage::ProviderUsageRuntime;
 pub use provider_usage::{ProviderUsageStateData, ProviderUsageStateSnapshot};
 pub(crate) use shutdown_progress::ShutdownProgressBus;
@@ -261,11 +260,6 @@ impl StudioRuntime {
         settings_api::settings_snapshot(state)
     }
 
-    /// 返回本次启动构造阶段产生的配置恢复报告。
-    pub fn startup_config_recovery(&self) -> Option<crate::config::ConfigRecoveryReport> {
-        self.config_runtime.startup_recovery()
-    }
-
     /// 立即重试待落库事实；查询和停止路径不需要调用本命令。
     pub async fn retry_persistence(&self) -> Result<crate::PersistenceStateSnapshot> {
         let persistence = self.agent_facility.persistence.lock().await.clone();
@@ -273,8 +267,17 @@ impl StudioRuntime {
             return Ok(self.agent_facility.product_events.persistence_state());
         };
         persistence.retry_now();
-        self.store.sessions().retry();
+        self.store.thread_persistence().retry_now();
         Ok(self.agent_facility.product_events.persistence_state())
+    }
+
+    /// 进程级持久化队列压力与逐 Thread 水位。
+    ///
+    /// 唯一事实源是持有全部 per-Thread writer 的持久化协调器；本入口只是把它已观测到的
+    /// 真实值投影为协议形态，不读取、不聚合、也不编造任何 GUI 本地计数。队列字节、最老
+    /// 待保存年龄、在途字节与最近错误都直接来自协调器，缺失即为未知而非零。
+    pub fn persistence_queue_snapshot(&self) -> pl_protocol::PersistenceQueueSnapshot {
+        self.store.thread_persistence().queue_snapshot()
     }
 
     /// Returns whether an active turn prevents a safe application update.

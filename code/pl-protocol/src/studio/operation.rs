@@ -22,6 +22,8 @@ pub enum StudioOperation {
     SetThreadMode,
     SetThreadModelRoute,
     ListThreadTurns,
+    ListThreadTimeline,
+    ReadThreadTimelineItem,
     SubmitPrompt,
     InterruptTurn,
     AdmitAttachmentDrafts,
@@ -59,12 +61,13 @@ pub enum StudioOperation {
     ReadRecovery,
     RetryRecovery,
     RetryPersistence,
+    ReadPersistenceQueue,
     SubscribeProduct,
     SubscribeThread,
 }
 
 impl StudioOperation {
-    pub const ALL: [Self; 54] = [
+    pub const ALL: [Self; 57] = [
         Self::ReadState,
         Self::OpenProject,
         Self::RenameProject,
@@ -80,6 +83,8 @@ impl StudioOperation {
         Self::SetThreadMode,
         Self::SetThreadModelRoute,
         Self::ListThreadTurns,
+        Self::ListThreadTimeline,
+        Self::ReadThreadTimelineItem,
         Self::SubmitPrompt,
         Self::InterruptTurn,
         Self::AdmitAttachmentDrafts,
@@ -117,6 +122,7 @@ impl StudioOperation {
         Self::ReadRecovery,
         Self::RetryRecovery,
         Self::RetryPersistence,
+        Self::ReadPersistenceQueue,
         Self::SubscribeProduct,
         Self::SubscribeThread,
     ];
@@ -138,6 +144,8 @@ impl StudioOperation {
             Self::SetThreadMode => "thread.setMode",
             Self::SetThreadModelRoute => "thread.setModelRoute",
             Self::ListThreadTurns => "thread.listTurns",
+            Self::ListThreadTimeline => "thread.listTimeline",
+            Self::ReadThreadTimelineItem => "thread.readTimelineItem",
             Self::SubmitPrompt => "prompt.submit",
             Self::InterruptTurn => "turn.interrupt",
             Self::AdmitAttachmentDrafts => "attachment.admit",
@@ -175,6 +183,7 @@ impl StudioOperation {
             Self::ReadRecovery => "recovery.read",
             Self::RetryRecovery => "recovery.retry",
             Self::RetryPersistence => "persistence.retry",
+            Self::ReadPersistenceQueue => "persistence.readQueue",
             Self::SubscribeProduct => "studio.subscribeProduct",
             Self::SubscribeThread => "thread.subscribe",
         }

@@ -130,6 +130,7 @@ impl Owner {
 mod tests {
     use super::*;
     use crate::model::{Model, ModelSession, PreparedModelCall};
+    use crate::thread::tests::history_snapshot;
     use pretty_assertions::assert_eq;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -484,7 +485,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         let AttemptOutcome::Committed(output) = &snapshot.attempts[0].outcome else {
             panic!("committed latest binding response");
         };

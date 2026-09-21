@@ -13,17 +13,17 @@ pub use self::handlers::{
     list_ssh_servers, list_thread_turns, list_threads_page, list_timeline_items,
     load_provider_catalog, open_project, open_remote_project, probe_lsp_server, query_threads,
     read_agent_profiles, read_attachment_draft, read_deepseek_web_search_settings, read_lsp_state,
-    read_mcp_state, read_provider_usage_state, read_recovery_state, read_settings_state,
-    read_skills_state, read_startup_stage, read_studio_state, read_studio_update_state,
-    read_thread, read_thread_attachment, read_web_search_settings, reload_settings_from_disk,
-    remove_attachment_draft, rename_project, rename_thread, repair_lsp_server, reset_lsp,
-    reset_mcp, respond_interaction, restore_thread, retry_persistence, retry_recovery,
-    save_deepseek_web_search_settings, save_general_settings, save_instructions_settings,
-    save_mcp_settings, save_provider_settings, save_runtime_permission_mode, save_skills_settings,
-    save_ssh_server, save_user_agent_profile, save_web_search_settings, search_skills,
-    set_mode_model_route, set_model_role, set_system_agent_enabled, set_thread_mode,
-    set_thread_model_route, shutdown_runtime, start_new_thread, start_studio_runtime,
-    submit_prompt, test_ssh_connection,
+    read_mcp_state, read_persistence_queue, read_provider_usage_state, read_recovery_state,
+    read_settings_state, read_skills_state, read_startup_stage, read_studio_state,
+    read_studio_update_state, read_thread, read_thread_attachment, read_timeline_item,
+    read_web_search_settings, reload_settings_from_disk, remove_attachment_draft, rename_project,
+    rename_thread, repair_lsp_server, reset_lsp, reset_mcp, respond_interaction, restore_thread,
+    retry_persistence, retry_recovery, save_deepseek_web_search_settings, save_general_settings,
+    save_instructions_settings, save_mcp_settings, save_provider_settings,
+    save_runtime_permission_mode, save_skills_settings, save_ssh_server, save_user_agent_profile,
+    save_web_search_settings, search_skills, set_mode_model_route, set_model_role,
+    set_system_agent_enabled, set_thread_mode, set_thread_model_route, shutdown_runtime,
+    start_new_thread, start_studio_runtime, submit_prompt, test_ssh_connection,
 };
 pub use self::subscription::{
     BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeThreadStreamEnvelope,
@@ -66,6 +66,8 @@ mod tests {
             SetThreadMode => set_thread_mode,
             SetThreadModelRoute => set_thread_model_route,
             ListThreadTurns => list_thread_turns,
+            ListThreadTimeline => list_timeline_items,
+            ReadThreadTimelineItem => read_timeline_item,
             SubmitPrompt => submit_prompt,
             InterruptTurn => interrupt_turn,
             AdmitAttachmentDrafts => admit_attachment_drafts,
@@ -103,6 +105,7 @@ mod tests {
             ReadRecovery => read_recovery_state,
             RetryRecovery => retry_recovery,
             RetryPersistence => retry_persistence,
+            ReadPersistenceQueue => read_persistence_queue,
             SubscribeProduct => create_product_subscription,
             SubscribeThread => subscribe_thread,
         ];
@@ -137,6 +140,62 @@ mod tests {
                 upserted: Vec::new(),
                 removed: Vec::new(),
             })
+        );
+    }
+
+    #[test]
+    fn bridge_persistence_queue_projects_each_thread_watermark() {
+        let snapshot = pl_protocol::PersistenceQueueSnapshot {
+            pending_operations: 3,
+            pending_bytes: 4096,
+            in_flight_bytes: 512,
+            oldest_pending_age_millis: Some(250),
+            last_error: Some("io".to_string()),
+            pressure_paused: true,
+            threads: vec![pl_protocol::ThreadPersistenceSnapshot {
+                thread_id: "thread-1".to_string(),
+                // 该 Thread 有上报水位的 writer：已观测到的水位是 `Some`（未知才是 `None`）。
+                history_durable_sequence: Some(8),
+                oldest_pending_age_millis: Some(120),
+                ..Default::default()
+            }],
+        };
+
+        let bridge = super::convert::runtime::bridge_persistence_queue(snapshot);
+
+        assert_eq!(bridge.pending_operations, 3);
+        assert_eq!(bridge.pending_bytes, 4096);
+        assert_eq!(bridge.oldest_pending_age_millis, Some(250));
+        assert_eq!(bridge.last_error.as_deref(), Some("io"));
+        assert!(bridge.pressure_paused);
+        assert_eq!(bridge.threads.len(), 1);
+        assert_eq!(bridge.threads[0].thread_id, "thread-1");
+        assert_eq!(bridge.threads[0].history_durable_sequence, Some(8));
+        assert_eq!(bridge.threads[0].oldest_pending_age_millis, Some(120));
+    }
+
+    #[test]
+    fn bridge_persistence_queue_keeps_unobserved_watermarks_unknown() {
+        // 仅有 checkpoint 回退诊断的 Thread 没有 writer，水位是未知而不是已观测的零。
+        let snapshot = pl_protocol::PersistenceQueueSnapshot {
+            threads: vec![pl_protocol::ThreadPersistenceSnapshot {
+                thread_id: "thread-recovery".to_string(),
+                last_error: Some("checkpoint rollback pending".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let bridge = super::convert::runtime::bridge_persistence_queue(snapshot);
+
+        assert_eq!(bridge.threads.len(), 1);
+        assert_eq!(bridge.threads[0].thread_id, "thread-recovery");
+        assert_eq!(bridge.threads[0].state_durable_revision, None);
+        assert_eq!(bridge.threads[0].history_durable_sequence, None);
+        assert_eq!(bridge.threads[0].calls_durable_sequence, None);
+        assert_eq!(
+            bridge.threads[0].last_error.as_deref(),
+            Some("checkpoint rollback pending")
         );
     }
 

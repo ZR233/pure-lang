@@ -23,7 +23,7 @@ The home directory can be overridden, in resolution order:
 2. `ANYWORK_HOME` environment variable (absolute, non-empty)
 3. default `<user home>/.anywork`
 
-Product metadata lives in `<home>/studio/studio.sqlite`; Thread history lives in `<home>/studio/sessions.sqlite`. Never edit either database by hand.
+Product metadata lives in `<home>/studio/studio.sqlite`, and model/tool call records live in `<home>/studio/calls.sqlite`. Each Thread keeps its current state checkpoint in `<home>/sessions/<thread-key>/state.toml` plus the previous `state.prev.toml`, and its Timeline history in the sibling `history.sqlite`; `<thread-key>` is derived from the Thread identity, not the raw id. Never edit these files by hand.
 
 ## Format Rules
 
@@ -37,7 +37,7 @@ Product metadata lives in `<home>/studio/studio.sqlite`; Thread history lives in
 
 - `[models.providers.<id>]` — provider endpoint, preset, credential reference, model catalog.
 - `[mode_model_routes."<mode-id>"]` — new/root Thread default route per full Mode ID. `mode.simple` and `mode.task` are required; custom Modes inherit `mode.simple` until explicitly saved.
-- `[models.routes.<role>]` — child model route per role: `explorer`, `executor`, `worktree_executor`, `reviewer`. All four must resolve. Root Threads keep their route in the Thread journal instead of a global `planner` route.
+- `[models.routes.<role>]` — child model route per role: `explorer`, `executor`, `worktree_executor`, `reviewer`. All four must resolve. Root Threads keep their route in the Thread state checkpoint instead of a global `planner` route.
 - `[runtime]` — `permission_mode` (`request-approval` | `auto-review` | `full-access`), tool capabilities, active skills and MCP servers.
 - `[skills]` — enable/disable, auto-learn, project/user/external skill directories, disabled skills. The default writable project directory is `.agents/skills`; explicit `project_dir` values remain unchanged. In addition to configured `user_dir`, 糊来帮 always discovers the read-only user compatibility directory at `$HOME/.agents/skills` on Linux and `%USERPROFILE%\.agents\skills` on Windows.
 - `[mcp]` — custom servers under `[mcp.servers.<id>]` plus builtin server states.

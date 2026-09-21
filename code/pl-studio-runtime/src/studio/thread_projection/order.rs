@@ -1,6 +1,6 @@
 //! One deterministic timeline order, derived from immutable fact admission rather than current rendering.
 use super::ProjectionError;
-use pl_core::thread::{AttemptOutcome, input::InputChange, journal::ThreadCommit};
+use pl_core::thread::{AttemptOutcome, ThreadEffectBatch, input::InputChange};
 use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Debug, Clone, Copy)]
@@ -13,10 +13,10 @@ pub(super) fn compaction_id(id: &str) -> String {
     format!("compaction:{}:{id}", id.len())
 }
 
-pub(super) fn turn_id(id: &str) -> String {
+pub(in crate::studio) fn turn_id(id: &str) -> String {
     format!("turn:{}:{id}", id.len())
 }
-pub(super) fn message_id(id: &str) -> String {
+pub(in crate::studio) fn message_id(id: &str) -> String {
     format!("message:{}:{id}", id.len())
 }
 pub(super) fn skill_id(id: &str) -> String {
@@ -30,13 +30,23 @@ pub(super) fn completion_id(id: &str) -> String {
 pub(super) fn tool_id(id: &str) -> String {
     format!("tool:{}:{id}", id.len())
 }
+
+/// Durable receipt identity of one terminal interaction/permission record.
+///
+/// The writer records the receipt in the same transaction as the effect that produced it and the
+/// host reads it back by this identity, so both sides derive it from the same function instead of
+/// duplicating a format.
+pub(in crate::studio) fn receipt_id(kind: &str, id: &str) -> String {
+    format!("{kind}:{}:{id}", id.len())
+}
+
 pub(super) fn response_id(id: &str, kind: &str) -> String {
     format!("model:{}:{id}:{kind}", id.len())
 }
 
 /// Reserved slots include hidden/empty projections so later schema interpretation cannot shift history.
 pub(super) fn positions(
-    journal: &[Arc<ThreadCommit>],
+    journal: &[Arc<ThreadEffectBatch>],
     through: u64,
 ) -> Result<BTreeMap<String, Position>, ProjectionError> {
     let mut positions = BTreeMap::new();
@@ -107,8 +117,8 @@ mod tests {
     };
     use pretty_assertions::assert_eq;
 
-    fn commit(sequence: u64) -> ThreadCommit {
-        ThreadCommit {
+    fn commit(sequence: u64) -> ThreadEffectBatch {
+        ThreadEffectBatch {
             committed_at: sequence as i64,
             thread_id: "thread".into(),
             sequence,

@@ -1,7 +1,7 @@
 # 14 - Thread Runtime 宿主与会话工具任务
 
 本文定义 Studio 侧的 Thread 装配、激活、输入受理、步骤限制、后台工具任务交付与消息唤醒。
-core 内核契约见 [16](./16-core-contracts.md)，存储与重放见 [15](./15-session-storage.md)。
+core 内核契约见 [16](./16-core-contracts.md)，状态与历史存储见 [15](./15-session-storage.md)。
 
 ## 14.1 统一装配与激活
 
@@ -17,7 +17,8 @@ workspace/project 绑定创建新实例，不重新创建 worktree 或重演历�
 
 每 Thread 独占模型会话与工具实例；同批声明和 executor 由 core 冻结。配置、Profile 与工作区
 语义由 Studio 解释，不进入 core 类型；root 的无凭据模型 selector 作为不透明
-`studio.model-route` 扩展进入 journal，child 使用冻结的 Profile snapshot。服务可按隔离身份共享租约，关闭一个 Thread 不撤销
+`studio.model-route` 扩展进入当前 checkpoint，并由 effect 记录修订历史；child 使用冻结的 Profile
+snapshot。服务可按隔离身份共享租约，关闭一个 Thread 不撤销
 其他 Thread 的租约。模型切换由 owner 串行执行：关闭旧会话后清空旧 continuation 与重试计划，
 再创建新会话；工厂失败时 Thread 明确保持模型不可用，保留历史并允许重新装配。执行中的
 Turn 不被参数刷新中途替换，后台工具任务与模型切换互相独立。
@@ -37,8 +38,10 @@ HTTP 使用 `POST /api/v1/threads/{thread_id}/prompts`（`prompt.submit`），FR
 提交返回 inputId 和该输入首次受理的 commit 序号，客户端通过同 ID 的输入时间线条目关联实际
 Turn；Turn DTO 与 Turn 时间线条目保留实际 inputId 关联，即使模型准备失败也能把失败对应到
 已受理输入，不复制一条从未交付模型的用户消息来伪造关联。受理和模型准入是不同提交：受理
-即返回幂等回执；只有模型准备完成、权限与容量复核通过后，消费状态才与实际请求记录及用户
-上下文同一提交。准备失败保留输入，驱动暂停不自动产生新的收费尝试。
+即返回幂等回执，该回执跨窗口、跨重启稳定——稳定 `inputId` 的最小身份与产生它的 effect 同一
+history 事务写入，重复提交先查该 durable 身份索引（见 [15](./15-session-storage.md) §15.3）；
+只有模型准备完成、权限与容量复核通过后，消费状态才与实际请求记录及用户上下文同一提交。
+准备失败保留输入，驱动暂停不自动产生新的收费尝试。
 
 steer 记录原目标 Turn，在下一份模型请求冻结时按序加入用户上下文，并与该请求一同提交消费
 事实；冻结后到达的 steer 留待后续请求。未消费的 steer 与其他输入一样保留，可在中断恢复后
@@ -138,16 +141,17 @@ commit，准备失败或准入前取消不消费。明确输入、后台消息�
 
 ## 14.6 生命周期与观测
 
-启动只审计和收束保存的 journal，不构造模型或工具；缺失已注册历史或产品关联明确失败，
-不创建空会话掩盖数据丢失；实际服务在显式激活时装配。停止、关闭与任务取消由 owner 核对
-执行代次：关闭先禁止新工作，取消在途执行并等待物理结束，重试未提交结果，再关闭工具与
-模型并 flush 最终日志；关闭失败保留 owner。冷恢复把遗留 Running 收束为 Interrupted，不恢复
-旧 executor 或自动重放副作用。
+启动只读取轻量 catalog，不遍历或激活会话。目标 Thread 激活时读取并校验其 checkpoint，缺失
+checkpoint 或产品关联明确失败，不创建空会话掩盖数据丢失；实际服务在显式激活时装配。停止、
+关闭与任务取消由 owner 核对执行代次：关闭先禁止新工作，取消在途执行并等待物理结束，重试未
+提交结果，再关闭工具与模型，flush 该 Thread 的固定历史/调用水位并保存最终 checkpoint；关闭
+失败保留 owner。冷恢复把遗留 Running 收束为 Interrupted，不恢复旧 executor 或自动重放副作用。
 
-订阅使用同一快照水位和只读日志句柄；执行 owner 关闭后仍可读取最终事实。归档等待整棵
+订阅使用当前状态 snapshot 与增量 effect；历史分页始终通过独立 HistoryReader，执行 owner 关闭后
+仍可读取数据库中的最终事实。归档等待整棵
 Thread 树关闭、保存成功与工作树清理收束（成功，或回落 `preserved` 并发布诊断）。SQLite
 writer 的失败与未保存事实必须可观察；目录 writer 只保存
-产品关联，不代理 Thread commit。
+产品关联，不代理 Thread effect、历史或 checkpoint。
 
 ## 14.7 交互与业务状态的宿主侧
 

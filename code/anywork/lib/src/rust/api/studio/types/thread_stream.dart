@@ -5,7 +5,6 @@
 
 import '../../../frb_generated.dart';
 import 'attachment.dart';
-import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
@@ -431,12 +430,20 @@ sealed class BridgeThreadNotification with _$BridgeThreadNotification {
 
 class BridgeThreadNotificationEnvelope {
   final String threadId;
+
+  /// 生产端一次连续广播生命周期的标识；与上一条不一致时客户端丢弃旧帧。
+  final BigInt epoch;
+
+  /// 本通知之前的状态水位；与客户端已知水位不一致即表示缺口。
+  final BigInt baseRevision;
   final BigInt revision;
   final PlatformInt64 emittedAt;
   final BridgeThreadNotification notification;
 
   const BridgeThreadNotificationEnvelope({
     required this.threadId,
+    required this.epoch,
+    required this.baseRevision,
     required this.revision,
     required this.emittedAt,
     required this.notification,
@@ -445,6 +452,8 @@ class BridgeThreadNotificationEnvelope {
   @override
   int get hashCode =>
       threadId.hashCode ^
+      epoch.hashCode ^
+      baseRevision.hashCode ^
       revision.hashCode ^
       emittedAt.hashCode ^
       notification.hashCode;
@@ -455,6 +464,8 @@ class BridgeThreadNotificationEnvelope {
       other is BridgeThreadNotificationEnvelope &&
           runtimeType == other.runtimeType &&
           threadId == other.threadId &&
+          epoch == other.epoch &&
+          baseRevision == other.baseRevision &&
           revision == other.revision &&
           emittedAt == other.emittedAt &&
           notification == other.notification;
@@ -625,12 +636,6 @@ class BridgeThreadSnapshot {
   final BigInt revision;
   final BridgeThread thread;
   final BridgeTurn? activeTurn;
-  final List<BridgeThreadItem> items;
-  final List<BridgeTimelineTurn> timelineTurns;
-  final BridgeTurn? lastTurn;
-
-  /// 更旧历史的回源锚点（窗口首 item 的 id，before 语义）；None 表示无更旧内容。
-  final String? historyCursor;
   final List<BridgeInteractionRequest> interactions;
   final BridgeThreadRuntimeSnapshot? runtime;
   final BridgeThreadRuntimeAvailability runtimeAvailability;
@@ -640,10 +645,6 @@ class BridgeThreadSnapshot {
     required this.revision,
     required this.thread,
     this.activeTurn,
-    required this.items,
-    required this.timelineTurns,
-    this.lastTurn,
-    this.historyCursor,
     required this.interactions,
     this.runtime,
     required this.runtimeAvailability,
@@ -655,10 +656,6 @@ class BridgeThreadSnapshot {
       revision.hashCode ^
       thread.hashCode ^
       activeTurn.hashCode ^
-      items.hashCode ^
-      timelineTurns.hashCode ^
-      lastTurn.hashCode ^
-      historyCursor.hashCode ^
       interactions.hashCode ^
       runtime.hashCode ^
       runtimeAvailability.hashCode;
@@ -672,10 +669,6 @@ class BridgeThreadSnapshot {
           revision == other.revision &&
           thread == other.thread &&
           activeTurn == other.activeTurn &&
-          items == other.items &&
-          timelineTurns == other.timelineTurns &&
-          lastTurn == other.lastTurn &&
-          historyCursor == other.historyCursor &&
           interactions == other.interactions &&
           runtime == other.runtime &&
           runtimeAvailability == other.runtimeAvailability;

@@ -93,72 +93,61 @@ impl ThreadHandle {
     /// # Errors
     /// Rejects an empty Thread identity before spawning the owner.
     pub fn start(id: String, model: DynModelSession) -> Result<Self, ThreadError> {
-        Self::restore(id, model, Vec::new())
+        Self::resume(id, model, None)
     }
 
-    /// Restores saved facts into a fresh model owner without executing any historical tool call.
-    /// The host must register new tool instances before accepting new model work.
-    ///
-    /// # Errors
-    /// Rejects invalid identity, corrupt journal ordering and inconsistent context relationships.
-    pub fn restore(
+    /// Starts or resumes one owner from a direct current-state checkpoint.
+    pub fn resume(
         id: String,
         model: DynModelSession,
-        journal: Vec<Arc<journal::ThreadCommit>>,
+        checkpoint: Option<ThreadCheckpoint>,
     ) -> Result<Self, ThreadError> {
-        Self::restore_with_model(id, Some(model), journal)
+        Self::resume_with_model(id, Some(model), checkpoint)
     }
 
-    /// Restores saved facts while keeping model execution explicitly unavailable.
-    /// A later deferred model update can install a valid binding without rebuilding the owner.
-    ///
-    /// # Errors
-    /// Rejects invalid identity, corrupt journal ordering and inconsistent context relationships.
-    pub fn restore_without_model(
+    /// Starts or resumes one owner without opening a physical model session.
+    pub fn resume_without_model(
         id: String,
-        journal: Vec<Arc<journal::ThreadCommit>>,
+        checkpoint: Option<ThreadCheckpoint>,
     ) -> Result<Self, ThreadError> {
-        Self::restore_with_model(id, None, journal)
+        Self::resume_with_model(id, None, checkpoint)
     }
 
-    fn restore_with_model(
+    fn resume_with_model(
         id: String,
         model: Option<DynModelSession>,
-        journal: Vec<Arc<journal::ThreadCommit>>,
+        checkpoint: Option<ThreadCheckpoint>,
     ) -> Result<Self, ThreadError> {
         if id.is_empty() {
             return Err(ThreadError::InvalidIdentity);
         }
-        if journal.first().is_some_and(|commit| commit.thread_id != id) {
-            return Err(ThreadError::InvalidIdentity);
-        }
-        let published = journal::replay(&journal)?;
-        let state = recovery::settle(published.clone())?;
-        let encoded_journal = journal
-            .iter()
-            .map(|commit| commit.encode().map_err(Arc::new))
-            .collect();
+        let resumed = checkpoint.is_some();
+        let (published, state) = match checkpoint {
+            Some(checkpoint) => checkpoint.into_states(&id)?,
+            None => (ThreadSnapshot::default(), ThreadSnapshot::default()),
+        };
         let (commands, receiver) = mpsc::channel(64);
         let (mailbox, mailbox_receiver) = mpsc::channel(64);
         let interrupt = cancellation::InterruptHandle::default();
         let (publish, snapshots) = watch::channel(published.clone());
         let tools = crate::tool::opaque::ToolManager::with_discovery(&state.discovered_tools);
-        let history = Arc::new(std::sync::RwLock::new(journal.clone()));
+        let effect_window = Arc::new(EffectWindow::new());
+        let thread_id = id.clone();
         let mut owner = Owner {
             model_identity: None,
             pending_model_update: None,
             pending_runtime_facts: Default::default(),
             context_preparation: None,
             model_progress: None,
-            history: history.clone(),
+            effect_window: effect_window.clone(),
             permission_leases: Default::default(),
             active_inputs: Vec::new(),
             input_batch_through: None,
             interrupted_turn: None,
-            input_driver: if journal.is_empty() {
-                input::InputDriver::Dormant
-            } else {
+            input_driver: if resumed {
                 input::InputDriver::Paused
+            } else {
+                input::InputDriver::Dormant
             },
             interrupt: interrupt.clone(),
             mailbox: mailbox_receiver,
@@ -173,8 +162,7 @@ impl ThreadHandle {
             background: Default::default(),
             uncommitted_tools: Default::default(),
             capacity: Default::default(),
-            journal,
-            encoded_journal,
+            pending_effects: Default::default(),
             cold: None,
             cold_error: None,
             resources: None,
@@ -185,12 +173,13 @@ impl ThreadHandle {
         owner.publish_snapshot();
         tokio::spawn(owner.run(receiver));
         Ok(Self {
+            thread_id,
             _lifetime: Arc::new(HandleLifetime(interrupt.clone())),
             commands,
             mailbox,
             interrupt,
             snapshots,
-            history,
+            effect_window,
         })
     }
 
@@ -424,17 +413,40 @@ impl ThreadHandle {
             }
             {
                 let snapshot = snapshots.borrow_and_update();
-                let task = snapshot.tasks.get(id).ok_or(ThreadError::InvalidIdentity)?;
+                let task = snapshot
+                    .tasks
+                    .get(id)
+                    .or_else(|| {
+                        snapshot
+                            .terminal_tasks
+                            .iter()
+                            .find(|record| record.id == id)
+                    })
+                    .ok_or(ThreadError::InvalidIdentity)?;
                 if snapshot.pending_tool_commits.contains(&task.call_id) {
                     return Err(ThreadError::PendingToolCommit);
                 }
                 if task.status != task::TaskStatus::Running {
-                    return snapshot
+                    // A settled result is committed history: read the resident queue while the result
+                    // is still owed to model context, otherwise the exact committed delivery from the
+                    // bounded live effect window. Older results are the host's calls reader.
+                    let call_id = task.call_id.as_str();
+                    if let Some(delivery) = snapshot
                         .deliveries
                         .iter()
-                        .find(|delivery| delivery.call_id == task.call_id)
-                        .cloned()
-                        .ok_or(ThreadError::InvalidOutput);
+                        .find(|delivery| delivery.call_id == call_id)
+                    {
+                        return Ok(delivery.clone());
+                    }
+                    return recent_effect_fact(&self.effect_window, |effect| {
+                        effect
+                            .deliveries
+                            .iter()
+                            .rev()
+                            .find(|delivery| delivery.call_id == call_id)
+                            .cloned()
+                    })
+                    .ok_or(ThreadError::InvalidOutput);
                 }
             }
             tokio::select! {
@@ -731,15 +743,40 @@ impl ThreadHandle {
 
     /// Retries pending admissions and waits for durability without rolling back runtime facts.
     ///
+    /// A released Thread already satisfies this barrier: closing only confirms after the admitted
+    /// watermark covered the final commit, so live observation can finish projecting a closed
+    /// Thread without a live owner.
+    ///
     /// # Errors
-    /// Returns storage failure or an unavailable owner.
+    /// Returns storage failure, or an unavailable owner that never confirmed a durable close.
     pub async fn flush(&self) -> Result<(), ThreadError> {
+        if self.durably_released() {
+            return Ok(());
+        }
         let (reply, response) = oneshot::channel();
-        self.commands
-            .send(Command::Flush(reply))
-            .await
-            .map_err(|_| ThreadError::Closed)?;
-        response.await.map_err(|_| ThreadError::Closed)?
+        if self.commands.send(Command::Flush(reply)).await.is_err() {
+            return self.settled_flush();
+        }
+        match response.await {
+            Ok(result) => result,
+            Err(_) => self.settled_flush(),
+        }
+    }
+
+    /// Reports whether the owner was released after its admitted effects became durable.
+    fn durably_released(&self) -> bool {
+        let snapshot = self.snapshot();
+        snapshot.lifecycle == ThreadLifecycle::Closed
+            && (!snapshot.persistence.attached
+                || snapshot.persistence.durable_sequence >= snapshot.commit_sequence)
+    }
+
+    fn settled_flush(&self) -> Result<(), ThreadError> {
+        if self.durably_released() {
+            Ok(())
+        } else {
+            Err(ThreadError::Closed)
+        }
     }
 
     /// Subscribes to immutable live snapshots without granting mutation or lifecycle authority.
@@ -750,41 +787,60 @@ impl ThreadHandle {
         }
     }
 
-    /// Reads bounded commit history after a known sequence. Snapshot notifications may skip revisions.
+    /// Reads the transient live effect window after a known sequence.
+    ///
+    /// The window retains only commits that are not durable yet: once a fixed durable watermark is
+    /// confirmed the covered batches are released, so a reader behind [`Self::effect_window_start`]
+    /// must resynchronize from durable history instead of expecting the live body.
     ///
     /// # Errors
     /// Rejects a future watermark. Closing execution does not revoke read access.
-    pub async fn journal_page(
+    pub async fn effect_page(
         &self,
         after: u64,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<Arc<journal::ThreadCommit>>, ThreadError> {
-        let history = self
-            .history
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let after = usize::try_from(after)
-            .ok()
-            .filter(|after| *after <= history.len())
-            .ok_or(ThreadError::InvalidContext)?;
-        Ok(history
-            .iter()
-            .skip(after)
-            .take(limit.get())
-            .cloned()
-            .collect())
+    ) -> Result<Vec<Arc<ThreadEffectBatch>>, ThreadError> {
+        if after > self.snapshot().commit_sequence {
+            return Err(ThreadError::InvalidContext);
+        }
+        // The gap check and the copy share one lock, so a durable release running right now cannot
+        // turn a valid request into a silently empty page.
+        match self.effect_window.page_after(after, limit.get()) {
+            WindowPage::Page(page) => Ok(page),
+            WindowPage::Gap => Err(ThreadError::InvalidContext),
+        }
     }
 
-    /// Returns immutable committed deltas, including after the execution owner has closed.
+    /// Returns every commit still retained by the transient live effect window.
+    ///
+    /// Durable commits have already been released to history/calls, so this is not a history
+    /// reader; it exists for the transient write batches the owner has not handed off yet.
     ///
     /// # Errors
     /// This in-memory read currently cannot fail.
-    pub async fn journal(&self) -> Result<Vec<Arc<journal::ThreadCommit>>, ThreadError> {
-        Ok(self
-            .history
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone())
+    pub async fn effects(&self) -> Result<Vec<Arc<ThreadEffectBatch>>, ThreadError> {
+        Ok(self.effect_window.retained())
+    }
+
+    /// Captures current owner state after the caller fixed and flushed the matching history fence.
+    pub fn checkpoint(&self, history_fence: u64) -> Result<ThreadCheckpoint, ThreadError> {
+        let state = self.snapshot();
+        if history_fence > state.commit_sequence {
+            return Err(ThreadError::InvalidContext);
+        }
+        Ok(ThreadCheckpoint::capture(
+            self.thread_id.clone(),
+            history_fence,
+            state,
+        ))
+    }
+
+    /// Returns the first effect sequence the live window can still serve.
+    ///
+    /// Every released commit below it is durable, so a consumer that falls behind this frontier
+    /// resynchronizes from durable history/calls before it continues consuming effects.
+    pub fn effect_window_start(&self) -> Option<u64> {
+        self.effect_window.start()
     }
 
     /// Returns the last atomic commit without waiting for an in-flight model operation.

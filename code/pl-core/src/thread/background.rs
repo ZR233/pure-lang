@@ -94,15 +94,21 @@ pub(super) fn append_result_message(
     output: &crate::tool::ToolOutput,
     context: Vec<ContextContent>,
 ) -> Result<String, ThreadError> {
-    let sequence = state
-        .inbox
-        .last()
-        .map_or(0, |record| record.sequence)
-        .checked_add(1)
-        .ok_or(ThreadError::RevisionExhausted)?;
+    // A consumed message left the resident queue but keeps its identity in the bounded ledger, so the
+    // uniqueness check has to span both: reusing an already-delivered id would make the durable
+    // message timeline reject the batch instead of appending the task result.
     let id = unique_id(
         "task-result",
-        state.inbox.iter().map(|record| record.message.id.as_str()),
+        state
+            .inbox
+            .iter()
+            .map(|record| record.message.id.as_str())
+            .chain(
+                state
+                    .consumed_message_identities
+                    .iter()
+                    .map(|identity| identity.id.as_str()),
+            ),
     )?;
     let message = inbox::ThreadMessage {
         id: id.clone(),
@@ -110,9 +116,7 @@ pub(super) fn append_result_message(
         payload: output.payload().clone(),
         context,
     };
-    let mut inbox = state.inbox.to_vec();
-    inbox.push(inbox::InboxRecord { sequence, message });
-    state.inbox = inbox.into();
+    inbox::admit_message(state, message)?;
     Ok(id)
 }
 

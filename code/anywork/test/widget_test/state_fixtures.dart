@@ -1,5 +1,40 @@
 part of '../widget_test.dart';
 
+/// Thread 首帧/读取只表达当前状态；窗口内容由分页 API 提供。
+ThreadWorkspace _currentStateOnly(ThreadWorkspace workspace) {
+  return workspace.copyWith(
+    items: const [],
+    cachedItems: const {},
+    latestItemIds: const [],
+    timelineTurns: const {},
+    latestTurn: null,
+  );
+}
+
+/// 测试专用：用一页历史把条目装进有界窗口，等价于订阅建立后的窗口读取。
+StudioState _seedTimelineWindow(
+  StudioState state,
+  String threadId,
+  List<ThreadItemView> items, {
+  String? olderCursor,
+}) {
+  return applyTimelinePage(
+    state,
+    threadId,
+    TimelinePage(
+      threadId: threadId,
+      watermark: 0,
+      items: items,
+      olderCursor: olderCursor,
+      firstItemId: items.firstOrNull?.id,
+      lastItemId: items.lastOrNull?.id,
+    ),
+    TimelineDirection.newer,
+    replaceWindow: true,
+    followBottom: true,
+  );
+}
+
 const _testProviderCatalog = ProviderCatalogView(
   schemaVersion: 9,
   revision: 'widget-test-catalog-v8',
@@ -209,9 +244,11 @@ StudioState _emptyState() {
         runtime: _testRuntime(),
       ),
     },
+    // 首屏只恢复选择，不打开会话（§6.1）：UI 条目存在但状态是 `idle`（未打开），
+    // 而不是 `ready`；打开由显式交互触发。
     workspaceUiByThread: {
       session.id: const WorkspaceUiState(
-        syncState: AgentWorkspaceSyncState.ready,
+        syncState: AgentWorkspaceSyncState.idle,
       ),
     },
     selectedProjectId: project.id,
@@ -824,7 +861,9 @@ ThreadToolItemStateView _toolItemFixture(
     'awaitingApproval' => const AwaitingApprovalThreadToolView(),
     'approved' => const ApprovedThreadToolView(),
     'running' => RunningThreadToolView(tool.result ?? ''),
-    'succeeded' => SucceededThreadToolView(terminalAt, output),
+    // 文本条目的默认 fixture 状态是 `completed`；工具行 fixture 也接受同一别名，
+    // 避免 `_threadItemFixture(kind: toolCall)` 因默认状态直接抛错。
+    'completed' || 'succeeded' => SucceededThreadToolView(terminalAt, output),
     'failed' => FailedThreadToolView(
       terminalAt,
       ThreadToolFailureView(
@@ -839,7 +878,8 @@ ThreadToolItemStateView _toolItemFixture(
       terminalAt,
       tool.denialReason ?? error ?? 'denied',
     ),
-    'cancelled' => CancelledThreadToolView(terminalAt, error ?? status),
+    'cancelled' ||
+    'interrupted' => CancelledThreadToolView(terminalAt, error ?? status),
     _ => throw ArgumentError.value(status, 'status', 'unknown tool state'),
   };
   return ThreadToolItemStateView(invocation: invocation, lifecycle: lifecycle);

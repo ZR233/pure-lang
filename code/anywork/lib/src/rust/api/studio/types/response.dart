@@ -15,7 +15,7 @@ import 'updater.dart';
 part 'response.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class ArchiveThreadResult {
   final String archivedRootId;
@@ -89,22 +89,6 @@ sealed class BridgeAgentDirectoryState with _$BridgeAgentDirectoryState {
   const factory BridgeAgentDirectoryState.stopped(
     BridgeStoppedResource field0,
   ) = BridgeAgentDirectoryState_Stopped;
-}
-
-class BridgeConfigRecoveryReport {
-  final String backupPath;
-
-  const BridgeConfigRecoveryReport({required this.backupPath});
-
-  @override
-  int get hashCode => backupPath.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeConfigRecoveryReport &&
-          runtimeType == other.runtimeType &&
-          backupPath == other.backupPath;
 }
 
 enum BridgeDirectoryFilter { all, running, attention }
@@ -441,6 +425,54 @@ class BridgeModelPerformanceSummary {
           tokensPerSecond == other.tokensPerSecond &&
           averageTtftMillis == other.averageTtftMillis &&
           averageResponseMillis == other.averageResponseMillis;
+}
+
+/// 进程级持久化队列压力与逐 Thread 水位。
+///
+/// 与 [`BridgePersistenceStateSnapshot`] 的单条 owner 状态互补：本快照保留每个 Thread 的
+/// checkpoint/history/calls 水位，并把队列字节、最老待保存年龄、在途字节与最近错误一并暴露，
+/// 因此 GUI 展示的落后量、压力与错误都来自持久化协调器的真实观测而非本地推算。
+class BridgePersistenceQueueSnapshot {
+  final BigInt pendingOperations;
+  final BigInt pendingBytes;
+  final BigInt inFlightBytes;
+  final BigInt? oldestPendingAgeMillis;
+  final String? lastError;
+  final bool pressurePaused;
+  final List<BridgeThreadPersistenceSnapshot> threads;
+
+  const BridgePersistenceQueueSnapshot({
+    required this.pendingOperations,
+    required this.pendingBytes,
+    required this.inFlightBytes,
+    this.oldestPendingAgeMillis,
+    this.lastError,
+    required this.pressurePaused,
+    required this.threads,
+  });
+
+  @override
+  int get hashCode =>
+      pendingOperations.hashCode ^
+      pendingBytes.hashCode ^
+      inFlightBytes.hashCode ^
+      oldestPendingAgeMillis.hashCode ^
+      lastError.hashCode ^
+      pressurePaused.hashCode ^
+      threads.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePersistenceQueueSnapshot &&
+          runtimeType == other.runtimeType &&
+          pendingOperations == other.pendingOperations &&
+          pendingBytes == other.pendingBytes &&
+          inFlightBytes == other.inFlightBytes &&
+          oldestPendingAgeMillis == other.oldestPendingAgeMillis &&
+          lastError == other.lastError &&
+          pressurePaused == other.pressurePaused &&
+          threads == other.threads;
 }
 
 @freezed
@@ -904,24 +936,6 @@ class BridgeSkillsStateSnapshot {
           state == other.state;
 }
 
-class BridgeStudioStartupResult {
-  final RuntimeSnapshot runtime;
-  final BridgeConfigRecoveryReport? configRecovery;
-
-  const BridgeStudioStartupResult({required this.runtime, this.configRecovery});
-
-  @override
-  int get hashCode => runtime.hashCode ^ configRecovery.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeStudioStartupResult &&
-          runtimeType == other.runtimeType &&
-          runtime == other.runtime &&
-          configRecovery == other.configRecovery;
-}
-
 class BridgeStudioStateSnapshot {
   final RuntimeSnapshot runtime;
   final BridgeProjectDirectoryState projectDirectory;
@@ -1134,6 +1148,81 @@ class BridgeThreadModelRouteUpdateResponse {
           settings == other.settings &&
           modeDefaultSaved == other.modeDefaultSaved &&
           warning == other.warning;
+}
+
+/// 单个 Thread 的持久化水位与队列压力。
+///
+/// 水位字段为 `Some` 表示该 Thread 有正在上报的 writer，值为已观测事实（含 0）；`None`
+/// 表示没有 writer 报告过该水位（例如仅通过 checkpoint 回退诊断出现），是未知而非零。
+class BridgeThreadPersistenceSnapshot {
+  final String threadId;
+  final BigInt? stateDirtyRevision;
+  final BigInt? stateSavingRevision;
+  final BigInt? stateDurableRevision;
+  final BigInt? historyAdmittedSequence;
+  final BigInt? historyDurableSequence;
+  final BigInt? callsAdmittedSequence;
+  final BigInt? callsDurableSequence;
+  final BigInt pendingOperations;
+  final BigInt pendingBytes;
+  final BigInt? oldestPendingAgeMillis;
+  final BigInt inFlightBytes;
+  final String? lastError;
+  final bool pressurePaused;
+
+  const BridgeThreadPersistenceSnapshot({
+    required this.threadId,
+    this.stateDirtyRevision,
+    this.stateSavingRevision,
+    this.stateDurableRevision,
+    this.historyAdmittedSequence,
+    this.historyDurableSequence,
+    this.callsAdmittedSequence,
+    this.callsDurableSequence,
+    required this.pendingOperations,
+    required this.pendingBytes,
+    this.oldestPendingAgeMillis,
+    required this.inFlightBytes,
+    this.lastError,
+    required this.pressurePaused,
+  });
+
+  @override
+  int get hashCode =>
+      threadId.hashCode ^
+      stateDirtyRevision.hashCode ^
+      stateSavingRevision.hashCode ^
+      stateDurableRevision.hashCode ^
+      historyAdmittedSequence.hashCode ^
+      historyDurableSequence.hashCode ^
+      callsAdmittedSequence.hashCode ^
+      callsDurableSequence.hashCode ^
+      pendingOperations.hashCode ^
+      pendingBytes.hashCode ^
+      oldestPendingAgeMillis.hashCode ^
+      inFlightBytes.hashCode ^
+      lastError.hashCode ^
+      pressurePaused.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeThreadPersistenceSnapshot &&
+          runtimeType == other.runtimeType &&
+          threadId == other.threadId &&
+          stateDirtyRevision == other.stateDirtyRevision &&
+          stateSavingRevision == other.stateSavingRevision &&
+          stateDurableRevision == other.stateDurableRevision &&
+          historyAdmittedSequence == other.historyAdmittedSequence &&
+          historyDurableSequence == other.historyDurableSequence &&
+          callsAdmittedSequence == other.callsAdmittedSequence &&
+          callsDurableSequence == other.callsDurableSequence &&
+          pendingOperations == other.pendingOperations &&
+          pendingBytes == other.pendingBytes &&
+          oldestPendingAgeMillis == other.oldestPendingAgeMillis &&
+          inFlightBytes == other.inFlightBytes &&
+          lastError == other.lastError &&
+          pressurePaused == other.pressurePaused;
 }
 
 class DeepSeekBalanceDto {

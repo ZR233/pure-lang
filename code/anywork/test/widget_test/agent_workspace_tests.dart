@@ -41,7 +41,7 @@ void registerAgentWorkspaceTests() {
     );
   });
 
-  test('child snapshot never overwrites the root canonical workspace', () {
+  test('child snapshot updates only the child current state, never items', () {
     final current = _rootAndChildState();
     final incoming = current.workspacesByThread['child-1']!.copyWith(
       revision: 9,
@@ -58,14 +58,16 @@ void registerAgentWorkspaceTests() {
 
     final next = applyThreadSnapshot(current, incoming);
 
+    // 根会话的工作区未被触碰。
     expect(
       next.workspacesByThread['session-1']!.items.single.text,
       'root timeline',
     );
-    expect(
-      next.workspacesByThread['child-1']!.items.map((item) => item.text),
-      containsAll(['child timeline', 'new child snapshot']),
-    );
+    // snapshot 只更新当前状态：revision 采纳，但不向窗口注入条目（条目由历史页维护）。
+    expect(next.workspacesByThread['child-1']!.revision, 9);
+    expect(next.workspacesByThread['child-1']!.items.map((item) => item.text), [
+      'child timeline',
+    ]);
     expect(next.workspaceUiByThread['child-1']!.composer.draft, 'child draft');
   });
 

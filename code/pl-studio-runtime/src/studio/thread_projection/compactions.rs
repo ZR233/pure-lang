@@ -1,7 +1,7 @@
 //! Committed context reductions are distinct from auxiliary inference accounting.
 use super::{ProjectionError, order};
 use pl_core::thread::{
-    ContextReplacementReason, ThreadSnapshot, extensions::ExtensionChange, journal::ThreadCommit,
+    ContextReplacementReason, ThreadEffectBatch, ThreadSnapshot, extensions::ExtensionChange,
 };
 use pl_protocol::{ThreadContextCompactionItem, ThreadItem, ThreadItemState};
 use std::sync::Arc;
@@ -23,7 +23,7 @@ pub(super) fn receipt(
 pub(super) fn project_compactions(
     thread_id: &str,
     snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadCommit>],
+    journal: &[Arc<ThreadEffectBatch>],
 ) -> Result<Vec<ThreadItem>, ProjectionError> {
     let mut items = Vec::new();
     for commit in journal
@@ -78,6 +78,7 @@ pub(super) fn project_compactions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::studio::thread_projection::runtime;
     use pl_core::{
         context::{ContextContent, ContextRecord, ContextSource, OpaquePayload},
         model::{
@@ -195,7 +196,7 @@ mod tests {
             .await
             .unwrap();
         let snapshot = thread.snapshot();
-        let journal = thread.journal().await.unwrap();
+        let journal = thread.effects().await.unwrap();
         let items = project_compactions("projection", &snapshot, &journal).unwrap();
         assert_eq!(items.len(), 1);
         let ThreadItemState::ContextCompaction(item) = items[0].state() else {
@@ -203,7 +204,13 @@ mod tests {
         };
         assert_eq!(item.before_tokens(), None);
         assert_eq!(item.after_tokens(), None);
-        let usage = super::super::runtime::project_runtime("projection", &snapshot, &journal)
+        let mut summary = pl_core::thread::UsageSummary::default();
+        // 终态 attempt 会离开常驻快照，按 live 快照折叠会漏掉它；这里按 durable writer 的同一条
+        // 路径折叠已提交 effect：同一 effect 里的 turn attempt 与辅助压缩回执各只计一次。
+        for effect in &journal {
+            runtime::fold_effect_accounting(&mut summary, effect).unwrap();
+        }
+        let usage = runtime::project_runtime("projection", &snapshot, 0, &summary)
             .unwrap()
             .usage;
         assert_eq!(usage.prompt_tokens, 7);

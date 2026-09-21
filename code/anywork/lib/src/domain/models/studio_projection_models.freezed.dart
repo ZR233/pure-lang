@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$ShellChromeView {
 
- List<StudioRecoveryIssue> get applicationRecoveryIssues; ConfigRecoveryNotice? get configRecoveryNotice; PersistenceStateSnapshot get persistenceState;
+ List<StudioRecoveryIssue> get applicationRecoveryIssues; PersistenceStateSnapshot get persistenceState;
 /// Create a copy of ShellChromeView
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -27,20 +27,20 @@ $ShellChromeViewCopyWith<ShellChromeView> get copyWith => _$ShellChromeViewCopyW
 @override
 bool operator ==(Object other) {
   final _this = this as ShellChromeView;
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ShellChromeView&&const DeepCollectionEquality().equals(other.applicationRecoveryIssues, _this.applicationRecoveryIssues)&&(identical(other.configRecoveryNotice, _this.configRecoveryNotice) || other.configRecoveryNotice == _this.configRecoveryNotice)&&(identical(other.persistenceState, _this.persistenceState) || other.persistenceState == _this.persistenceState));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ShellChromeView&&const DeepCollectionEquality().equals(other.applicationRecoveryIssues, _this.applicationRecoveryIssues)&&(identical(other.persistenceState, _this.persistenceState) || other.persistenceState == _this.persistenceState));
 }
 
 
 @override
 int get hashCode {
   final _this = this as ShellChromeView;
-  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.applicationRecoveryIssues),_this.configRecoveryNotice,_this.persistenceState);
+  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.applicationRecoveryIssues),_this.persistenceState);
 }
 
 @override
 String toString() {
   final _this = this as ShellChromeView;
-  return 'ShellChromeView(applicationRecoveryIssues: ${_this.applicationRecoveryIssues}, configRecoveryNotice: ${_this.configRecoveryNotice}, persistenceState: ${_this.persistenceState})';
+  return 'ShellChromeView(applicationRecoveryIssues: ${_this.applicationRecoveryIssues}, persistenceState: ${_this.persistenceState})';
 }
 
 
@@ -51,7 +51,7 @@ abstract mixin class $ShellChromeViewCopyWith<$Res>  {
   factory $ShellChromeViewCopyWith(ShellChromeView value, $Res Function(ShellChromeView) _then) = _$ShellChromeViewCopyWithImpl;
 @useResult
 $Res call({
- List<StudioRecoveryIssue> applicationRecoveryIssues, ConfigRecoveryNotice? configRecoveryNotice, PersistenceStateSnapshot persistenceState
+ List<StudioRecoveryIssue> applicationRecoveryIssues, PersistenceStateSnapshot persistenceState
 });
 
 
@@ -68,11 +68,10 @@ class _$ShellChromeViewCopyWithImpl<$Res>
 
 /// Create a copy of ShellChromeView
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? applicationRecoveryIssues = null,Object? configRecoveryNotice = freezed,Object? persistenceState = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? applicationRecoveryIssues = null,Object? persistenceState = null,}) {
   return _then(ShellChromeView(
 applicationRecoveryIssues: null == applicationRecoveryIssues ? _self.applicationRecoveryIssues : applicationRecoveryIssues // ignore: cast_nullable_to_non_nullable
-as List<StudioRecoveryIssue>,configRecoveryNotice: freezed == configRecoveryNotice ? _self.configRecoveryNotice : configRecoveryNotice // ignore: cast_nullable_to_non_nullable
-as ConfigRecoveryNotice?,persistenceState: null == persistenceState ? _self.persistenceState : persistenceState // ignore: cast_nullable_to_non_nullable
+as List<StudioRecoveryIssue>,persistenceState: null == persistenceState ? _self.persistenceState : persistenceState // ignore: cast_nullable_to_non_nullable
 as PersistenceStateSnapshot,
   ));
 }
@@ -158,10 +157,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<StudioRecoveryIssue> applicationRecoveryIssues,  ConfigRecoveryNotice? configRecoveryNotice,  PersistenceStateSnapshot persistenceState)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<StudioRecoveryIssue> applicationRecoveryIssues,  PersistenceStateSnapshot persistenceState)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ShellChromeView() when $default != null:
-return $default(_that.applicationRecoveryIssues,_that.configRecoveryNotice,_that.persistenceState);case _:
+return $default(_that.applicationRecoveryIssues,_that.persistenceState);case _:
   return orElse();
 
 }
@@ -179,10 +178,10 @@ return $default(_that.applicationRecoveryIssues,_that.configRecoveryNotice,_that
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<StudioRecoveryIssue> applicationRecoveryIssues,  ConfigRecoveryNotice? configRecoveryNotice,  PersistenceStateSnapshot persistenceState)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<StudioRecoveryIssue> applicationRecoveryIssues,  PersistenceStateSnapshot persistenceState)  $default,) {final _that = this;
 switch (_that) {
 case _ShellChromeView():
-return $default(_that.applicationRecoveryIssues,_that.configRecoveryNotice,_that.persistenceState);case _:
+return $default(_that.applicationRecoveryIssues,_that.persistenceState);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -199,10 +198,10 @@ return $default(_that.applicationRecoveryIssues,_that.configRecoveryNotice,_that
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<StudioRecoveryIssue> applicationRecoveryIssues,  ConfigRecoveryNotice? configRecoveryNotice,  PersistenceStateSnapshot persistenceState)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<StudioRecoveryIssue> applicationRecoveryIssues,  PersistenceStateSnapshot persistenceState)?  $default,) {final _that = this;
 switch (_that) {
 case _ShellChromeView() when $default != null:
-return $default(_that.applicationRecoveryIssues,_that.configRecoveryNotice,_that.persistenceState);case _:
+return $default(_that.applicationRecoveryIssues,_that.persistenceState);case _:
   return null;
 
 }
@@ -214,7 +213,7 @@ return $default(_that.applicationRecoveryIssues,_that.configRecoveryNotice,_that
 
 
 class _ShellChromeView implements ShellChromeView {
-  const _ShellChromeView({required  List<StudioRecoveryIssue> applicationRecoveryIssues, required this.configRecoveryNotice, required this.persistenceState}): _applicationRecoveryIssues = applicationRecoveryIssues;
+  const _ShellChromeView({required  List<StudioRecoveryIssue> applicationRecoveryIssues, required this.persistenceState}): _applicationRecoveryIssues = applicationRecoveryIssues;
 
 
  final  List<StudioRecoveryIssue> _applicationRecoveryIssues;
@@ -224,7 +223,6 @@ class _ShellChromeView implements ShellChromeView {
   return EqualUnmodifiableListView(_applicationRecoveryIssues);
 }
 
-@override final  ConfigRecoveryNotice? configRecoveryNotice;
 @override final  PersistenceStateSnapshot persistenceState;
 
 /// Create a copy of ShellChromeView
@@ -237,18 +235,18 @@ _$ShellChromeViewCopyWith<_ShellChromeView> get copyWith => __$ShellChromeViewCo
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is _ShellChromeView&&const DeepCollectionEquality().equals(other.applicationRecoveryIssues, _applicationRecoveryIssues)&&(identical(other.configRecoveryNotice, configRecoveryNotice) || other.configRecoveryNotice == configRecoveryNotice)&&(identical(other.persistenceState, persistenceState) || other.persistenceState == persistenceState));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _ShellChromeView&&const DeepCollectionEquality().equals(other.applicationRecoveryIssues, _applicationRecoveryIssues)&&(identical(other.persistenceState, persistenceState) || other.persistenceState == persistenceState));
 }
 
 
 @override
 int get hashCode {
-    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_applicationRecoveryIssues),configRecoveryNotice,persistenceState);
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_applicationRecoveryIssues),persistenceState);
 }
 
 @override
 String toString() {
-    return 'ShellChromeView(applicationRecoveryIssues: $applicationRecoveryIssues, configRecoveryNotice: $configRecoveryNotice, persistenceState: $persistenceState)';
+    return 'ShellChromeView(applicationRecoveryIssues: $applicationRecoveryIssues, persistenceState: $persistenceState)';
 }
 
 
@@ -259,7 +257,7 @@ abstract mixin class _$ShellChromeViewCopyWith<$Res> implements $ShellChromeView
   factory _$ShellChromeViewCopyWith(_ShellChromeView value, $Res Function(_ShellChromeView) _then) = __$ShellChromeViewCopyWithImpl;
 @override @useResult
 $Res call({
- List<StudioRecoveryIssue> applicationRecoveryIssues, ConfigRecoveryNotice? configRecoveryNotice, PersistenceStateSnapshot persistenceState
+ List<StudioRecoveryIssue> applicationRecoveryIssues, PersistenceStateSnapshot persistenceState
 });
 
 
@@ -276,11 +274,10 @@ class __$ShellChromeViewCopyWithImpl<$Res>
 
 /// Create a copy of ShellChromeView
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? applicationRecoveryIssues = null,Object? configRecoveryNotice = freezed,Object? persistenceState = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? applicationRecoveryIssues = null,Object? persistenceState = null,}) {
   return _then(_ShellChromeView(
 applicationRecoveryIssues: null == applicationRecoveryIssues ? _self._applicationRecoveryIssues : applicationRecoveryIssues // ignore: cast_nullable_to_non_nullable
-as List<StudioRecoveryIssue>,configRecoveryNotice: freezed == configRecoveryNotice ? _self.configRecoveryNotice : configRecoveryNotice // ignore: cast_nullable_to_non_nullable
-as ConfigRecoveryNotice?,persistenceState: null == persistenceState ? _self.persistenceState : persistenceState // ignore: cast_nullable_to_non_nullable
+as List<StudioRecoveryIssue>,persistenceState: null == persistenceState ? _self.persistenceState : persistenceState // ignore: cast_nullable_to_non_nullable
 as PersistenceStateSnapshot,
   ));
 }

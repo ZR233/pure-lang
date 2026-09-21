@@ -1,6 +1,6 @@
 //! SQLite cold-store adapter for protocol-independent Thread commit payloads.
 use super::SqliteSessionStore;
-use crate::thread::cold::{ColdStore, ColdStoreError};
+use crate::thread::cold::{ColdStore, ColdStoreError, ThreadWrite};
 
 impl ColdStore for SqliteSessionStore {
     fn pressure(&self, thread_id: &str) -> crate::thread::cold::StoragePressure {
@@ -16,12 +16,11 @@ impl ColdStore for SqliteSessionStore {
         }
     }
 
-    fn admit(
-        &self,
-        thread_id: &str,
-        sequence: u64,
-        payload: crate::context::OpaquePayload,
-    ) -> Result<(), ColdStoreError> {
+    fn admit(&self, thread_id: &str, write: ThreadWrite) -> Result<(), ColdStoreError> {
+        let sequence = write.effect.sequence;
+        let payload = write.effect.encode().map_err(|source| ColdStoreError {
+            source: Box::new(source),
+        })?;
         self.register_immutable_payload(
             thread_id,
             &format!("thread-commit.{sequence:020}"),
@@ -48,27 +47,15 @@ impl ColdStore for SqliteSessionStore {
 }
 
 impl SqliteSessionStore {
-    /// Reads encoded Thread commits without model/tool activation or business payload decoding.
-    ///
-    /// # Errors
-    /// Returns corrupt outer commit encoding or invalid sequence/context relationships.
-    pub async fn replay_thread(
-        &self,
-        thread_id: &str,
-    ) -> Result<crate::thread::ThreadSnapshot, super::SessionStoreError> {
-        let commits = self.read_thread_journal(thread_id).await?;
-        crate::thread::journal::replay(&commits)
-            .map_err(|error| super::SessionStoreError::Invalid(error.to_string()))
-    }
-
-    /// Reads validated commit facts for cold restoration into fresh model and tool instances.
+    /// Reads validated legacy commit facts for one-way old-data migration only.
     ///
     /// # Errors
     /// Rejects corrupt storage envelopes, mismatched Thread identity or noncontiguous commits.
-    pub async fn read_thread_journal(
+    #[doc(hidden)]
+    pub async fn read_legacy_thread_journal(
         &self,
         thread_id: &str,
-    ) -> Result<Vec<std::sync::Arc<crate::thread::journal::ThreadCommit>>, super::SessionStoreError>
+    ) -> Result<Vec<std::sync::Arc<crate::thread::ThreadEffectBatch>>, super::SessionStoreError>
     {
         let mut records = self
             .replay_entries(thread_id, None)
@@ -86,7 +73,7 @@ impl SqliteSessionStore {
                     entry.payload,
                 )
                 .map_err(|error| super::SessionStoreError::Invalid(error.to_string()))?;
-                let commit = crate::thread::journal::ThreadCommit::decode(&payload)
+                let commit = crate::thread::ThreadEffectBatch::decode(&payload)
                     .map_err(|error| super::SessionStoreError::Invalid(error.to_string()))?;
                 if commit.thread_id != thread_id
                     || entry.id != format!("pl.resource.thread-commit.{:020}", commit.sequence)
@@ -98,7 +85,7 @@ impl SqliteSessionStore {
                 Ok(std::sync::Arc::new(commit))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        crate::thread::journal::replay(&commits)
+        crate::thread::journal::legacy_migration::replay(&commits)
             .map_err(|error| super::SessionStoreError::Invalid(error.to_string()))?;
         Ok(commits)
     }

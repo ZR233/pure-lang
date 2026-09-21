@@ -538,13 +538,27 @@ mod tests {
                 .await
                 .is_err()
         );
-        let snapshot = thread.snapshot();
-        let output = &snapshot.deliveries[0].output;
+        // A received result reaches model context and leaves the bounded current snapshot, so the
+        // committed effect stream is the authority that the received material stayed in history.
+        let effects = thread.effects().await.unwrap();
+        let deliveries = effects
+            .iter()
+            .flat_map(|effect| effect.deliveries.iter())
+            .collect::<Vec<_>>();
+        assert_eq!(deliveries.len(), 1);
+        assert_eq!(deliveries[0].call_id, "call");
+        assert!(
+            matches!(
+                deliveries[0].outcome,
+                pl_core::thread::ToolOutcome::Failed(_)
+            ),
+            "{:?}",
+            deliveries[0].outcome
+        );
+        let output = &deliveries[0].output;
         assert_eq!(output.payload().format(), "pl.tool.mcp-unarchived");
         let received: Value = serde_json::from_str(output.payload().content()).unwrap();
         assert_eq!(received["content"][0]["data"], "AAH/");
-        let replayed = pl_core::thread::journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(&replayed.deliveries[0].output, output);
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
         thread.close().await.unwrap();
     }

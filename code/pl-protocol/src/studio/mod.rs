@@ -3,6 +3,7 @@
 mod attachment;
 mod error;
 mod operation;
+mod persistence;
 mod query;
 mod request;
 mod settings;
@@ -11,6 +12,7 @@ mod settings_update;
 pub use attachment::*;
 pub use error::*;
 pub use operation::*;
+pub use persistence::*;
 pub use query::*;
 pub use request::*;
 pub use settings::*;

@@ -125,8 +125,7 @@ mod tests {
         fn admit(
             &self,
             _: &str,
-            _: u64,
-            _: pl_core::context::OpaquePayload,
+            _: pl_core::thread::cold::ThreadWrite,
         ) -> Result<(), pl_core::thread::cold::ColdStoreError> {
             Ok(())
         }
@@ -179,11 +178,8 @@ mod tests {
         assert!(source.to_string().contains("durability unavailable"));
         let closed = child.snapshot();
         assert_eq!(closed.lifecycle, pl_core::thread::ThreadLifecycle::Closing);
-        let canonical = pl_core::thread::journal::replay(&child.journal().await.unwrap()).unwrap();
-        assert_eq!(
-            canonical.lifecycle,
-            pl_core::thread::ThreadLifecycle::Closed
-        );
+        let canonical = child.effects().await.unwrap().last().unwrap().lifecycle;
+        assert_eq!(canonical, Some(pl_core::thread::ThreadLifecycle::Closed));
         assert!(closed.persistence.durable_sequence < closed.commit_sequence);
         assert!(owner.0.state().entries.contains_key("child"));
         assert_eq!(resources.calls.load(Ordering::SeqCst), 0);

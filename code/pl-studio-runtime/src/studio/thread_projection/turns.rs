@@ -1,8 +1,8 @@
 //! Turn lifecycle and diagnostics projected from saved commit metadata.
 use super::ProjectionError;
 use pl_core::thread::{
-    AttemptOutcome, ThreadSnapshot, TurnOutcome as CoreTurnOutcome, TurnRecord,
-    TurnState as CoreTurnState, journal::ThreadCommit,
+    AttemptOutcome, ThreadEffectBatch, ThreadSnapshot, TurnOutcome as CoreTurnOutcome, TurnRecord,
+    TurnState as CoreTurnState,
 };
 use pl_protocol::{Turn, TurnPhase, TurnState};
 use std::{collections::BTreeMap, sync::Arc};
@@ -16,7 +16,7 @@ struct Stamp {
 pub(in crate::studio) fn project_turns(
     thread_id: &str,
     snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadCommit>],
+    journal: &[Arc<ThreadEffectBatch>],
 ) -> Result<Vec<Turn>, ProjectionError> {
     let mut stamps = BTreeMap::<String, Stamp>::new();
     for commit in journal
@@ -67,6 +67,57 @@ pub(in crate::studio) fn project_turns(
             })
         })
         .collect()
+}
+
+pub(super) fn project_turn(
+    thread_id: &str,
+    snapshot: &ThreadSnapshot,
+    record: &TurnRecord,
+    created_at: i64,
+    updated_at: i64,
+    revision: u64,
+) -> Result<Turn, ProjectionError> {
+    let stamp = Stamp {
+        started_at: created_at,
+        updated_at,
+        revision,
+    };
+    Ok(Turn {
+        input_id: record.input_id.clone(),
+        id: record.turn_id.clone(),
+        thread_id: thread_id.into(),
+        revision,
+        state: state(snapshot, record, &stamp)?,
+        updated_at,
+    })
+}
+
+pub(in crate::studio) fn project_active_turn(
+    thread_id: &str,
+    snapshot: &ThreadSnapshot,
+    updated_at: i64,
+) -> Result<Option<Turn>, ProjectionError> {
+    let Some(record) = snapshot
+        .turns
+        .iter()
+        .rev()
+        .find(|record| record.state == CoreTurnState::Running)
+    else {
+        return Ok(None);
+    };
+    let stamp = Stamp {
+        started_at: updated_at,
+        updated_at,
+        revision: snapshot.commit_sequence,
+    };
+    Ok(Some(Turn {
+        input_id: record.input_id.clone(),
+        id: record.turn_id.clone(),
+        thread_id: thread_id.into(),
+        revision: stamp.revision,
+        state: state(snapshot, record, &stamp)?,
+        updated_at: stamp.updated_at,
+    }))
 }
 
 fn state(

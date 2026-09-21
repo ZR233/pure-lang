@@ -66,6 +66,16 @@ pub fn openapi_json() -> anyhow::Result<String> {
     serde_json::to_string_pretty(&openapi_document()).context("failed to serialize OpenAPI")
 }
 
+/// Runs the explicit one-time conversion of a pre-`catalog.toml` Studio home and returns its
+/// auditable outcome. It shares the coordinator's phase machine with normal startup and never
+/// starts the runtime; `confirmed_home` must match the resolved Studio home.
+pub async fn migrate_legacy_storage(
+    studio_home: Option<PathBuf>,
+    confirmed_home: PathBuf,
+) -> anyhow::Result<pl_studio_runtime::LegacyMigrationOutcome> {
+    pl_studio_runtime::migrate_legacy_storage(studio_home, confirmed_home).await
+}
+
 pub async fn serve(options: ServerOptions) -> anyhow::Result<()> {
     security::ensure_loopback_bind(options.listen)?;
     let listener = TcpListener::bind(options.listen)
@@ -592,7 +602,9 @@ mod tests {
         let body = json_body(response).await;
         assert_eq!(body["schemaVersion"], pl_protocol::THREAD_SCHEMA_VERSION);
         assert_eq!(body["thread"]["id"], thread.id);
-        assert_eq!(body["items"], serde_json::json!([]));
+        // 当前状态快照不再携带 Timeline；历史条目由 `/timeline` 分页读取。
+        assert!(body.get("items").is_none());
+        assert_eq!(body["interactions"], serde_json::json!([]));
         assert!(body.get("revision").is_some());
         runtime.shutdown_runtime().await.unwrap();
     }

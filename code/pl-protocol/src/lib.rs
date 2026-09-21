@@ -86,13 +86,17 @@ pub use provider_catalog::{
     ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor,
     WebSearchProviderCapabilitiesDescriptor, WebSearchResolutionDescriptor,
 };
+// 持久化观测契约（队列压力、逐 Thread 水位）同时由 runtime 协调器与其上层
+// bridge/HTTP 适配器命名，因此在 crate 根重导出，消费方无需再拼 `studio::` 路径。
+pub use studio::{PersistenceQueueSnapshot, ThreadPersistenceSnapshot};
 pub use thread::mode::{ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId};
 pub use thread::{
     CacheUsageSummary, THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition,
     ThreadModelRouteSnapshot, ThreadNotification, ThreadNotificationEnvelope,
     ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot, ThreadStatus,
     ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTurnHistory, ThreadTurnPage,
-    ThreadWorkspaceMode, TimelinePage, TimelineQuery, TimelineTurn,
+    ThreadWorkspaceMode, TimelineItemQuery, TimelineItemRead, TimelinePage, TimelineQuery,
+    TimelineTurn,
 };
 mod session_entry;
 pub use session_entry::SessionEntry;

@@ -55,6 +55,12 @@ class TimelineView extends StatefulWidget {
     this.olderCursor,
     this.newerCursor,
     this.windowEpoch = 0,
+    this.previewedItemIds = const {},
+    this.loadingItemIds = const {},
+    this.itemBodyErrors = const {},
+    this.pendingItemBodyIds = const {},
+    this.unavailableItemIds = const {},
+    this.onLoadItemBody,
     super.key,
   });
 
@@ -78,6 +84,26 @@ class TimelineView extends StatefulWidget {
   final String? newerCursor;
   final int windowEpoch;
 
+  /// 页面只以预览返回的超大条目 ID：需要按 identity 回源完整正文。
+  final Set<String> previewedItemIds;
+
+  /// 正在回源完整正文的条目 ID。
+  final Set<String> loadingItemIds;
+
+  /// 回源失败的条目 ID 与其错误文案。
+  final Map<String, String> itemBodyErrors;
+
+  /// 回源已发出但完整正文尚未可取的条目 ID（例如历史事务尚未 durable）。
+  ///
+  /// 与 [unavailableItemIds] 不同：这是“在途”，入口继续可见可重试。
+  final Set<String> pendingItemBodyIds;
+
+  /// 数据源无法提供完整正文的条目 ID。
+  final Set<String> unavailableItemIds;
+
+  /// 按 item identity 回源完整正文；为空时对应条目只显示不可用提示。
+  final ValueChanged<String>? onLoadItemBody;
+
   @override
   State<TimelineView> createState() => _TimelineViewState();
 }
@@ -93,6 +119,7 @@ class _TimelineViewState extends State<TimelineView> {
   bool _detachedByUser = false;
   bool _programmaticScroll = false;
   bool _bottomScrollScheduled = false;
+  bool _tailResumeScheduled = false;
   bool _scrollBoundsCorrectionScheduled = false;
   bool _olderLoadRequested = false;
   bool _newerLoadRequested = false;
@@ -103,8 +130,8 @@ class _TimelineViewState extends State<TimelineView> {
   final _centerKey = GlobalKey();
   final _viewportKey = GlobalKey();
   final Map<String, GlobalKey> _rowKeys = {};
-  final Map<String, ({int version, bool expanded, Widget child})> _rowWidgets =
-      {};
+  final Map<String, ({int version, bool expanded, String? body, Widget child})>
+  _rowWidgets = {};
   String? _centerId;
   bool _scrollingOlder = true;
   int _pendingNewEvents = 0;
@@ -303,88 +330,98 @@ class _TimelineViewState extends State<TimelineView> {
         contextMenuBuilder: _buildTimelineContextMenu,
         child: Stack(
           children: [
-            Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: StudioLayout.conversationWidth,
-                ),
-                child: SizedBox(
-                  key: _viewportKey,
-                  child: NotificationListener<ScrollMetricsNotification>(
-                    onNotification: _handleScrollMetricsChanged,
-                    child: NotificationListener<ScrollEndNotification>(
-                      onNotification: (_) {
-                        if (!_programmaticScroll) {
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (mounted && !_programmaticScroll) {
-                              _rebaseToVisibleAnchor();
-                            }
-                          });
-                        }
-                        return false;
-                      },
-                      child: CustomScrollView(
-                        center: _centerKey,
-                        key: StudioDriverKeys.timeline,
-                        controller: _controller,
-                        slivers: [
-                          _itemSliver(
-                            blocks.take(centerIndex).toList().reversed.toList(),
-                          ),
-                          _itemSliver(
-                            blocks.skip(centerIndex).toList(),
-                            key: _centerKey,
-                          ),
-                          SliverPadding(
-                            padding: const EdgeInsets.symmetric(horizontal: 24),
-                            sliver: SliverLayoutBuilder(
-                              builder: (context, constraints) {
-                                final remaining =
-                                    constraints.viewportMainAxisExtent -
-                                    constraints.precedingScrollExtent;
-                                return SliverToBoxAdapter(
-                                  child: ConstrainedBox(
-                                    constraints: BoxConstraints(
-                                      minHeight: remaining > 0 ? remaining : 0,
+            // "跳到最新"占用滚动区之外的独立横条，而不是浮在消息列上：用户气泡右对齐，
+            // 恰好落在底部角落，悬浮覆盖会挡住正文末尾。无提示时该横条不占高度。
+            Positioned.fill(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: StudioLayout.conversationWidth,
+                  ),
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          key: _viewportKey,
+                          child: NotificationListener<ScrollMetricsNotification>(
+                            onNotification: _handleScrollMetricsChanged,
+                            child: NotificationListener<ScrollEndNotification>(
+                              onNotification: (_) {
+                                if (!_programmaticScroll) {
+                                  WidgetsBinding.instance.addPostFrameCallback((
+                                    _,
+                                  ) {
+                                    if (mounted && !_programmaticScroll) {
+                                      _rebaseToVisibleAnchor();
+                                    }
+                                  });
+                                }
+                                return false;
+                              },
+                              child: CustomScrollView(
+                                center: _centerKey,
+                                key: StudioDriverKeys.timeline,
+                                controller: _controller,
+                                slivers: [
+                                  _itemSliver(
+                                    blocks
+                                        .take(centerIndex)
+                                        .toList()
+                                        .reversed
+                                        .toList(),
+                                  ),
+                                  _itemSliver(
+                                    blocks.skip(centerIndex).toList(),
+                                    key: _centerKey,
+                                  ),
+                                  SliverPadding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 24,
                                     ),
-                                    child: _TimelineTail(
-                                      activity: activity,
-                                      planSummary: planSummary,
+                                    sliver: SliverLayoutBuilder(
+                                      builder: (context, constraints) {
+                                        final remaining =
+                                            constraints.viewportMainAxisExtent -
+                                            constraints.precedingScrollExtent;
+                                        return SliverToBoxAdapter(
+                                          child: ConstrainedBox(
+                                            constraints: BoxConstraints(
+                                              minHeight: remaining > 0
+                                                  ? remaining
+                                                  : 0,
+                                            ),
+                                            child: _TimelineTail(
+                                              activity: activity,
+                                              planSummary: planSummary,
+                                            ),
+                                          ),
+                                        );
+                                      },
                                     ),
                                   ),
-                                );
-                              },
+                                ],
+                              ),
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                      if (_showJumpToLatest)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+                          child: Align(
+                            alignment: Alignment.centerRight,
+                            child: _JumpToLatestButton(
+                              pendingCount: _pendingNewEvents,
+                              onPressed: _jumpToLatest,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
             ),
-            if (_showJumpToLatest)
-              Positioned.fill(
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: StudioLayout.conversationWidth,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-                      child: Align(
-                        alignment: Alignment.bottomRight,
-                        child: _JumpToLatestButton(
-                          pendingCount: _pendingNewEvents,
-                          onPressed: _jumpToLatest,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
             if (_showLoading && widget.isLoadingOlder ||
                 widget.olderError != null)
               _edgeIndicator(older: true),
@@ -447,6 +484,14 @@ class _TimelineViewState extends State<TimelineView> {
     _schedulePrefetch();
     if (_programmaticScroll) return false;
     final metrics = notification.metrics;
+    // 内容或历史页改变布局后，滚动位置可能已经落在末尾：按与滚动事件相同的规则恢复
+    // 跟随并清掉"新内容"计数。否则分页恢复/内容替换后会长久残留一个已经回到末尾的
+    // 提示层，既误导读者，也会在右下角压住正文。
+    if (!widget.hasNewer &&
+        metrics.extentAfter <= _bottomThreshold &&
+        (!_followingBottom || _detachedByUser || _pendingNewEvents != 0)) {
+      _scheduleTailResume();
+    }
     if (_followingBottom &&
         !_detachedByUser &&
         !widget.hasNewer &&
@@ -494,6 +539,31 @@ class _TimelineViewState extends State<TimelineView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _bottomScrollScheduled = false;
       if (mounted && _followingBottom && !_detachedByUser) _scrollToBottom();
+    });
+  }
+
+  /// 布局/内容变化后已经落在末尾时恢复跟随。
+  ///
+  /// 与 [`_handleScrollPositionChanged`] 的 `nearBottom` 规则一致：末尾（"没有更新条目"
+  /// 且距内容末尾不超过 [`_bottomThreshold`]）就是跟随状态，必须清掉"脱离 + 新内容计数"，
+  /// 否则历史分页/窗口替换后提示层会停留在一个已经回到末尾的位置上。这里只恢复状态，
+  /// 不主动移动阅读位置——真正的贴底由下一次 [ScrollMetricsNotification] 的跟随分支完成。
+  void _scheduleTailResume() {
+    if (_tailResumeScheduled) return;
+    _tailResumeScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _tailResumeScheduled = false;
+      if (!mounted || !_controller.hasClients || _programmaticScroll) return;
+      if (widget.hasNewer ||
+          _controller.position.extentAfter > _bottomThreshold ||
+          (_followingBottom && !_detachedByUser && _pendingNewEvents == 0)) {
+        return;
+      }
+      setState(() {
+        _followingBottom = true;
+        _detachedByUser = false;
+        _pendingNewEvents = 0;
+      });
     });
   }
 
@@ -635,6 +705,38 @@ int _timelineContentVersion(
     rows.length,
     for (final row in rows) ...[row.id, row.type, row.renderVersion],
   ]);
+}
+
+/// 一条条目在窗口中的“完整正文”状态：预览 / 正在回源 / 回源失败。
+///
+/// 身份、顺序与 ordinal 由条目自身携带；这里只表达载荷是否需要回源，因此不会改变阅读位置。
+class _ItemBodyState {
+  const _ItemBodyState({
+    required this.itemId,
+    required this.isPreviewed,
+    required this.isLoading,
+    required this.isPending,
+    required this.isUnavailable,
+    this.label,
+    this.error,
+    this.onLoad,
+  });
+
+  /// canonical item 身份；回源与去重都以它为准，分组行的合成行身份不参与。
+  final String itemId;
+
+  /// 可选的数据来源标签（例如工具名），用于在同一分组里区分多条回源入口。
+  final String? label;
+  final bool isPreviewed;
+  final bool isLoading;
+
+  /// 回源已发出但完整正文尚未可取（例如历史事务尚未 durable）：入口仍可见可重试。
+  final bool isPending;
+
+  /// 数据源无法提供完整正文；此时不提供重试入口（重试也不会取到完整内容）。
+  final bool isUnavailable;
+  final String? error;
+  final VoidCallback? onLoad;
 }
 
 class _TimelineDisplayBlock {

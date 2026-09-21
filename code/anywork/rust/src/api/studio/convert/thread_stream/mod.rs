@@ -84,15 +84,13 @@ fn thread_notification(
     };
     Ok(Some(BridgeThreadNotificationEnvelope {
         thread_id: envelope.thread_id,
+        epoch: envelope.epoch,
+        base_revision: envelope.base_revision,
         revision: envelope.revision,
         emitted_at: envelope.emitted_at,
         notification,
     }))
 }
-
-/// wire 快照的 item 窗口上限（低于 GUI 侧历史窗口上限，留出加载余量）。
-/// 超过后按 item 从最旧方向截断，被截内容经 `history_cursor` 回源。
-const SNAPSHOT_ITEM_WINDOW: usize = 400;
 
 pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThreadSnapshot> {
     let runtime_availability = if value.runtime.is_some() {
@@ -100,50 +98,11 @@ pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThre
     } else {
         BridgeThreadRuntimeAvailability::Inactive
     };
-    let all_items = value
-        .items
-        .into_iter()
-        .map(bridge_thread_item)
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    let last_by_turn: std::collections::BTreeMap<_, _> = all_items
-        .iter()
-        .map(|item| (item.turn_id.clone(), item.id.clone()))
-        .collect();
-    let mut timeline_turns: Vec<_> = all_items
-        .iter()
-        .filter_map(|item| {
-            let BridgeThreadItemState::Turn { state, input_id } = &item.state else {
-                return None;
-            };
-            Some(BridgeTimelineTurn {
-                turn: BridgeTurn {
-                    id: item.turn_id.clone(),
-                    thread_id: item.thread_id.clone(),
-                    input_id: input_id.clone(),
-                    revision: item.revision,
-                    state: state.clone(),
-                    updated_at: item.updated_at,
-                },
-                last_item_id: last_by_turn[&item.turn_id].clone(),
-                context_disposition: BridgeThreadContextDisposition::Active,
-            })
-        })
-        .collect();
-    let last_turn = timeline_turns.last().map(|entry| entry.turn.clone());
-    let (items, history_cursor) = snapshot_item_window(all_items);
-    timeline_turns.retain(|entry| items.iter().any(|item| item.turn_id == entry.turn.id));
     Ok(BridgeThreadSnapshot {
         schema_version: value.schema_version,
         revision: value.revision,
         thread: bridge_thread(value.thread),
         active_turn: value.active_turn.map(bridge_turn),
-        items,
-        history_cursor,
-        timeline_turns,
-        last_turn,
         interactions: value
             .interactions
             .into_iter()
@@ -152,18 +111,6 @@ pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThre
         runtime: value.runtime.map(runtime_snapshot),
         runtime_availability,
     })
-}
-
-/// Hard item budget; the exclusive before cursor can page inside a large Turn.
-fn snapshot_item_window(
-    mut items: Vec<BridgeThreadItem>,
-) -> (Vec<BridgeThreadItem>, Option<String>) {
-    if items.len() <= SNAPSHOT_ITEM_WINDOW {
-        return (items, None);
-    }
-    let start = items.len() - SNAPSHOT_ITEM_WINDOW;
-    let cursor = items[start].id.clone();
-    (items.split_off(start), Some(cursor))
 }
 
 pub(crate) fn bridge_thread(value: Thread) -> BridgeThread {
@@ -866,6 +813,8 @@ mod tests {
         assert!(
             thread_notification(ThreadNotificationEnvelope {
                 thread_id: "thread-1".to_string(),
+                epoch: 1,
+                base_revision: 0,
                 revision: 1,
                 emitted_at: 1,
                 notification: ThreadNotification::ItemCompleted {
@@ -876,18 +825,8 @@ mod tests {
             .is_none()
         );
 
-        let mut snapshot = ThreadSnapshot::empty("thread-1");
-        snapshot.items = vec![
-            context_compaction,
-            item(ThreadItemState::Text(ThreadTextItem::new(
-                ThreadTextChannel::User,
-                "visible".to_string(),
-                Vec::new(),
-                ThreadContentLifecycle::completed(1),
-            ))),
-        ];
-        let bridged = bridge_thread_snapshot(snapshot).unwrap();
-        assert_eq!(bridged.items.len(), 1);
+        let bridged = bridge_thread_snapshot(ThreadSnapshot::empty("thread-1")).unwrap();
+        assert_eq!(bridged.thread.id, "thread-1");
     }
 
     #[test]
@@ -909,32 +848,6 @@ mod tests {
                 ..
             } if text == "follow-up guidance"
         ));
-    }
-
-    #[test]
-    fn snapshot_window_pages_inside_large_turns_with_item_cursor() {
-        let mut snapshot = ThreadSnapshot::empty("thread-1");
-        snapshot.items = (0..500)
-            .map(|ordinal| window_item(ordinal, "large-turn".into()))
-            .collect();
-        let bridged = bridge_thread_snapshot(snapshot).unwrap();
-        // Even one large Turn must respect the item budget.
-        assert_eq!(bridged.items.len(), 400);
-        assert_eq!(bridged.history_cursor.as_deref(), Some("item-100"));
-        assert_eq!(bridged.items.first().unwrap().turn_id, "large-turn");
-        assert_eq!(bridged.items.last().unwrap().turn_id, "large-turn");
-    }
-
-    #[test]
-    fn small_snapshots_carry_no_history_cursor() {
-        let mut snapshot = ThreadSnapshot::empty("thread-1");
-        snapshot.items = vec![
-            window_item(0, "turn-0".to_string()),
-            window_item(1, "turn-1".to_string()),
-        ];
-        let bridged = bridge_thread_snapshot(snapshot).unwrap();
-        assert_eq!(bridged.items.len(), 2);
-        assert_eq!(bridged.history_cursor, None);
     }
 
     #[test]
@@ -967,24 +880,6 @@ mod tests {
                 ..
             } if name == "pdf" && source == "system" && tool_call_id == "tool-1"
         ));
-    }
-
-    fn window_item(ordinal: u64, turn_id: String) -> ThreadItem {
-        ThreadItem::new(
-            format!("item-{ordinal}"),
-            "thread-1".to_string(),
-            turn_id,
-            ordinal,
-            1,
-            1,
-            1,
-            ThreadItemState::Text(ThreadTextItem::new(
-                ThreadTextChannel::User,
-                format!("message {ordinal}"),
-                Vec::new(),
-                ThreadContentLifecycle::completed(1),
-            )),
-        )
     }
 
     fn item(state: ThreadItemState) -> ThreadItem {

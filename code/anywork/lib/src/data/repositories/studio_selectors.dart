@@ -9,6 +9,9 @@ part 'studio_selectors.g.dart';
 typedef WorkspaceLayoutView = ({
   String threadId,
   bool isLoading,
+
+  /// 已选中但尚未打开：首屏恢复的选择不打开会话，由用户显式交互触发。
+  bool needsOpen,
   String? loadError,
   TimelineTodoListUpdate? todo,
   PlanConfirmationView? planConfirmation,
@@ -92,6 +95,8 @@ AsyncValue<WorkspaceLayoutView?> selectedWorkspaceLayout(Ref ref) {
         return (
           threadId: workspace.threadId,
           isLoading: workspace.isLoading,
+          // 打开是显式用户动作：首屏恢复的选择不在 openedThreadIds 中。
+          needsOpen: !state.openedThreadIds.contains(workspace.threadId),
           loadError: workspace.loadError,
           todo: workspace.todo,
           planConfirmation: workspace.activeInteraction?.planConfirmation,

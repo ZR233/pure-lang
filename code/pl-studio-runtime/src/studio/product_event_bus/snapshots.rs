@@ -112,39 +112,40 @@ impl ProductEventBus {
         mut state: watch::Receiver<PersistenceStateSnapshot>,
     ) {
         let bus = self.clone();
-        let mut sessions = bus.store.sessions().subscribe_persistence();
-        bus.update_persistence(state.borrow().clone());
+        let mut threads = bus.store.thread_persistence().subscribe();
+        bus.update_persistence(state.borrow().clone(), threads.borrow().clone());
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     result = state.changed() => if result.is_err() { break; },
-                    result = sessions.changed() => if result.is_err() { break; },
+                    result = threads.changed() => if result.is_err() { break; },
                 }
-                bus.update_persistence(state.borrow_and_update().clone());
-                if sessions.borrow_and_update().stopped
-                    && state.borrow().state.pending_commits() == 0
-                {
-                    break;
-                }
+                bus.update_persistence(
+                    state.borrow_and_update().clone(),
+                    threads.borrow_and_update().clone(),
+                );
             }
         });
     }
 
-    fn update_persistence(&self, mut state: PersistenceStateSnapshot) {
+    fn update_persistence(
+        &self,
+        mut state: PersistenceStateSnapshot,
+        threads: crate::studio::storage::coordinator::ThreadPersistenceSnapshot,
+    ) {
         use crate::studio::{BlockedPersistence, FlushingPersistence, PersistenceState};
-        let sessions = self.store.sessions().persistence();
         let pending = state
             .state
             .pending_commits()
-            .saturating_add(sessions.pending_commits as u64);
-        if let Some(error) = sessions.error {
+            .saturating_add(threads.pending_commits);
+        if let Some(error) = threads.error {
             state.state = PersistenceState::Blocked(BlockedPersistence {
                 pending_commits: pending,
-                oldest_pending_revision: Some(sessions.durable.saturating_add(1)),
+                oldest_pending_revision: threads.oldest_pending_revision,
                 first_failed_at: super::unix_seconds(),
                 error: pl_protocol::StateError {
-                    code: "sessionPersistenceFailed".into(),
-                    message: error.to_string(),
+                    code: "threadPersistenceFailed".into(),
+                    message: error,
                     retryable: true,
                 },
             });
@@ -153,7 +154,7 @@ impl ProductEventBus {
                 PersistenceState::Ready(_) if pending > 0 => {
                     state.state = PersistenceState::Flushing(FlushingPersistence {
                         pending_commits: pending,
-                        oldest_pending_revision: Some(sessions.durable.saturating_add(1)),
+                        oldest_pending_revision: threads.oldest_pending_revision,
                     })
                 }
                 PersistenceState::Ready(value) => value.pending_commits = pending,

@@ -1,7 +1,7 @@
 //! Tool timeline facts use original call bytes and the context actually delivered by core.
 use super::{ProjectionError, content::text_content};
 use pl_core::thread::{
-    AttemptOutcome, ThreadSnapshot, ToolDelivery, ToolOutcome, journal::ThreadCommit,
+    AttemptOutcome, ThreadEffectBatch, ThreadSnapshot, ToolDelivery, ToolOutcome,
     permissions::PermissionState, task::TaskStatus,
 };
 use pl_protocol::{
@@ -20,7 +20,7 @@ struct Call<'a> {
 pub(in crate::studio) fn project_tools(
     thread_id: &str,
     snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadCommit>],
+    journal: &[Arc<ThreadEffectBatch>],
 ) -> Result<Vec<ThreadItem>, ProjectionError> {
     let mut calls = BTreeMap::new();
     let mut updates = BTreeMap::new();
@@ -69,83 +69,109 @@ pub(in crate::studio) fn project_tools(
     }
     let mut items = Vec::new();
     for (id, saved) in calls {
-        let task = snapshot.tasks.values().find(|task| task.call_id == id);
-        let delivery = snapshot
-            .deliveries
-            .iter()
-            .find(|delivery| delivery.call_id == id);
         let (revision, at) = updates
             .get(id)
             .copied()
             .unwrap_or((saved.sequence, saved.at));
-        let state = if let Some(delivery) = delivery {
-            if delivery.tool_id != saved.call.tool_id {
-                return Err(ProjectionError::DuplicateCall(id.into()));
-            }
-            terminal(delivery, at)?
-        } else if let Some(task) = task {
-            if task.status != TaskStatus::Running {
-                return Err(ProjectionError::MissingToolResult(id.into()));
-            }
-            let progress = snapshot
-                .tool_progress
-                .get(&task.id)
-                .map_or_else(String::new, |content| text_content(content));
-            if task.cancel_requested {
-                ThreadToolState::Cancelling(pl_protocol::CancellingThreadTool::new(progress))
-            } else if snapshot.permissions.values().any(|permission| {
-                permission.call_id == id && permission.state == PermissionState::Pending
-            }) {
-                ThreadToolState::AwaitingApproval(pl_protocol::AwaitingApprovalThreadTool)
-            } else {
-                ThreadToolState::Running(pl_protocol::RunningThreadTool::new(progress))
-            }
-        } else {
-            ThreadToolState::Queued(pl_protocol::QueuedThreadTool)
-        };
-        if let Some(delivery) = delivery
-            && delivery.tool_id == "skill_view"
-            && matches!(delivery.outcome, ToolOutcome::Succeeded)
-            && let Ok(Some(mut activation)) = pl_tool::skill::saved_skill_activation(
-                delivery.output.payload(),
-                saved.turn_id.into(),
-                pl_protocol::SkillActivationCause::Tool {
-                    tool_call_id: id.into(),
-                },
-            )
-        {
-            activation.activated_at = at;
-            items.push(ThreadItem::new(
-                super::order::skill_id(id),
-                thread_id.into(),
-                saved.turn_id.into(),
-                revision,
-                revision,
-                at,
-                at,
-                ThreadItemState::Skill(pl_protocol::ThreadSkillItem::new(activation)),
-            ));
-        }
-        let mut invocation = ThreadToolInvocation::new(
-            id.into(),
-            saved.call.tool_id.clone(),
-            saved.call.arguments.content().into(),
-        )
-        .with_provider_identity(Some(id.into()), None);
-        if let Some(task) = task {
-            invocation = invocation.with_task_id(task.id.clone());
-        }
-        items.push(ThreadItem::new(
-            super::order::tool_id(id),
-            thread_id.into(),
-            saved.turn_id.into(),
+        items.extend(project_tool_call(
+            thread_id,
+            snapshot,
+            saved.turn_id,
+            saved.call,
             saved.sequence,
-            revision,
             saved.at,
+            revision,
             at,
-            ThreadItemState::Tool(ThreadToolItem::new(invocation, state)),
+        )?);
+    }
+    Ok(items)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn project_tool_call(
+    thread_id: &str,
+    snapshot: &ThreadSnapshot,
+    turn_id: &str,
+    call: &pl_core::model::ModelToolCall,
+    ordinal: u64,
+    created_at: i64,
+    revision: u64,
+    updated_at: i64,
+) -> Result<Vec<ThreadItem>, ProjectionError> {
+    let mut items = Vec::new();
+    let id = call.call_id.as_str();
+    let task = snapshot.tasks.values().find(|task| task.call_id == id);
+    let delivery = snapshot
+        .deliveries
+        .iter()
+        .find(|delivery| delivery.call_id == id);
+    let state = if let Some(delivery) = delivery {
+        if delivery.tool_id != call.tool_id {
+            return Err(ProjectionError::DuplicateCall(id.into()));
+        }
+        terminal(delivery, updated_at)?
+    } else if let Some(task) = task {
+        if task.status != TaskStatus::Running {
+            return Err(ProjectionError::MissingToolResult(id.into()));
+        }
+        let progress = snapshot
+            .tool_progress
+            .get(&task.id)
+            .map_or_else(String::new, |content| text_content(content));
+        if task.cancel_requested {
+            ThreadToolState::Cancelling(pl_protocol::CancellingThreadTool::new(progress))
+        } else if snapshot.permissions.values().any(|permission| {
+            permission.call_id == id && permission.state == PermissionState::Pending
+        }) {
+            ThreadToolState::AwaitingApproval(pl_protocol::AwaitingApprovalThreadTool)
+        } else {
+            ThreadToolState::Running(pl_protocol::RunningThreadTool::new(progress))
+        }
+    } else {
+        ThreadToolState::Queued(pl_protocol::QueuedThreadTool)
+    };
+    if let Some(delivery) = delivery
+        && delivery.tool_id == "skill_view"
+        && matches!(delivery.outcome, ToolOutcome::Succeeded)
+        && let Ok(Some(mut activation)) = pl_tool::skill::saved_skill_activation(
+            delivery.output.payload(),
+            turn_id.into(),
+            pl_protocol::SkillActivationCause::Tool {
+                tool_call_id: id.into(),
+            },
+        )
+    {
+        activation.activated_at = updated_at;
+        items.push(ThreadItem::new(
+            super::order::skill_id(id),
+            thread_id.into(),
+            turn_id.into(),
+            revision,
+            revision,
+            updated_at,
+            updated_at,
+            ThreadItemState::Skill(pl_protocol::ThreadSkillItem::new(activation)),
         ));
     }
+    let mut invocation = ThreadToolInvocation::new(
+        id.into(),
+        call.tool_id.clone(),
+        call.arguments.content().into(),
+    )
+    .with_provider_identity(Some(id.into()), None);
+    if let Some(task) = task {
+        invocation = invocation.with_task_id(task.id.clone());
+    }
+    items.push(ThreadItem::new(
+        super::order::tool_id(id),
+        thread_id.into(),
+        turn_id.into(),
+        ordinal,
+        revision,
+        created_at,
+        updated_at,
+        ThreadItemState::Tool(ThreadToolItem::new(invocation, state)),
+    ));
     Ok(items)
 }
 

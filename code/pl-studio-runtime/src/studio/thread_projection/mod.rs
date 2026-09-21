@@ -2,10 +2,18 @@
 mod compactions;
 mod completions;
 mod content;
+pub(in crate::studio) use content::{
+    prompt_request_digest, referenced_attachment_ids, saved_prompt_request_digest,
+};
+mod effect;
+pub(in crate::studio) use effect::project_effect_items;
+mod live;
+pub(in crate::studio) use live::{LiveEvent, LiveProjection, TurnEvent};
 mod runtime;
+pub(in crate::studio) use runtime::fold_effect_accounting;
 mod snapshot;
-pub(in crate::studio) use snapshot::{project_snapshot, saved_mode, status};
-mod order;
+pub(in crate::studio) use snapshot::{project_history_items, project_snapshot, saved_mode, status};
+pub(in crate::studio) mod order;
 mod tool_media;
 pub(crate) use tool_media::{delivery_attachments, read_persisted_media};
 mod tools;
@@ -16,7 +24,15 @@ mod inputs;
 mod messages;
 pub(in crate::studio) use inputs::project_inputs;
 mod turns;
-pub(in crate::studio) use turns::project_turns;
+pub(in crate::studio) use turns::{project_active_turn, project_turns};
+
+/// Identity of one streaming channel item (`reasoning` or `text`) for an attempt.
+///
+/// Both the durable writer and the live projection derive the finalize set from the same identity,
+/// so a failure never finalizes a channel the attempt never started.
+pub(in crate::studio) fn attempt_channel_id(attempt_id: &str, channel: &str) -> String {
+    order::response_id(attempt_id, channel)
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ProjectionError {
@@ -28,6 +44,8 @@ pub(crate) enum ProjectionError {
     ToolMedia(pl_core::tool::opaque::ToolError),
     #[error("projection journal is incomplete or mixes Thread identities")]
     JournalOrder,
+    #[error("durable history identity lookup failed: {0}")]
+    History(String),
     #[error("timeline item {0} has no unique admission position")]
     ItemOrder(String),
     #[error("historical content metadata could not be encoded")]
@@ -44,6 +62,8 @@ pub(crate) enum ProjectionError {
     UnsupportedOutput(String),
     #[error("missing committed metadata for input {0}")]
     MissingInput(String),
+    #[error("durable history is missing the committed input item(s) {0}")]
+    MissingDurableInput(String),
     #[error("missing committed consumption for parent message {0}")]
     MissingMessage(String),
     #[error("missing committed metadata for Turn {0}")]
@@ -55,11 +75,18 @@ pub(crate) enum ProjectionError {
 }
 
 /// Combines product projections with one order derived from their original admission facts.
+///
+/// This is the one-way legacy-history projection: it consumes one committed effect window
+/// (`pl_core::thread::ThreadEffectBatch`, the bounded batch the owner publishes per commit) together
+/// with the durable session state a restart or the migration export reconstructed. The only caller
+/// that supplies a complete window is the one-way migration export; live and durable product reads
+/// use `project_effect_items` plus the durable history database instead, so no normal path depends on
+/// replaying a complete journal.
 pub(crate) fn project_items(
     thread_id: &str,
     parent_id: Option<&str>,
     snapshot: &pl_core::thread::ThreadSnapshot,
-    journal: &[std::sync::Arc<pl_core::thread::journal::ThreadCommit>],
+    journal: &[std::sync::Arc<pl_core::thread::ThreadEffectBatch>],
 ) -> Result<Vec<pl_protocol::ThreadItem>, ProjectionError> {
     let positions = order::positions(journal, snapshot.commit_sequence)?;
     let mut items = project_inputs(thread_id, snapshot, journal)?;

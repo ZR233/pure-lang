@@ -14,6 +14,10 @@ pub struct TaskAccess {
     executor: crate::tool::opaque::ExecutionAuthority,
     authorization: Option<crate::tool::opaque::ToolAuthorization>,
     snapshots: watch::Receiver<ThreadSnapshot>,
+    effect_window: Arc<EffectWindow>,
+    thread_id: String,
+    /// Durable store handle, if this Thread is persisted. Reads only; it never keeps the owner alive.
+    cold: Option<cold::ColdStoreHandle>,
     commands: mpsc::WeakSender<mailbox::MailboxCommand>,
     caller: String,
     may_wait: bool,
@@ -31,6 +35,9 @@ impl TaskAccess {
             executor: executor.authority(),
             authorization: permissions.authorization,
             snapshots: owner.publish.subscribe(),
+            effect_window: owner.effect_window.clone(),
+            thread_id: owner.id.clone(),
+            cold: owner.cold.clone(),
             commands: owner.task_commands.clone(),
             caller: format!("task:{caller}"),
             may_wait: permissions.wait,
@@ -141,10 +148,16 @@ impl TaskAccess {
     /// # Errors
     /// Rejects a task not owned by this Thread.
     pub fn get(&self, id: &str) -> Result<task::TaskRecord, ThreadError> {
-        self.snapshots
-            .borrow()
+        let snapshot = self.snapshots.borrow();
+        snapshot
             .tasks
             .get(id)
+            .or_else(|| {
+                snapshot
+                    .terminal_tasks
+                    .iter()
+                    .find(|record| record.id == id)
+            })
             .cloned()
             .ok_or_else(|| ThreadError::TaskNotFound { task_id: id.into() })
     }
@@ -158,6 +171,12 @@ impl TaskAccess {
         let task = snapshot
             .tasks
             .get(id)
+            .or_else(|| {
+                snapshot
+                    .terminal_tasks
+                    .iter()
+                    .find(|record| record.id == id)
+            })
             .ok_or_else(|| ThreadError::TaskNotFound { task_id: id.into() })?;
         if snapshot.pending_tool_commits.contains(&task.call_id) {
             return Err(ThreadError::PendingToolCommit);
@@ -165,13 +184,48 @@ impl TaskAccess {
         if task.status == task::TaskStatus::Running {
             return Ok(None);
         }
-        snapshot
+        // A settled result is committed history. The resident queue answers a result still owed to
+        // model context; otherwise the exact committed delivery is read back from the bounded live
+        // effect window. Older results are answered by the host's calls reader (by
+        // `(thread_id, call_id)`), never by a checkpoint-visible payload ledger.
+        let call_id = task.call_id.as_str();
+        if let Some(delivery) = snapshot
             .deliveries
             .iter()
-            .find(|delivery| delivery.call_id == task.call_id)
-            .cloned()
-            .map(Some)
-            .ok_or(ThreadError::InvalidOutput)
+            .find(|delivery| delivery.call_id == call_id)
+        {
+            return Ok(Some(delivery.clone()));
+        }
+        match recent_effect_fact(&self.effect_window, |effect| {
+            effect
+                .deliveries
+                .iter()
+                .rev()
+                .find(|delivery| delivery.call_id == call_id)
+                .cloned()
+        }) {
+            Some(delivery) => Ok(Some(delivery)),
+            None => Err(ThreadError::InvalidOutput),
+        }
+    }
+
+    /// Reads a task's durable fact when the owner no longer retains its transient identity/result.
+    ///
+    /// The resident task ledgers and the live effect window are both bounded, so a finished task
+    /// that left the window must be answered by the host's durable call facts instead of being
+    /// reported as unknown or revived. This is a read-only lookup: it grants no permission, starts no
+    /// execution and does not keep the owner alive. `Ok(None)` means the durable store does not know
+    /// the identity either, and a non-terminal record must not be presented as a finished result.
+    ///
+    /// # Errors
+    /// Surfaces storage failures; it never fabricates a terminal state.
+    pub async fn durable(&self, id: &str) -> Result<Option<cold::DurableToolTask>, ThreadError> {
+        let Some(cold) = &self.cold else {
+            return Ok(None);
+        };
+        cold.read_tool_task(&self.thread_id, id)
+            .await
+            .map_err(|error| ThreadError::Storage(Arc::new(error)))
     }
 
     /// Waits for any selected task to finish or for a pending Thread message.
@@ -204,6 +258,12 @@ impl TaskAccess {
                         snapshot
                             .tasks
                             .get(id)
+                            .or_else(|| {
+                                snapshot
+                                    .terminal_tasks
+                                    .iter()
+                                    .find(|record| record.id == *id)
+                            })
                             .cloned()
                             .ok_or_else(|| ThreadError::TaskNotFound { task_id: id.into() })
                     })
@@ -214,7 +274,12 @@ impl TaskAccess {
                 {
                     return Err(ThreadError::PendingToolCommit);
                 }
-                let messages_ready = snapshot.inbox.len() as u64 > snapshot.consumed_messages;
+                // The resident queue holds only pending messages, so readiness is a sequence
+                // comparison against the consumption watermark, never a queue length.
+                let messages_ready = snapshot
+                    .inbox
+                    .iter()
+                    .any(|record| record.sequence > snapshot.consumed_messages);
                 if messages_ready
                     || tasks
                         .iter()
@@ -248,12 +313,32 @@ impl TaskAccess {
             .send(mailbox::MailboxCommand::ToolCancelTask {
                 caller: self.caller.clone(),
                 authorization: self.authorization.clone(),
-                target: id,
+                target: id.clone(),
                 reply,
             })
             .await
             .map_err(|_| ThreadError::Closed)?;
-        response.await.map_err(|_| ThreadError::Closed)?
+        match response.await.map_err(|_| ThreadError::Closed)? {
+            Ok(receipt) => Ok(receipt),
+            // The owner's terminal task ledger is bounded, so a finished task that left it is
+            // adjudicated from the durable task lifecycle instead of being reported as unknown.
+            // A durable terminal row is already finished, and a recorded cancellation request is
+            // already requested: neither answer revives the task nor starts new work.
+            Err(ThreadError::TaskNotFound { .. }) => {
+                match self.durable(&id).await? {
+                    Some(fact) if fact.task.status != task::TaskStatus::Running => {
+                        Ok(task::TaskCancellationReceipt::AlreadyFinished)
+                    }
+                    Some(fact) if fact.task.cancel_requested => {
+                        Ok(task::TaskCancellationReceipt::AlreadyRequested)
+                    }
+                    // A still-running task the owner does not know about is a real inconsistency:
+                    // report it instead of inventing a cancellation receipt.
+                    _ => Err(ThreadError::TaskNotFound { task_id: id }),
+                }
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn ensure_running(&self, snapshot: &ThreadSnapshot) -> Result<(), ThreadError> {
@@ -428,18 +513,28 @@ mod tests {
             execution.await.unwrap().unwrap();
             let completed = thread.snapshot();
             assert!(completed.tool_progress.is_empty());
+            // A finished call stays inspectable from its bounded terminal facts: the committed
+            // result and terminal status are answered without reviving the task or re-delivering
+            // the result to model context.
+            let delivery = access
+                .result("task:call")
+                .unwrap()
+                .expect("a committed result stays inspectable after completion");
             assert_eq!(
-                completed.deliveries[0].delivered_context,
+                delivery.delivered_context,
                 vec![ContextContent::Text {
                     text: "final output".into()
                 }]
+            );
+            assert_eq!(
+                access.get("task:call").unwrap().status,
+                task::TaskStatus::Succeeded
             );
             assert!(matches!(
                 access.report_progress(preview).await,
                 Err(ThreadError::TaskAccessExpired)
             ));
-            let replay = journal::replay(&thread.journal().await.unwrap()).unwrap();
-            assert!(replay.tool_progress.is_empty());
+            assert!(thread.snapshot().tool_progress.is_empty());
             thread.close().await.unwrap();
         }
     }

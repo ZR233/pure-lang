@@ -1,4 +1,4 @@
-//! Root activation uses the same physical tools as children and loads history without rerendering it.
+//! Root activation uses the same physical tools as children and resumes a current-state checkpoint.
 use super::{
     StudioThreadFactory,
     errors::resource_error,
@@ -25,10 +25,16 @@ impl StudioThreadFactory {
         }
         let project = self.project_record(&thread.project_id).await?;
         let config = self.services.config_runtime.read()?.config;
-        let history = super::recovery::recover_journal(&self.services.store, id)
+        let protocol_thread: pl_protocol::Thread = thread.clone().into();
+        let checkpoint = super::recovery::load_checkpoint(&self.services.store, &protocol_thread)
             .await
-            .map_err(|error| resource_error("recover Thread journal", error))?;
-        let saved = pl_core::thread::journal::replay(&history)?;
+            .map_err(|error| resource_error("load Thread checkpoint", error))?;
+        let saved = checkpoint
+            .as_ref()
+            .map_or_else(pl_core::thread::ThreadSnapshot::default, |checkpoint| {
+                checkpoint.state.clone()
+            });
+        let is_new = checkpoint.is_none();
         let selected_mode = crate::studio::thread_projection::saved_mode(&saved)
             .map_err(|error| resource_error("read saved Mode", error))?
             .unwrap_or_else(|| thread.mode.clone());
@@ -107,12 +113,7 @@ impl StudioThreadFactory {
             }
         })
         .with_lsp_runtime(Some(self.services.lsp_runtime.clone()));
-        let store = FileResourceStore::new(
-            self.services
-                .store
-                .attachments_dir()
-                .join("thread-resources"),
-        );
+        let store = FileResourceStore::new(self.services.store.session_resources_dir(id));
         let mut prepared = self
             .prepare_thread_tools(ThreadToolAssembly {
                 thread_id: id,
@@ -139,7 +140,7 @@ impl StudioThreadFactory {
                     .map_err(|error| resource_error("freeze initial model route", error))?,
             );
         }
-        if history.is_empty() {
+        if is_new {
             let (context, sources) = thread_seed::capture(ThreadInstructionSeed {
                 thread_id: id,
                 config: &config,
@@ -201,9 +202,8 @@ impl StudioThreadFactory {
                 .map_err(|error| resource_error("freeze root project", error))?,
             );
         }
-        if !history.is_empty() && mode.workflow().is_some() {
-            let restored = pl_core::thread::journal::replay(&history)?;
-            let saved = restored
+        if !is_new && mode.workflow().is_some() {
+            let saved = saved
                 .extensions
                 .get(crate::workflow_tool::WORKFLOW_EXTENSION)
                 .ok_or_else(|| {
@@ -220,6 +220,10 @@ impl StudioThreadFactory {
         if cancellation.is_cancelled() {
             return Err(pl_core::thread::ThreadError::Cancelled.into());
         }
+        let persistence = crate::studio::storage::thread_writer::ThreadStorageSink::new(
+            self.services.store.clone(),
+            protocol_thread,
+        );
         let spec = StudioThreadSpec {
             context_preparation: crate::compaction::preparer(
                 &route,
@@ -240,15 +244,13 @@ impl StudioThreadFactory {
             route,
             model_available,
             hosted_tools: prepared.hosted,
-            history,
+            checkpoint,
             initial_context,
             initial_extensions,
             tools: Vec::new(),
             resources: ResourceAccess::new(store),
             capacity: Default::default(),
-            cold_store: Some(pl_core::thread::cold::ColdStoreHandle::new(
-                self.services.store.sessions().clone(),
-            )),
+            cold_store: Some(pl_core::thread::cold::ColdStoreHandle::new(persistence)),
         };
         Ok(prepared.tools.install(spec))
     }

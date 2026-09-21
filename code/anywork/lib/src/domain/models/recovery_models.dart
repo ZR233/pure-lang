@@ -1,9 +1,3 @@
-class ConfigRecoveryNotice {
-  const ConfigRecoveryNotice({required this.backupPath});
-
-  final String backupPath;
-}
-
 enum RecoveryIssueScope { application, project, thread }
 
 enum RecoveryIssueCategory { processLease, agentState, repository }

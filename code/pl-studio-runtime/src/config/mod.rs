@@ -43,7 +43,7 @@ pub use pl_tool::mcp::config::validate_mcp_identifier;
 
 pub use pl_model::config::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot, ResolvedAgentProfile};
-pub use store::{ConfigPaths, ConfigRecoveryReport, ConfigStore};
+pub use store::{ConfigPaths, ConfigStore};
 
 pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 20;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".anywork";

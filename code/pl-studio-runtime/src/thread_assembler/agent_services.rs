@@ -1,4 +1,4 @@
-//! Saved agent identities, explicit cold activation and read-only journal/Profile queries.
+//! Saved agent identities, explicit cold activation and read-only history/Profile queries.
 use super::*;
 use anyhow::{Context, Result, bail};
 use base64::Engine;
@@ -71,6 +71,7 @@ struct Cursor {
     version: u32,
     target: String,
     through: u64,
+    ceiling: u64,
     order: Order,
     detail: Detail,
     anchor: u64,
@@ -110,7 +111,7 @@ impl QueryTool {
             .registry
             .upgrade()
             .context("agent query coordinator is closed")?;
-        let (services, owner) = {
+        let services = {
             let state = registry.state();
             if state.closing
                 || !state.entries.get(&context.thread_id).is_some_and(|entry| {
@@ -119,14 +120,12 @@ impl QueryTool {
             {
                 bail!("agent query caller is not active");
             }
-            (
-                state
-                    .agent_services
-                    .clone()
-                    .context("agent product queries were not configured")?,
-                StudioThreadAssembler(registry.clone()),
-            )
+            state
+                .agent_services
+                .clone()
+                .context("agent product queries were not configured")?
         };
+        let owner = StudioThreadAssembler(registry.clone());
         match self.kind {
             Kind::Profiles => {
                 let _: Empty = serde_json::from_str(input.content())?;
@@ -142,8 +141,7 @@ impl QueryTool {
                 let path = services
                     .authorize(&context.thread_id, &input.target)
                     .await?;
-                let history = services.history(&owner, &input.target).await?;
-                output(&session_page(input, path, history)?)
+                output(&services.session_page(&owner, input, path).await?)
             }
         }
     }
@@ -156,6 +154,8 @@ impl AgentServices {
     ) -> Result<Vec<serde_json::Value>> {
         let caller = self.record(caller).await?;
         let mut rows = Vec::new();
+        // 冷 agent 查询只消费 `catalog.toml` 的目录摘要，不逐个 child 读取 checkpoint。
+        // 摘要只有 durable status，因此这里只投影 lifecycle，不虚构 Turn/Task 运行态计数。
         for record in self
             .store
             .list_threads_for_root(&caller.root_thread_id)
@@ -164,16 +164,10 @@ impl AgentServices {
             if loaded.contains(&record.id) {
                 continue;
             }
-            let history = self
-                .store
-                .sessions()
-                .read_thread_journal(&record.id)
-                .await?;
-            let snapshot = pl_core::thread::journal::replay(&history)?;
             rows.push(super::agents::agent_row(
                 &record.id,
                 record.parent_thread_id.as_deref(),
-                &snapshot,
+                &directory_snapshot(record.status),
             ));
         }
         Ok(rows)
@@ -237,128 +231,85 @@ impl AgentServices {
         path.reverse();
         Ok(path)
     }
-    async fn history(
+    async fn session_page(
         &self,
         owner: &StudioThreadAssembler,
-        id: &str,
-    ) -> Result<Vec<Arc<ThreadCommit>>> {
-        let handle = owner
-            .observed_threads()
-            .into_iter()
-            .find(|(thread_id, _)| thread_id == id)
-            .map(|(_, handle)| handle);
-        let Some(handle) = handle else {
-            return Ok(self.store.sessions().read_thread_journal(id).await?);
-        };
-        let through = handle.snapshot().commit_sequence;
-        let mut history = Vec::new();
-        while (history.len() as u64) < through {
-            let page = handle
-                .journal_page(
-                    history.len() as u64,
-                    std::num::NonZeroUsize::new(128).expect("constant is nonzero"),
-                )
-                .await?;
-            let previous = history.len();
-            history.extend(
-                page.into_iter()
-                    .take_while(|commit| commit.sequence <= through),
-            );
-            if previous == history.len() {
-                bail!("agent journal is incomplete");
-            }
+        input: SessionInput,
+        path: Vec<pl_protocol::ThreadId>,
+    ) -> Result<AgentSessionPage> {
+        if !(1..=50).contains(&input.limit) {
+            bail!("session limit must be between 1 and 50");
         }
-        Ok(history)
-    }
-}
-fn session_page(
-    input: SessionInput,
-    path: Vec<pl_protocol::ThreadId>,
-    mut history: Vec<Arc<ThreadCommit>>,
-) -> Result<AgentSessionPage> {
-    if !(1..=50).contains(&input.limit) {
-        bail!("session limit must be between 1 and 50");
-    }
-    let cursor = input
-        .cursor
-        .as_ref()
-        .map(|value| {
-            let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(value)?;
-            Ok::<Cursor, anyhow::Error>(serde_json::from_slice(&bytes)?)
-        })
-        .transpose()?;
-    if let Some(cursor) = &cursor {
-        if cursor.version != 1
-            || cursor.target != input.target
-            || cursor.order != input.order
-            || cursor.detail != input.detail
+        // A resident target must be durable before its history keyset is read.
+        if let Some(thread) = owner.thread(&input.target) {
+            thread.flush().await?;
+        }
+        let cursor = input
+            .cursor
+            .as_ref()
+            .map(|value| {
+                let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(value)?;
+                Ok::<Cursor, anyhow::Error>(serde_json::from_slice(&bytes)?)
+            })
+            .transpose()?;
+        if let Some(cursor) = &cursor
+            && (cursor.version != 2
+                || cursor.target != input.target
+                || cursor.order != input.order
+                || cursor.detail != input.detail)
         {
             bail!("session cursor does not belong to this query");
         }
-        if cursor.through > history.len() as u64 {
-            bail!("session cursor is ahead of saved history");
-        }
-        history.truncate(usize::try_from(cursor.through)?);
+        let history = self.store.history(&input.target).await?;
+        let (watermark, ceiling, items, has_more) = history
+            .agent_page(
+                input.order == Order::Descending,
+                input.detail == Detail::Text,
+                cursor.as_ref().map(|cursor| cursor.anchor),
+                cursor.as_ref().map(|cursor| cursor.ceiling),
+                cursor.as_ref().map(|cursor| cursor.through),
+                input.limit,
+            )
+            .await?;
+        let through = cursor.as_ref().map_or(watermark, |cursor| cursor.through);
+        let next_cursor = if has_more {
+            let anchor = items
+                .last()
+                .context("session continuation has no anchor")?
+                .ordinal;
+            Some(
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(
+                    &Cursor {
+                        version: 2,
+                        target: input.target.clone(),
+                        through,
+                        ceiling,
+                        order: input.order,
+                        detail: input.detail,
+                        anchor,
+                    },
+                )?),
+            )
+        } else {
+            None
+        };
+        Ok(AgentSessionPage {
+            agent_id: pl_protocol::ThreadId::new(input.target)?,
+            path,
+            through_sequence: through,
+            order: match input.order {
+                Order::Ascending => AgentSessionReadOrder::Ascending,
+                Order::Descending => AgentSessionReadOrder::Descending,
+            },
+            detail: match input.detail {
+                Detail::Text => AgentSessionReadDetail::Text,
+                Detail::Full => AgentSessionReadDetail::Full,
+            },
+            items,
+            has_more,
+            next_cursor,
+        })
     }
-    let snapshot = pl_core::thread::journal::replay(&history)?;
-    let parent_id = path.iter().rev().nth(1).map(|id| id.as_str());
-    let mut items = crate::studio::thread_projection::project_items(
-        &input.target,
-        parent_id,
-        &snapshot,
-        &history,
-    )?;
-    if input.detail == Detail::Text {
-        items.retain(|item| item.text().is_some());
-    }
-    if let Some(cursor) = &cursor {
-        if !items.iter().any(|item| item.ordinal == cursor.anchor) {
-            bail!("session cursor anchor is absent");
-        }
-        items.retain(|item| match input.order {
-            Order::Ascending => item.ordinal > cursor.anchor,
-            Order::Descending => item.ordinal < cursor.anchor,
-        });
-    }
-    if input.order == Order::Descending {
-        items.reverse();
-    }
-    let has_more = items.len() > input.limit;
-    items.truncate(input.limit);
-    let next_cursor = if has_more {
-        let anchor = items
-            .last()
-            .context("session continuation has no anchor")?
-            .ordinal;
-        Some(
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&Cursor {
-                version: 1,
-                target: input.target.clone(),
-                through: snapshot.commit_sequence,
-                order: input.order,
-                detail: input.detail,
-                anchor,
-            })?),
-        )
-    } else {
-        None
-    };
-    Ok(AgentSessionPage {
-        agent_id: pl_protocol::ThreadId::new(input.target)?,
-        path,
-        through_sequence: snapshot.commit_sequence,
-        order: match input.order {
-            Order::Ascending => AgentSessionReadOrder::Ascending,
-            Order::Descending => AgentSessionReadOrder::Descending,
-        },
-        detail: match input.detail {
-            Detail::Text => AgentSessionReadDetail::Text,
-            Detail::Full => AgentSessionReadDetail::Full,
-        },
-        items,
-        has_more,
-        next_cursor,
-    })
 }
 fn output(value: &impl Serialize) -> Result<ToolOutput> {
     let text = serde_json::to_string(value)?;
@@ -445,6 +396,26 @@ fn validate_scope(
         bail!("agent query target is not the caller or its descendant");
     }
     Ok(())
+}
+
+/// 由 catalog 目录摘要构造只读 snapshot：仅承载 durable lifecycle，不含 Turn/Task 明细。
+fn directory_snapshot(status: pl_protocol::ThreadStatus) -> pl_core::thread::ThreadSnapshot {
+    use pl_core::thread::{ThreadLifecycle, ThreadSnapshot};
+    use pl_protocol::ThreadStatus;
+    ThreadSnapshot {
+        lifecycle: match status {
+            ThreadStatus::Closing => ThreadLifecycle::Closing,
+            ThreadStatus::Closed => ThreadLifecycle::Closed,
+            ThreadStatus::Idle
+            | ThreadStatus::Queued
+            | ThreadStatus::Running
+            | ThreadStatus::WaitingTool
+            | ThreadStatus::WaitingInteraction
+            | ThreadStatus::Cancelling
+            | ThreadStatus::Faulted => ThreadLifecycle::Open,
+        },
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]

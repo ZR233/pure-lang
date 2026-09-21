@@ -31,18 +31,11 @@ impl HotColdEntry for Thread {
 }
 
 impl ProductEventBus {
-    pub(in crate::studio) fn record_attachments(
+    pub(in crate::studio) async fn record_attachments(
         &self,
         records: Vec<crate::studio::AttachmentRecord>,
     ) -> Result<()> {
-        for record in records {
-            self.store.sessions().register_resource(
-                &record.thread_id,
-                &record.id,
-                record.session_payload()?,
-            )?;
-        }
-        Ok(())
+        self.store.record_attachments(records).await
     }
 
     pub async fn read_thread_directory(&self) -> Result<StudioThreadDirectoryState> {
@@ -56,9 +49,9 @@ impl ProductEventBus {
         })
     }
 
-    /// 会话列表分页：SQLite 冷分页 + 活动热集合 overlay。
+    /// 会话列表分页：`catalog.toml` 冷分页 + 活动热集合 overlay。
     ///
-    /// 同 ID 热条目覆盖冷行，cursor 键排重；与 Turn 历史共用
+    /// 同 ID 热条目覆盖冷条目，cursor 键排重；与 Turn 历史共用
     /// [`merge_page_desc`] 合并核心。热集合条目可能尚未耐久化，冷页查询
     /// 以 `limit + 1` 判定 has_more。
     pub async fn read_thread_directory_page(
@@ -81,6 +74,7 @@ impl ProductEventBus {
             .lock()
             .expect("thread index lock poisoned")
             .values()
+            .filter(|thread| thread.parent_thread_id.is_none())
             .cloned()
             .collect::<Vec<_>>();
         let mut merged = merge_page_desc(hot, cold, cursor_key.as_ref());
@@ -156,9 +150,11 @@ impl ProductEventBus {
         matches.truncate(limit + 1);
         let mut cold_cursor = decoded;
         loop {
+            // Cold search reads only `catalog.toml`; session `state.toml`/`history.sqlite` are never
+            // touched (design/17 §17.2).
             let cold = self
                 .store
-                .query_thread_directory_page(cold_cursor.as_ref(), query, 100)
+                .catalog_query(query, &matching_projects, cold_cursor.as_ref(), 100)
                 .await?;
             let end = cold.last().map(|thread| ThreadDirectoryCursor {
                 updated_at: thread.updated_at,
@@ -267,17 +263,27 @@ impl ProductEventBus {
         status: pl_protocol::ThreadStatus,
         committed_at: i64,
     ) -> Option<Thread> {
-        let mut index = self
-            .thread_index
-            .lock()
-            .expect("thread index lock poisoned");
-        let thread = index.get_mut(thread_id)?;
-        if thread.archived {
-            return None;
-        }
-        thread.status = status;
-        thread.updated_at = thread.updated_at.max(committed_at);
-        let thread = thread.clone();
+        let thread = {
+            let mut index = self
+                .thread_index
+                .lock()
+                .expect("thread index lock poisoned");
+            let thread = index.get_mut(thread_id)?;
+            if thread.archived {
+                return None;
+            }
+            thread.status = status;
+            thread.updated_at = thread.updated_at.max(committed_at);
+            thread.clone()
+        };
+        // 状态观察是目录事实：只把有界摘要并入 write-behind 目录队列，不在观察热路径做文件 I/O。
+        // 同 Thread 的连续 delta 由队列合并；write-behind 批次经 `apply_directory_delta` 把摘要
+        // 幂等写入 catalog/workspaces TOML。调用方在发布后用固定目标 ticket（`flush_through`）
+        // 建立保存屏障；状态错误不回滚已提交的内存目录事实。
+        self.writer.record_directory(DirectoryDelta {
+            thread_upserts: vec![thread.clone()],
+            ..Default::default()
+        });
         self.bump(&self.revisions.thread);
         let (revision, updated_at) = self.revision(&self.revisions.thread);
         self.emit(StudioProductEventKind::ThreadDirectoryChanged(
@@ -318,6 +324,10 @@ impl ProductEventBus {
         if delta.is_empty() {
             return Err(anyhow::anyhow!("directory delta is empty"));
         }
+        // Durable first-screen fact first: `catalog.toml` is the lightweight session summary that
+        // startup/pagination/search consume. The write-behind queue mirrors the same delta into the
+        // other fact sources (design/17 §17.3).
+        self.store.persist_directory_summaries(&delta).await?;
         let mut archived = Vec::new();
         {
             let mut index = self
@@ -397,7 +407,7 @@ impl ProductEventBus {
             .lock()
             .expect("thread index lock poisoned")
             .values()
-            .filter(|thread| !thread.archived)
+            .filter(|thread| !thread.archived && thread.parent_thread_id.is_none())
             .cloned()
             .collect::<Vec<_>>();
         threads.sort_by(|left, right| {
@@ -424,9 +434,7 @@ impl ProductEventBus {
         spec: RegisteredChildThread,
     ) -> Result<()> {
         let delta = DirectoryDelta::register_child_thread(spec);
-        self.writer.record_directory(delta.clone());
-        self.apply_thread_delta(delta.thread_upserts.clone(), Vec::new())
-            .await?;
+        self.commit_directory(delta).await?;
         Ok(())
     }
 
@@ -449,10 +457,10 @@ impl ProductEventBus {
                 thread_id: id.into(),
                 state,
             }],
+            thread_upserts: vec![thread],
             ..Default::default()
         };
-        self.writer.record_directory(delta);
-        self.apply_thread_delta(vec![thread], Vec::new()).await?;
+        self.commit_directory(delta).await?;
         Ok(())
     }
 

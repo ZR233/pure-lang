@@ -56,10 +56,7 @@ mod tests {
     use pl_core::{
         context::{ContextRecord, ContextSource, OpaquePayload},
         model::ModelToolCall,
-        thread::{
-            ToolDelivery, ToolOutcome,
-            journal::{ContextChange, ThreadCommit, replay},
-        },
+        thread::{ThreadEffectBatch, ToolDelivery, ToolOutcome, journal::ContextChange},
         tool::opaque::{CallContext, Tool},
     };
     use pl_tool::{
@@ -229,7 +226,7 @@ mod tests {
         assert_eq!(attachments[0].filename, None);
     }
 
-    fn journal_commit(delivery: &ToolDelivery) -> ThreadCommit {
+    fn media_delivery_effect(delivery: &ToolDelivery) -> ThreadEffectBatch {
         let call = ModelToolCall {
             call_id: delivery.call_id.clone(),
             tool_id: delivery.tool_id.clone(),
@@ -253,7 +250,7 @@ mod tests {
             content: delivery.delivered_context.clone(),
             tool_calls: Vec::new(),
         };
-        ThreadCommit {
+        ThreadEffectBatch {
             committed_at: 1,
             thread_id: "thread".into(),
             sequence: 1,
@@ -281,25 +278,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn archived_tool_media_restores_through_cold_replay_and_reads_without_the_source() {
+    async fn archived_tool_media_round_trips_through_the_effect_codec_and_reads_without_the_source()
+    {
         let (source_dir, _resource_dir, store, delivery) = retain_source_image().await;
         let live = delivery_attachments(&delivery).unwrap();
         assert_eq!(live.len(), 1);
         let attachment_id = live[0].id.clone();
 
-        // Round-trip the committed fact through the cold-store codec and replay the journal,
-        // exactly as a restart restores history, instead of reusing the live delivery.
-        let encoded = journal_commit(&delivery).encode().unwrap();
-        let decoded = ThreadCommit::decode(&encoded).unwrap();
-        let restored = replay(&[std::sync::Arc::new(decoded)]).unwrap();
-        assert_eq!(restored.deliveries.len(), 1);
+        // Round-trip the committed fact through the current effect codec instead of reusing the
+        // live delivery or reconstructing a legacy journal.
+        let encoded = media_delivery_effect(&delivery).encode().unwrap();
+        let decoded = ThreadEffectBatch::decode(&encoded).unwrap();
+        let restored_deliveries = decoded.deliveries.to_vec();
+        assert_eq!(restored_deliveries.len(), 1);
 
-        let restored_attachments = delivery_attachments(&restored.deliveries[0]).unwrap();
+        let restored_attachments = delivery_attachments(&restored_deliveries[0]).unwrap();
         assert_eq!(restored_attachments, live);
 
         // The original workspace file no longer exists; the archived variant still reads back.
         std::fs::remove_file(source_dir.path().join("photo.png")).unwrap();
-        let bytes = read_persisted_media(&store, &restored.deliveries, &attachment_id)
+        let bytes = read_persisted_media(&store, &restored_deliveries, &attachment_id)
             .await
             .unwrap();
         assert_eq!(bytes.len() as u64, live[0].byte_size);

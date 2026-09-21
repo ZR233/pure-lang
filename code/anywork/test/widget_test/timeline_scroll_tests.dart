@@ -183,6 +183,61 @@ void registerTimelineScrollTests() {
     expect(find.byTooltip('Jump to latest'), findsNothing);
   });
 
+  testWidgets('jump-to-latest affordance never covers the reading area', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    const threadId = 'session-new-pill';
+    await tester.pumpWidget(
+      _timelineHarness(threadId: threadId, items: _scrollItems(threadId, 24)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(StudioDriverKeys.timeline),
+      const Offset(0, 900),
+    );
+    await tester.pumpAndSettle();
+
+    // 用户气泡右对齐，正好落在底部角落：提示层必须整体位于滚动视口之外，
+    // 因此最下方消息（例如最后一条用户输入）不会被浮层压住。
+    final pill = find.byKey(const ValueKey('timeline-jump-latest'));
+    expect(pill, findsOneWidget);
+    final timelineRect = tester.getRect(find.byKey(StudioDriverKeys.timeline));
+    final pillRect = tester.getRect(pill);
+    expect(pillRect.top, greaterThanOrEqualTo(timelineRect.bottom));
+    expect(timelineRect.height, greaterThan(200));
+  });
+
+  testWidgets('new-content affordance clears once the reader is at the tail', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    const threadId = 'session-tail-resume';
+    await tester.pumpWidget(
+      _timelineHarness(threadId: threadId, items: _scrollItems(threadId, 24)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(StudioDriverKeys.timeline),
+      const Offset(0, 900),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('timeline-jump-latest')), findsOneWidget);
+    expect(_timelineExtentAfter(tester), greaterThan(80));
+
+    // 窗口内容替换成不足一屏：位置落到末尾，且窗口里没有更新条目（hasNewer 为
+    // false）⇒ 按"回到末尾即恢复跟随"的规则清掉提示层与新内容计数。
+    await tester.pumpWidget(
+      _timelineHarness(threadId: threadId, items: _scrollItems(threadId, 2)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(_timelineExtentAfter(tester), lessThanOrEqualTo(80));
+    expect(find.byKey(const ValueKey('timeline-jump-latest')), findsNothing);
+  });
+
   testWidgets('timeline follows streaming content growth near the bottom', (
     tester,
   ) async {

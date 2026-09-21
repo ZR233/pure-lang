@@ -4,17 +4,19 @@
 
 订阅命令（subscribeThread，参数为 threadId）返回四种帧：
 
-- `snapshot`：订阅首帧，包含 Thread、当前/最近 Turn、完整 Item、pending Interaction、runtime、
-  Todo 与 child directory。
+- `snapshot`：订阅首帧，只包含 Thread 当前执行状态、active Turn、pending Interaction、runtime、
+  Todo 与 child directory，不包含完整 Item 历史。
 - `notification`：后续 typed 变化。
-- `lagged`：只表示 best-effort 事件发生丢弃，客户端必须重新订阅。
+- `lagged`：表示客户端不能证明增量连续，必须从数据库刷新当前窗口；重新订阅只恢复当前状态，
+  不能补回历史 Item。
 - `closed`：Thread 或 runtime 已关闭。
 
-驻留 Thread 的订阅实现先注册 receiver，再直接读取 Thread owner 的内存 authoritative snapshot，
-最后发送 snapshot，避免 snapshot 与 live 之间漏事件；该路径不得查询 SQLite。未驻留 Thread 必须
-先通过显式激活命令从冷基线创建 Thread owner，激活完成后再走同一订阅流程。实时流没有 durable
-cursor、journal replay 或 resync 补丁协议；恢复永远重新取得同一内存 owner snapshot。旧历史通过
-`listThreadTurns` 的 opaque keyset cursor 从 SQLite 冷分页读取。
+驻留 Thread 的订阅实现先注册 receiver，再读取 Thread owner 的小型 authoritative snapshot，最后
+发送 snapshot。打开/重连协调器在 receiver 建立后把当前活跃草稿推进 history writer，等待固定
+写入屏障，再通过 `listTimelineItems(Latest)` 读取可见历史窗口；期间实时事件按 item ID 和 revision
+合并。普通滚动分页不得查询 owner 或触发 flush。未驻留 Thread 只有执行或读取当前状态时才显式
+激活；单纯历史查询直接读取 `history.sqlite`。实时流没有 durable replay，缺口通过数据库 cursor
+重同步，不通过完整 snapshot 或内存 journal 补丁恢复。
 
 实时事件总线只拥有 Turn、Item、Interaction、runtime 与 live overlay 的实时投影，不拥有
 Thread directory 元数据。订阅注册完成后，Studio 运行时必须用内存 Thread directory owner 的
@@ -23,10 +25,15 @@ Thread directory 元数据。订阅注册完成后，Studio 运行时必须用�
 
 ## 7.2 Notification
 
-内部 trace 的生产者提交开始、追加和终态操作，不预分配 sequence 或 item revision。唯一内存
-发布入口在同一短临界区内校验、编号、更新项目状态并入队，返回规范事件；所有投影消费返回事实。
-入队失败不推进状态。项目身份由 Turn ID 与 Item ID 确定，开始序号首次分配后不变。实时投影与
-异步保存分别消费已提交事实：存储故障不阻塞实时通知，也不使旧事件重入实时投影。
+内部 trace 的生产者提交开始、追加和终态操作，不预分配 write sequence 或 item revision。唯一
+内存发布入口在同一短临界区内校验、编号、更新当前状态并形成规范 effect；Item ordinal 在开始时
+首次分配后不变。实时投影与 history writer 消费同一 effect。writer 受理失败必须可观察并暂停新的
+执行准入，已成立事实保留重试；它不能通过重放旧 effect 再次进入实时投影。
+
+每条通知由版本化封套承载：`epoch` 标识生产端一次连续广播生命周期（重订阅、owner 重建或数据库
+重同步后递增），`base_revision` 是应用本通知之前的状态水位，`revision` 是应用之后的水位。客户端
+只有当 `epoch` 相同且 `base_revision` 恰好等于本地已知水位时才能拼接；否则视为缺口并重同步，
+不把迟到帧接到新生命周期上。
 
 通知穷尽为：
 
@@ -112,11 +119,13 @@ receiver 与 pin。Runtime subscription 在恢复 owner 前取得 pin，并持�
 临时激活分别计数，任一 guard 释放不影响其余 pin。
 
 FRB `readThreadSnapshot` 与 HTTP `GET /api/v1/threads/{thread_id}` 机械调用同一个 snapshot
-query，均返回完整 Thread snapshot，不得让 HTTP route 退化为只返回 Thread directory 元数据。
+query，均返回不含历史 Item 的当前 Thread 状态，不得让 HTTP route 退化为只返回 Thread directory
+元数据。FRB 与 HTTP 另有同一 HistoryReader 支持的 Timeline page API；HTTP route 为
+`GET /api/v1/threads/{thread_id}/timeline`。
 Skill 激活使用普通的终态 Skill Item 和 `threadRuntimeUpdated` 通知；激活来源是 typed 的
 `Tool { toolCallId } | UserGesture { invocationId }`，资源位置是 typed resource base，不允许
 transport 或前端从工具 JSON 推断；Timeline 文案按来源区分代理激活与用户激活。首次订阅及重连
-snapshot 必须包含相同的 Skill Item 与 runtime 的 activeSkills。Skill Item 只接受 typed
+从 HistoryReader 取得相同的 Skill Item，状态 snapshot 只携带 runtime 的 activeSkills。Skill Item 只接受 typed
 resource base、provider identity 与 `Tool | UserGesture` 来源；旧 `path + toolCallId`、缺失
 provider 或未知字段一律是协议错误，不做映射、默认填充或读时升级。
 

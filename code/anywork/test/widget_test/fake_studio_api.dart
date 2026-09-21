@@ -23,11 +23,22 @@ class _FakeStudioApi implements StudioApi {
   final Map<String, StudioState> selectProjectStates = {};
   final Map<String, StudioState> archiveProjectStates = {};
   Completer<void>? blockedStudioStateLoad;
-  bool publishSnapshotOnSubscribe = false;
+
+  /// 订阅时是否先投递一次权威 snapshot。
+  ///
+  /// 真实 bridge 的首帧恒为 snapshot（原生接收端注册 + 固定持久化屏障完成后），
+  /// 生产代码依赖该帧作为“订阅已建立”的证明后再读取首个历史窗口，因此测试替身
+  /// 默认也按同一顺序投递。
+  bool publishSnapshotOnSubscribe = true;
   final List<String> loadedSessionIds = [];
   final List<String> threadSubscriptions = [];
   final List<({String threadId, String? cursor})> historyRequests = [];
+
+  /// 分页 API 覆盖表：`null` 键表示订阅后的权威最新窗口，其余键按查询锚点覆盖。
   final Map<String, Map<String?, ThreadHistoryPage>> historyPagesByThread = {};
+
+  /// 模拟 `history.sqlite` 的窗口外历史；缺省从当前状态首次读取时装载。
+  final Map<String, List<ThreadItemView>> timelineDb = {};
   final List<String?> directoryPageRequests = [];
   final Map<String?, ThreadDirectoryPage> directoryPages = {};
 
@@ -794,11 +805,11 @@ class _FakeStudioApi implements StudioApi {
           onDone: controller.close,
         );
         if (publishSnapshotOnSubscribe) {
+          final workspace =
+              _currentState.workspacesByThread[threadId] ??
+              _placeholderWorkspace(threadId);
           controller.add(
-            ThreadSnapshotFrame(
-              workspace: _currentState.workspacesByThread[threadId]!,
-              historyCursor: null,
-            ),
+            ThreadSnapshotFrame(workspace: _currentStateOnly(workspace)),
           );
         }
       },
@@ -811,12 +822,34 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<({ThreadWorkspace workspace, String? historyCursor})>
-  readThreadSnapshot(String threadId) async {
+  Future<ThreadWorkspace> readThreadSnapshot(String threadId) async {
     final workspace =
         _currentState.workspacesByThread[threadId] ??
         (throw StateError('unknown fake Thread workspace $threadId'));
-    return (workspace: workspace, historyCursor: null);
+    return _currentStateOnly(workspace);
+  }
+
+  /// 首帧兜底：fixture 只声明 Thread 而未带 workspace 时，构造一份空当前状态。
+  ThreadWorkspace _placeholderWorkspace(String threadId) {
+    final thread = _currentState.threads
+        .where((thread) => thread.id == threadId)
+        .firstOrNull;
+    return ThreadWorkspace(
+      thread:
+          thread ??
+          StudioThread(
+            id: threadId,
+            projectId: _currentState.selectedProjectId ?? '',
+            title: '',
+            mode: ThreadModeId.simple,
+            updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+            workspacePath: '',
+          ),
+      revision: 0,
+      items: const [],
+      interactions: const [],
+      runtime: _testRuntime(),
+    );
   }
 
   @override
@@ -879,18 +912,105 @@ class _FakeStudioApi implements StudioApi {
   }) async {
     historyRequests.add((threadId: threadId, cursor: itemId));
     if (historyGates.isNotEmpty) await historyGates.removeAt(0).future;
-    final page =
-        historyPagesByThread[threadId]?[itemId] ??
-        const ThreadHistoryPage(items: [], nextCursor: null);
+    final all = _timeline(threadId);
+    final override =
+        historyPagesByThread[threadId]?[kind == TimelineQueryKind.latest
+            ? null
+            : itemId];
+    if (override != null) {
+      return TimelinePage(
+        threadId: threadId,
+        watermark: _currentState.workspacesByThread[threadId]?.revision ?? 0,
+        items: override.items,
+        olderCursor: switch (kind) {
+          TimelineQueryKind.latest ||
+          TimelineQueryKind.before ||
+          TimelineQueryKind.around => override.nextCursor,
+          TimelineQueryKind.after => null,
+        },
+        newerCursor: switch (kind) {
+          TimelineQueryKind.after ||
+          TimelineQueryKind.around => override.nextCursor,
+          TimelineQueryKind.latest || TimelineQueryKind.before => null,
+        },
+        firstItemId: override.items.firstOrNull?.id,
+        lastItemId: override.items.lastOrNull?.id,
+        turns: _fakeTimelineTurns(override.items),
+      );
+    }
+    final window = _fakeWindow(all, kind, itemId, limit);
     return TimelinePage(
       threadId: threadId,
-      watermark: 0,
-      items: page.items,
-      olderCursor: kind == TimelineQueryKind.before ? page.nextCursor : null,
-      newerCursor: kind == TimelineQueryKind.after ? page.nextCursor : null,
-      firstItemId: page.items.firstOrNull?.id,
-      lastItemId: page.items.lastOrNull?.id,
+      watermark: _currentState.workspacesByThread[threadId]?.revision ?? 0,
+      items: window.items,
+      olderCursor: window.start > 0 ? window.items.firstOrNull?.id : null,
+      newerCursor: window.end < all.length ? window.items.lastOrNull?.id : null,
+      firstItemId: window.items.firstOrNull?.id,
+      lastItemId: window.items.lastOrNull?.id,
+      turns: _fakeTimelineTurns(window.items),
     );
+  }
+
+  /// 模拟 HistoryReader 的 keyset 分页：Latest/Before/After/Around 全部落在
+  /// 同一份窗口外历史上。
+  ({List<ThreadItemView> items, int start, int end}) _fakeWindow(
+    List<ThreadItemView> all,
+    TimelineQueryKind kind,
+    String? itemId,
+    int limit,
+  ) {
+    if (all.isEmpty) return (items: const [], start: 0, end: 0);
+    final index = itemId == null
+        ? all.length
+        : all.indexWhere((item) => item.id == itemId);
+    if (index < 0) {
+      throw StateError('unknown timeline item $itemId');
+    }
+    final start = switch (kind) {
+      TimelineQueryKind.latest => (all.length - limit).clamp(0, all.length),
+      TimelineQueryKind.before => (index - limit).clamp(0, all.length),
+      TimelineQueryKind.after => (index + 1).clamp(0, all.length),
+      TimelineQueryKind.around => (index - limit ~/ 2).clamp(0, all.length),
+    };
+    final end = kind == TimelineQueryKind.before
+        ? index
+        : (start + limit).clamp(start, all.length);
+    return (items: all.sublist(start, end), start: start, end: end);
+  }
+
+  List<ThreadItemView> _timeline(String threadId) {
+    return timelineDb.putIfAbsent(
+      threadId,
+      () => [...?_currentState.workspacesByThread[threadId]?.items],
+    );
+  }
+
+  List<TimelineTurnView> _fakeTimelineTurns(List<ThreadItemView> items) {
+    final lastItemByTurn = <String, ThreadItemView>{};
+    final turnItemByTurn = <String, ThreadItemView>{};
+    for (final item in items) {
+      final previous = lastItemByTurn[item.turnId];
+      if (previous == null || item.ordinal > previous.ordinal) {
+        lastItemByTurn[item.turnId] = item;
+      }
+      if (item.state is ThreadTurnItemStateView) {
+        turnItemByTurn[item.turnId] = item;
+      }
+    }
+    return [
+      for (final entry in turnItemByTurn.entries)
+        TimelineTurnView(
+          turn: StudioTurnView(
+            inputId: (entry.value.state as ThreadTurnItemStateView).inputId,
+            turnId: entry.key,
+            threadId: entry.value.threadId,
+            revision: entry.value.revision,
+            state: (entry.value.state as ThreadTurnItemStateView).state,
+            updatedAt: entry.value.updatedAt,
+          ),
+          lastItemId: lastItemByTurn[entry.key]!.id,
+        ),
+    ];
   }
 
   @override

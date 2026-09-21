@@ -3,7 +3,7 @@ use super::{SessionStoreError, SqliteSessionOptions, history, sqlite};
 use crate::{
     context::OpaquePayload,
     storage::{SessionEntry, SessionEntryChange},
-    thread::journal::ThreadCommit,
+    thread::ThreadEffectBatch,
 };
 use sea_orm::{ConnectionTrait, Database, TransactionTrait};
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// Rejects unsupported versions, damaged history, conversion failures and storage failures.
 pub async fn migrate_v6(
     options: SqliteSessionOptions,
-    transform: impl Fn(&mut ThreadCommit) -> Result<(), SessionStoreError> + Send + Sync,
+    transform: impl Fn(&mut ThreadEffectBatch) -> Result<(), SessionStoreError> + Send + Sync,
 ) -> Result<(), SessionStoreError> {
     let mut url =
         url::Url::parse("sqlite:///").map_err(|e| SessionStoreError::Invalid(e.to_string()))?;
@@ -64,12 +64,12 @@ pub async fn migrate_v6(
             for entry in &current {
                 if entry.id.starts_with("pl.resource.thread-commit.") {
                     let payload = OpaquePayload::new(entry.type_id.clone(),entry.schema_version,entry.payload.clone()).map_err(|e|SessionStoreError::Invalid(e.to_string()))?;
-                    let commit = ThreadCommit::decode(&payload).map_err(|e|SessionStoreError::Invalid(e.to_string()))?;
+                    let commit = ThreadEffectBatch::decode(&payload).map_err(|e|SessionStoreError::Invalid(e.to_string()))?;
                     if commit.thread_id != id || entry.id != format!("pl.resource.thread-commit.{:020}",commit.sequence) { return Err(SessionStoreError::Invalid("commit ownership mismatch".into())); }
                     commits.push(Arc::new(commit));
                 }
             }
-            crate::thread::journal::replay(&commits).map_err(|e|SessionStoreError::Invalid(e.to_string()))?;
+            crate::thread::journal::legacy_migration::replay(&commits).map_err(|e|SessionStoreError::Invalid(e.to_string()))?;
         }
         tx.execute_unprepared("PRAGMA user_version=7").await?;
         tx.commit().await?;
@@ -88,7 +88,7 @@ pub async fn migrate_v6(
 
 fn convert(
     entry: &mut SessionEntry,
-    transform: &impl Fn(&mut ThreadCommit) -> Result<(), SessionStoreError>,
+    transform: &impl Fn(&mut ThreadEffectBatch) -> Result<(), SessionStoreError>,
 ) -> Result<(), SessionStoreError> {
     if entry.type_id != "pl.core.thread-commit" {
         return Ok(());
@@ -105,7 +105,7 @@ fn convert(
     {
         state["value"] = "completed".into();
     }
-    let mut commit: ThreadCommit = serde_json::from_value(value)?;
+    let mut commit: ThreadEffectBatch = serde_json::from_value(value)?;
     transform(&mut commit)?;
     entry.schema_version = 3;
     entry.payload = serde_json::to_string(&commit)?;

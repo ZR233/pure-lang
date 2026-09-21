@@ -38,7 +38,7 @@ impl StudioRuntime {
         {
             return Ok(thread);
         }
-        // 冷数据回源：未驻留 Thread 的目录元数据从 SQLite 读取。
+        // 冷数据回源：未驻留 Thread 的目录元数据只从 `catalog.toml` 读取。
         let Some(record) = self.store.read_thread(thread_id).await? else {
             return Err(anyhow::anyhow!("selected Thread not found"));
         };
@@ -114,11 +114,7 @@ impl StudioRuntime {
 
     /// 排空 agent framework 的 write-behind 队列并停止 writer。
     pub(super) async fn flush_persistence(&self) -> Result<()> {
-        self.store
-            .sessions()
-            .shutdown()
-            .await
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        self.store.thread_persistence().wait_for_drain().await?;
         let repository = self.agent_facility.persistence.lock().await.clone();
         if let Some(repository) = repository {
             repository
@@ -131,6 +127,18 @@ impl StudioRuntime {
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             self.agent_facility.persistence.lock().await.take();
         }
+        // 调用库是独立的全局 writer：只等待受理时固定的 ticket 变为 durable，随后停止受理。
+        // 保存失败保留事实并显式上报，绝不在 pending 未清零时报告关机成功。
+        self.store
+            .calls()
+            .flush()
+            .await
+            .context("failed to flush call records")?;
+        self.store
+            .calls()
+            .shutdown()
+            .await
+            .context("failed to shut down the call writer")?;
         Ok(())
     }
 
@@ -138,7 +146,9 @@ impl StudioRuntime {
     pub async fn pending_persistence_commits(&self) -> usize {
         let repository = self.agent_facility.persistence.lock().await.clone();
         repository.map_or(0, |repository| repository.pending_commit_count())
-            + self.store.sessions().persistence().pending_commits
+            + self.store.calls().pending_count()
+            + usize::try_from(self.store.thread_persistence().snapshot().pending_commits)
+                .unwrap_or(usize::MAX)
     }
 }
 

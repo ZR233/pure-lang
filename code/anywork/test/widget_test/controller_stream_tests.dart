@@ -103,26 +103,42 @@ void registerControllerStreamTests() {
     );
   });
 
-  test('controller subscribes only the selected Thread', () async {
-    final api = _FakeStudioApi(_emptyState());
-    final container = ProviderContainer(
-      overrides: [studioApiProvider.overrideWithValue(api)],
-    );
-    addTearDown(container.dispose);
+  test(
+    'controller opens only the selected Thread on explicit interaction',
+    () async {
+      final api = _FakeStudioApi(_emptyState());
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
 
-    await container.read(studioControllerProvider.future);
-    await pumpEventQueue();
+      await container.read(studioControllerProvider.future);
+      await pumpEventQueue();
 
-    expect(api.threadSubscriptions, ['session-1']);
-    expect(
-      container
-          .read(studioControllerProvider)
-          .requireValue
-          .selectedWorkspaceUi
-          .subscriptionGeneration,
-      greaterThan(0),
-    );
-  });
+      // §6.1：首屏只恢复“选择”，不打开会话——没有订阅、没有打开数据库、没有历史加载。
+      expect(api.threadSubscriptions, isEmpty);
+      expect(
+        container
+            .read(studioControllerProvider)
+            .requireValue
+            .selectedWorkspaceUi
+            .syncState,
+        AgentWorkspaceSyncState.idle,
+      );
+
+      await _openSelectedThread(container);
+
+      expect(api.threadSubscriptions, ['session-1']);
+      expect(
+        container
+            .read(studioControllerProvider)
+            .requireValue
+            .selectedWorkspaceUi
+            .subscriptionGeneration,
+        greaterThan(0),
+      );
+    },
+  );
 
   test(
     'Mode model command response cannot overwrite a newer settings event',
@@ -206,6 +222,7 @@ void registerControllerStreamTests() {
 
       await container.read(studioControllerProvider.future);
       await pumpEventQueue();
+      await _openSelectedThread(container);
       controller.updateComposer('session-1', 'first');
       await controller.submitComposer('session-1');
       expect(api.submittedPrompts.single.prompt, 'first');
@@ -214,13 +231,6 @@ void registerControllerStreamTests() {
         ThreadSnapshotFrame(
           workspace: initial.selectedWorkspace!.copyWith(
             revision: 1,
-            items: [
-              _submittedInputItem(
-                threadId: 'session-1',
-                turnId: api.submitTurnId,
-                inputId: api.submitInputId,
-              ),
-            ],
             activeTurn: _testTurn(
               threadId: 'session-1',
               state: const RunningStudioTurnState(
@@ -283,6 +293,7 @@ void registerControllerStreamTests() {
     addTearDown(container.dispose);
     await container.read(studioControllerProvider.future);
     await pumpEventQueue();
+    await _openSelectedThread(container);
     final controller = container.read(studioControllerProvider.notifier);
     controller.updateComposer('session-1', 'first');
     await controller.submitComposer('session-1');
@@ -292,37 +303,37 @@ void registerControllerStreamTests() {
         workspace: initial.selectedWorkspace!.copyWith(
           revision: 2,
           activeTurn: null,
-          items: [
-            _submittedInputItem(
-              threadId: 'session-1',
-              turnId: api.submitTurnId,
-              inputId: api.submitInputId,
-            ),
-            ThreadItemView(
-              id: 'terminal-item',
-              threadId: 'session-1',
-              turnId: api.submitTurnId,
-              ordinal: 2,
-              revision: 2,
-              createdAt: timestamp,
-              updatedAt: timestamp,
-              state: const ThreadTurnItemStateView(
-                FailedStudioTurnState(
-                  startedAt: 1,
-                  completedAt: 2,
-                  failure: StudioTurnFailureView(
-                    category: 'protocol',
-                    providerKind: null,
-                    code: null,
-                    httpStatus: null,
-                    message: 'Invalid event revision',
-                    retryable: false,
-                    retryAfterMs: null,
-                  ),
-                ),
+        ),
+      ),
+    );
+    // 终态 Turn 通过 Item 通知进入窗口：数据库正文是时间线的事实源。
+    api.emitThreadFrame(
+      _threadItemFrame(
+        threadId: 'session-1',
+        workspaceRevision: 3,
+        item: ThreadItemView(
+          id: 'terminal-item',
+          threadId: 'session-1',
+          turnId: api.submitTurnId,
+          ordinal: 2,
+          revision: 2,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          state: const ThreadTurnItemStateView(
+            FailedStudioTurnState(
+              startedAt: 1,
+              completedAt: 2,
+              failure: StudioTurnFailureView(
+                category: 'protocol',
+                providerKind: null,
+                code: null,
+                httpStatus: null,
+                message: 'Invalid event revision',
+                retryable: false,
+                retryAfterMs: null,
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -350,6 +361,7 @@ void registerControllerStreamTests() {
 
     await container.read(studioControllerProvider.future);
     await pumpEventQueue();
+    await _openSelectedThread(container);
     controller.updateComposer('session-1', 'hello');
     await controller.submitComposer('session-1');
     expect(
@@ -400,6 +412,7 @@ void registerControllerStreamTests() {
 
       await container.read(studioControllerProvider.future);
       await pumpEventQueue();
+      await _openSelectedThread(container);
       controller.updateComposer('session-1', 'hello');
       await controller.submitComposer('session-1');
       api.emitThreadFrame(
@@ -498,6 +511,7 @@ void registerControllerStreamTests() {
 
       await container.read(studioControllerProvider.future);
       await pumpEventQueue();
+      await _openSelectedThread(container);
       final before = container
           .read(studioControllerProvider)
           .requireValue
@@ -520,10 +534,13 @@ void registerControllerStreamTests() {
           .selectedWorkspaceUi;
       expect(after.subscriptionGeneration, greaterThan(before));
       expect(api.threadSubscriptions.length, 2);
-      expect(
-        container.read(studioControllerProvider).requireValue.selectedWorkspace,
-        same(workspaceBefore),
-      );
+      // Resync 只恢复当前状态并从数据库刷新窗口，不重读 product snapshot。
+      final afterWorkspace = container
+          .read(studioControllerProvider)
+          .requireValue
+          .selectedWorkspace;
+      expect(afterWorkspace!.revision, workspaceBefore!.revision);
+      expect(afterWorkspace.items, workspaceBefore.items);
       expect(api.bootstrapCount, productReadsBefore);
     },
   );
@@ -559,26 +576,36 @@ void registerControllerStreamTests() {
     );
     addTearDown(container.dispose);
 
+    // 订阅建立后的权威窗口由历史 API 提供；快照只更新当前状态。
+    api.historyPagesByThread['session-1'] = {
+      null: ThreadHistoryPage(
+        items: [
+          _threadItemFixture(
+            id: 'live-item',
+            threadId: 'session-1',
+            turnId: 'turn-live',
+            ordinal: 10,
+            text: 'live',
+          ),
+        ],
+        nextCursor: 'live-item',
+      ),
+    };
     await container.read(studioControllerProvider.future);
     await pumpEventQueue();
-    api.emitThreadFrame(
-      ThreadSnapshotFrame(
-        workspace: initial.selectedWorkspace!.copyWith(
-          revision: 1,
-          items: [
-            _threadItemFixture(
-              id: 'live-item',
-              threadId: 'session-1',
-              turnId: 'turn-live',
-              ordinal: 10,
-              text: 'live',
-            ),
-          ],
-        ),
-        historyCursor: 'live-item',
-      ),
+    // 显式打开会话：首个权威帧之后读取首窗（§6.1）。
+    await _openSelectedThread(container);
+    expect(
+      container
+          .read(studioControllerProvider)
+          .requireValue
+          .selectedWorkspace!
+          .items
+          .map((item) => item.id),
+      ['live-item'],
     );
-    await pumpEventQueue();
+
+    // 更旧一页：分页锚点来自已加载窗口的首条身份。
     api.historyPagesByThread['session-1'] = {
       'live-item': ThreadHistoryPage(
         items: [
@@ -597,9 +624,10 @@ void registerControllerStreamTests() {
     await container
         .read(studioControllerProvider.notifier)
         .loadOlderHistory('session-1');
+    await pumpEventQueue();
 
     final state = container.read(studioControllerProvider).requireValue;
-    expect(api.historyRequests.single.cursor, 'live-item');
+    expect(api.historyRequests.last.cursor, 'live-item');
     expect(state.selectedWorkspace!.items.map((item) => item.id), [
       'history-item',
       'live-item',
@@ -713,18 +741,26 @@ void registerControllerStreamTests() {
       await container.read(studioControllerProvider.future);
       await pumpEventQueue();
 
-      // 快照携带 400 条窗口内容与更旧回源锚点；随后一页 120 条更旧历史
-      // 使窗口达到 520，向旧翻页应淘汰远端最新的 20 条。
-      api.emitThreadFrame(
-        ThreadSnapshotFrame(
-          workspace: initial.selectedWorkspace!.copyWith(
-            revision: 1,
-            items: windowItems(0, 400),
-          ),
-          historyCursor: 'item-0',
+      // 权威窗口来自历史 API：首窗 400 条、还有更旧内容；随后一页 120 条更旧
+      // 历史使窗口达到 520，向旧翻页应淘汰远端最新的 20 条。
+      api.historyPagesByThread['session-1'] = {
+        null: ThreadHistoryPage(
+          items: windowItems(0, 400),
+          nextCursor: 'item-0',
         ),
+      };
+      // 显式打开会话：首窗由订阅建立后的权威读取提供。
+      await _openSelectedThread(container);
+      expect(api.historyRequests.last.cursor, isNull);
+      expect(
+        container
+            .read(studioControllerProvider)
+            .requireValue
+            .selectedWorkspace!
+            .items
+            .length,
+        400,
       );
-      await pumpEventQueue();
       api.historyPagesByThread['session-1'] = {
         'item-0': ThreadHistoryPage(
           items: windowItems(-120, 120),
@@ -735,6 +771,7 @@ void registerControllerStreamTests() {
       await container
           .read(studioControllerProvider.notifier)
           .loadOlderHistory('session-1');
+      await pumpEventQueue();
 
       final state = container.read(studioControllerProvider).requireValue;
       final history = state.selectedWorkspaceUi.history;
@@ -744,7 +781,7 @@ void registerControllerStreamTests() {
       expect(history.hasOlder, isFalse);
       expect(history.hasNewer, isTrue);
       expect(history.isLoading, isFalse);
-      expect(state.selectedWorkspace!.cachedItems.length, 520);
+      expect(state.selectedWorkspace!.cachedItems.length, 500);
 
       api.historyPagesByThread['session-1'] = {
         'item-379': ThreadHistoryPage(

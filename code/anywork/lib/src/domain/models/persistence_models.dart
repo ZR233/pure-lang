@@ -98,3 +98,95 @@ final class BlockedPersistenceState extends PersistenceState {
   @override
   final ObservedResourceError error;
 }
+
+/// 进程级持久化队列压力与逐 Thread 水位。
+///
+/// 这是诊断观测，不承载任何权威会话状态：队列字节、最老待保存年龄、在途字节与最近错误
+/// 都直接来自后端持久化协调器的观测值，缺失即未知（`null`），而不是本地推算的零。
+class PersistenceQueueSnapshot {
+  const PersistenceQueueSnapshot({
+    required this.pendingOperations,
+    required this.pendingBytes,
+    required this.inFlightBytes,
+    this.oldestPendingAgeMillis,
+    this.lastError,
+    this.pressurePaused = false,
+    this.threads = const [],
+  });
+
+  const PersistenceQueueSnapshot.empty()
+    : pendingOperations = 0,
+      pendingBytes = 0,
+      inFlightBytes = 0,
+      oldestPendingAgeMillis = null,
+      lastError = null,
+      pressurePaused = false,
+      threads = const [];
+
+  /// 跨全部 Thread 的排队操作数（含一次保留的 checkpoint 发布）。
+  final int pendingOperations;
+
+  /// 排队事实的编码字节数。
+  final int pendingBytes;
+
+  /// 正在写入的批次字节数。
+  final int inFlightBytes;
+
+  /// 最老排队操作的年龄；没有排队时为空。
+  final int? oldestPendingAgeMillis;
+
+  /// 最近一次写入错误；下一次成功落库前一直保留。
+  final String? lastError;
+
+  /// 是否有 Thread 因存储压力暂停了新推理准入。
+  final bool pressurePaused;
+
+  /// 逐 Thread 水位与压力，按 Thread 身份排序。
+  final List<ThreadPersistenceSnapshot> threads;
+
+  bool get isBacklogged => pendingOperations > 0 || pendingBytes > 0;
+}
+
+/// 单个 Thread 的持久化水位与队列压力。
+///
+/// 水位为 `null` 表示没有 writer 报告过该值（未知），`0` 才是已观测到的零。UI 必须把两者
+/// 分开显示，不把未知折叠成零。
+class ThreadPersistenceSnapshot {
+  const ThreadPersistenceSnapshot({
+    required this.threadId,
+    this.stateDirtyRevision,
+    this.stateSavingRevision,
+    this.stateDurableRevision,
+    this.historyAdmittedSequence,
+    this.historyDurableSequence,
+    this.callsAdmittedSequence,
+    this.callsDurableSequence,
+    this.pendingOperations = 0,
+    this.pendingBytes = 0,
+    this.oldestPendingAgeMillis,
+    this.inFlightBytes = 0,
+    this.lastError,
+    this.pressurePaused = false,
+  });
+
+  final String threadId;
+
+  /// 已受理待发布的 checkpoint 修订；未知为 null。
+  final int? stateDirtyRevision;
+
+  /// 正在序列化或同步的 checkpoint 修订；未知为 null。
+  final int? stateSavingRevision;
+
+  /// 已作为 `state.toml` 发布的 checkpoint 修订；未知为 null。
+  final int? stateDurableRevision;
+  final int? historyAdmittedSequence;
+  final int? historyDurableSequence;
+  final int? callsAdmittedSequence;
+  final int? callsDurableSequence;
+  final int pendingOperations;
+  final int pendingBytes;
+  final int? oldestPendingAgeMillis;
+  final int inFlightBytes;
+  final String? lastError;
+  final bool pressurePaused;
+}

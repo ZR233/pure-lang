@@ -688,7 +688,7 @@ impl StudioRuntime {
     /// 未驻留即不 busy：钉住集合恢复保证有 pending 工作的 Thread 会被恢复，
     /// LRU 只淘汰空闲且已耐久化的 actor（design/17 §17.5）。
     pub(in crate::studio::runtime) async fn thread_is_busy(&self, thread_id: &str) -> Result<bool> {
-        let (snapshot, _) = self.read_thread_facts(thread_id).await?;
+        let snapshot = self.read_thread_state(thread_id).await?;
         Ok(snapshot
             .turns
             .iter()
@@ -759,7 +759,7 @@ impl StudioRuntime {
         let Some(thread) = self.threads.thread(thread_id) else {
             return Ok(());
         };
-        let (snapshot, _) = self.read_thread_facts(thread_id).await?;
+        let snapshot = self.read_thread_state(thread_id).await?;
         let pending = snapshot
             .inputs
             .iter()
@@ -958,21 +958,31 @@ mod tests {
             DynModelSession::new(CooperativeCancelSession),
         )
         .unwrap();
+        let persistence = crate::studio::storage::thread_writer::ThreadStorageSink::new(
+            runtime.store.clone(),
+            runtime.read_thread(&child_id).await.unwrap(),
+        );
         historical
-            .attach_storage(ColdStoreHandle::new(runtime.store.sessions().clone()))
+            .attach_storage(ColdStoreHandle::new(persistence))
             .await
             .unwrap();
         historical.close().await.unwrap();
         let original_history = runtime
             .store
-            .sessions()
-            .read_thread_journal(&child_id)
+            .history(&child_id)
             .await
             .unwrap()
-            .iter()
-            .map(|commit| commit.encode().unwrap())
-            .collect::<Vec<_>>();
-        assert!(!original_history.is_empty());
+            .watermark()
+            .await
+            .unwrap();
+        assert!(original_history > 0);
+        let original_checkpoint = runtime
+            .store
+            .state(&child_id)
+            .load()
+            .await
+            .unwrap()
+            .unwrap();
         let writer = runtime.persistence_repository().await.unwrap();
         writer.flush().await.unwrap();
         assert!(runtime.threads.thread(&child_id).is_none());
@@ -1012,14 +1022,24 @@ mod tests {
         assert_eq!(
             runtime
                 .store
-                .sessions()
-                .read_thread_journal(&child_id)
+                .history(&child_id)
                 .await
                 .unwrap()
-                .iter()
-                .map(|commit| commit.encode().unwrap())
-                .collect::<Vec<_>>(),
+                .watermark()
+                .await
+                .unwrap(),
             original_history
+        );
+        assert_eq!(
+            runtime
+                .store
+                .state(&child_id)
+                .load()
+                .await
+                .unwrap()
+                .unwrap()
+                .state_revision,
+            original_checkpoint.state_revision
         );
 
         let restored = runtime.restore_thread(root_id.clone()).await.unwrap();
@@ -1049,9 +1069,32 @@ mod tests {
         assert_eq!(archived.archived_root_id, id);
         assert!(archived.removed_thread_ids.contains(&id));
 
-        let turns = thread.snapshot().turns;
-        let last = turns.last().expect("the interrupted Turn is recorded");
-        assert_eq!(last.state, TurnState::Interrupted);
+        // 终态 Turn 在提交后就离开常驻快照（`retain_live_facts`），因此先建立保存屏障，
+        // 再从 durable history 断言“被中断的 Turn 已记录”：状态、取消原因与身份都来自落盘事实。
+        runtime
+            .persistence_repository()
+            .await
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        let page = runtime.list_thread_turns(&id, None, 20).await.unwrap();
+        let last = page
+            .turns
+            .first()
+            .expect("the interrupted Turn is recorded in durable history");
+        assert_eq!(last.turn.thread_id, id);
+        assert_eq!(last.turn.input_id.as_deref(), Some("n3-running-input"));
+        let pl_protocol::TurnState::Cancelled(cancelled) = &last.turn.state else {
+            panic!(
+                "the interrupted Turn must be recorded as cancelled: {:?}",
+                last.turn.state
+            );
+        };
+        assert_eq!(
+            cancelled.cause(),
+            &pl_protocol::TurnCancellationCause::Interrupted
+        );
         assert!(runtime.read_thread(&id).await.unwrap().archived);
         let visible = runtime
             .query_threads(&Default::default(), None, 20)
@@ -1083,15 +1126,26 @@ mod tests {
 
         runtime.archive_thread(id.clone()).await.unwrap().unwrap();
 
-        let snapshot = thread.snapshot();
-        let record = snapshot
-            .inputs
-            .iter()
-            .find(|record| record.input.id == "n3-pending-input")
-            .expect("the admitted input is recorded");
-        assert_eq!(record.state, InputState::Discarded);
+        // 已受理输入到达终态后同样离开常驻快照：durable 身份索引才是终态权威。
+        runtime
+            .persistence_repository()
+            .await
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        let history = runtime.store.history(&id).await.unwrap();
+        let record = history
+            .input_identity("n3-pending-input")
+            .await
+            .unwrap()
+            .expect("the admitted input is recorded durably");
+        assert_eq!(record.entry.id, "n3-pending-input");
+        assert_eq!(record.entry.state, InputState::Discarded);
+        // 未驱动：durable history 里不得存在任何 Turn。
+        let turns = runtime.list_thread_turns(&id, None, 20).await.unwrap();
         assert!(
-            snapshot.turns.is_empty(),
+            turns.turns.is_empty(),
             "discarding a pending input must not start a Turn"
         );
         assert!(runtime.read_thread(&id).await.unwrap().archived);
@@ -1673,13 +1727,30 @@ mod tests {
             .await
             .unwrap();
         assert!(repository.shutdown().await.is_err());
+        // 目录（catalog）是内存先行的摘要事实源：新线程的目录 delta 已可见，
+        // 但这不能证明 SQLite 已落盘。两者必须分开断言。
         assert!(
             runtime
                 .store
                 .read_thread(&thread.id)
                 .await
                 .unwrap()
-                .is_none()
+                .is_some(),
+            "the memory catalog publishes the new Thread before its durable row exists"
+        );
+        assert!(
+            runtime
+                .store
+                .database()
+                .query_one_raw(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "SELECT id FROM threads WHERE id=?",
+                    [sea_orm::Value::String(Some(thread.id.clone()))],
+                ))
+                .await
+                .unwrap()
+                .is_none(),
+            "a failed write batch must not leave a durable Thread row"
         );
         let owner = runtime.ensure_thread_owner(&thread.id).await.unwrap();
         assert_eq!(
@@ -1717,6 +1788,22 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .title,
+            renamed.title
+        );
+        // 重试后真正的落盘断言：durable SQLite 行存在且带上最新标题。
+        let persisted = runtime
+            .store
+            .database()
+            .query_one_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT title FROM threads WHERE id=?",
+                [sea_orm::Value::String(Some(thread.id.clone()))],
+            ))
+            .await
+            .unwrap()
+            .expect("a successful retry must persist the Thread row");
+        assert_eq!(
+            persisted.try_get::<String>("", "title").unwrap(),
             renamed.title
         );
         runtime.shutdown().await;
@@ -3306,9 +3393,8 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
         let (runtime, project) = worktree_runtime(&home, &workspace).await;
-        // 准入一个真实图片草稿（默认 Planner 路由支持 image/png）；随后把 attachment
-        // objects 目录替换成普通文件，使升级阶段（激活之后的 `promote_attachment_drafts`）
-        // 确定性失败。
+        // 准入一个真实图片草稿（默认 Planner 路由支持 image/png）；随后让草稿对象本身不可读，
+        // 使升级阶段（激活之后的 `promote_attachment_drafts`）确定性失败。
         const ONE_PIXEL_PNG: &[u8] = &[
             0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
             0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
@@ -3330,10 +3416,14 @@ mod tests {
             .await
             .unwrap();
         let draft_id = admitted.drafts.first().unwrap().draft_id.clone();
-        let objects = runtime.store.attachments_dir().join("objects");
-        tokio::fs::write(&objects, b"not a directory")
-            .await
-            .unwrap();
+        // 首条 prompt 的受理阶段（Thread 激活之后）把已准入草稿升级进
+        // `sessions/<storage-key>/blobs`；该目标是每会话的随机 storage key 目录，无法预先占位，
+        // 而整个 `sessions/` 根一旦被占位会让失败提前到 Thread 激活。因此让升级的**源对象**
+        // 不可用（草稿对象替换为目录）：`promote_attachment_drafts` 的 `fs::copy` 在任何
+        // storage key 下都确定性失败，同时不影响更早的 Thread 激活。
+        let draft_object = runtime.store.attachment_drafts_dir().join(&draft_id);
+        tokio::fs::remove_file(&draft_object).await.unwrap();
+        tokio::fs::create_dir(&draft_object).await.unwrap();
 
         let error = runtime
             .create_thread_command(
@@ -3351,7 +3441,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        // 不复述具体的 OS 错误文本（Unix 为 `Not a directory`，Windows 目录语义不同）；
+        // 不复述具体的 OS 错误文本（草稿对象不是普通文件时由 `fs::copy` 判定，各平台文本不同）；
         // “失败来自首条 prompt 受理”由后续断言共同证明：lease 已收束为 preserved、
         // 物理 worktree 仍存在，且 Recovery 条目的原因文本是首条 prompt 被拒。
         assert!(!format!("{error:#}").trim().is_empty());

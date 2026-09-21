@@ -387,12 +387,7 @@ mod tests {
                 text: "Summary\nproject alpha".into()
             }]
         );
-        assert_eq!(
-            pl_core::thread::journal::replay(&thread.journal().await.unwrap())
-                .unwrap()
-                .context,
-            current.context
-        );
+        assert_eq!(thread.snapshot().context, current.context);
         thread.close().await.unwrap();
     }
 

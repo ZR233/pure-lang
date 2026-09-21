@@ -140,6 +140,9 @@ void registerProjectSidebarTests() {
       final api = _FakeStudioApi(
         _twoProjectState(selectedProjectId: 'project-a'),
       );
+      // 本用例要观察“切换到初始窗口外的会话”时的加载面：按住首个权威帧，
+      // 使 loading 状态可观察（发布后仍由同一帧驱动首窗读取）。
+      api.publishSnapshotOnSubscribe = false;
       api.directoryPages['old'] = ThreadDirectoryPage(
         threads: [
           StudioThread(

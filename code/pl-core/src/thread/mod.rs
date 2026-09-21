@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, watch};
 mod background;
 mod cancellation;
+mod checkpoint;
 pub mod cold;
 pub mod context_preparation;
 mod continuation;
@@ -21,6 +22,12 @@ pub mod task;
 mod task_access;
 pub use task_access::{TaskAccess, TaskWaitSnapshot};
 mod turn;
+pub use checkpoint::{
+    CHECKPOINT_BODY_THRESHOLD_BYTES, CheckpointBodyError, CheckpointBodyKind,
+    CheckpointBodyReference, CheckpointBodySlot, CheckpointExternalBody, ExtractedCheckpointBody,
+    ThreadCheckpoint,
+};
+pub use journal::ThreadEffectBatch;
 use owner::{Owner, PendingCall};
 pub use subscription::ThreadSubscription;
 use tokio_util::sync::CancellationToken;
@@ -50,6 +57,236 @@ pub use types::*;
 mod tests {
     use super::*;
     use crate::model::{ModelSession, PreparedModelCall};
+
+    /// Test-only projection of the committed effect stream onto the facts the bounded live state
+    /// evicts.
+    ///
+    /// [`ThreadSnapshot`] keeps only current execution and live observation facts; terminal turns,
+    /// attempts, deliveries, resolved interactions and consumed inputs are handed out as committed
+    /// effect batches instead. Behavioral tests read those batches through this helper so they keep
+    /// asserting the same durable evidence the history writer receives, while live-only fields
+    /// (progress, persistence, current context) still come from the current snapshot. It folds the
+    /// current [`ThreadEffectBatch`] stream only; no legacy decode or durable journal is read, and
+    /// a committed-history projection never holds a physical model session.
+    pub(super) async fn history_snapshot(thread: &ThreadHandle) -> ThreadSnapshot {
+        let effects = thread.effects().await.unwrap();
+        let mut view = thread.snapshot();
+        // Rebuild the context chain from the committed changes alone. An owner publishes its first
+        // batch at sequence 1, so this reconstructs the complete context rather than appending the
+        // deltas a second time onto the already complete live context. A window that begins after a
+        // checkpoint (resume) cannot rebuild older revisions, so the live context stays the
+        // authority there.
+        let mut context = ContextSnapshot::default();
+        let mut contexts = std::collections::BTreeMap::from([(0_u64, ContextSnapshot::default())]);
+        let mut complete = true;
+        for effect in &effects {
+            let Some(change) = &effect.context else {
+                continue;
+            };
+            match change {
+                journal::ContextChange::Append { revision, records } => {
+                    if complete && *revision == context.revision.saturating_add(1) {
+                        let mut current = context.records.to_vec();
+                        current.extend(records.iter().cloned());
+                        context = ContextSnapshot {
+                            revision: *revision,
+                            records: current.into(),
+                        };
+                    } else {
+                        complete = false;
+                    }
+                }
+                journal::ContextChange::Replace(next) => context = next.clone(),
+            }
+            contexts.insert(context.revision, context.clone());
+        }
+        if !complete || context.revision != view.context.revision {
+            // A window that begins after a checkpoint cannot rebuild older revisions, so the
+            // complete live context stays the authority.
+            contexts =
+                std::collections::BTreeMap::from([(view.context.revision, view.context.clone())]);
+        } else {
+            view.context = context;
+        }
+        view.model_available = false;
+        // Committed order is authoritative, so facts reconstructed from the effect stream come
+        // first and only facts the window no longer carries (for example a resumed owner's running
+        // attempt) are appended afterwards.
+        let mut attempts: Vec<RequestAttempt> = Vec::new();
+        let mut turns: Vec<TurnRecord> = Vec::new();
+        let mut deliveries: Vec<ToolDelivery> = Vec::new();
+        let mut replacements = view.context_replacements.to_vec();
+        let mut inputs = view.inputs.to_vec();
+        let mut interactions = view.interactions.values().cloned().collect::<Vec<_>>();
+        let mut tasks = view.tasks.values().cloned().collect::<Vec<_>>();
+        let mut permissions = view.permissions.values().cloned().collect::<Vec<_>>();
+        let mut inbox = view.inbox.to_vec();
+        let mut runtime_facts = view.runtime_facts.clone();
+        for effect in &effects {
+            view.commit_sequence = view.commit_sequence.max(effect.sequence);
+            if let Some(update) = &effect.attempt {
+                let attempt = RequestAttempt {
+                    request_metadata: update.request_metadata.clone(),
+                    tool_projection: update.tool_projection.clone(),
+                    turn_id: update.turn_id.clone(),
+                    attempt_id: update.attempt_id.clone(),
+                    retry_of: update.retry_of.clone(),
+                    input: contexts
+                        .get(&update.input_revision)
+                        .cloned()
+                        .unwrap_or_default(),
+                    tools: update.tools.clone(),
+                    outcome: update.outcome.clone(),
+                    input_estimate: update.input_estimate,
+                };
+                match attempts
+                    .iter_mut()
+                    .find(|previous| previous.attempt_id == attempt.attempt_id)
+                {
+                    Some(previous) => *previous = attempt,
+                    None => attempts.push(attempt),
+                }
+            }
+            if let Some(turn) = &effect.turn {
+                match turns
+                    .iter_mut()
+                    .find(|previous| previous.turn_id == turn.turn_id)
+                {
+                    Some(previous) => *previous = turn.clone(),
+                    None => turns.push(turn.clone()),
+                }
+            }
+            for delivery in effect.deliveries.iter() {
+                if !deliveries
+                    .iter()
+                    .any(|previous| previous.call_id == delivery.call_id)
+                {
+                    deliveries.push(delivery.clone());
+                }
+            }
+            replacements.extend(effect.replacements.iter().cloned());
+            for change in effect.inputs.iter() {
+                match change {
+                    input::InputChange::Accepted(record) => {
+                        if !inputs
+                            .iter()
+                            .any(|previous| previous.input.id == record.input.id)
+                        {
+                            inputs.push(record.clone());
+                        }
+                    }
+                    input::InputChange::Transition {
+                        id,
+                        revision,
+                        state,
+                    } => {
+                        if let Some(previous) =
+                            inputs.iter_mut().find(|previous| &previous.input.id == id)
+                        {
+                            previous.revision = *revision;
+                            previous.state = state.clone();
+                        }
+                    }
+                }
+            }
+            for record in effect.interactions.iter() {
+                match interactions
+                    .iter_mut()
+                    .find(|previous| previous.request.id == record.request.id)
+                {
+                    Some(previous) => *previous = record.clone(),
+                    None => interactions.push(record.clone()),
+                }
+            }
+            for record in effect.tasks.iter() {
+                match tasks.iter_mut().find(|previous| previous.id == record.id) {
+                    Some(previous) => *previous = record.clone(),
+                    None => tasks.push(record.clone()),
+                }
+            }
+            for record in effect.permissions.iter() {
+                match permissions
+                    .iter_mut()
+                    .find(|previous| previous.id == record.id)
+                {
+                    Some(previous) => *previous = record.clone(),
+                    None => permissions.push(record.clone()),
+                }
+            }
+            for record in effect.inbox.iter() {
+                if !inbox
+                    .iter()
+                    .any(|previous| previous.message.id == record.message.id)
+                {
+                    inbox.push(record.clone());
+                }
+            }
+            if let Some(facts) = &effect.runtime_facts {
+                runtime_facts = facts.clone();
+            }
+            if let Some(lifecycle) = effect.lifecycle {
+                view.lifecycle = lifecycle;
+            }
+            if let Some(watermark) = effect.consumed_messages {
+                view.consumed_messages = watermark;
+            }
+            if let Some(watermark) = effect.wake_messages_through {
+                view.wake_messages_through = watermark;
+            }
+            for change in effect.extensions.iter() {
+                match change {
+                    extensions::ExtensionChange::Put { id, record } => {
+                        view.extensions.insert(id.clone(), record.clone());
+                    }
+                    extensions::ExtensionChange::Delete { id, .. } => {
+                        view.extensions.remove(id);
+                    }
+                }
+            }
+        }
+        for attempt in view.attempts.iter() {
+            if !attempts
+                .iter()
+                .any(|seen| seen.attempt_id == attempt.attempt_id)
+            {
+                attempts.push(attempt.clone());
+            }
+        }
+        for turn in view.turns.iter() {
+            if !turns.iter().any(|seen| seen.turn_id == turn.turn_id) {
+                turns.push(turn.clone());
+            }
+        }
+        for delivery in view.deliveries.iter() {
+            if !deliveries
+                .iter()
+                .any(|seen| seen.call_id == delivery.call_id)
+            {
+                deliveries.push(delivery.clone());
+            }
+        }
+        view.attempts = attempts.into();
+        view.turns = turns.into();
+        view.deliveries = deliveries.into();
+        view.context_replacements = replacements.into();
+        inputs.sort_by_key(|record| record.ordinal);
+        view.inputs = inputs.into();
+        view.interactions = interactions
+            .into_iter()
+            .map(|record| (record.request.id.clone(), record))
+            .collect();
+        view.tasks = tasks
+            .into_iter()
+            .map(|record| (record.id.clone(), record))
+            .collect();
+        view.permissions = permissions
+            .into_iter()
+            .map(|record| (record.id.clone(), record))
+            .collect();
+        view.inbox = inbox.into();
+        view.runtime_facts = runtime_facts;
+        view
+    }
 
     struct Echo;
     impl ModelSession for Echo {
@@ -98,7 +335,7 @@ mod tests {
             .step(input("accepted", CancellationToken::new()))
             .await
             .unwrap();
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(snapshot.context.records.len(), 2);
         assert_eq!(
             snapshot.private_context.unwrap().content(),
@@ -209,7 +446,7 @@ mod tests {
                 .await,
             Err(ThreadError::ModelUnavailable)
         ));
-        assert_eq!(thread.snapshot().attempts.len(), 1);
+        assert_eq!(history_snapshot(&thread).await.attempts.len(), 1);
         thread
             .replace_model(crate::model::ModelFactory::new(EchoFactory {
                 opens,
@@ -217,9 +454,11 @@ mod tests {
             }))
             .await
             .unwrap();
-        let replayed = journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.context, context);
-        assert!(!replayed.model_available);
+        // The history projection of the replaced owner still carries the same committed context
+        // and never constructs a physical model session.
+        let projected = history_snapshot(&thread).await;
+        assert_eq!(projected.context, context);
+        assert!(!projected.model_available);
         thread.close().await.unwrap();
     }
 
@@ -297,17 +536,22 @@ mod tests {
             .await
             .unwrap();
         thread.close().await.unwrap();
-        let replayed = journal::replay(&thread.journal().await.unwrap()).unwrap();
+        let effects = thread.effects().await.unwrap();
+        let question = effects
+            .iter()
+            .flat_map(|effect| effect.interactions.iter())
+            .rfind(|record| record.request.id == "question")
+            .unwrap();
+        assert_eq!(question.state, interactions::InteractionState::Cancelled);
+        assert_eq!(question.request.payload.content(), "original question");
         assert_eq!(
-            replayed.interactions["question"].state,
-            interactions::InteractionState::Cancelled
+            effects
+                .iter()
+                .filter_map(|effect| effect.lifecycle)
+                .next_back(),
+            Some(ThreadLifecycle::Closed)
         );
-        assert_eq!(
-            replayed.interactions["question"].request.payload.content(),
-            "original question"
-        );
-        assert_eq!(replayed.lifecycle, ThreadLifecycle::Closed);
-        assert!(replayed.attempts.is_empty());
+        assert!(effects.iter().all(|effect| effect.attempt.is_none()));
     }
 
     #[tokio::test]
@@ -348,7 +592,7 @@ mod tests {
             running.await.unwrap(),
             Err(ThreadError::Cancelled)
         ));
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(snapshot.turns[0].state, TurnState::Interrupted);
         assert!(snapshot.private_context.is_none());
         assert_eq!(snapshot.attempts[0].usage().unwrap().input_tokens, Some(13));
@@ -398,19 +642,19 @@ mod tests {
         .expect("mailbox must progress before the model is released")
         .unwrap();
         assert_eq!(sequence, 1);
-        let journal = tokio::time::timeout(std::time::Duration::from_secs(2), thread.journal())
+        let effects = tokio::time::timeout(std::time::Duration::from_secs(2), thread.effects())
             .await
             .expect("history must remain readable during execution")
             .unwrap();
-        let replayed = journal::replay(&journal).unwrap();
-        assert_eq!(replayed.context, admitted);
-        assert_eq!(replayed.inbox.len(), 1);
-        assert_eq!(replayed.consumed_messages, 0);
+        assert!(effects.iter().any(|effect| effect.inbox.len() == 1));
+        assert_eq!(thread.snapshot().context, admitted);
+        assert_eq!(thread.snapshot().inbox.len(), 1);
+        assert_eq!(thread.snapshot().consumed_messages, 0);
         release.notify_one();
         running.await.unwrap().unwrap();
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(snapshot.attempts[0].input, admitted);
-        assert_eq!(snapshot.inbox, replayed.inbox);
+        assert_eq!(snapshot.inbox.len(), 1);
         assert_eq!(snapshot.consumed_messages, 0);
         thread.close().await.unwrap();
     }
@@ -447,7 +691,7 @@ mod tests {
             running.await.unwrap(),
             Err(ThreadError::Cancelled)
         ));
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(snapshot.context, admitted);
         assert!(snapshot.private_context.is_none());
         assert_eq!(snapshot.attempts[0].usage().unwrap().input_tokens, Some(13));
@@ -508,7 +752,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(current.revision, previous.context.revision + 1);
         assert_eq!(snapshot.context_replacements[0].previous, previous.context);
         assert_eq!(
@@ -517,16 +761,15 @@ mod tests {
         );
         assert!(snapshot.private_context.is_none());
         assert_eq!(snapshot.context.records.len(), 1);
-        let commits = thread.journal().await.unwrap();
-        let decoded = commits
-            .iter()
-            .map(|commit| {
-                Arc::new(journal::ThreadCommit::decode(&commit.encode().unwrap()).unwrap())
-            })
-            .collect::<Vec<_>>();
-        assert!(journal::replay(&decoded).unwrap().private_context.is_none());
+        let checkpoint = thread
+            .checkpoint(thread.snapshot().commit_sequence)
+            .unwrap();
         assert!(matches!(
-            ThreadHandle::restore("wrong-thread".into(), DynModelSession::new(Echo), decoded),
+            ThreadHandle::resume(
+                "wrong-thread".into(),
+                DynModelSession::new(Echo),
+                Some(checkpoint)
+            ),
             Err(ThreadError::InvalidIdentity)
         ));
         thread.close().await.unwrap();
@@ -658,12 +901,7 @@ mod tests {
         assert_eq!(thread.snapshot().context, before.context);
         thread.patch_runtime_facts(Vec::new()).await.unwrap();
         assert_eq!(thread.snapshot().context, before.context);
-        assert_eq!(
-            journal::replay(&thread.journal().await.unwrap())
-                .unwrap()
-                .runtime_facts,
-            before.runtime_facts
-        );
+        assert_eq!(thread.snapshot().runtime_facts, before.runtime_facts);
         thread.close().await.unwrap();
     }
 
@@ -695,7 +933,25 @@ mod tests {
             matches!(&compacted.records[0].source, ContextSource::Runtime { source_id } if source_id == "plugin.status")
         );
         let cleared = thread.update_facts(Vec::new()).await.unwrap();
-        assert_eq!(cleared.records.len(), 2);
+        // A source that stops reporting keeps exactly one current record: its in-place
+        // invalidation record. The superseded content leaves current context through the commit.
+        assert_eq!(cleared.records.len(), 1);
+        assert!(matches!(
+            &cleared.records[0].source,
+            ContextSource::Runtime { source_id } if source_id == "plugin.status"
+        ));
+        assert_ne!(cleared.records[0].content, fact.content);
+        assert!(
+            thread
+                .effects()
+                .await
+                .unwrap()
+                .iter()
+                .any(|effect| matches!(
+                    effect.context.as_ref(),
+                    Some(journal::ContextChange::Replace(_))
+                ))
+        );
         assert_eq!(thread.update_facts(Vec::new()).await.unwrap(), cleared);
         let replayed = thread
             .replace_context(ReplaceContext {
@@ -705,8 +961,10 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(replayed.records.len(), 2);
-        assert_eq!(replayed.records[1].content, cleared.records[1].content);
+        // Rewinding an older context cannot resurrect superseded fact content: the current fact
+        // state is re-applied as the single authoritative record for each source.
+        assert_eq!(replayed.records.len(), 1);
+        assert_eq!(replayed.records[0].content, cleared.records[0].content);
         assert_eq!(first.records[0].content, fact.content);
         thread.close().await.unwrap();
     }
@@ -740,7 +998,11 @@ mod tests {
             .await
             .unwrap();
         thread.step(input()).await.unwrap();
-        assert!(thread.snapshot().attempts[0].input_estimate.is_none());
+        assert!(
+            history_snapshot(&thread).await.attempts[0]
+                .input_estimate
+                .is_none()
+        );
         thread.close().await.unwrap();
     }
 
@@ -882,7 +1144,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.outcome, TurnOutcome::Completed);
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert!(matches!(
             snapshot.deliveries[0].outcome,
             ToolOutcome::Failed(_)
@@ -891,9 +1153,6 @@ mod tests {
             snapshot.deliveries[0].output.payload().content(),
             "  full observed result\n"
         );
-        let replayed = journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.deliveries[0].output, snapshot.deliveries[0].output);
-        assert_eq!(replayed.context, snapshot.context);
         thread.close().await.unwrap();
     }
 
@@ -1018,10 +1277,13 @@ mod tests {
         let before = thread.snapshot();
         assert_eq!(before.tasks["task:call"].status, task::TaskStatus::Running);
         assert!(before.tasks["task:call"].acknowledgement.is_some());
-        let restored = ThreadHandle::restore(
+        let checkpoint = thread
+            .checkpoint(thread.snapshot().commit_sequence)
+            .unwrap();
+        let restored = ThreadHandle::resume(
             "thread".into(),
             DynModelSession::new(CallsOnce),
-            thread.journal().await.unwrap(),
+            Some(checkpoint),
         )
         .unwrap();
         let interrupted = restored
@@ -1034,7 +1296,6 @@ mod tests {
             ToolDeliveryTarget::Inbox { .. }
         ));
         assert_eq!(restored.snapshot().context, before.context);
-        journal::replay(&restored.journal().await.unwrap()).unwrap();
         restored.close().await.unwrap();
         origin.cancel();
         release.notify_one();
@@ -1056,9 +1317,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(thread.snapshot().consumed_messages, 1);
-        let replayed = journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.tasks, thread.snapshot().tasks);
-        assert_eq!(replayed.context, thread.snapshot().context);
         thread.close().await.unwrap();
     }
 
@@ -1121,15 +1379,13 @@ mod tests {
         let completed = running.await.unwrap().unwrap();
         assert_eq!(completed.outcome, TurnOutcome::Completed);
         assert_eq!(
-            thread.snapshot().tasks["task:call"].status,
+            history_snapshot(&thread).await.tasks["task:call"].status,
             task::TaskStatus::Cancelled
         );
         assert_eq!(
             thread.cancel_task("task:call".into()).await.unwrap(),
             task::TaskCancellationReceipt::AlreadyFinished
         );
-        let replayed = journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.tasks, thread.snapshot().tasks);
         thread.close().await.unwrap();
     }
 
@@ -1176,18 +1432,23 @@ mod tests {
             snapshot.tasks["task:call"].status,
             task::TaskStatus::Running
         );
-        let saved = thread.journal().await.unwrap();
-        let restored =
-            ThreadHandle::restore("thread".into(), DynModelSession::new(CallsOnce), saved).unwrap();
+        let saved = thread
+            .checkpoint(thread.snapshot().commit_sequence)
+            .unwrap();
+        let restored = ThreadHandle::resume(
+            "thread".into(),
+            DynModelSession::new(CallsOnce),
+            Some(saved),
+        )
+        .unwrap();
+        let restored_snapshot = history_snapshot(&restored).await;
         assert_eq!(
-            restored.snapshot().tasks["task:call"].status,
+            restored_snapshot.tasks["task:call"].status,
             task::TaskStatus::Interrupted
         );
-        assert_eq!(restored.snapshot().attempts.len(), snapshot.attempts.len());
-        let replayed = journal::replay(&restored.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.tasks, restored.snapshot().tasks);
+        assert_eq!(restored_snapshot.attempts.len(), snapshot.attempts.len());
         assert!(matches!(
-            replayed.deliveries[0].outcome,
+            restored_snapshot.deliveries[0].outcome,
             ToolOutcome::Interrupted
         ));
         restored.close().await.unwrap();
@@ -1198,10 +1459,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            thread.snapshot().tasks["task:call"].status,
+            history_snapshot(&thread).await.tasks["task:call"].status,
             task::TaskStatus::Succeeded
         );
-        let commits = thread.journal().await.unwrap();
+        let commits = thread.effects().await.unwrap();
         let terminal = commits.last().unwrap();
         assert_eq!(terminal.tasks[0].status, task::TaskStatus::Succeeded);
         assert_eq!(terminal.deliveries[0].call_id, "call");
@@ -1262,11 +1523,7 @@ mod tests {
         assert_eq!(closes.load(std::sync::atomic::Ordering::SeqCst), 0);
         release.notify_one();
         running.await.unwrap().unwrap();
-        let output = thread
-            .wait_task("task:call", CancellationToken::new())
-            .await
-            .unwrap()
-            .output;
+        let output = history_snapshot(&thread).await.deliveries[0].output.clone();
         assert_eq!(output.payload(), &OpaquePayload::text("original executor"));
         thread
             .step(StepInput {
@@ -1278,7 +1535,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            thread.snapshot().attempts[1].tools[0].declaration,
+            history_snapshot(&thread).await.attempts[1].tools[0].declaration,
             OpaquePayload::text("new schema")
         );
         thread.close().await.unwrap();
@@ -1315,7 +1572,7 @@ mod tests {
             .unwrap();
         assert_eq!(completed.outcome, TurnOutcome::Completed);
         assert_eq!(completed.model_steps, 2);
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(snapshot.turns.len(), 1);
         assert_eq!(
             snapshot.turns[0].state,
@@ -1337,23 +1594,8 @@ mod tests {
             snapshot.deliveries[0].output.payload().content(),
             "raw input"
         );
-        let commits = thread.journal().await.unwrap();
-        let encoded = commits
-            .iter()
-            .map(|commit| commit.encode().unwrap())
-            .collect::<Vec<_>>();
-        let decoded = encoded
-            .iter()
-            .map(|payload| Arc::new(journal::ThreadCommit::decode(payload).unwrap()))
-            .collect::<Vec<_>>();
-        let restored = journal::replay(&decoded).unwrap();
-        assert_eq!(restored.context, snapshot.context);
-        assert_eq!(restored.private_context, snapshot.private_context);
-        assert_eq!(restored.commit_sequence, snapshot.commit_sequence);
-        assert_eq!(restored.deliveries[0].output, snapshot.deliveries[0].output);
-        assert_eq!(restored.attempts.len(), snapshot.attempts.len());
-        assert_eq!(restored.turns, snapshot.turns);
-        assert_eq!(restored.attempts[1].input, snapshot.attempts[1].input);
+        let commits = thread.effects().await.unwrap();
+        assert_eq!(snapshot.private_context, None);
         assert!(
             commits
                 .iter()
@@ -1362,44 +1604,10 @@ mod tests {
         );
         thread.close().await.unwrap();
     }
-    #[tokio::test]
-    async fn journal_rejects_changed_attempt_identity_and_repeated_terminal_results() {
-        let thread = ThreadHandle::start("thread".into(), DynModelSession::new(Echo)).unwrap();
-        thread
-            .step(StepInput {
-                turn_id: "turn".into(),
-                attempt_id: "attempt".into(),
-                content: vec![ContextContent::Text {
-                    text: Arc::from("input"),
-                }],
-                cancellation: CancellationToken::new(),
-            })
-            .await
-            .unwrap();
-        let commits = thread.journal().await.unwrap();
-        journal::replay(&commits).unwrap();
-        let mut tampered = commits.clone();
-        let terminal = Arc::make_mut(tampered.last_mut().unwrap());
-        terminal.attempt.as_mut().unwrap().turn_id = "different-turn".into();
-        assert!(matches!(
-            journal::replay(&tampered),
-            Err(ThreadError::InvalidOutput)
-        ));
-        let mut repeated = commits.clone();
-        let mut extra = (**commits.last().unwrap()).clone();
-        extra.sequence += 1;
-        extra.context = None;
-        repeated.push(Arc::new(extra));
-        assert!(matches!(
-            journal::replay(&repeated),
-            Err(ThreadError::InvalidOutput)
-        ));
-        thread.close().await.unwrap();
-    }
     #[derive(Debug)]
     struct FailingStore(Arc<std::sync::atomic::AtomicBool>);
     impl cold::ColdStore for FailingStore {
-        fn admit(&self, _: &str, _: u64, _: OpaquePayload) -> Result<(), cold::ColdStoreError> {
+        fn admit(&self, _: &str, _: cold::ThreadWrite) -> Result<(), cold::ColdStoreError> {
             if self.0.load(std::sync::atomic::Ordering::SeqCst) {
                 Err(cold::ColdStoreError {
                     source: Box::new(std::io::Error::other("storage unavailable")),
@@ -1446,7 +1654,7 @@ mod tests {
     #[derive(Debug)]
     struct FlushFailure(Arc<std::sync::atomic::AtomicBool>);
     impl cold::ColdStore for FlushFailure {
-        fn admit(&self, _: &str, _: u64, _: OpaquePayload) -> Result<(), cold::ColdStoreError> {
+        fn admit(&self, _: &str, _: cold::ThreadWrite) -> Result<(), cold::ColdStoreError> {
             Ok(())
         }
         async fn flush(&self, _: &str, _: u64) -> Result<(), cold::ColdStoreError> {
@@ -1473,7 +1681,7 @@ mod tests {
         assert_eq!(pending.lifecycle, ThreadLifecycle::Closing);
         assert!(pending.persistence.durable_sequence < pending.commit_sequence);
         assert!(pending.persistence.error.is_some());
-        let commits = thread.journal().await.unwrap();
+        let commits = thread.effects().await.unwrap();
         failure.store(false, std::sync::atomic::Ordering::SeqCst);
         thread.close().await.unwrap();
         let closed = thread.snapshot();
@@ -1492,7 +1700,7 @@ mod tests {
                 error: None,
             }
         }
-        fn admit(&self, _: &str, _: u64, _: OpaquePayload) -> Result<(), cold::ColdStoreError> {
+        fn admit(&self, _: &str, _: cold::ThreadWrite) -> Result<(), cold::ColdStoreError> {
             Ok(())
         }
         async fn flush(&self, _: &str, _: u64) -> Result<(), cold::ColdStoreError> {
@@ -1554,11 +1762,17 @@ mod tests {
             .await
             .unwrap();
         assert!(original.snapshot().deliveries.is_empty());
-        let commits = original.journal().await.unwrap();
+        let checkpoint = original
+            .checkpoint(original.snapshot().commit_sequence)
+            .unwrap();
         original.close().await.unwrap();
-        let restored =
-            ThreadHandle::restore("thread".into(), DynModelSession::new(Echo), commits).unwrap();
-        let snapshot = restored.snapshot();
+        let restored = ThreadHandle::resume(
+            "thread".into(),
+            DynModelSession::new(Echo),
+            Some(checkpoint),
+        )
+        .unwrap();
+        let snapshot = history_snapshot(&restored).await;
         snapshot.context.validate_complete().unwrap();
         assert_eq!(snapshot.deliveries.len(), 1);
         assert!(matches!(
@@ -1571,12 +1785,6 @@ mod tests {
                 .execute_tool("call".into(), CancellationToken::new())
                 .await,
             Err(ThreadError::MissingCall)
-        ));
-        let replayed = journal::replay(&restored.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.context, snapshot.context);
-        assert!(matches!(
-            replayed.deliveries[0].outcome,
-            ToolOutcome::Interrupted
         ));
         restored.close().await.unwrap();
     }
@@ -1640,7 +1848,7 @@ mod tests {
             .retry_attempt("first".into(), "retry".into(), CancellationToken::new())
             .await
             .unwrap();
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(snapshot.attempts[0].input, admitted);
         assert_eq!(snapshot.attempts[1].input, admitted);
         assert_eq!(snapshot.attempts[1].retry_of.as_deref(), Some("first"));
@@ -1653,8 +1861,12 @@ mod tests {
                 .count(),
             1
         );
-        let replayed = journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.attempts[1].retry_of.as_deref(), Some("first"));
+        assert_eq!(
+            history_snapshot(&thread).await.attempts[1]
+                .retry_of
+                .as_deref(),
+            Some("first")
+        );
         thread.close().await.unwrap();
     }
     #[derive(Debug)]
@@ -1699,7 +1911,7 @@ mod tests {
                 .await,
             Err(ThreadError::InvalidIdentity)
         ));
-        assert_eq!(thread.snapshot().attempts.len(), 1);
+        assert_eq!(history_snapshot(&thread).await.attempts.len(), 1);
         thread.close().await.unwrap();
     }
     #[tokio::test]
@@ -1742,17 +1954,21 @@ mod tests {
             }])
             .await
             .unwrap();
-        let commits = thread.journal().await.unwrap();
-        let decoded = commits
-            .iter()
-            .map(|commit| {
-                Arc::new(journal::ThreadCommit::decode(&commit.encode().unwrap()).unwrap())
-            })
-            .collect::<Vec<_>>();
-        let current = journal::replay(&decoded).unwrap();
+        let commits = thread.effects().await.unwrap();
+        let current = thread.snapshot();
         assert!(current.extensions.is_empty());
         assert_eq!(current.extension_sequence, 2);
-        let extensions::ExtensionChange::Put { record, .. } = &current.extension_changes[0] else {
+        let Some(extensions::ExtensionChange::Put { record, .. }) = commits
+            .iter()
+            .flat_map(|commit| commit.extensions.iter())
+            .find(|change| {
+                matches!(
+                    change,
+                    extensions::ExtensionChange::Put { id, .. } if id.as_str() == "plan"
+                )
+            })
+            .cloned()
+        else {
             panic!("original version");
         };
         assert_eq!(record.payload, payload);
@@ -1798,14 +2014,11 @@ mod tests {
             committed.extensions["workflow"].payload.content(),
             "business state"
         );
-        let journal = thread.journal().await.unwrap();
+        let journal = thread.effects().await.unwrap();
         assert_eq!(journal.len(), 1);
         assert_eq!(journal[0].extensions.len(), 1);
         assert!(journal[0].context.is_some());
-        assert_eq!(
-            journal::replay(&journal).unwrap().context,
-            committed.context
-        );
+        assert_eq!(thread.snapshot().context, committed.context);
         thread.close().await.unwrap();
     }
     #[derive(Debug)]
@@ -1865,17 +2078,14 @@ mod tests {
             snapshot.extensions["custom.state"].payload.content(),
             "unknown state\0"
         );
-        let commits = thread.journal().await.unwrap();
+        let commits = thread.effects().await.unwrap();
         let delivery = commits
             .iter()
             .find(|commit| !commit.deliveries.is_empty())
             .unwrap();
         assert_eq!(delivery.extensions.len(), 1);
         assert!(delivery.context.is_some());
-        assert_eq!(
-            journal::replay(&commits).unwrap().extensions,
-            snapshot.extensions
-        );
+        assert_eq!(thread.snapshot().extensions, snapshot.extensions);
         thread.close().await.unwrap();
     }
     #[derive(Debug)]
@@ -1932,7 +2142,7 @@ mod tests {
                 .await,
             Err(ThreadError::Cancelled)
         ));
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert!(snapshot.extensions.is_empty());
         snapshot.context.validate_complete().unwrap();
         let delivery = &snapshot.deliveries[0];
@@ -1943,9 +2153,8 @@ mod tests {
             snapshot.context.records.last().unwrap().content,
             delivery.delivered_context
         );
-        let restored = journal::replay(&thread.journal().await.unwrap()).unwrap();
         assert_eq!(
-            restored.deliveries[0].delivered_context,
+            snapshot.deliveries[0].delivered_context,
             delivery.delivered_context
         );
         thread.close().await.unwrap();
@@ -1995,20 +2204,6 @@ mod tests {
             .unwrap();
         thread.update_facts(vec![fact]).await.unwrap();
         thread.snapshot().context.validate_complete().unwrap();
-        let commits = thread.journal().await.unwrap();
-        journal::replay(&commits).unwrap();
-        let mut changed = commits;
-        let delivery = changed
-            .iter_mut()
-            .find(|commit| !commit.deliveries.is_empty())
-            .unwrap();
-        Arc::make_mut(&mut Arc::make_mut(delivery).deliveries)[0]
-            .delivered_context
-            .clear();
-        assert!(matches!(
-            journal::replay(&changed),
-            Err(ThreadError::InvalidOutput)
-        ));
         thread.close().await.unwrap();
     }
     #[tokio::test]
@@ -2047,10 +2242,10 @@ mod tests {
             .await
             .unwrap();
         thread.step(input()).await.unwrap();
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(snapshot.consumed_messages, 1);
         assert_eq!(snapshot.inbox.len(), 1);
-        let commits = thread.journal().await.unwrap();
+        let commits = thread.effects().await.unwrap();
         let consumed = commits
             .iter()
             .find(|commit| commit.consumed_messages == Some(1))
@@ -2060,9 +2255,7 @@ mod tests {
             AttemptOutcome::Running
         ));
         assert!(consumed.context.is_some());
-        let restored = journal::replay(&commits).unwrap();
-        assert_eq!(restored.inbox, snapshot.inbox);
-        assert_eq!(restored.consumed_messages, 1);
+        assert_eq!(snapshot.consumed_messages, 1);
         thread.close().await.unwrap();
     }
     #[derive(Debug)]
@@ -2109,12 +2302,9 @@ mod tests {
             Err(ThreadError::Tool(_))
         ));
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         snapshot.context.validate_complete().unwrap();
         assert_eq!(snapshot.tasks["task:call"].status, task::TaskStatus::Failed);
-        let replayed = journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.context, snapshot.context);
-        assert_eq!(replayed.tasks, snapshot.tasks);
         thread.close().await.unwrap();
     }
 
@@ -2144,7 +2334,7 @@ mod tests {
             .unwrap();
         assert_eq!(thread.snapshot().context.pending_calls().unwrap().len(), 1);
         thread.close().await.unwrap();
-        let closed = thread.snapshot();
+        let closed = history_snapshot(&thread).await;
         closed.context.validate_complete().unwrap();
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(closed.deliveries.len(), 1);
@@ -2185,7 +2375,7 @@ mod tests {
         assert!(matches!(first.await.unwrap(), Err(ThreadError::Cancelled)));
         assert!(matches!(queued.await, Err(ThreadError::Closed)));
         closing.await.unwrap();
-        assert_eq!(thread.snapshot().attempts.len(), 1);
+        assert_eq!(history_snapshot(&thread).await.attempts.len(), 1);
         assert_eq!(thread.snapshot().lifecycle, ThreadLifecycle::Closed);
     }
     #[derive(Debug)]
@@ -2225,25 +2415,12 @@ mod tests {
             })
             .await
             .unwrap();
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert!(matches!(
             snapshot.deliveries[0].outcome,
             ToolOutcome::Failed(_)
         ));
         snapshot.context.validate_complete().unwrap();
-        let encoded = thread
-            .journal()
-            .await
-            .unwrap()
-            .iter()
-            .map(|commit| {
-                Arc::new(journal::ThreadCommit::decode(&commit.encode().unwrap()).unwrap())
-            })
-            .collect::<Vec<_>>();
-        assert!(matches!(
-            journal::replay(&encoded).unwrap().deliveries[0].outcome,
-            ToolOutcome::Failed(_)
-        ));
         thread.close().await.unwrap();
     }
     #[tokio::test]
@@ -2294,9 +2471,6 @@ mod tests {
             snapshot.context.records[0].source,
             ContextSource::Runtime { .. }
         ));
-        let replayed = journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.interactions, snapshot.interactions);
-        assert_eq!(replayed.context, snapshot.context);
         thread.close().await.unwrap();
     }
     #[tokio::test]
@@ -2350,9 +2524,6 @@ mod tests {
                 source_id: "interaction:cancel-question".into(),
             }
         );
-        let replayed = journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.interactions, snapshot.interactions);
-        assert_eq!(replayed.context, snapshot.context);
         thread.close().await.unwrap();
     }
 
@@ -2406,14 +2577,13 @@ mod tests {
             })
             .await
             .unwrap();
-        let commits = thread.journal().await.unwrap();
+        let commits = thread.effects().await.unwrap();
         let resolved = commits.last().unwrap();
         assert_eq!(resolved.interactions.len(), 1);
         assert_eq!(resolved.extensions.len(), 1);
         assert!(resolved.context.is_some());
-        let replayed = journal::replay(&commits).unwrap();
         assert_eq!(
-            replayed.extensions["plan"].payload.content(),
+            thread.snapshot().extensions["plan"].payload.content(),
             "approved state"
         );
         thread.close().await.unwrap();
@@ -2430,7 +2600,7 @@ mod tests {
                 })),
             }
         }
-        fn admit(&self, _: &str, _: u64, _: OpaquePayload) -> Result<(), cold::ColdStoreError> {
+        fn admit(&self, _: &str, _: cold::ThreadWrite) -> Result<(), cold::ColdStoreError> {
             Ok(())
         }
         async fn flush(&self, _: &str, _: u64) -> Result<(), cold::ColdStoreError> {
@@ -2544,29 +2714,28 @@ mod tests {
         let latest = subscription.next().await.unwrap();
         assert_eq!(latest.commit_sequence, 2);
         let limit = std::num::NonZeroUsize::new(1).unwrap();
-        let first = thread.journal_page(0, limit).await.unwrap();
-        let second = thread.journal_page(first[0].sequence, limit).await.unwrap();
+        let first = thread.effect_page(0, limit).await.unwrap();
+        let second = thread.effect_page(first[0].sequence, limit).await.unwrap();
         assert_eq!(first[0].sequence, 1);
         assert_eq!(second[0].sequence, 2);
-        assert!(thread.journal_page(2, limit).await.unwrap().is_empty());
-        assert!(thread.journal_page(3, limit).await.is_err());
+        assert!(thread.effect_page(2, limit).await.unwrap().is_empty());
+        assert!(thread.effect_page(3, limit).await.is_err());
         thread.close().await.unwrap();
         assert_eq!(
             subscription.next().await.unwrap().lifecycle,
             ThreadLifecycle::Closed
         );
         assert!(subscription.next().await.is_none());
-        let final_history = thread.journal().await.unwrap();
+        let final_history = thread.effects().await.unwrap();
         let final_snapshot = thread.snapshot();
         assert_eq!(
             final_history.last().unwrap().sequence,
             final_snapshot.commit_sequence
         );
-        let replayed = journal::replay(&final_history).unwrap();
-        assert_eq!(replayed.lifecycle, ThreadLifecycle::Closed);
-        assert_eq!(replayed.inbox.len(), 2);
+        assert_eq!(final_snapshot.lifecycle, ThreadLifecycle::Closed);
+        assert_eq!(final_snapshot.inbox.len(), 2);
         let final_page = thread
-            .journal_page(final_snapshot.commit_sequence - 1, limit)
+            .effect_page(final_snapshot.commit_sequence - 1, limit)
             .await
             .unwrap();
         assert_eq!(final_page[0].sequence, final_snapshot.commit_sequence);
@@ -2644,7 +2813,6 @@ mod tests {
             .await
             .unwrap();
         thread.step(input()).await.unwrap();
-        journal::replay(&thread.journal().await.unwrap()).unwrap();
         thread.close().await.unwrap();
     }
     struct ProjectionCalls(Arc<std::sync::Mutex<OpaquePayload>>);
@@ -2727,25 +2895,19 @@ mod tests {
             panic!("projection tool completes immediately");
         };
         assert_eq!(output.payload(), &original);
-        let history = thread.journal().await.unwrap();
-        let saved = journal::replay(&history).unwrap();
-        assert_eq!(saved.attempts[0].tool_projection.as_ref(), Some(&original));
-        assert_eq!(saved.attempts[0].request_metadata.as_ref(), Some(&original));
-        assert_eq!(saved.deliveries[0].output.payload(), &original);
-        let mut corrupt = history.clone();
-        let index = corrupt
+        let history = thread.effects().await.unwrap();
+        let attempt = history
             .iter()
-            .position(|commit| {
-                commit
-                    .attempt
-                    .as_ref()
-                    .is_some_and(|attempt| matches!(attempt.outcome, AttemptOutcome::Committed(_)))
-            })
+            .find_map(|effect| effect.attempt.as_ref())
             .unwrap();
-        let mut commit = (*corrupt[index]).clone();
-        commit.attempt.as_mut().unwrap().tool_projection = Some(OpaquePayload::text("tampered"));
-        corrupt[index] = Arc::new(commit);
-        assert!(journal::replay(&corrupt).is_err());
+        assert_eq!(attempt.tool_projection.as_ref(), Some(&original));
+        assert_eq!(attempt.request_metadata.as_ref(), Some(&original));
+        let delivery = history
+            .iter()
+            .flat_map(|effect| effect.deliveries.iter())
+            .next()
+            .unwrap();
+        assert_eq!(delivery.output.payload(), &original);
         thread.close().await.unwrap();
     }
     #[tokio::test]
@@ -2786,7 +2948,7 @@ mod tests {
         );
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert!(matches!(
-            thread.snapshot().deliveries[0].outcome,
+            history_snapshot(&thread).await.deliveries[0].outcome,
             ToolOutcome::Failed(_)
         ));
         thread.close().await.unwrap();
@@ -2815,21 +2977,22 @@ mod tests {
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 let snapshot = subscription.next().await.unwrap();
-                if snapshot.consumed_messages == sequence
-                    && snapshot
-                        .turns
-                        .last()
-                        .is_some_and(|turn| matches!(turn.state, TurnState::Finished(_)))
-                {
+                // A finished Turn is a history fact and leaves the bounded live state, so the
+                // settled driven Turn shows up as "message consumed with no running Turn".
+                if snapshot.consumed_messages == sequence && snapshot.turns.is_empty() {
                     break;
                 }
             }
         })
         .await
         .expect("message wakes the idle owner");
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert!(snapshot.inputs.is_empty());
         assert_eq!(snapshot.attempts.len(), 1);
+        assert!(matches!(
+            snapshot.turns.last().map(|turn| &turn.state),
+            Some(TurnState::Finished(_))
+        ));
         assert!(snapshot.context.records.iter().any(|record| record.source
             == ContextSource::Runtime {
                 source_id: "agent:parent".into()
@@ -2848,11 +3011,9 @@ mod tests {
                 .unwrap(),
             sequence
         );
-        let history = thread.journal().await.unwrap();
-        assert_eq!(thread.snapshot().attempts.len(), 1);
-        let restored = journal::replay(&history).unwrap();
-        assert_eq!(restored.wake_messages_through, sequence);
-        assert_eq!(restored.consumed_messages, sequence);
+        assert_eq!(history_snapshot(&thread).await.attempts.len(), 1);
+        assert_eq!(thread.snapshot().wake_messages_through, sequence);
+        assert_eq!(thread.snapshot().consumed_messages, sequence);
         thread.close().await.unwrap();
     }
     struct ReusedCall;
@@ -2946,7 +3107,7 @@ mod tests {
         ));
         assert_eq!(thread.snapshot().context, original);
         assert!(matches!(
-            thread.snapshot().attempts[0].outcome,
+            history_snapshot(&thread).await.attempts[0].outcome,
             AttemptOutcome::Rejected { .. }
         ));
         thread.close().await.unwrap();
@@ -3035,14 +3196,18 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(executions.load(std::sync::atomic::Ordering::SeqCst), 0);
-            let commits = thread.journal().await.unwrap();
-            let replayed = journal::replay(&commits).unwrap();
-            assert_eq!(replayed.permissions[&pending.id], pending);
-            let restored =
-                ThreadHandle::restore("thread".into(), DynModelSession::new(CallsOnce), commits)
-                    .unwrap();
+            assert_eq!(thread.snapshot().permissions[&pending.id], pending);
+            let checkpoint = thread
+                .checkpoint(thread.snapshot().commit_sequence)
+                .unwrap();
+            let restored = ThreadHandle::resume(
+                "thread".into(),
+                DynModelSession::new(CallsOnce),
+                Some(checkpoint),
+            )
+            .unwrap();
             assert_eq!(
-                restored.snapshot().permissions[&pending.id].state,
+                history_snapshot(&restored).await.permissions[&pending.id].state,
                 permissions::PermissionState::Cancelled
             );
             assert!(
@@ -3091,12 +3256,6 @@ mod tests {
                 .await
                 .expect("an identical retry returns the recorded decision without executing again");
             assert_eq!(thread.snapshot().commit_sequence, sequence);
-            assert_eq!(
-                journal::replay(&thread.journal().await.unwrap())
-                    .unwrap()
-                    .permissions,
-                thread.snapshot().permissions
-            );
             thread.close().await.unwrap();
         }
     }
@@ -3152,7 +3311,7 @@ mod tests {
             resolved
         );
         assert_eq!(thread.snapshot().commit_sequence, sequence);
-        let journal = thread.journal().await.unwrap();
+        let journal = thread.effects().await.unwrap();
         let commit = journal.last().unwrap();
         assert_eq!(commit.interactions.len(), 1);
         assert_eq!(commit.inputs.len(), 1);
@@ -3161,16 +3320,15 @@ mod tests {
             commit.interactions[0].continuation_id.as_deref(),
             Some("answer-input")
         );
-        let mut incomplete = journal.clone();
-        let mut broken_commit = incomplete.last().unwrap().as_ref().clone();
-        broken_commit.inputs = Vec::new().into();
-        *incomplete.last_mut().unwrap() = Arc::new(broken_commit);
-        assert!(
-            journal::replay(&incomplete).is_err(),
-            "a continuation without its input fact is an incomplete commit"
-        );
-        let restored =
-            ThreadHandle::restore("thread".into(), DynModelSession::new(Echo), journal).unwrap();
+        let checkpoint = thread
+            .checkpoint(thread.snapshot().commit_sequence)
+            .unwrap();
+        let restored = ThreadHandle::resume(
+            "thread".into(),
+            DynModelSession::new(Echo),
+            Some(checkpoint),
+        )
+        .unwrap();
         assert_eq!(
             restored.snapshot().inputs[0].state,
             input::InputState::Pending
@@ -3322,25 +3480,30 @@ mod tests {
         );
         release.notify_one();
         let mut subscription = thread.subscribe();
-        let completed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
-                let snapshot = subscription.next().await.unwrap();
-                if snapshot.inputs.len() == 3
-                    && snapshot
+                subscription.next().await.unwrap();
+                // Consumed inputs and terminal Turns are history facts, so the settled driven queue
+                // is only observable in the committed projection, the same authority asserted on
+                // below.
+                let committed = history_snapshot(&thread).await;
+                if committed.inputs.len() == 3
+                    && committed
                         .inputs
                         .iter()
                         .all(|record| matches!(record.state, input::InputState::Consumed { .. }))
-                    && snapshot
+                    && committed
                         .turns
                         .iter()
                         .all(|turn| turn.state != TurnState::Running)
                 {
-                    break snapshot;
+                    break;
                 }
             }
         })
         .await
         .unwrap();
+        let completed = history_snapshot(&thread).await;
         let has = |snapshot: &ContextSnapshot, expected: &str| {
             snapshot.records.iter().any(|record| {
                 record.source == ContextSource::User
@@ -3365,12 +3528,7 @@ mod tests {
         assert!(
             matches!(&steer.state, input::InputState::Consumed { turn_id, .. } if turn_id == &original_turn)
         );
-        assert_eq!(
-            journal::replay(&thread.journal().await.unwrap())
-                .unwrap()
-                .inputs,
-            completed.inputs
-        );
+        assert!(thread.snapshot().inputs.is_empty());
         thread.close().await.unwrap();
     }
 }

@@ -19,7 +19,143 @@ pub struct InboxRecord {
     pub message: ThreadMessage,
 }
 
+impl ThreadMessage {
+    /// Content digest used by the bounded consumed-message ledger for duplicate delivery checks.
+    ///
+    /// The digest covers the immutable message body and its frozen attribution; it never covers the
+    /// owner-assigned sequence, which is a framework receipt.
+    pub fn digest(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(self.id.as_bytes());
+        hasher.update([0]);
+        hasher.update(self.source_id.as_bytes());
+        hasher.update([0]);
+        hasher.update(self.payload.format().as_bytes());
+        hasher.update([0]);
+        hasher.update(self.payload.content().as_bytes());
+        for content in &self.context {
+            hasher.update([0]);
+            hasher.update(serde_json::to_vec(content).unwrap_or_default());
+        }
+        format!("sha256:{:x}", hasher.finalize())
+    }
+}
+
+/// Minimal resident identity of a message the owner already consumed.
+///
+/// The body and its context stay in the durable history; this record is the only thing the live
+/// owner keeps so a repeated delivery of the same stable message identity can still be answered
+/// idempotently after the inbox entry left the resident queue. A repeat is only a no-op when it
+/// matches the stored content digest; the same identity carrying a different body is an identity
+/// conflict instead of a second delivery.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageIdentity {
+    /// Content digest of the originally accepted message body.
+    pub digest: String,
+    pub id: String,
+    /// Original admission sequence, returned as the repeat receipt.
+    pub sequence: u64,
+}
+
+impl MessageIdentity {
+    /// Projects one consumed inbox record into its minimal durable identity.
+    pub fn from_record(record: &InboxRecord) -> Self {
+        Self {
+            digest: record.message.digest(),
+            id: record.message.id.clone(),
+            sequence: record.sequence,
+        }
+    }
+}
+
+/// Allocates the next durable message sequence for one Thread.
+///
+/// The value is the highest of the resident pending tail, the consumption watermark, the bounded
+/// consumed-identity ledger and the checkpointed [`ThreadSnapshot::inbox_sequence`]. Only the last
+/// one survives consumption pruning, so a message admitted after every earlier message was consumed
+/// continues the sequence instead of restarting it. A legacy checkpoint that predates the durable
+/// watermark still gets a safe answer because the resident tail and the watermark are considered too.
+fn next_sequence(state: &ThreadSnapshot) -> Result<u64, ThreadError> {
+    state
+        .inbox
+        .last()
+        .map_or(0, |record| record.sequence)
+        .max(state.consumed_messages)
+        .max(
+            state
+                .consumed_message_identities
+                .last()
+                .map_or(0, |identity| identity.sequence),
+        )
+        .max(state.inbox_sequence)
+        .checked_add(1)
+        .ok_or(ThreadError::RevisionExhausted)
+}
+
+/// Appends one accepted message under the next admission sequence and advances the Thread's
+/// monotonic admission watermark to it.
+pub(super) fn admit_message(
+    state: &mut ThreadSnapshot,
+    message: ThreadMessage,
+) -> Result<u64, ThreadError> {
+    let sequence = next_sequence(state)?;
+    let mut inbox = state.inbox.to_vec();
+    inbox.push(InboxRecord { sequence, message });
+    state.inbox = inbox.into();
+    state.inbox_sequence = sequence;
+    Ok(sequence)
+}
+
 impl Owner {
+    /// Resolves an already accepted message identity to its original admission receipt.
+    ///
+    /// A message's stable identity is its `id`; its frozen body is the stored content digest. The
+    /// resident queue answers the identities still waiting for model context, and the bounded
+    /// consumed-identity ledger answers the ones whose body already left the queue. A repeat of an
+    /// accepted identity with the same body is therefore a no-op receipt, while the same identity
+    /// carrying a different body is an identity conflict and never a second message. `None` means
+    /// this owner never accepted the identity, so the caller admits it normally.
+    ///
+    /// Callers that must not treat a repeat as new work resolve this before any admission check,
+    /// so a repeat is never refused because the owner is closing, is waiting for an interaction or
+    /// is under storage pressure, and never disturbs the work that is currently running.
+    pub(super) fn accepted_message_receipt(
+        &self,
+        message: &ThreadMessage,
+    ) -> Result<Option<u64>, ThreadError> {
+        if let Some(record) = self
+            .state
+            .inbox
+            .iter()
+            .find(|record| record.message.id == message.id)
+        {
+            return if record.message == *message {
+                Ok(Some(record.sequence))
+            } else {
+                Err(ThreadError::InvalidIdentity)
+            };
+        }
+        // A consumed message left the resident queue, so its identity ledger answers a repeated
+        // delivery: the same digest is an idempotent replay of an already-consumed message, while
+        // the same identity carrying a different body stays an identity conflict and is never
+        // accepted (or delivered) twice.
+        if let Some(identity) = self
+            .state
+            .consumed_message_identities
+            .iter()
+            .find(|identity| identity.id == message.id)
+        {
+            return if identity.digest == message.digest() {
+                Ok(Some(identity.sequence))
+            } else {
+                Err(ThreadError::InvalidIdentity)
+            };
+        }
+        Ok(None)
+    }
+
     pub(super) fn receive_message(
         &mut self,
         message: ThreadMessage,
@@ -31,31 +167,13 @@ impl Owner {
         if message.id.is_empty() || message.source_id.is_empty() {
             return Err(ThreadError::InvalidIdentity);
         }
-        if let Some(existing) = self
-            .state
-            .inbox
-            .iter()
-            .find(|record| record.message.id == message.id)
-        {
-            if existing.message != message {
-                return Err(ThreadError::InvalidIdentity);
-            }
-            let sequence = existing.sequence;
+        if let Some(sequence) = self.accepted_message_receipt(&message)? {
             self.request_message_wakeup(sequence, drive);
             self.publish();
             self.publish_snapshot();
             return Ok(sequence);
         }
-        let sequence = self
-            .state
-            .inbox
-            .last()
-            .map_or(0, |record| record.sequence)
-            .checked_add(1)
-            .ok_or(ThreadError::RevisionExhausted)?;
-        let mut inbox = self.state.inbox.to_vec();
-        inbox.push(InboxRecord { sequence, message });
-        self.state.inbox = inbox.into();
+        let sequence = admit_message(&mut self.state, message)?;
         self.request_message_wakeup(sequence, drive);
         self.publish();
         self.publish_snapshot();
@@ -92,5 +210,75 @@ impl Owner {
             })
             .collect();
         (records, watermark)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(id: &str) -> ThreadMessage {
+        ThreadMessage {
+            id: id.to_string(),
+            source_id: "agent:parent".to_string(),
+            payload: OpaquePayload::text(id),
+            context: vec![ContextContent::Text {
+                text: Arc::from(id),
+            }],
+        }
+    }
+
+    /// Consumption pruning empties the resident queue, yet the next admitted message still has to
+    /// continue the durable sequence instead of restarting at one and overwriting an earlier
+    /// parent message in the timeline.
+    #[test]
+    fn sequence_continues_after_the_queue_was_pruned_by_consumption() {
+        let mut state = ThreadSnapshot::default();
+        admit_message(&mut state, message("initial")).expect("admit initial");
+        admit_message(&mut state, message("other")).expect("admit other");
+        assert_eq!(state.inbox_sequence, 2);
+
+        // The next Turn consumes both messages, so the commit prunes the queue to its identity
+        // ledger only.
+        state.consumed_messages = 2;
+        state.retain_live_facts();
+        assert!(state.inbox.is_empty());
+        assert_eq!(state.consumed_message_identities.len(), 2);
+
+        let sequence = admit_message(&mut state, message("steer")).expect("admit steer");
+        assert_eq!(sequence, 3);
+        assert_eq!(state.inbox_sequence, 3);
+        assert_eq!(state.inbox.len(), 1);
+        assert_eq!(state.inbox[0].sequence, 3);
+        assert_eq!(state.inbox[0].message.id, "steer");
+    }
+
+    /// A checkpoint written before the monotonic admission watermark existed still resumes
+    /// monotonically: the consumption watermark is the highest sequence it can prove.
+    #[test]
+    fn sequence_continues_from_the_consumption_watermark_of_a_legacy_checkpoint() {
+        let mut state = ThreadSnapshot {
+            consumed_messages: 5,
+            inbox_sequence: 0,
+            ..ThreadSnapshot::default()
+        };
+        assert_eq!(admit_message(&mut state, message("resumed")).unwrap(), 6);
+        assert_eq!(state.inbox_sequence, 6);
+    }
+
+    /// A repeated delivery of an already-consumed identity keeps answering with its original
+    /// receipt instead of being admitted a second time.
+    #[test]
+    fn consumed_identity_keeps_its_original_receipt() {
+        let mut state = ThreadSnapshot::default();
+        admit_message(&mut state, message("initial")).expect("admit initial");
+        let record = state.inbox[0].clone();
+        state.consumed_messages = record.sequence;
+        state.retain_live_facts();
+        assert_eq!(
+            MessageIdentity::from_record(&record),
+            state.consumed_message_identities[0]
+        );
+        assert_eq!(state.consumed_message_identities[0].sequence, 1);
     }
 }

@@ -1,4 +1,7 @@
-//! Append-only runtime facts, projected by hosts and ordered by stable source identity.
+//! Current runtime facts, projected by hosts and keyed by stable source identity.
+//!
+//! Only the newest content of each source stays in current context; superseded content belongs to
+//! history and is exported through the commit that replaced it.
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -87,17 +90,13 @@ pub(super) fn stage_facts(
             });
     }
     let mut records = state.context.records.to_vec();
-    let mut identities = records
-        .iter()
-        .map(|record| record.id.clone())
-        .collect::<BTreeSet<_>>();
     let revision = state
         .context
         .revision
         .checked_add(1)
         .ok_or(ThreadError::RevisionExhausted)?;
     for fact in next.values() {
-        append_if_missing(&mut records, &mut identities, fact, revision);
+        write_fact(&mut records, fact, revision);
     }
     let facts = next.into_values().collect::<Vec<_>>();
     if records.as_slice() != state.context.records.as_ref() {
@@ -115,21 +114,16 @@ pub(super) fn restore_facts(
     facts: &[RuntimeFact],
     revision: u64,
 ) {
-    let mut identities = records
-        .iter()
-        .map(|record| record.id.clone())
-        .collect::<BTreeSet<_>>();
     for fact in facts {
-        append_if_missing(records, &mut identities, fact, revision);
+        write_fact(records, fact, revision);
     }
 }
 
-fn append_if_missing(
-    records: &mut Vec<ContextRecord>,
-    identities: &mut BTreeSet<String>,
-    fact: &RuntimeFact,
-    revision: u64,
-) {
+/// Writes one source's current facts at most once.
+///
+/// Superseded content is replaced in place, so a source that keeps reporting never accumulates
+/// historic fact records in current context; an absent source keeps its invalidation record.
+fn write_fact(records: &mut Vec<ContextRecord>, fact: &RuntimeFact, revision: u64) {
     let content = if fact.content.is_empty() {
         vec![ContextContent::Text {
             text: Arc::from(
@@ -142,14 +136,14 @@ fn append_if_missing(
     let source = ContextSource::Runtime {
         source_id: fact.source_id.clone(),
     };
-    if records
-        .iter()
-        .rev()
-        .find(|record| record.source == source)
-        .is_some_and(|record| record.content == content)
-    {
+    if let Some(index) = records.iter().rposition(|record| record.source == source) {
+        records[index].content = content;
         return;
     }
+    let mut identities = records
+        .iter()
+        .map(|record| record.id.clone())
+        .collect::<BTreeSet<_>>();
     let mut suffix = 0_u64;
     let id = loop {
         let id = format!("runtime:{revision}:{}:{suffix}", fact.source_id);

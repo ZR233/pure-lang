@@ -335,9 +335,9 @@ int _timelineRowRenderVersion(TimelineEntry part) {
     part.id,
     part.revision,
     part.status,
-    part.text,
-    ...part.reasoningSummary,
-    ...part.reasoningContent,
+    _bodyFingerprint(part.text),
+    _bodyFingerprint(part.reasoningSummary.join()),
+    _bodyFingerprint(part.reasoningContent.join()),
     part.skill?.name,
     part.skill?.source,
     part.skill?.providerId,
@@ -348,13 +348,24 @@ int _timelineRowRenderVersion(TimelineEntry part) {
     part.contextDisposition,
     part.updatedAt?.millisecondsSinceEpoch,
     part.error,
-    tool?.arguments,
+    _bodyFingerprint(tool?.arguments),
     tool?.taskId,
-    tool?.result,
+    _bodyFingerprint(tool?.result),
     tool?.exitCode,
     tool?.timedOut,
     tool?.denialReason,
   ]);
+}
+
+/// 正文指纹：长度 + 有界尾部样本。
+///
+/// 渲染版本只需要"内容变了没有"；对整串取哈希会让大正文在每次投影/增量时都被
+/// 重新遍历。正文本身已被客户端预算约束，这里再用长度与定长样本即可（长度单调变
+/// 化，尾部样本捕捉等长滑动）。
+Object? _bodyFingerprint(String? text) {
+  if (text == null || text.isEmpty) return text;
+  final tail = text.length <= 256 ? text : text.substring(text.length - 256);
+  return Object.hash(text.length, tail);
 }
 
 bool _isActiveToolStatus(String status) {

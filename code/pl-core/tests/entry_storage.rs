@@ -2,6 +2,43 @@ use pl_core::context::OpaquePayload;
 use pl_core::persistence::{SqliteSessionOptions, SqliteSessionStore};
 use pretty_assertions::assert_eq;
 
+/// Minimal valid persistence ticket used to exercise the cold-store adapter directly.
+fn thread_write(thread_id: &str, sequence: u64) -> pl_core::thread::cold::ThreadWrite {
+    let effect = pl_core::thread::ThreadEffectBatch {
+        committed_at: sequence as i64,
+        permissions: Default::default(),
+        wake_messages_through: None,
+        inputs: Default::default(),
+        tasks: Default::default(),
+        thread_id: thread_id.to_owned(),
+        sequence,
+        context: None,
+        private_context: None,
+        attempt: None,
+        turn: None,
+        discovered_tools: None,
+        deliveries: Default::default(),
+        extensions: Default::default(),
+        inbox: Default::default(),
+        consumed_messages: None,
+        interactions: Default::default(),
+        replacements: Default::default(),
+        runtime_facts: None,
+        lifecycle: None,
+    };
+    pl_core::thread::cold::ThreadWrite {
+        effect: std::sync::Arc::new(effect),
+        checkpoint: pl_core::thread::ThreadCheckpoint::capture(
+            thread_id.to_owned(),
+            sequence,
+            pl_core::thread::ThreadSnapshot {
+                commit_sequence: sequence,
+                ..Default::default()
+            },
+        ),
+    }
+}
+
 #[tokio::test]
 async fn existing_unversioned_database_is_rejected_without_changing_its_data() {
     use sea_orm::{ConnectionTrait, Database};
@@ -83,17 +120,72 @@ async fn committed_thread_payload_is_not_rejected_by_metadata_record_size_limit(
     use pl_core::thread::cold::ColdStore;
     let store = SqliteSessionStore::open_memory().await.unwrap();
     let content = "载荷".repeat(400_000);
-    let payload = OpaquePayload::new("plugin.future-record", 19, content.clone()).unwrap();
-    ColdStore::admit(&store, "thread", 1, payload).unwrap();
+    let mut ticket = thread_write("thread", 1);
+    let large = std::sync::Arc::make_mut(&mut ticket.effect);
+    large.extensions = vec![pl_core::thread::extensions::ExtensionChange::Put {
+        id: "future.record".into(),
+        record: pl_core::thread::extensions::ExtensionRecord {
+            revision: 1,
+            payload: OpaquePayload::new("plugin.future-record", 19, content.clone()).unwrap(),
+        },
+    }]
+    .into();
+    let encoded = ticket.effect.encode().unwrap();
+    ColdStore::admit(&store, "thread", ticket).unwrap();
     ColdStore::flush(&store, "thread", 1).await.unwrap();
     let records = store.replay_entries("thread", None).await.unwrap();
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].payload, content);
-    assert_eq!(records[0].schema_version, 19);
+    assert_eq!(records[0].payload, encoded.content());
+    assert_eq!(records[0].schema_version, 1);
+    assert!(records[0].payload.len() > 400_000);
     store.shutdown().await.unwrap();
 }
 
 struct JournalModel(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+#[derive(Clone, Debug, Default)]
+struct CheckpointStore {
+    writes: std::sync::Arc<
+        std::sync::Mutex<std::collections::BTreeMap<u64, pl_core::thread::cold::ThreadWrite>>,
+    >,
+}
+
+impl CheckpointStore {
+    fn checkpoint(&self, thread_id: &str) -> pl_core::thread::ThreadCheckpoint {
+        self.writes
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|write| write.checkpoint.thread_id == thread_id)
+            .max_by_key(|write| write.effect.sequence)
+            .expect("checkpoint store has no write")
+            .checkpoint
+            .clone()
+    }
+}
+
+impl pl_core::thread::cold::ColdStore for CheckpointStore {
+    fn admit(
+        &self,
+        thread_id: &str,
+        write: pl_core::thread::cold::ThreadWrite,
+    ) -> Result<(), pl_core::thread::cold::ColdStoreError> {
+        assert_eq!(write.effect.thread_id, thread_id);
+        self.writes
+            .lock()
+            .unwrap()
+            .insert(write.effect.sequence, write);
+        Ok(())
+    }
+
+    async fn flush(
+        &self,
+        _thread_id: &str,
+        _sequence: u64,
+    ) -> Result<(), pl_core::thread::cold::ColdStoreError> {
+        Ok(())
+    }
+}
 
 impl pl_core::model::ModelSession for JournalModel {
     fn prepare(
@@ -136,7 +228,7 @@ impl pl_core::model::ModelSession for JournalModel {
 }
 
 #[tokio::test]
-async fn thread_journal_reopens_and_continues_without_replaying_model_work() {
+async fn thread_checkpoint_reopens_and_continues_without_replaying_model_work() {
     use pl_core::context::ContextContent;
     use pl_core::model::DynModelSession;
     use pl_core::thread::{StepInput, ThreadHandle, ThreadLifecycle, cold::ColdStoreHandle};
@@ -146,12 +238,8 @@ async fn thread_journal_reopens_and_continues_without_replaying_model_work() {
     };
     use tokio_util::sync::CancellationToken;
 
-    let directory = tempfile::tempdir().unwrap();
-    let options = SqliteSessionOptions {
-        path: directory.path().join("journal.sqlite"),
-    };
     let calls = Arc::new(AtomicUsize::new(0));
-    let store = SqliteSessionStore::open(options.clone()).await.unwrap();
+    let store = CheckpointStore::default();
     let thread = ThreadHandle::start(
         "thread".into(),
         DynModelSession::new(JournalModel(calls.clone())),
@@ -187,27 +275,24 @@ async fn thread_journal_reopens_and_continues_without_replaying_model_work() {
     let saved = thread.snapshot();
     assert_eq!(saved.lifecycle, ThreadLifecycle::Closed);
     assert_eq!(saved.persistence.durable_sequence, saved.commit_sequence);
-    store.shutdown().await.unwrap();
     drop(thread);
-    drop(store);
 
-    let reopened = SqliteSessionStore::open(options).await.unwrap();
-    let replayed = reopened.replay_thread("thread").await.unwrap();
-    assert_eq!(replayed.context, saved.context);
-    assert_eq!(replayed.inputs, saved.inputs);
-    assert_eq!(replayed.private_context, saved.private_context);
+    let checkpoint = store.checkpoint("thread");
+    assert_eq!(checkpoint.state.context, saved.context);
+    assert_eq!(checkpoint.state.inputs, saved.inputs);
+    assert_eq!(checkpoint.state.private_context, saved.private_context);
+    let first_revision = checkpoint.state_revision;
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    let history = reopened.read_thread_journal("thread").await.unwrap();
-    let restored = ThreadHandle::restore(
+    let restored = ThreadHandle::resume(
         "thread".into(),
         DynModelSession::new(JournalModel(calls.clone())),
-        history,
+        Some(checkpoint),
     )
     .unwrap();
     assert!(restored.snapshot().private_context.is_none());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     restored
-        .attach_storage(ColdStoreHandle::new(reopened.clone()))
+        .attach_storage(ColdStoreHandle::new(store.clone()))
         .await
         .unwrap();
     restored
@@ -223,15 +308,9 @@ async fn thread_journal_reopens_and_continues_without_replaying_model_work() {
         .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     restored.close().await.unwrap();
-    let continued = reopened.replay_thread("thread").await.unwrap();
-    assert_eq!(continued.context, restored.snapshot().context);
-    assert_eq!(continued.attempts.len(), 2);
-    assert_eq!(continued.inputs[0].input, saved.inputs[0].input);
-    assert!(matches!(
-        continued.inputs[0].state,
-        pl_core::thread::input::InputState::Consumed { .. }
-    ));
-    reopened.shutdown().await.unwrap();
+    let continued = store.checkpoint("thread");
+    assert_eq!(continued.state.context, restored.snapshot().context);
+    assert!(continued.state_revision > first_revision);
 }
 
 #[tokio::test]
@@ -296,11 +375,21 @@ async fn shared_store_counts_pending_bytes_per_thread_and_releases_pressure_afte
     use pl_core::thread::cold::ColdStore;
     let store = SqliteSessionStore::open_memory().await.unwrap();
     let peer = store.clone();
-    ColdStore::admit(&store, "first", 1, OpaquePayload::text("first")).unwrap();
-    ColdStore::admit(&peer, "second", 1, OpaquePayload::text("second")).unwrap();
+    let first = thread_write("first", 1);
+    let second = thread_write("second", 1);
+    let first_bytes = first.effect.encode().unwrap().content().len() as u64;
+    let second_bytes = second.effect.encode().unwrap().content().len() as u64;
+    ColdStore::admit(&store, "first", first).unwrap();
+    ColdStore::admit(&peer, "second", second).unwrap();
     // No await precedes these observations: the writer cannot run on this current-thread runtime.
-    assert_eq!(store.pending_bytes("first"), (5, 11));
-    assert_eq!(peer.pending_bytes("second"), (6, 11));
+    assert_eq!(
+        store.pending_bytes("first"),
+        (first_bytes, first_bytes + second_bytes)
+    );
+    assert_eq!(
+        peer.pending_bytes("second"),
+        (second_bytes, first_bytes + second_bytes)
+    );
     assert_eq!(store.persistence().pending_commits, 2);
     ColdStore::flush(&store, "first", 1).await.unwrap();
     store.flush().await.unwrap();

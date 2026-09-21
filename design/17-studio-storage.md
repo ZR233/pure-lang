@@ -1,181 +1,269 @@
-# 17 - Studio 存储与诊断
+# 17 - Studio 存储、迁移与诊断
 
-本文是 Studio 双库划分、write-behind checkpoint、恢复与诊断的唯一权威源；通用会话条目与
-core 存储语义见 [15](./15-session-storage.md)，数据切换的安全边界见 [04](./04-security.md)。
+本文是 Studio 文件布局、目录加载、会话激活、历史/调用数据库、迁移和恢复诊断的唯一权威源；
+Thread checkpoint 与 writer 合同见 [15](./15-session-storage.md)，安全边界见
+[04](./04-security.md)。
 
-## 17.1 数据库
+## 17.1 数据布局
 
-Studio 产品数据使用 `~/.anywork/studio/studio.sqlite`，会话使用同目录的 `sessions.sqlite`。
-两库不以业务表或双写协议复制 Thread 状态：产品库保存项目、Thread 目录、设置、观测缓存
-与版本化 Studio object；通用 Thread journal、输入、交互、工具交付、扩展及资源元数据保存
-在独立会话库，Item 由日志投影。拆库或结构升级遵循 17.4 的迁移契约，不能通过清空会话
-完成升级。启动前取得 Studio home 的跨进程独占 lock；数据库使用 WAL、foreign keys、busy
-timeout 与串行 write-behind transaction。运行锁文件中的 PID/宿主/启动时间仅用于诊断，
-独占权由操作系统文件锁决定；诊断元数据不强制刷盘，数据库的持久化策略不受影响。
+Studio home（`~/.anywork/`）的布局为：
 
-Workflow 是 Studio 编码的 `studio.workflow` Thread 扩展，不新增 workflow 阶段/边/转换业务
-表。历史结构仅在迁移边界转换为当前事实，不恢复旧任务运行入口。worktree lease 复用
-`studio_objects`，不新增任务表；lease 保存
-`prepared | active | preserved | cleanupRequested | cleaned`、repo/path/branch/base 和
-revision，仅表达物理资源 ownership（生命周期合同见 [12](./12-collaboration.md)）。
+```text
+~/.anywork/
+├── config.toml                     # provider/model/Skill 配置
+├── settings.toml                   # UI 与产品设置
+├── workspaces.toml                 # Project/Workspace 定义
+├── catalog.toml                    # 会话目录摘要
+├── agents/<agent-id>.toml          # 用户 Agent Profile
+├── sessions/<storage-key>/         # 每个 Thread 一个目录（storage-key = id 的 sha256 十六进制）
+│   ├── state.toml
+│   ├── state.prev.toml
+│   ├── history.sqlite
+│   └── blobs/                      # 附件正文与外置 checkpoint 正文
+│       └── checkpoint/<xx>/<sha256>   # 外置 checkpoint 正文（> 64 KiB）
+├── calls/
+│   ├── calls.sqlite                # 全局模型/工具调用记录
+│   └── blobs/
+├── migrations/                     # 一次性迁移状态、源指纹与备份/归档
+│   ├── session-migration.json
+│   ├── layout-publication.json     # 仅布局切换在途时存在
+│   └── session-archive/
+└── studio/                         # 产品库与进程级资源
+    ├── studio.sqlite               # 产品库；辅助/对象存储
+    ├── runtime.lock                # 跨进程独占锁
+    ├── attachment-drafts/          # 临时附件草稿
+    └── skills/.system/             # 构建期预置系统 Skill
+```
 
-root 的 desired 模型 selector 使用 `studio.model-route` Thread 扩展保存，格式固定为
-`pl.studio.model-route`、版本 1，内容只包含 provider、model 与 effort，不保存 endpoint、凭据
-或解析后的模型目录。扩展与下一 Turn pending model update 在同一 owner 操作中提交。冷恢复先
-重放该扩展，再用当前 provider 配置解析同一 selector；旧 Thread 缺失扩展时在恢复发布前从最后
-有效请求回执迁移，无法恢复时使用该 Thread 当前 Mode 的默认 selector。未知或损坏版本明确失败。
+canonical 会话、调用与迁移目录位于应用 home 根（`~/.anywork/`）；只有产品库与进程级资源在
+`studio/` 子目录。`<storage-key>` 是 Thread id 的 SHA-256 十六进制摘要，不是原始 id。
+一次性迁移的 staging 目录（`sessions.staging/`、`calls.staging/`）与旧共享库
+`studio/sessions.sqlite`、旧逐产品 `studio/calls.sqlite`、旧全局 `studio/attachments/`
+同处应用 home 范围，仅供迁移边界读取/切换。
 
-lease 载荷还记录归属类型（`session` 会话自身工作区 | `child` 子智能体工作区）与 owner
-Thread id，两类归属共用同一状态机、存储与显式清理入口。Thread 目录事实另外保存会话级
-`workspace_mode`（`local | worktree`）：它是产品事实，lease 是物理资源 ownership，两者职责
-不同；没有 lease 不代表会话回到 `local`，也不允许由 GUI 或目录查询推导。
+会话数据库始终位于应用 home，不写入本地或 SSH 项目工作区。进程启动前取得
+`~/.anywork/studio/runtime.lock` 的跨进程独占锁；锁文件 PID/宿主/启动时间只用于诊断，所有权
+由 OS 文件锁决定。
 
-Thread 目录事实还保存会话级工作区地址 `workspace_path`：`local` 行是 canonical Project
-目录，`worktree` 行是该会话工作树路径；它在创建会话时写定、之后只读，子线程继承所属根会话
-的地址。地址是投影给 GUI 的会话事实，不是第二份 ownership：`worktree` 行的地址由同一归属
-派生（见 [12](./12-collaboration.md) §12.5），物理创建、身份校验与清理仍只消费 durable
-lease。
+`catalog.toml` 只保存轻量目录摘要：Thread/parent/workspace 身份、title、mode、role、工作区
+模式和地址、创建/更新时间、归档状态与 `status`。它不保存当前上下文、完整 Turn、历史正文、
+请求/工具结果或执行状态，也没有独立的活动摘要字段：侧栏活动指示由内存热集合覆盖，持久
+`status` 只反映最后一次已提交的目录状态。目录摘要可用于侧栏，不可用于判断工具或 Turn 当前
+是否仍在运行。
 
-## 17.2 checkpoint 与分页
+`workspaces.toml` 保存 Project/Workspace 定义和稳定引用；物理 worktree ownership 使用版本化
+lease 记录，保留 `prepared | active | preserved | cleanupRequested | cleaned`、owner Thread、
+repo/path/branch/base/revision。目录展示与物理 ownership 是不同职责，不能互相推导。
 
-活动 Thread owner 是唯一事实源。write-behind queue 接收已冻结编码的不可变 commit；worker
-只执行外层完整性校验和 SQLite transaction。workflow tool-call、tool result 与 working state
-同批提交，失败共同回滚；该回滚仅限数据库事务，不回滚已提交内存。后台写入独立重试并
-完整保留未保存事实；待保存量达到 Thread/store 阈值时暂停新的执行受理，既有结果继续保存
-（阈值与背压见 [15](./15-session-storage.md)）。内存 revision 与 durable revision 独立，
-持久化状态仅用于诊断和释放判断。完整 workflow state 最大 256 KiB；图 hash 与尾部历史在
-进入存储前已由 Studio 验证；完整图与 Mode Prompt 只存在于当前内存注册快照，不写入
-repository。
+## 17.2 启动与按需激活
 
-查询不产生 mutation：read snapshot、timeline keyset page 与 observed state 必须可重复，
-且不触发扫描、修复、默认 Thread 创建或工具执行。
+启动顺序固定为：取得锁 → 完成或恢复迁移 → 读取全局 TOML → 读取 workspace/catalog 摘要 →
+创建空会话注册表 → 发布 GUI 首屏。此时加载的会话状态、打开的会话数据库和历史条目均为零。
 
-Studio 的 Timeline 条目索引从同一 canonical journal 与提交水位派生，可以重建；不改变
-core 日志格式，不建立第二份历史数据库。索引随 Thread 驻留释放，稳定 item 身份用于双向
-游标和锚点查询；分页返回覆盖边界、双向游标、水位与相关 Turn 元数据，不以整 Turn 限制
-页大小。连续历史阅读分页契约：冷分页与热追加消费同一水位语义，跨页阅读不重复或跳过
-条目。
+启动不遍历全部 `state.toml`，也不在首屏之后后台激活全部历史会话。全局恢复只处理迁移状态、
+数据根目录级资源和孤立物理 lease。会话内部恢复推迟到显式打开、执行或需要人工处置该会话时。
 
-生命周期遵循同一内存契约：worktree lease 的唯一 owner 驻留于进程，创建、激活、保留、
-清理与补偿只消费 owner 状态，lease 事实进入同一 write-behind 队列。Git/文件系统失败影响
-操作结果；数据库失败只影响保存诊断，不能回滚已提交内存或已完成物理清理。启动与显式
-历史恢复允许读取冷数据；恢复后的运行不回退到 SQLite 判断 ownership。
+打开 Thread 时：
 
-Thread 冷激活先校验目标及待激活祖先的身份、归属与未归档状态，再将已读取的目录条目
-补入内存热集合，最后发布 owner。缓存预热不改变目录 revision、不广播目录变更，且不能
-覆盖已有的更新条目。工具刷新与运行状态观察只能看到目录就绪的活动 owner；普通分页
-查询不隐式预热，延迟观察也不能重新插入已归档条目。冷目录分页与历史查询不能作为运行
-完成判据；尚未清理的 lease 与未保存事实不得淘汰。崩溃可能留下未保存 lease 的物理资源：
-启动核对受管目录与 Git 注册，对不明资源保留并报告。
+1. 校验 catalog 身份和祖先关系；
+2. 合并同 Thread 并发打开；
+3. 读取并验证一次 `state.toml`；
+4. 纯恢复内存 owner，不执行模型/工具；
+5. 建立增量订阅；
+6. history writer 执行固定屏障后，HistoryReader 查询首个可见窗口。
 
-## 17.3 文件配置
+读取历史页面不激活 owner。离开 GUI 页面只释放订阅和远离窗口的 GUI 数据，不自动停止仍在执行
+的 Thread。空闲、无订阅、无待保存数据且没有必须存活资源的 owner 在最终 checkpoint 后可释放。
 
-主配置位于 `~/.anywork/config.toml`，保存 provider、子代理模型 route、按 Mode 的 root 默认
-route 和 `disabled_system_agents`。
-用户 Agent Profile 位于 `~/.anywork/agents/*.toml`，一个文件一个稳定 Agent ID；runtime 原子
-保存单文件并单独报告解析诊断；系统 Profile 不写 TOML。Thread Mode 由内存注册表提供，
-不复制到数据库或用户目录；run 只保存 Mode ID 与图 hash（见 [11](./11-thread-mode.md)）。
-配置 schema 的完整契约见 [20](./20-config.md)。
+## 17.3 配置和目录文件
 
-## 17.4 恢复与版本迁移
+`config.toml` 保存 provider、模型 route、指令、Skill/MCP 等配置；`settings.toml` 保存 UI 和
+产品设置；`workspaces.toml` 保存 workspace/project；`catalog.toml` 保存会话目录。所有文件使用
+版本化 schema、CAS revision 与统一原子写入，不在正常路径双读旧格式。
 
-启动恢复处理进程 lease、Agent session snapshot、不可用项目路径和 durable worktree
-lease。worktree 部分缺失或身份不匹配时保留现场并发布带 revision、branch/base/head、
-dirty/changed-files 的 Recovery preview；显式 cleanup 才能删除。preview 与显式 cleanup 只
-面向需要人工处置的 lease：`preserved`、没有已注册 Thread 的孤儿 lease、归档清理失败而保留
-的现场，或身份与物理资源缺失、不匹配的现场；由活动（未归档）Thread 持有的 `active`
-lease 不是清理候选，cleanup 命令在服务端复合同一前置条件后才执行删除。运行期收束为
-`preserved` 的会话 worktree 与启动审计使用同一发布与清理路径，不要求等到下次启动才可见。
-运行期仍处于创建中的 lease 由进程内标记豁免发布与清理；崩溃遗留（标记随进程消失）仍按需要
-人工处置处理。任何把会话 worktree 收束为 `preserved` 的运行期路径都要在返回错误前完成发布。
-启动逐 Thread 恢复审计先
-读取纯目录关联，再独立解码各自 journal；单条日志损坏产生该 Thread 的清理提示，不提前
-阻断同项目其他日志的恢复收束。
+用户 Agent Profile 继续一个稳定 ID 一个 TOML 文件。系统 Profile 不写用户文件。Provider secret
+保存在 OS 凭据库；配置迁移改变 provider ID 时必须先写入并验证目标凭据，再切换引用。
 
-逐 Thread 恢复审计在首屏可用后执行，不作为全应用启动屏障；执行所需恢复仍在目标
-Thread activation 前完成。当前 schema 的重复启动不重新执行建表和版本写入；完整性与
-版本检查、WAL 和同步持久化保证保持不变。预置技能以构建期内容指纹及文件清单（长度、
-修改时间）复用本地资源；派生清单位于资源目录外，原子替换，不作为安全授权依据。
-缓存缺失或文件元数据改变时通过 staging 准备后替换，失败保留可重试状态。
+目录变更与会话 checkpoint 不共享伪造的跨文件事务。创建/归档等跨资源命令使用显式可恢复
+步骤和迁移/操作记录：目标文件全部验证并持久化后才发布新 catalog revision；失败保留可重试
+状态和原资源。
 
-以下为 anywork 版本演进必须满足的迁移契约；当前实现尚未全部满足，缺口见 17.6。
+## 17.4 历史、调用与实时流
 
-- Studio 在持有数据根目录独占运行锁、正常运行尚未发布时协调迁移。先识别 schema 与载荷
-  版本、校验完整性并确定到当前版本的完整迁移路径；支持跨版本升级，不要求用户逐版安装。
-  调用方取消等待不提前释放迁移锁，操作收束或恢复状态持久化后才允许交接。
-- 迁移前保留可恢复的一致性备份，不覆盖已有备份，覆盖相关数据库及其已提交 WAL 数据。库内修改使用事务；
-  跨库、文件或凭据关联的切换使用可恢复步骤，未完成前不发布混合版本状态。
-- 迁移保留项目、Thread 身份、日志事实与顺序、配置关联、附件内容、资源引用及 worktree
-  ownership。可重建投影从迁移后的事实派生，不能以空历史、空数据库或备份归档替代转换。
-- 各格式所有者负责历史结构到当前结构的转换；Studio 协调产品关系，core 仅转换通用信封，
-  provider/工具 payload 按所属格式处理。旧解码器仅服务迁移，不能成为运行时兼容入口。
-- 步骤必须可安全重试；崩溃或取消后依据持久化进度继续或恢复至切换前的一致状态，不重复
-  转换已完成数据。提交前校验记录、引用和目标格式，全部成功后才交给当前运行时。
-- 未知未来版本、损坏数据、不明 WAL、缺失迁移路径或转换失败均明确失败并保留原数据与
-  恢复材料；不能默认为初始状态，也不自动删除用户数据。独立打开存储不隐式执行产品迁移。
+每个会话 history writer 直接消费 `ThreadEffectBatch` 并写入该会话 `history.sqlite`；全局 call
+recorder 消费模型/工具调用事实并写 `calls.sqlite`。两者都不保存 owner snapshot，也不向执行
+路径提供可变状态。
 
-模型性能缓存是 `studio_objects` 中的产品投影，不新增 SQLite 表或列。载荷升级由该对象所有者
-在加载边界转换，保留旧费用、幂等 fingerprint、性能数值、provider、model 与思考强度；旧样本
-没有模型链路证据时标记历史未知，不猜测性回填。正常运行只读写当前载荷，重复重放不得累计费用
-或样本。
+产品投影在 effect 提交时形成 canonical Turn/Item/Interaction 增量：
 
-v20→v21 是在位产品迁移，在持有数据根独占运行锁的启动协调器内、备份产品库之后完成两件事：
-一是为 `threads` 增加 `workspace_mode` 列并把 worktree lease 载荷由版本 1 的 `childId` 转换
-为版本 2 的 `ownerKind` + `ownerThreadId`，既有行解释为 `local`，不删除 Thread 行或会话关联
-事实；二是把 `ssh_servers` 行迁出产品库成为 `~/.ssh/config` 管理块，`projects.ssh_server_id`
-重写为 `ssh_alias` 并删除旧表（契约明细见 [22](./22-ssh-remote.md)）。两步都幂等可重试，
-文件写入与别名分配在提交前执行外键与指纹校验；旧 lease 解码器只服务这次迁移，不成为运行时
-兼容入口，会话工作区模式不参与会话库升级，也不因 schema 变化被清空。
+```text
+Thread owner
+├─ 当前状态 snapshot → 状态订阅
+├─ Item/Turn effect → history writer
+├─ Item/Turn notification → GUI
+└─ model/tool call fact → call recorder
+```
 
-v21→v22 是同一在位迁移路径：为 `threads` 增加 `workspace_path` 列并回填既有行——`local` 行
-取所属 project 的 `path`，`worktree` 行取该 root thread durable lease 的 `path`，lease 缺失
-时回退所属 project 的 `path`；不以默认值或清空代替转换，迁移幂等可重试，不删除 Thread 行、
-会话关联事实或 lease。
+首次 Thread snapshot 只包含当前状态、pending interaction、runtime、workflow 和目录引用，不含
+完整 Timeline。History API 使用 `Latest/Before/After/Around` 直接 SQL 分页；热 Thread 与冷
+Thread 使用相同 reader，不建立驻留期全历史 `TimelineIndex`。
 
-迁移验证覆盖相邻及跨版本升级、拆库、引用与附件保全、重复启动、中途失败和重启恢复，
-以及未来版本、损坏输入、缺失转换、备份或提交失败时原数据保持可恢复。配置和凭据关联
-的专项契约见 [20](./20-config.md)。
+打开或重连为避免间隙，先注册事件接收端，再请求当前草稿进入 writer，等待固定写入屏障，最后
+查询数据库窗口；这就是首窗屏障。期间收到的事件按版本化通知封套合并：封套携带
+`epoch` + `base_revision` + `revision`，同 `epoch` 且 `base_revision` 等于客户端已知水位才连续，
+否则即为缺口。Item delta 还要求命中当前未终态 Item 且 revision 严格递增。任何缺口、未知变体
+或 `lagged` 一律重新订阅并从数据库窗口重建，不拼接空洞、不向 owner 索取已释放的历史 effect。
+普通滚动分页只查询数据库，不读取 owner、不 flush writer、不触发恢复。
 
-## 17.5 诊断
+## 17.5 Snapshot scheduler 与保存诊断
 
-日志错误包含 operation、Thread/Turn/Interaction identity 与脱敏 correlation id，不记录
-provider token、Mode Prompt 正文或用户 Profile credential。Live artifact 对 wire capture、
-配置和日志执行凭据脱敏；wire capture 可携带不进入 provider wire 的 sessionId、turnId 与
-inferenceId trace identity，使验收能按 canonical session 聚合跨 inference 调用。失败
-artifact 保留 workflow snapshot、GUI/Driver 日志、截图、文件 diff、验证输出和最后进程树。
+每个已加载 Thread 最多一个 snapshot scheduler。它维护正在写的一份和最新待写的一份，使用
+跳过错过 tick 的一秒 interval；序列化与文件 IO 在 owner 临界区外完成。scheduler 先等待
+checkpoint 的 history/blob fence，再原子发布 TOML。
 
-工具流式 trace 已分配的 item identity 在执行与输出期间保持不变：provider item ID 后到时
-只补充 provider identity，不重命名 canonical trace item；后续命令输出必须发布到已存在的
-canonical item。
+公共持久化状态至少暴露：
 
-上下文恢复验证每个条目的内容摘要、信封与索引一致性、连续 ordinal，以及同一 checkpoint
-的 transcript manifest 总数；中间缺口和尾部丢失都必须失败关闭。追加只写入新增条目，整体
-替换与新 manifest 在同一事务提交，不反复编码完整历史前缀。后台 writer 通过 revision
-receipt 识别已保存的批次前缀；事务失败或确认结果不明时保留不可变待保存事实并幂等重试；
-后台编码结果与 SQLite 查询结果不作为活动 actor 的第二份热状态。
+- state dirty/saving/durable revision；
+- history/calls admitted/durable write sequence；
+- pending operations/bytes、oldest pending age、in-flight bytes；
+- 最近类型化错误和是否因压力暂停准入。
 
-通用协作 ownership 约束 LRU：未关闭的 child 与仍拥有未关闭 child 的 parent 保持驻留，
-不依赖任务模式、角色名或返工计数；关闭后可在全部事实耐久且无其他活动引用时转为冷
-历史。订阅 pin：有活跃订阅的线程不参与 LRU 淘汰。
+状态错误不回滚已提交内存事实。关闭、归档和 shutdown 只等待相关 Thread 的固定 ticket；其他
+Thread 持续写入不能阻塞当前操作。
 
-## 17.6 已实现迁移与剩余边界
+## 17.6 worktree 与资源恢复
 
-- 当前会话 schema 6→7 已实现原位事务迁移，取代协调清空流程；保留 Thread 目录、历史正文、
-  工具身份、顺序和模型/凭据关联。使用当前用户数据副本及旧版本真实 API 生成的非空历史验证，
-  可读取旧交付并续跑同一子代理。具体变换见下节。
-- core 独立打开不兼容格式仍拒绝并保留原库；Studio 对尚无转换路径的会话版本明确失败，
-  不以备份后清空替代迁移。未穷尽所有损坏、断电和更早版本组合。
-- 配置已实现 18→19 保留式迁移：移除主智能体的旧禁用项，保留路由、其他设置及凭据；
-  该迁移失败时保留原文件。其他版本、解析或校验失败仍可能进入既有备份后替换默认配置
-  的路径，完整版本化转换仍有缺口；具体配置契约见 [20](./20-config.md)。
-- 配置 19→20 将旧 `planner` 路由复制为 `mode.simple` 与 `mode.task` 的默认 route，并从
-  `models.routes` 删除 `planner`；provider、四个系统子代理 route、用户 Profile、凭据和其他
-  设置保持不变。迁移先备份并完整校验，失败保留原文件并可重试。
+worktree lease 是物理资源唯一 ownership。会话的 `workspace_mode` 与 `workspace_path` 是目录
+展示事实，不因 lease 缺失自动改为 local。激活时 lease 或物理身份缺失/不匹配明确失败并发布
+Recovery preview；不静默切换到项目根目录。
 
-### Turn 协作格式迁移
+Recovery preview 包含 revision、branch/base/head、dirty/changed files 和缺失/冲突原因。只有
+`preserved`、孤立 lease、清理失败或身份不匹配资源进入人工清理列表；活动 Thread 的 active
+lease 不是清理候选。显式 cleanup 在服务端重新验证前置条件后执行。
 
-会话 schema 6→7 在启动独占锁和一致备份后，以单一事务转换 current entries、完整 history
-和 head hash，并核对重放一致性；journal v2→v3 合并正常结束原因，旧完成正文与证据保留，
-旧 progress/notification 转为不可执行历史载荷。原工具标识、参数和模型绑定是历史事实，不
-重命名历史调用。缺失迁移路径或遗留 destructive-reset 标记时明确失败保留材料，不再清空
-Thread 目录或重建空会话。产品 schema 22 无表结构变化。
+物理资源创建、变更和清理必须在对应 checkpoint/catalog fence 前耐久化其 ownership 记录。
+文件系统或 Git 操作成功而目录保存失败时保留资源和补偿记录，不删除现场冒充回滚。
+
+## 17.7 迁移实现状态与剩余边界
+
+本节区分已落地的迁移行为与仍存在的边界；文中未列出的能力不得据本文假定已实现或已验收。
+
+已实现（当前代码路径）：
+
+- 数据迁移只由一次性协调器执行，运行在 `~/.anywork/studio/runtime.lock` 独占运行锁内，相位
+  与源指纹写入 `~/.anywork/migrations/session-migration.json`；来源只能是共享会话库
+  （`studio/sessions.sqlite`）、旧逐产品调用库（`studio/calls.sqlite`）、旧全局附件根
+  （`studio/attachments/`）或旧产品 schema，正常启动不读取退役表。
+- 相位机为 `Detected → BackedUp → Upgraded → Exported → Verified → Published`，逐相位落盘，
+  崩溃或取消后按记录相位继续，已验证步骤按稳定身份不重复累加。
+- 产品库 schema 19–21 的正常打开明确失败（要求迁移），不能隐式原地升级：产品表结构升级
+  只在协调器内、独占锁与备份之后原位执行，v20 经 `20 → 21 → 22` 两步在同一事务提交，v21
+  只执行 `21 → 22`；步骤幂等可重启，仅在自身列改动与载荷回填成功后才推进 `user_version`。
+  仅有产品库（无会话 journal）的 home 走同一显式入口，操作者命令为
+  `pl-studio-server [--studio-home <绝对路径>] migrate-legacy-storage --confirm <绝对路径>`
+  （`--confirm` 必须等于解析出的 Studio home，且要求存在原始产品库）；正常启动只在存在旧
+  产品 schema / 旧布局信号时转换，否则保留字节并失败关闭。
+- 退役 `studio/calls.sqlite` 按 §17.8 的“退役调用库导入与发布”规则导入、重验与归档。
+- 布局切换有独立的 durable 公告 `~/.anywork/migrations/layout-publication.json`：它在任何
+  canonical 文档或 layout root 被触碰前写入，在报告落盘 `Published` 后删除并 fsync 其目录；
+  这条删除是整次切换的提交点。公告存在期间没有读取者可以归类/读取 canonical 布局或自建
+  canonical root（例如空 `calls/calls.sqlite`），一律 fail closed；崩溃留下的公告由下一次
+  持锁启动续跑相位机后退役。
+- 无 journal 的空壳 Thread 被拒绝：若退役产品目录仍有 Thread 目录行，而 staged 结果里没有
+  可恢复的会话 journal/checkpoint，迁移明确失败并保留全部原字节，绝不发布一个打不开的 Thread
+  或重建空会话。
+- 已发布当前布局的 home 在正常启动时不重建 canonical 文档：`catalog.toml`、`settings.toml`、
+  `workspaces.toml` 任一缺失即失败关闭，原字节保留；只有全新 home 才创建空文档。
+- 配置启动迁移当前处理 schema 18 与 19 → 20：备份原文件后完成路由与 disabled agent 的
+  变换，保留 provider 身份与凭据，失败保留原文件。
+
+剩余边界（不要据此宣称完整迁移能力）：
+
+- 会话版本迁移窗口硬编码为 `sessions.sqlite` schema 6 与 7；产品库迁移窗口为 schema 20–22。
+  超出窗口的版本明确失败并保留原数据，没有通用迁移路径或“逐版本补齐”。注意产品库 schema 19
+  的正常打开会报“需要迁移”，但协调器只接受 20–22，因此 19 目前**无可用转换路径**（保留字节
+  并报错）；这是已知缺口，不是已支持能力。
+- 配置只有 18、19 有版本化转换路径；启动期对未知/未来版本、不可解析、当前 schema 校验失败
+  或含内联凭据的配置一律 fail closed，保留原字节与 provider 凭据关联并报错，不再有“备份后
+  替换默认”的降级路径；仅当 `config.toml` 路径条目真正缺失时才采用内存默认配置，权限、
+  元数据或符号链接异常同样 fail closed，且解析失败诊断只报路径、类别与行/列位置，不回显
+  原文或凭据。通用版本化转换仍不完整（配置契约见 [20](./20-config.md)）。
+- 损坏 WAL、未知 payload 等异常组合未被穷尽；已知异常组合 fail closed，未知组合未验证。
+- 迁移测试覆盖“旧会话 journal + 已归档的早期 calls/附件”等磁盘态的确定性恢复，但**没有**对
+  发布中的真实 SIGKILL 做故障注入；生产切换的原子性由上述公告 + 相位续跑提供，不是单次
+  rename 的原子性。
+
+## 17.8 旧存储迁移
+
+从 `studio.sqlite` + `sessions.sqlite` 迁移到 TOML + 每会话历史库 + 全局调用库，在
+`~/.anywork/studio/runtime.lock` 独占运行锁内完成。旧事实有两个调用来源：共享会话 journal
+中随 Turn 产生的调用记录，以及旧逐产品 `studio/calls.sqlite`；两者都并入 canonical 全局
+`~/.anywork/calls/calls.sqlite`。迁移前：
+
+1. 识别产品、会话、配置和 payload 版本，确认完整升级路径；
+2. 对 SQLite 执行完整性检查和 WAL checkpoint；
+3. 创建不覆盖既有文件的一致性备份；
+4. 写入持久化迁移状态和源文件指纹。
+
+逐 Thread 转换：读取旧不可变 journal → 使用旧 decoder 纯重放 → 通过当前 projector 生成所有
+历史 items/turns 与调用记录 → 写临时 history/calls 目标 → 验证数量、身份、顺序、引用、hash 和
+终态 → 写临时 checkpoint。全部 Thread、目录、配置、凭据关联、附件和 lease 验证成功后进入
+发布：写入布局公告，重写三份 canonical 文档，对 `sessions/` 与 `calls/` 两个 layout root
+各做一次目录 rename（改用先写公告、再切换、最后删公告提交的多根协议，而非单次 rename），
+再归档退役源文件，最后落盘 `Published` 并删除公告。已存在的目标 root 视为此前发布已到达该步，
+重跑不重复 rename；崩溃后由公告与相位报告续跑，不会把半切换的安装当成现役安装。
+
+迁移幂等且可恢复：目标记录以稳定身份写入，已验证步骤不会重复累加；崩溃或取消后按迁移状态
+继续或恢复到切换前。旧 journal decoder、schema 和 projector 仅编译进迁移模块；切换后正常
+runtime、query、activation 和 subscription 不可引用它们。
+
+迁移必须保留：Project/Thread/parent 身份、目录字段、完整历史正文与原始未知 payload、顺序与
+revision、调用 binding/usage、附件/blob、provider/credential 关联、workflow 扩展和 worktree
+ownership。未知未来版本、损坏 WAL、缺失 decoder、引用不一致或任一写入失败都保留原数据并
+明确失败，不能清空、回默认值或只留下备份。
+
+### 退役 `studio/calls.sqlite` 的导入与发布
+
+旧逐产品调用库 `~/.anywork/studio/calls.sqlite`（与旧产品库同级）是独立于会话 journal 的调用
+事实源，必须并入 canonical `~/.anywork/calls/calls.sqlite`，不能在迁移中丢弃或只保留备份：
+
+- **只读快照**：导入只读取 phase-1 备份出的字节副本，从不打开或改写现场退役库；其正文
+  通过与会话调用相同的加法式、数据保全 schema upgrader 归属 blob。
+- **字节身份绑定**：源库的存在性、schema 版本、database id、行数与只读聚合指纹在导入前记录。
+  指纹是主库文件、`-wal` 边车与 `blobs` 根下每个内容寻址 blob 的相对路径和完整字节的流式摘要；
+  `-shm` 是 SQLite 打开时自建的瞬时索引，**不进入指纹**（仅在发布阶段随其他退役成员一起归档）。
+  导入与发布前都要求实际现场或归档副本仍与记录指纹一致。
+- **分阶段重验**：phase-4 从保留的 phase-1 快照重新推导源与目标审计——在“实时源 + 字节归档”并
+  集上复算源指纹要求其与记录一致，并从快照重新核对目标覆盖源事实；目标首次验证后记录字节身份。
+  发布边界只复算并比对已记录的源/归档指纹与目标字节身份，不重新推导整份源到目标的逐行审计；
+  仅当 `verified` 为真、且两处身份比对都通过时，才允许 rename 或归档。
+- **失败关闭**：源库存在却无法识别、正文缺失/损坏、目标冲突、指纹或存在性变化、发布后目标
+  被改动、源与归档同时出现同一成员等都 fail closed，保留全部原始字节并把失败写入迁移报告。
+- **幂等发布**：恢复到 `Verified` 相位时以实际 live 目标（canonical 或 staging）为准重验，
+  已 rename 的目标直接跳过；未验证的源不会被发布，也不会作为“已核实”归档。
+
+只有导入并验证成功后，退役的 `studio/calls.sqlite`（含 `-wal`/`-shm` 边车及其 blobs）才与其
+他退役源一起移入 `~/.anywork/migrations/session-archive/`；canonical `~/.anywork/calls/calls.sqlite`
+原地保留。
+
+## 17.9 数据库和发布验收
+
+新 history/calls 数据库启用 WAL、FULL、foreign keys 与 busy timeout。打包时记录并验收实际
+链接的 SQLite 版本；不能只依据 ORM crate 版本宣称具备某个 WAL 修复。迁移和发布测试至少覆盖：
+
+- 相邻及跨版本、非空历史、未知 payload、附件与 lease；
+- WAL 中仍有已提交数据、重复启动和中途失败恢复；
+- checkpoint 不越过 history/blob fence；
+- writer busy/失败/确认不明时不丢批次；
+- 大历史启动不扫描会话，分页成本不随历史前缀线性增长；
+- 冷历史查询不激活 owner、不执行模型/工具、不修改文件。
+
+## 17.10 诊断与脱敏
+
+错误包含 operation、Thread/Turn/Interaction/call identity 和脱敏 correlation ID，不记录 token、
+Mode Prompt 正文、用户 credential 或未授权请求正文。失败 artifact 可包含 migration 状态、schema、
+数据库 quick check、写入水位、队列压力、GUI/Driver 日志和文件 diff；敏感原始备份受权限保护。
+
+Timeline 的工具 item 在开始时分配稳定身份；provider identity 后到只更新同一 item。历史缺口、
+重复 ordinal、同 revision 内容冲突、checkpoint fence 越界或 blob hash 不匹配必须失败关闭，不能
+用当前工作区内容或当前工具渲染器补回。

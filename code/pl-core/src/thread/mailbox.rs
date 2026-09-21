@@ -161,7 +161,11 @@ impl Owner {
                         .permissions
                         .values()
                         .any(|record| record.state == permissions::PermissionState::Pending)
-                    && self.state.inbox.len() as u64 == self.state.consumed_messages
+                    && !self
+                        .state
+                        .inbox
+                        .iter()
+                        .any(|record| record.sequence > self.state.consumed_messages)
                     && self.pending.is_empty()
                     && self.uncommitted_tools.is_empty();
                 if idle {

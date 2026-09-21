@@ -7,6 +7,24 @@ typedef ThreadModelRouteUpdateResult = ({
   String? warning,
 });
 
+/// 按 item identity 直接读取完整条目正文的可选能力。
+///
+/// Timeline 分页对超出单条预览预算的条目只返回同身份预览；实现本能力的 API 额外
+/// 提供按 identity 读取未经截断 payload 的入口，使 preview 条目可以回源完整正文。
+/// 未实现该能力的 API（例如测试替身）退化为围绕该身份读取一页。
+abstract interface class TimelineItemBodyReader {
+  Future<TimelinePage> readTimelineItem(String threadId, String itemId);
+}
+
+/// 按需读取进程级持久化队列压力的可选能力。
+///
+/// 队列压力（排队操作数、字节、最老待保存年龄、在途字节与最近错误）是诊断观测，不是权威
+/// 会话状态。实现本能力的 API 从后端持久化协调器读取真实值；未实现该能力的 API（例如测试
+/// 替身）不提供该观测，调用方据此显示为未知，而不是编造本地推算值。
+abstract interface class PersistenceQueueReader {
+  Future<PersistenceQueueSnapshot> readPersistenceQueue();
+}
+
 abstract class StudioApi {
   Future<RecoveryStateSnapshot> retryRecovery();
   Future<ProviderCatalogView> loadProviderCatalog();
@@ -90,9 +108,8 @@ abstract class StudioApi {
   /// Cleanup failures preserve the native owner and propagate to the caller.
   Future<void> shutdownRuntime();
 
-  /// 读取线程快照；`historyCursor` 是快照窗口之外的回源锚点（Turn id）。
-  Future<({ThreadWorkspace workspace, String? historyCursor})>
-  readThreadSnapshot(String threadId);
+  /// 读取 Thread 当前状态；Timeline 历史由 [listTimelineItems] 分页提供。
+  Future<ThreadWorkspace> readThreadSnapshot(String threadId);
   Future<TimelinePage> listTimelineItems(
     String threadId, {
     TimelineQueryKind kind = TimelineQueryKind.latest,
@@ -201,7 +218,8 @@ AttachmentDraftView _attachmentDraftFromFrb(
   );
 }
 
-class FrbStudioApi implements StudioApi {
+class FrbStudioApi
+    implements StudioApi, TimelineItemBodyReader, PersistenceQueueReader {
   static final startupProgress = ValueNotifier(
     StudioStartupPhase.loadingBridge,
   );
@@ -231,7 +249,6 @@ class FrbStudioApi implements StudioApi {
   static Future<void>? _shutdownFuture;
   static Future<void> Function()? _initializationOverrideForTesting;
   static bool _rustInitialized = false;
-  static ConfigRecoveryNotice? _pendingConfigRecoveryNotice;
   ProviderCatalogView? _providerCatalogCache;
 
   static Future<void> ensureReady() => _ensureReady();
@@ -243,7 +260,6 @@ class FrbStudioApi implements StudioApi {
     _initFuture = null;
     _shutdownFuture = null;
     _initializationOverrideForTesting = initialization;
-    _pendingConfigRecoveryNotice = null;
   }
 
   static Future<void> _ensureReady() {
@@ -276,17 +292,12 @@ class FrbStudioApi implements StudioApi {
             const Duration(milliseconds: 100),
             (_) => _readStartupPhase(),
           );
-          final frb.BridgeStudioStartupResult startup;
           try {
-            startup = await frb.startStudioRuntime();
+            await frb.startStudioRuntime();
             _readStartupPhase();
           } finally {
             progress.cancel();
           }
-          final recovery = startup.configRecovery;
-          _pendingConfigRecoveryNotice = recovery == null
-              ? null
-              : ConfigRecoveryNotice(backupPath: recovery.backupPath);
         }
       } catch (error, stackTrace) {
         if (identical(_initFuture, attempt)) {
@@ -324,7 +335,6 @@ class FrbStudioApi implements StudioApi {
     RustLib.dispose();
     _rustInitialized = false;
     _initFuture = null;
-    _pendingConfigRecoveryNotice = null;
   }
 
   @override
@@ -449,9 +459,7 @@ class FrbStudioApi implements StudioApi {
       'startup_stage=read_state elapsed_ms=${watch.elapsedMilliseconds}',
     );
     startupProgress.value = StudioStartupPhase.ready;
-    final recovery = _pendingConfigRecoveryNotice;
-    _pendingConfigRecoveryNotice = null;
-    return state.copyWith(configRecoveryNotice: recovery);
+    return state;
   }
 
   @override
@@ -688,6 +696,14 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
+  Future<PersistenceQueueSnapshot> readPersistenceQueue() async {
+    await _ensureReady();
+    return _persistenceQueueFromFrb(
+      await _bridgeCall(frb.readPersistenceQueue),
+    );
+  }
+
+  @override
   Future<SettingsStateSnapshot> setModelRole({
     required int expectedSettingsRevision,
     required String roleKey,
@@ -771,16 +787,12 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<({ThreadWorkspace workspace, String? historyCursor})>
-  readThreadSnapshot(String threadId) async {
+  Future<ThreadWorkspace> readThreadSnapshot(String threadId) async {
     await _ensureReady();
     final snapshot = await _bridgeCall(
       () => frb.readThread(threadId: threadId),
     );
-    return (
-      workspace: _threadWorkspaceFromFrb(snapshot),
-      historyCursor: snapshot.historyCursor,
-    );
+    return _threadWorkspaceFromSnapshot(snapshot);
   }
 
   @override
@@ -1015,27 +1027,16 @@ class FrbStudioApi implements StudioApi {
         ),
       ),
     );
-    final turns = page.turns.map(_timelineTurnFromFrb).toList();
-    final dispositions = {
-      for (final entry in turns) entry.turn.turnId: entry.disposition,
-    };
-    return TimelinePage(
-      threadId: page.threadId,
-      watermark: page.watermark.toInt(),
-      items: [
-        for (final item in page.items)
-          _threadItemFromFrb(
-            item,
-            contextDisposition:
-                dispositions[item.turnId] ?? ThreadContextDisposition.active,
-          ),
-      ],
-      olderCursor: page.olderCursor,
-      newerCursor: page.newerCursor,
-      firstItemId: page.firstItemId,
-      lastItemId: page.lastItemId,
-      turns: turns,
+    return _timelinePageFromFrb(page);
+  }
+
+  @override
+  Future<TimelinePage> readTimelineItem(String threadId, String itemId) async {
+    await _ensureReady();
+    final page = await _bridgeCall(
+      () => frb.readTimelineItem(threadId: threadId, itemId: itemId),
     );
+    return _timelinePageFromFrb(page);
   }
 
   @override

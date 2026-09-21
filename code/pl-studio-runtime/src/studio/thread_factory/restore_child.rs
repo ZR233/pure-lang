@@ -29,15 +29,14 @@ impl StudioThreadFactory {
             ));
         }
         let project = self.project_record(&thread.project_id).await?;
-        let history = super::recovery::recover_journal(&self.services.store, id)
+        let protocol_thread: pl_protocol::Thread = thread.clone().into();
+        let checkpoint = super::recovery::load_checkpoint(&self.services.store, &protocol_thread)
             .await
-            .map_err(|error| resource_error("recover Thread journal", error))?;
-        if history.is_empty() {
-            return Err(ThreadAssemblyError::Identity(format!(
-                "child {id} has no saved journal"
-            )));
-        }
-        let restored = pl_core::thread::journal::replay(&history)?;
+            .map_err(|error| resource_error("load Thread checkpoint", error))?
+            .ok_or_else(|| {
+                ThreadAssemblyError::Identity(format!("child {id} has no saved checkpoint"))
+            })?;
+        let restored = checkpoint.state.clone();
         let saved = restored.extensions.get("studio.workspace").ok_or_else(|| {
             ThreadAssemblyError::Identity(format!("child {id} has no workspace receipt"))
         })?;
@@ -180,12 +179,7 @@ impl StudioThreadFactory {
             ));
         }
 
-        let resources = FileResourceStore::new(
-            self.services
-                .store
-                .attachments_dir()
-                .join("thread-resources"),
-        );
+        let resources = FileResourceStore::new(self.services.store.session_resources_dir(id));
         let prepared = self
             .prepare_thread_tools(ThreadToolAssembly {
                 thread_id: id,
@@ -202,6 +196,10 @@ impl StudioThreadFactory {
         if request.cancellation.is_cancelled() {
             return Err(ThreadAssemblyError::Closed);
         }
+        let persistence = crate::studio::storage::thread_writer::ThreadStorageSink::new(
+            self.services.store.clone(),
+            protocol_thread,
+        );
         let mut initial_extensions = BTreeMap::new();
         if bootstrap_profile {
             initial_extensions.insert(
@@ -225,15 +223,13 @@ impl StudioThreadFactory {
             route,
             model_available,
             hosted_tools: prepared.hosted,
-            history,
+            checkpoint: Some(checkpoint),
             initial_context: Vec::new(),
             initial_extensions,
             tools: Vec::new(),
             resources: ResourceAccess::new(resources),
             capacity: Default::default(),
-            cold_store: Some(pl_core::thread::cold::ColdStoreHandle::new(
-                self.services.store.sessions().clone(),
-            )),
+            cold_store: Some(pl_core::thread::cold::ColdStoreHandle::new(persistence)),
         };
         Ok(prepared.tools.install(spec))
     }

@@ -231,6 +231,39 @@ PersistenceStateSnapshot _persistenceStateFromFrb(
   );
 }
 
+PersistenceQueueSnapshot _persistenceQueueFromFrb(
+  frb.BridgePersistenceQueueSnapshot snapshot,
+) {
+  return PersistenceQueueSnapshot(
+    pendingOperations: snapshot.pendingOperations.toInt(),
+    pendingBytes: snapshot.pendingBytes.toInt(),
+    inFlightBytes: snapshot.inFlightBytes.toInt(),
+    oldestPendingAgeMillis: snapshot.oldestPendingAgeMillis?.toInt(),
+    lastError: snapshot.lastError,
+    pressurePaused: snapshot.pressurePaused,
+    threads: [
+      for (final thread in snapshot.threads)
+        ThreadPersistenceSnapshot(
+          threadId: thread.threadId,
+          // `None` 是未知（没有 writer 上报），与已观测到的 0 区分保留。
+          stateDirtyRevision: thread.stateDirtyRevision?.toInt(),
+          stateSavingRevision: thread.stateSavingRevision?.toInt(),
+          stateDurableRevision: thread.stateDurableRevision?.toInt(),
+          historyAdmittedSequence: thread.historyAdmittedSequence?.toInt(),
+          historyDurableSequence: thread.historyDurableSequence?.toInt(),
+          callsAdmittedSequence: thread.callsAdmittedSequence?.toInt(),
+          callsDurableSequence: thread.callsDurableSequence?.toInt(),
+          pendingOperations: thread.pendingOperations.toInt(),
+          pendingBytes: thread.pendingBytes.toInt(),
+          oldestPendingAgeMillis: thread.oldestPendingAgeMillis?.toInt(),
+          inFlightBytes: thread.inFlightBytes.toInt(),
+          lastError: thread.lastError,
+          pressurePaused: thread.pressurePaused,
+        ),
+    ],
+  );
+}
+
 ProjectDirectoryState _projectDirectoryFromFrb(
   frb.BridgeProjectDirectoryState snapshot,
 ) {

@@ -313,6 +313,39 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
+    /// Latest committed Turn record per identity, folded from the effect stream in commit order.
+    fn committed_turns(
+        effects: &[std::sync::Arc<pl_core::thread::ThreadEffectBatch>],
+    ) -> Vec<pl_core::thread::TurnRecord> {
+        let mut turns: Vec<pl_core::thread::TurnRecord> = Vec::new();
+        for effect in effects {
+            let Some(turn) = effect.turn.as_ref() else {
+                continue;
+            };
+            match turns
+                .iter()
+                .position(|previous| previous.turn_id == turn.turn_id)
+            {
+                Some(index) => turns[index] = turn.clone(),
+                None => turns.push(turn.clone()),
+            }
+        }
+        turns
+    }
+
+    /// Latest committed record per task identity, folded from the effect stream.
+    fn committed_tasks(
+        effects: &[std::sync::Arc<pl_core::thread::ThreadEffectBatch>],
+    ) -> std::collections::BTreeMap<String, pl_core::thread::task::TaskRecord> {
+        let mut tasks = std::collections::BTreeMap::new();
+        for effect in effects {
+            for record in effect.tasks.iter() {
+                tasks.insert(record.id.clone(), record.clone());
+            }
+        }
+        tasks
+    }
+
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn redirected_prompt_waits_for_real_command_descendants_to_exit() {
@@ -445,8 +478,10 @@ mod tests {
                     "{:#?}",
                     state.input_execution
                 );
-                if state.turns.len() == 2
-                    && state.turns[1].state == TurnState::Finished(TurnOutcome::Completed)
+                // A finished Turn leaves the bounded current snapshot, so the committed Turn
+                // records are the authority that the redirect Turn itself reached completion.
+                let turns = committed_turns(&thread.effects().await.unwrap());
+                if turns.len() == 2 && turns[1].state == TurnState::Finished(TurnOutcome::Completed)
                 {
                     break;
                 }
@@ -454,10 +489,12 @@ mod tests {
         })
         .await
         .unwrap();
-        assert_eq!(
-            thread.snapshot().tasks["task:blocking-command"].status,
-            task::TaskStatus::Cancelled
-        );
+        // The cancelled command task is settled history; fold its committed revisions.
+        let tasks = committed_tasks(&thread.effects().await.unwrap());
+        let task = tasks
+            .get("task:blocking-command")
+            .expect("the interrupted command task is committed history");
+        assert_eq!(task.status, task::TaskStatus::Cancelled);
         thread.close().await.unwrap();
     }
 

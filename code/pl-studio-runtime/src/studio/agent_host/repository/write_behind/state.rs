@@ -1,6 +1,4 @@
-//! PersistenceState 的计算与发布，以及 writer 退出时的屏障失败处理。
-
-use std::collections::VecDeque;
+//! PersistenceState 的计算与发布。
 
 use pl_protocol::StateError;
 
@@ -10,9 +8,7 @@ use crate::studio::{
     PersistenceStateSnapshot, ReadyPersistence, RecoveringPersistence, unix_seconds,
 };
 
-use super::super::store_error;
 use super::handle::WriterShared;
-use super::queue::{QueueEntry, QueuedMutation, StudioDirectoryMutation, StudioMutation};
 
 pub(super) fn update_healthy_state(shared: &WriterShared, pending: usize) {
     if matches!(
@@ -112,24 +108,9 @@ fn first_failed_at(shared: &WriterShared) -> Option<i64> {
     }
 }
 
-fn oldest_pending_revision(shared: &WriterShared) -> Option<u64> {
-    shared
-        .queue
-        .lock()
-        .expect("write-behind queue lock poisoned")
-        .iter()
-        .find_map(|entry| match entry {
-            QueueEntry::Mutation(QueuedMutation {
-                mutation: StudioMutation::Directory(directory),
-                ..
-            }) => match directory.as_ref() {
-                StudioDirectoryMutation::ModelPerformance(commit) => Some(commit.revision),
-                StudioDirectoryMutation::Delta(_) | StudioDirectoryMutation::WorktreeLease(_) => {
-                    None
-                }
-            },
-            QueueEntry::Barrier(_) => None,
-        })
+/// 目录事实与 lease 没有单条 revision 概念；保留该位以维持状态快照契约。
+fn oldest_pending_revision(_shared: &WriterShared) -> Option<u64> {
+    None
 }
 
 fn pending_from_queue(shared: &WriterShared) -> usize {
@@ -137,24 +118,5 @@ fn pending_from_queue(shared: &WriterShared) -> usize {
         .queue
         .lock()
         .expect("write-behind queue lock poisoned")
-        .iter()
-        .filter(|entry| entry.is_commit())
-        .count()
-}
-
-/// writer 退出时只失败屏障，待落库 commit 保留供诊断。
-pub(super) fn fail_barriers(shared: &WriterShared, reason: &str) {
-    let mut queue = shared
-        .queue
-        .lock()
-        .expect("write-behind queue lock poisoned");
-    let mut retained = VecDeque::with_capacity(queue.len());
-    while let Some(entry) = queue.pop_front() {
-        if let QueueEntry::Barrier(sender) = entry {
-            let _ = sender.send(Err(store_error(reason.to_string())));
-        } else {
-            retained.push_back(entry);
-        }
-    }
-    *queue = retained;
+        .len()
 }

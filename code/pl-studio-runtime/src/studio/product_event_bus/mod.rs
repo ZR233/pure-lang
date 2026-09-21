@@ -28,10 +28,11 @@ use super::ids::unix_seconds;
 
 /// Studio 低频产品状态 owner 与事件通道。
 ///
-/// 启动时以 SQLite 建立 Project 小集合基线；运行期间 Project、Thread 与
+/// 启动时以 `workspaces.toml` 建立 Project 小集合基线；运行期间 Project、Thread 与
 /// Agent 目录快照都由内存增量提交维护。所有 `read_*` 都是纯查询，活动事件不得
-/// 回读数据库覆盖热事实。Thread 目录是"活动热集合 + SQLite 冷分页 overlay"：
-/// `thread_index` 只保存仍有内存事实的 Thread，旧数据分页回源 SQLite。
+/// 回读数据库覆盖热事实。Thread 目录是"活动热集合 + `catalog.toml` 冷分页 overlay"：
+/// `thread_index` 只保存仍有内存事实的 Thread，旧数据分页回源 `catalog.toml`；
+/// SQLite `thread`/`project` 表只是 write-behind 镜像，运行期不作为第二读事实源。
 #[derive(Clone)]
 pub struct ProductEventBus {
     store: StudioStore,

@@ -80,6 +80,21 @@ impl Owner {
                 Err(ThreadError::InvalidIdentity)
             };
         }
+        // The call already settled its permission identity when any committed permission record for
+        // this call is still inside the bounded live effect window; a second prompt for the same call
+        // must not mint a fresh pending revision or a new execution lease.
+        if recent_effect_fact(&self.effect_window, |effect| {
+            effect
+                .permissions
+                .iter()
+                .rev()
+                .find(|record| record.id == id)
+                .cloned()
+        })
+        .is_some()
+        {
+            return Err(ThreadError::InvalidIdentity);
+        }
         let now = crate::time::unix_seconds();
         let record = PermissionRecord {
             created_at: now,
@@ -107,20 +122,34 @@ impl Owner {
         if self.state.lifecycle != ThreadLifecycle::Open || self.interrupt.is_closing() {
             return Err(ThreadError::Closed);
         }
-        let previous = self
-            .state
-            .permissions
-            .get(&resolution.id)
-            .ok_or(ThreadError::InvalidIdentity)?;
         let state = match resolution.decision {
             PermissionDecision::Allow => PermissionState::Allowed,
             PermissionDecision::Deny => PermissionState::Denied,
+        };
+        let live = self.state.permissions.get(&resolution.id).cloned();
+        let settled = live.is_none();
+        let previous = match live {
+            Some(previous) => previous,
+            None => recent_effect_fact(&self.effect_window, |effect| {
+                effect
+                    .permissions
+                    .iter()
+                    .rev()
+                    .find(|record| record.id == resolution.id)
+                    .cloned()
+            })
+            .ok_or(ThreadError::InvalidIdentity)?,
         };
         if previous.state == state
             && previous.response == resolution.payload
             && resolution.expected_revision.checked_add(1) == Some(previous.revision)
         {
             return Ok(previous.clone());
+        }
+        if settled {
+            // A settled permission only ever replays the decision recorded in its receipt; it no
+            // longer owns a lease, so a differing retry can never grant new execution.
+            return Err(ThreadError::InvalidIdentity);
         }
         let authority = self
             .permission_leases

@@ -8,10 +8,13 @@ void registerAppLifecycleTests() {
     await _pumpStudioApp(tester, DriverDemoStudioApi());
 
     expect(find.byKey(StudioDriverKeys.shell), findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.timeline), findsOneWidget);
+    // §6.1：首屏只恢复选择，不打开会话——展示显式打开入口，而不是直接渲染历史。
+    expect(find.byKey(StudioDriverKeys.unopenedThread), findsOneWidget);
 
     await tester.tap(find.byKey(StudioDriverKeys.threadRow('thread-alt')));
     await tester.pumpAndSettle();
+    // 显式点击会话才打开它：首窗由历史分页提供，快照不携带条目。
+    expect(find.byKey(StudioDriverKeys.unopenedThread), findsNothing);
     expect(
       find.text('Riverpod selector boundary is isolated.'),
       findsOneWidget,

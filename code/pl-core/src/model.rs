@@ -179,6 +179,9 @@ pub struct ModelError {
     pub details: Option<Box<OpaquePayload>>,
     pub kind: ModelFailureKind,
     pub usage: ModelUsage,
+    /// Formats without an explicit null (TOML state checkpoints) omit an absent source, so the
+    /// field must default instead of requiring it during decode.
+    #[serde(default)]
     #[serde(with = "crate::error_record::optional")]
     pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
@@ -206,6 +209,36 @@ impl ModelError {
             details: None,
             usage: ModelUsage::default(),
             source: Some(Box::new(source)),
+        }
+    }
+
+    /// Diagnostic source-chain text of this failure, exactly as serialization records it.
+    ///
+    /// The persisted form of a `ModelError` keeps only this text — never the provider or plugin type
+    /// that produced it — so two failures with equal text serialize identically.
+    pub(crate) fn source_chain(&self) -> Vec<String> {
+        match &self.source {
+            Some(source) => crate::error_record::chain_text(source.as_ref()),
+            None => Vec::new(),
+        }
+    }
+
+    /// Copy of this failure with replaced `details` and `source`, preserving kind and usage.
+    ///
+    /// `ModelError` owns a `Box<dyn Error>` and is deliberately not `Clone`; a copy is rebuilt from
+    /// the two things the persisted form keeps, so the copy persists and reports exactly like the
+    /// original while the live owner keeps the untouched value. Callers pass the source as its
+    /// portable chain (see [`crate::error_record::chain_source`]) instead of the original type.
+    pub(crate) fn with_parts(
+        &self,
+        details: Option<Box<OpaquePayload>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        Self {
+            details,
+            kind: self.kind,
+            usage: self.usage.clone(),
+            source,
         }
     }
 }

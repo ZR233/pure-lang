@@ -98,6 +98,23 @@ impl SqliteSessionStore {
         Self::start(sqlite::open(Some(options)).await?, Some(lock)).await
     }
 
+    /// Opens an existing database while adopting an **already-held exclusive lease**.
+    ///
+    /// The one-time migration coordinator takes the `.sqlite.lock` lease once and hands a clone of
+    /// that file to this constructor. A cloned handle shares the same underlying lock, so the
+    /// coordinator's own reader can open the retired repository without re-locking the file it
+    /// already holds (which would self-block), while every other process stays excluded for as long
+    /// as the coordinator's original handle lives.
+    ///
+    /// # Errors
+    /// Returns filesystem, database or schema errors without rebuilding an existing database.
+    pub async fn open_with_lock(
+        options: SqliteSessionOptions,
+        lease: std::fs::File,
+    ) -> Result<Self, SessionStoreError> {
+        Self::start(sqlite::open(Some(options)).await?, Some(lease)).await
+    }
+
     /// Opens an ephemeral SQLite database with the same commit semantics.
     ///
     /// # Errors

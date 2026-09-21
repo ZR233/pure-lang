@@ -1,4 +1,5 @@
 //! Product-owned relationship checks and descendant shutdown over generic Thread handles.
+use super::observation::DeliveryDisposition;
 use super::{Registry, State, StudioThreadAssembler, ThreadAssemblyError};
 use pl_core::{
     context::{ContextContent, OpaquePayload},
@@ -237,19 +238,32 @@ impl AgentControlHost for AgentHost {
         if let Err(error) = owner.publish_child_resources(&id) {
             return Err(cleanup_spawn_failure(&owner, &id, error).await);
         }
-        let delivery = child
-            .send_message_and_continue(
-                pl_core::thread::inbox::ThreadMessage {
-                    id: format!("initial:{}:{}", context.thread_id.len(), context.call_id),
-                    source_id: format!("agent:{}", context.thread_id),
-                    payload: OpaquePayload::text(request.message.clone()),
-                    context: vec![ContextContent::Text {
-                        text: Arc::from(request.message),
-                    }],
-                },
-                options,
-            )
-            .await;
+        let message = pl_core::thread::inbox::ThreadMessage {
+            id: format!("initial:{}:{}", context.thread_id.len(), context.call_id),
+            source_id: format!("agent:{}", context.thread_id),
+            payload: OpaquePayload::text(request.message.clone()),
+            context: vec![ContextContent::Text {
+                text: Arc::from(request.message),
+            }],
+        };
+        // The child's initial delivery is adjudicated against the child's durable identity index
+        // first: a repeated spawn command must answer with the original receipt instead of queueing
+        // the same initial message as new work, and an unverifiable or conflicting identity is
+        // rejected rather than delivered again.
+        let delivery = match owner.adjudicate_message(&id, &message).await {
+            Ok(DeliveryDisposition::Receipt(sequence)) => Ok(sequence),
+            Ok(DeliveryDisposition::New) => child
+                .send_message_and_continue(message, options)
+                .await
+                .map_err(ThreadAssemblyError::from),
+            Ok(DeliveryDisposition::Conflict) => {
+                Err(ThreadAssemblyError::MessageConflict(message.id.clone()))
+            }
+            Ok(DeliveryDisposition::Unverifiable) => {
+                Err(ThreadAssemblyError::MessageUnverifiable(message.id.clone()))
+            }
+            Err(error) => Err(error),
+        };
         match delivery {
             Ok(sequence) => output(SpawnReceipt {
                 agent_id: id,
@@ -297,20 +311,39 @@ impl AgentControlHost for AgentHost {
                 })?;
             (entry.thread.clone(), entry.execution)
         };
-        let sequence = target
-            .send_message_and_continue(
-                pl_core::thread::inbox::ThreadMessage {
-                    id: message.id.clone(),
-                    source_id: format!("agent:{caller}"),
-                    payload: OpaquePayload::text(message.message.clone()),
-                    context: vec![ContextContent::Text {
-                        text: Arc::from(message.message),
-                    }],
-                },
-                options,
-            )
+        let delivery = pl_core::thread::inbox::ThreadMessage {
+            id: message.id.clone(),
+            source_id: format!("agent:{caller}"),
+            payload: OpaquePayload::text(message.message.clone()),
+            context: vec![ContextContent::Text {
+                text: Arc::from(message.message),
+            }],
+        };
+        // The target's durable identity index adjudicates the delivery before it can become new work:
+        // an identical repeat answers with its original receipt instead of a second delivery, while a
+        // conflicting or unverifiable identity is rejected and a failed lookup never admits a
+        // possible duplicate.
+        let sequence = match owner
+            .adjudicate_message(&message.target, &delivery)
             .await
-            .map_err(ToolError::new)?;
+            .map_err(ToolError::new)?
+        {
+            DeliveryDisposition::Receipt(sequence) => sequence,
+            DeliveryDisposition::New => target
+                .send_message_and_continue(delivery, options)
+                .await
+                .map_err(ToolError::new)?,
+            DeliveryDisposition::Conflict => {
+                return Err(ToolError::new(ThreadAssemblyError::MessageConflict(
+                    message.id.clone(),
+                )));
+            }
+            DeliveryDisposition::Unverifiable => {
+                return Err(ToolError::new(ThreadAssemblyError::MessageUnverifiable(
+                    message.id.clone(),
+                )));
+            }
+        };
         output(
             serde_json::json!({"target":message.target, "messageId":message.id, "sequence":sequence}),
         )
@@ -445,6 +478,39 @@ mod tests {
     use super::super::tests::spec;
     use super::*;
     use pretty_assertions::assert_eq;
+
+    /// 已提交 commit 流里的 Turn 记录，按提交顺序保留每个 identity 的最新状态。
+    ///
+    /// 终态 Turn 会被 `retain_live_facts` 从常驻快照移除，因此行为断言读这里的 durable 证据。
+    async fn committed_turns(
+        thread: &pl_core::thread::ThreadHandle,
+    ) -> Vec<pl_core::thread::TurnRecord> {
+        let mut turns: Vec<pl_core::thread::TurnRecord> = Vec::new();
+        for effect in thread.effects().await.unwrap() {
+            let Some(turn) = effect.turn.as_ref() else {
+                continue;
+            };
+            match turns
+                .iter()
+                .position(|previous| previous.turn_id == turn.turn_id)
+            {
+                Some(index) => turns[index] = turn.clone(),
+                None => turns.push(turn.clone()),
+            }
+        }
+        turns
+    }
+
+    /// 已提交 commit 流里的消息 admission 记录，按提交顺序。
+    async fn committed_messages(
+        thread: &pl_core::thread::ThreadHandle,
+    ) -> Vec<pl_core::thread::inbox::InboxRecord> {
+        let mut messages = Vec::new();
+        for effect in thread.effects().await.unwrap() {
+            messages.extend(effect.inbox.iter().cloned());
+        }
+        messages
+    }
 
     #[tokio::test]
     async fn control_ports_restrict_targets_to_descendants_and_close_children_first() {
@@ -617,11 +683,14 @@ mod tests {
         );
         cleanup.notify_one();
         let mut updates = child.subscribe();
+        // 终态 Turn 在提交后离开常驻快照（`retain_live_facts`），因此等待条件与断言都改读
+        // 已提交 commit 流：两次 Turn 的 identity、状态与顺序仍是同一条 durable 证据。
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                let snapshot = updates.next().await.unwrap();
-                if snapshot.turns.len() == 2
-                    && snapshot.turns[1].state
+                let _ = updates.next().await.unwrap();
+                let turns = committed_turns(&child).await;
+                if turns.len() == 2
+                    && turns[1].state
                         == pl_core::thread::TurnState::Finished(
                             pl_core::thread::TurnOutcome::Completed,
                         )
@@ -634,23 +703,41 @@ mod tests {
         .unwrap();
         assert_eq!(contexts.lock().unwrap().len(), 2);
         assert_eq!(child.snapshot().consumed_messages, 2);
+        let turns = committed_turns(&child).await;
+        assert_eq!(turns.len(), 2, "both Turns are committed facts");
+        assert_ne!(turns[0].turn_id, turns[1].turn_id);
+        assert_eq!(
+            turns[0].state,
+            pl_core::thread::TurnState::Interrupted,
+            "the redirected Turn is settled as interrupted"
+        );
+        // 消息来源去重：只有被授权的父 source 的 admission 进入提交事实，越权消息一条都没有。
+        let messages = committed_messages(&child).await;
+        assert_eq!(
+            messages
+                .iter()
+                .map(|record| record.message.id.clone())
+                .collect::<Vec<_>>(),
+            ["initial", "redirect"]
+        );
         assert!(
-            child
-                .snapshot()
-                .inbox
+            messages
                 .iter()
                 .all(|record| record.message.source_id == "agent:root")
         );
-        assert_eq!(
-            child.snapshot().turns[0].state,
-            pl_core::thread::TurnState::Interrupted
+        assert!(
+            !messages
+                .iter()
+                .any(|record| record.message.id == "forbidden"),
+            "an unauthorized parent must never inject a message"
         );
         host.send("root", message("idle-followup")).await.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                let snapshot = updates.next().await.unwrap();
-                if snapshot.turns.len() == 3
-                    && snapshot.turns[2].state
+                let _ = updates.next().await.unwrap();
+                let turns = committed_turns(&child).await;
+                if turns.len() == 3
+                    && turns[2].state
                         == pl_core::thread::TurnState::Finished(
                             pl_core::thread::TurnOutcome::Completed,
                         )
@@ -661,6 +748,16 @@ mod tests {
         })
         .await
         .unwrap();
+        let turns = committed_turns(&child).await;
+        assert_eq!(turns.len(), 3);
+        assert_eq!(
+            committed_messages(&child)
+                .await
+                .iter()
+                .map(|record| record.message.id.clone())
+                .collect::<Vec<_>>(),
+            ["initial", "redirect", "idle-followup"]
+        );
         assert_eq!(contexts.lock().unwrap().len(), 3);
         assert!(owner.close_all().await.is_empty());
     }

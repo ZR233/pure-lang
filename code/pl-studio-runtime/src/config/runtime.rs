@@ -4,7 +4,7 @@ use crate::studio::unix_seconds;
 use crate::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
-use super::{ConfigRecoveryReport, ConfigStore, StudioConfig};
+use super::{ConfigStore, StudioConfig};
 
 /// Settings desired state 的唯一进程内 owner。
 ///
@@ -14,7 +14,6 @@ pub struct ConfigRuntime {
     store: ConfigStore,
     command_lock: Arc<Mutex<()>>,
     state: Arc<RwLock<ConfigRuntimeSnapshot>>,
-    startup_recovery: Option<ConfigRecoveryReport>,
 }
 
 /// 已校验 Studio 配置及其单调 revision。
@@ -71,21 +70,16 @@ impl From<ConfigRuntimeError> for PureError {
 impl ConfigRuntime {
     /// 从磁盘加载并校验初始 desired config。
     pub fn initialize(store: ConfigStore) -> ConfigRuntimeResult<Self> {
-        let startup = store.load_for_startup()?;
+        let config = store.load_for_startup()?;
         Ok(Self {
             store,
             command_lock: Arc::new(Mutex::new(())),
             state: Arc::new(RwLock::new(ConfigRuntimeSnapshot {
                 revision: 1,
                 updated_at: unix_seconds(),
-                config: startup.config,
+                config,
             })),
-            startup_recovery: startup.recovery,
         })
-    }
-
-    pub(crate) fn startup_recovery(&self) -> Option<ConfigRecoveryReport> {
-        self.startup_recovery.clone()
     }
 
     /// 返回内存 canonical snapshot，不访问磁盘。
@@ -269,27 +263,27 @@ mod tests {
     }
 
     #[test]
-    fn initialize_retains_the_startup_recovery_report() {
+    fn initialize_fails_closed_on_unknown_schema_without_rewriting() {
         let home = tempfile::Builder::new()
-            .prefix("config-runtime-recovery-")
+            .prefix("config-runtime-unknown-schema-")
             .tempdir()
             .unwrap()
             .keep();
         let store = ConfigStore::new(ConfigPaths::from_home(home));
-        std::fs::create_dir_all(store.paths().config_dir()).unwrap();
+        let config_path = store.paths().config_file().to_path_buf();
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
         let current_schema = format!("schema_version = {}", crate::STUDIO_CONFIG_SCHEMA_VERSION);
-        let legacy = toml::to_string_pretty(&StudioConfig::default_config())
+        let unsupported = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
             .replace(&current_schema, "schema_version = 14");
-        std::fs::write(store.paths().config_file(), legacy).unwrap();
+        std::fs::write(&config_path, &unsupported).unwrap();
 
-        let runtime = ConfigRuntime::initialize(store).unwrap();
+        let Err(error) = ConfigRuntime::initialize(store) else {
+            panic!("unknown schema must fail closed instead of starting with defaults");
+        };
 
-        assert_eq!(
-            runtime.read().unwrap().config,
-            StudioConfig::default_config()
-        );
-        assert!(runtime.startup_recovery().unwrap().backup_path().exists());
+        assert!(error.to_string().contains("schema version"), "{error}");
+        assert_eq!(std::fs::read_to_string(&config_path).unwrap(), unsupported);
     }
 
     #[test]
@@ -324,7 +318,10 @@ mod tests {
 
         let error = runtime.reload_from_disk(before.revision).unwrap_err();
 
-        assert!(error.to_string().contains("failed to parse Studio config"));
+        assert!(
+            error.to_string().contains("invalid Studio config TOML"),
+            "{error}"
+        );
         assert_eq!(runtime.read().unwrap(), before);
         assert_eq!(
             std::fs::read_to_string(path).unwrap(),

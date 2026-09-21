@@ -118,8 +118,28 @@ impl Owner {
                     call_id: call.call_id.clone(),
                 });
             }
-            if !ids.insert(&call.call_id) || self.state.context.records.iter().any(|record| record.tool_calls.iter().any(|old| old.call_id == call.call_id)) || self.state.attempts.iter().any(|attempt| matches!(&attempt.outcome, AttemptOutcome::Committed(previous) if previous.tool_calls.iter().any(|old| old.call_id == call.call_id))) {
-                return Some(ModelOutputViolation::DuplicateCallIdentity { call_id: call.call_id.clone() });
+            // Call identity is global to the Thread: a call already admitted by the current context,
+            // by a still-resident attempt or by the live ledger must never be re-declared. The
+            // current context is the bounded current fact set, not the whole history.
+            if !ids.insert(&call.call_id)
+                || self.state.live_calls.contains_key(&call.call_id)
+                || self.state.context.records.iter().any(|record| {
+                    record
+                        .tool_calls
+                        .iter()
+                        .any(|old| old.call_id == call.call_id)
+                })
+                || self.state.attempts.iter().any(|attempt| {
+                    matches!(
+                        &attempt.outcome,
+                        AttemptOutcome::Committed(previous)
+                            if previous.tool_calls.iter().any(|old| old.call_id == call.call_id)
+                    )
+                })
+            {
+                return Some(ModelOutputViolation::DuplicateCallIdentity {
+                    call_id: call.call_id.clone(),
+                });
             }
         }
         let solo = output
@@ -360,6 +380,11 @@ impl Owner {
                     )
                 }
                 Ok(output) => {
+                    let admitted_call_ids = output
+                        .tool_calls
+                        .iter()
+                        .map(|call| call.call_id.clone())
+                        .collect::<Vec<_>>();
                     for call in &output.tool_calls {
                         if let Some(executor) = plan.get(&call.tool_id) {
                             self.pending.insert(
@@ -378,7 +403,9 @@ impl Owner {
                     records.push(ContextRecord {
                         tool_calls: output.tool_calls.clone(),
                         id: format!("{}:output", input.attempt_id),
-                        turn_id: Some(input.turn_id),
+                        // 提交记录与 effect/子引用共享同一个稳定 turn id：这里克隆而不是移动，
+                        // `input.turn_id` 之后仍要写入 live_calls。
+                        turn_id: Some(input.turn_id.clone()),
                         source: ContextSource::Assistant,
                         content: output.content.clone(),
                     });
@@ -387,6 +414,12 @@ impl Owner {
                         records: records.into(),
                     };
                     self.state.private_context = output.private_context.clone();
+                    for call_id in admitted_call_ids {
+                        self.state
+                            .live_calls
+                            .entry(call_id)
+                            .or_insert_with(|| input.turn_id.clone());
+                    }
                     (AttemptOutcome::Committed(output.clone()), Ok(output))
                 }
             }

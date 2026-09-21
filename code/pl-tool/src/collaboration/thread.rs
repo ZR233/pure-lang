@@ -424,14 +424,21 @@ mod tests {
                 );
                 read.unwrap();
                 list.unwrap();
-                assert_eq!(thread.snapshot().tasks.len(), 2);
+                // A settled task leaves the bounded current snapshot, so the committed effect
+                // stream is the authority for the tasks this read batch actually executed.
+                let tasks = committed_tasks(&thread.effects().await.unwrap());
+                assert_eq!(tasks.len(), 2);
                 assert!(
-                    thread
-                        .snapshot()
-                        .tasks
+                    tasks
                         .values()
                         .all(|task| task.status == task::TaskStatus::Succeeded)
                 );
+                let mut call_ids = tasks
+                    .values()
+                    .map(|task| task.call_id.clone())
+                    .collect::<Vec<_>>();
+                call_ids.sort();
+                assert_eq!(call_ids, ["list_agents", "read_file"]);
             } else {
                 assert!(
                     matches!(
@@ -442,10 +449,23 @@ mod tests {
                     ),
                     "{name}: {result:?}"
                 );
-                assert!(thread.snapshot().tasks.is_empty());
+                assert!(committed_tasks(&thread.effects().await.unwrap()).is_empty());
             }
             thread.close().await.unwrap();
         }
+    }
+
+    /// Latest committed record per task identity, folded from the effect stream.
+    fn committed_tasks(
+        effects: &[std::sync::Arc<pl_core::thread::ThreadEffectBatch>],
+    ) -> std::collections::BTreeMap<String, pl_core::thread::task::TaskRecord> {
+        let mut tasks = std::collections::BTreeMap::new();
+        for effect in effects {
+            for record in effect.tasks.iter() {
+                tasks.insert(record.id.clone(), record.clone());
+            }
+        }
+        tasks
     }
 
     #[test]

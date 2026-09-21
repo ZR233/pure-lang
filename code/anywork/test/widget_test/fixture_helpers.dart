@@ -1,5 +1,14 @@
 part of '../widget_test.dart';
 
+/// 显式打开当前选中会话并等到首个权威帧后的历史窗口落地。
+///
+/// 生产代码的首屏只恢复“选择”，不打开会话（§6.1）；依赖订阅/实时帧/历史窗口的测试
+/// 必须先显式打开，语义与用户点击“打开会话”完全一致。
+Future<void> _openSelectedThread(ProviderContainer container) async {
+  await container.read(studioControllerProvider.notifier).openSelectedThread();
+  await pumpEventQueue();
+}
+
 Widget _timelineHarness({
   required String threadId,
   required List<ThreadItemView> items,
@@ -13,6 +22,12 @@ Widget _timelineHarness({
   bool isLoadingOlder = false,
   StudioApi? api,
   TimelineRemoteImageProviderFactory? remoteImageProviderFactory,
+  Set<String> previewedItemIds = const {},
+  Set<String> loadingItemIds = const {},
+  Map<String, String> itemBodyErrors = const {},
+  Set<String> pendingItemBodyIds = const {},
+  Set<String> unavailableItemIds = const {},
+  ValueChanged<String>? onLoadItemBody,
   double height = 520,
 }) {
   return _timelineApp(
@@ -29,6 +44,12 @@ Widget _timelineHarness({
           turn: _testTurn(threadId: threadId, state: turnState),
           onLoadOlder: onLoadOlder,
           isLoadingOlder: isLoadingOlder,
+          previewedItemIds: previewedItemIds,
+          loadingItemIds: loadingItemIds,
+          itemBodyErrors: itemBodyErrors,
+          pendingItemBodyIds: pendingItemBodyIds,
+          unavailableItemIds: unavailableItemIds,
+          onLoadItemBody: onLoadItemBody,
         ),
       ),
     ),

@@ -135,17 +135,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get runtimeFatalRetry => '重试';
 
   @override
-  String get configRecoveryMessage => '检测到不兼容配置，原文件已备份并替换为当前默认配置。';
-
-  @override
-  String configRecoveryBackupPath(String path) {
-    return '备份位置：$path';
-  }
-
-  @override
-  String get configRecoveryDismissTooltip => '关闭配置恢复提示';
-
-  @override
   String persistenceDegraded(int count) {
     return '保存暂时不可用，尚有 $count 项更改未保存；可以继续会话。';
   }
@@ -162,6 +151,65 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get persistenceRetry => '重试保存';
+
+  @override
+  String get threadUnopenedTitle => '会话尚未打开';
+
+  @override
+  String get threadUnopenedBody => '当前仅选中该会话。打开后会读取当前状态与历史；在你发送消息之前不会恢复任何执行。';
+
+  @override
+  String get threadOpenAction => '打开会话';
+
+  @override
+  String get timelineItemBodyLoad => '加载完整内容';
+
+  @override
+  String get timelineItemBodyTruncated => '本页显示的是超大条目的截断预览。';
+
+  @override
+  String get timelineItemBodyLoading => '正在加载完整内容…';
+
+  @override
+  String get timelineItemBodyPending => '完整内容尚未写入历史，请稍后重试。';
+
+  @override
+  String get timelineItemBodyRetry => '重试';
+
+  @override
+  String get timelineItemBodyUnavailable => '当前数据源无法提供完整内容。';
+
+  @override
+  String get persistenceQueueTitle => '持久化诊断';
+
+  @override
+  String get persistenceQueueUnavailable => '当前数据源无法提供队列压力。';
+
+  @override
+  String persistenceQueuePending(int operations, int bytes) {
+    return '排队：$operations 项操作，$bytes 字节';
+  }
+
+  @override
+  String persistenceQueueInFlight(int bytes) {
+    return '正在写入：$bytes 字节';
+  }
+
+  @override
+  String persistenceQueueOldestAge(int millis) {
+    return '最老未保存：$millis 毫秒';
+  }
+
+  @override
+  String get persistenceQueuePressurePaused => '存储压力下已暂停新的推理准入。';
+
+  @override
+  String persistenceQueueError(String message) {
+    return '最近错误：$message';
+  }
+
+  @override
+  String get persistenceQueueRefresh => '刷新诊断';
 
   @override
   String recoveryGlobalWarning(int count) {

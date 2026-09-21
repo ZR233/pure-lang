@@ -1,6 +1,7 @@
 part of 'studio_api.dart';
 
-class DemoStudioApi implements StudioApi {
+class DemoStudioApi
+    implements StudioApi, TimelineItemBodyReader, PersistenceQueueReader {
   @override
   Future<RecoveryStateSnapshot> retryRecovery() async =>
       (await readStudioState()).recoveryState;
@@ -290,7 +291,12 @@ class DemoStudioApi implements StudioApi {
         revision: 0,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
       ),
-      workspacesByThread: Map.unmodifiable(_workspaces),
+      // Product snapshot 与 bridge 一样只暴露当前状态；Timeline 条目属于
+      // 分页历史，由 subscribeThread 首帧之后的 listTimelineItems 提供。
+      workspacesByThread: Map.unmodifiable({
+        for (final entry in _workspaces.entries)
+          entry.key: _snapshotOf(entry.value),
+      }),
       workspaceUiByThread: {
         for (final thread in threads)
           thread.id: const WorkspaceUiState(
@@ -1243,6 +1249,11 @@ class DemoStudioApi implements StudioApi {
   Future<PersistenceStateSnapshot> retryPersistence() async =>
       const PersistenceStateSnapshot.ready();
 
+  /// demo 是纯内存实现，没有异步持久化队列，因此队列压力恒为空的 canonical 观测。
+  @override
+  Future<PersistenceQueueSnapshot> readPersistenceQueue() async =>
+      const PersistenceQueueSnapshot.empty();
+
   @override
   Future<SettingsStateSnapshot> setModelRole({
     required int expectedSettingsRevision,
@@ -1455,7 +1466,7 @@ class DemoStudioApi implements StudioApi {
     if (snapshot == null) {
       throw StateError('unknown demo thread $threadId');
     }
-    yield ThreadSnapshotFrame(workspace: snapshot);
+    yield ThreadSnapshotFrame(workspace: _snapshotOf(snapshot));
     yield* _threadEvents.stream.where(
       (frame) => switch (frame) {
         ThreadSnapshotFrame(:final workspace) =>
@@ -1467,11 +1478,22 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<({ThreadWorkspace workspace, String? historyCursor})>
-  readThreadSnapshot(String threadId) async {
+  Future<ThreadWorkspace> readThreadSnapshot(String threadId) async {
     final workspace = (await readStudioState()).workspacesByThread[threadId];
     if (workspace == null) throw StateError('unknown demo thread $threadId');
-    return (workspace: workspace, historyCursor: null);
+    return _snapshotOf(workspace);
+  }
+
+  /// Thread 首帧/读取只暴露当前状态：条目、Turn 摘要与实时尾部属于分页历史，
+  /// 由 [listTimelineItems] 与实时通知提供。
+  ThreadWorkspace _snapshotOf(ThreadWorkspace workspace) {
+    return workspace.copyWith(
+      items: const [],
+      cachedItems: const {},
+      latestItemIds: const [],
+      timelineTurns: const {},
+      latestTurn: null,
+    );
   }
 
   @override
@@ -1497,14 +1519,38 @@ class DemoStudioApi implements StudioApi {
         ? index
         : (start + limit).clamp(start, all.length);
     final items = all.sublist(start, end);
+    return _demoTimelinePage(threadId, items, start: start, end: end);
+  }
+
+  @override
+  Future<TimelinePage> readTimelineItem(String threadId, String itemId) async {
+    final all = _workspaces[threadId]?.items;
+    if (all == null) throw StateError('unknown demo Thread');
+    final index = all.indexWhere((item) => item.id == itemId);
+    if (index < 0) throw StateError('unknown timeline item');
+    // demo 没有字节预览预算，按 identity 回源就是同一条完整载荷。
+    return _demoTimelinePage(threadId, [all[index]]);
+  }
+
+  TimelinePage _demoTimelinePage(
+    String threadId,
+    List<ThreadItemView> items, {
+    int? start,
+    int? end,
+  }) {
+    final all = _workspaces[threadId]?.items ?? const <ThreadItemView>[];
     return TimelinePage(
       threadId: threadId,
+      databaseId: _demoHistoryDatabaseId(threadId),
       watermark: _workspaces[threadId]!.revision,
       items: items,
-      olderCursor: start > 0 ? items.firstOrNull?.id : null,
-      newerCursor: end < all.length ? items.lastOrNull?.id : null,
+      olderCursor: start != null && start > 0 ? items.firstOrNull?.id : null,
+      newerCursor: end != null && end < all.length
+          ? items.lastOrNull?.id
+          : null,
       firstItemId: items.firstOrNull?.id,
       lastItemId: items.lastOrNull?.id,
+      turns: _demoTimelineTurns(items),
     );
   }
 
@@ -2507,6 +2553,44 @@ ThreadWorkspace _demoUpsertItem(
   }
   items.sort(_compareThreadItems);
   return workspace.copyWith(revision: revision, items: items);
+}
+
+/// demo 的历史数据库身份：与分页、按 identity 回源共用，使窗口身份校验生效。
+String _demoHistoryDatabaseId(String threadId) => 'demo-history:$threadId';
+
+/// 页内 Turn 摘要：取自页范围内的 Turn Item；`lastItemId` 指向该 Turn 在本页
+/// 的最后一条内容，供行投影定位终态行。
+List<TimelineTurnView> _demoTimelineTurns(List<ThreadItemView> items) {
+  final lastItemByTurn = <String, ThreadItemView>{};
+  final turnItemByTurn = <String, ThreadItemView>{};
+  for (final item in items) {
+    final previous = lastItemByTurn[item.turnId];
+    if (previous == null || item.ordinal > previous.ordinal) {
+      lastItemByTurn[item.turnId] = item;
+    }
+    if (item.state is ThreadTurnItemStateView) {
+      turnItemByTurn[item.turnId] = item;
+    }
+  }
+  return [
+    for (final entry in turnItemByTurn.entries)
+      TimelineTurnView(
+        turn: _turnOfItem(entry.value),
+        lastItemId: lastItemByTurn[entry.key]!.id,
+      ),
+  ];
+}
+
+StudioTurnView _turnOfItem(ThreadItemView item) {
+  final state = item.state as ThreadTurnItemStateView;
+  return StudioTurnView(
+    inputId: state.inputId,
+    turnId: item.turnId,
+    threadId: item.threadId,
+    revision: item.revision,
+    state: state.state,
+    updatedAt: item.updatedAt,
+  );
 }
 
 ThreadWorkspace _demoAppendDelta(

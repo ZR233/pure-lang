@@ -1,6 +1,6 @@
 //! Usage and product state are decoded by their producers, never inferred from tool text.
 use super::ProjectionError;
-use pl_core::thread::{AttemptOutcome, ThreadSnapshot, journal::ThreadCommit};
+use pl_core::thread::{AttemptOutcome, ThreadSnapshot};
 use pl_protocol::{
     CacheUsageSummary, InferenceAccounting, ThreadRuntimeSnapshot, ThreadRuntimeUsage, UsageReport,
 };
@@ -9,106 +9,39 @@ use std::sync::Arc;
 pub(super) fn project_runtime(
     thread_id: &str,
     state: &ThreadSnapshot,
-    journal: &[Arc<ThreadCommit>],
+    updated_at: i64,
+    summary: &pl_core::thread::UsageSummary,
 ) -> Result<ThreadRuntimeSnapshot, ProjectionError> {
-    let updated_at = journal
-        .iter()
-        .rev()
-        .find(|commit| commit.sequence <= state.commit_sequence)
-        .map_or(0, |commit| commit.committed_at);
-    let mut usage = ThreadRuntimeUsage {
-        has_incomplete_usage: false,
-        model: String::new(),
-        context_window: None,
-        latest_context_tokens: 0,
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        cached_prompt_tokens: 0,
-        cache_write_tokens: 0,
-        reasoning_tokens: 0,
-        inference_count: 0,
-        total_tokens: 0,
-        cache_usage: CacheUsageSummary::default(),
-        estimated_costs: Vec::new(),
-        estimated_cache_savings: Vec::new(),
-        has_unpriced_usage: false,
+    // Totals come from the Thread's cumulative summary, never from whatever attempts are still
+    // resident: finished attempts are dropped by the commit that produced them, so aggregating
+    // them here is what made a hot increment, a reconnect and a cold restore disagree.
+    let usage = ThreadRuntimeUsage {
+        has_incomplete_usage: summary.has_incomplete_usage,
+        model: summary.model.clone(),
+        context_window: summary.context_window,
+        latest_context_tokens: summary.latest_context_tokens,
+        prompt_tokens: summary.prompt_tokens,
+        completion_tokens: summary.completion_tokens,
+        cached_prompt_tokens: summary.cached_prompt_tokens,
+        cache_write_tokens: summary.cache_write_tokens,
+        reasoning_tokens: summary.reasoning_tokens,
+        inference_count: summary.inference_count,
+        total_tokens: summary.total_tokens,
+        cache_usage: CacheUsageSummary {
+            input_tokens: summary.cache_input_tokens,
+            cache_read_tokens: summary.cache_read_tokens,
+            hit_rate: (summary.cache_input_tokens > 0)
+                .then(|| summary.cache_read_tokens as f64 / summary.cache_input_tokens as f64),
+            has_incomplete_usage: summary.cache_incomplete,
+        },
+        estimated_costs: protocol_costs(&summary.estimated_costs),
+        estimated_cache_savings: protocol_costs(&summary.estimated_cache_savings),
+        has_unpriced_usage: summary.has_unpriced_usage,
         prompt_generation: None,
         prompt_cache_policy: None,
         prefix_changed_reason: None,
         updated_at,
     };
-    let mut turn_completion_tokens: u64 = 0;
-    let mut turn_decode_millis: u64 = 0;
-    for attempt in state.attempts.iter() {
-        // Model identity and capacity come from the newest attempt's admission-time binding, so
-        // they are projected before any response exists. An attempt that saved no capacity clears
-        // the previous model's capacity instead of reusing a value from an older model.
-        match attempt.request_metadata.as_ref() {
-            Some(metadata) => {
-                let request = pl_model::runtime::model_request_receipt(metadata)?;
-                usage.model = request.binding.requested_model;
-                usage.context_window = request.binding.context_window;
-            }
-            None => usage.context_window = None,
-        }
-        let output = match &attempt.outcome {
-            AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => {
-                Some(Ok(output))
-            }
-            AttemptOutcome::Failed(error) => Some(Err(error.as_ref())),
-            AttemptOutcome::Cancelled { result } => Some(result.as_ref().map_err(Arc::as_ref)),
-            AttemptOutcome::Running => None,
-            AttemptOutcome::Interrupted => {
-                usage.has_incomplete_usage = true;
-                usage.has_unpriced_usage = true;
-                usage.cache_usage.has_incomplete_usage = true;
-                None
-            }
-        };
-        let Some(output) = output else {
-            continue;
-        };
-        let accounting = match output {
-            Ok(output) => match pl_model::runtime::model_response_receipt(output)? {
-                Some(receipt) => {
-                    if state
-                        .turns
-                        .last()
-                        .is_some_and(|turn| turn.turn_id == attempt.turn_id)
-                        && let Some(timing) = receipt.response.timing
-                    {
-                        turn_completion_tokens = turn_completion_tokens
-                            .checked_add(
-                                receipt.response.accounting.usage.output_tokens.unwrap_or(0),
-                            )
-                            .ok_or(ProjectionError::Count)?;
-                        turn_decode_millis = turn_decode_millis
-                            .checked_add(timing.decode_millis)
-                            .ok_or(ProjectionError::Count)?;
-                    }
-                    receipt.response.accounting
-                }
-                None => unknown_accounting(&output.usage),
-            },
-            Err(error) => pl_model::runtime::model_failure_receipt(error)?.map_or_else(
-                || unknown_accounting(&error.usage),
-                |receipt| receipt.accounting,
-            ),
-        };
-        add_usage(&mut usage, &accounting)?;
-    }
-    let latest_context_tokens = usage.latest_context_tokens;
-    for record in state.extensions.values() {
-        if let Some(receipt) = super::compactions::receipt(&record.payload)? {
-            add_usage(&mut usage, &receipt.accounting)?;
-        }
-    }
-    usage.latest_context_tokens = latest_context_tokens;
-    if usage.cache_usage.input_tokens > 0 {
-        usage.cache_usage.hit_rate = Some(
-            usage.cache_usage.cache_read_tokens as f64 / usage.cache_usage.input_tokens as f64,
-        );
-    }
     let todo = state
         .extensions
         .get("pl.tool.todo")
@@ -156,8 +89,8 @@ pub(super) fn project_runtime(
         thread_id: thread_id.into(),
         model_route,
         usage,
-        turn_completion_tokens,
-        turn_decode_millis,
+        turn_completion_tokens: summary.turn_completion_tokens,
+        turn_decode_millis: summary.turn_decode_millis,
         todo,
         workflow,
         active_skills,
@@ -186,8 +119,174 @@ fn unknown_accounting(usage: &pl_core::model::ModelUsage) -> InferenceAccounting
     }
 }
 
-fn add_usage(
-    target: &mut ThreadRuntimeUsage,
+/// Folds one committed effect into the Thread's cumulative accounting exactly once.
+///
+/// Every field is written as an absolute total and `applied_sequence` makes a repeated fold of the
+/// same effect a no-op, so the live subscription and the durable writer may both fold the same
+/// effect without ever double counting. Finished attempts leave the resident state in the commit
+/// that produced them, so this summary — not `state.attempts` — is what survives them.
+pub(in crate::studio) fn fold_effect_accounting(
+    summary: &mut pl_core::thread::UsageSummary,
+    effect: &pl_core::thread::ThreadEffectBatch,
+) -> Result<(), ProjectionError> {
+    if effect.sequence <= summary.applied_sequence {
+        return Ok(());
+    }
+    // Fold into a copy so the sequence and the values it accounted for commit together: a failed
+    // decode or a counter overflow leaves the caller's summary untouched instead of advancing
+    // `applied_sequence` while only some fields were updated, which a retry would then skip.
+    let mut next = summary.clone();
+    fold_effect_accounting_in_place(&mut next, effect)?;
+    next.applied_sequence = effect.sequence;
+    *summary = next;
+    Ok(())
+}
+
+/// Applies one effect to a summary that has not yet recorded its sequence.
+fn fold_effect_accounting_in_place(
+    summary: &mut pl_core::thread::UsageSummary,
+    effect: &pl_core::thread::ThreadEffectBatch,
+) -> Result<(), ProjectionError> {
+    // 新的 Turn 开始时每轮计数重新累计；旧 Turn 的尝试不再改变它。
+    if let Some(turn) = &effect.turn
+        && summary.turn_id != turn.turn_id
+    {
+        summary.turn_id = turn.turn_id.clone();
+        summary.turn_completion_tokens = 0;
+        summary.turn_decode_millis = 0;
+    }
+    if let Some(update) = &effect.attempt {
+        // 模型身份与容量来自 admission 时的绑定，因此在响应存在之前就已投影。
+        match update.request_metadata.as_ref() {
+            Some(metadata) => {
+                let request = pl_model::runtime::model_request_receipt(metadata)?;
+                summary.model = request.binding.requested_model;
+                summary.context_window = request.binding.context_window;
+            }
+            None => summary.context_window = None,
+        }
+        let output = match &update.outcome {
+            AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => {
+                Some(Ok(output))
+            }
+            AttemptOutcome::Failed(error) => Some(Err(error.as_ref())),
+            AttemptOutcome::Cancelled { result } => Some(result.as_ref().map_err(Arc::as_ref)),
+            AttemptOutcome::Running => None,
+            AttemptOutcome::Interrupted => {
+                summary.has_incomplete_usage = true;
+                summary.has_unpriced_usage = true;
+                summary.cache_incomplete = true;
+                None
+            }
+        };
+        if let Some(output) = output {
+            let accounting = match output {
+                Ok(output) => match pl_model::runtime::model_response_receipt(output)? {
+                    Some(receipt) => {
+                        if summary.turn_id == update.turn_id
+                            && let Some(timing) = receipt.response.timing
+                        {
+                            summary.turn_completion_tokens = summary
+                                .turn_completion_tokens
+                                .checked_add(
+                                    receipt.response.accounting.usage.output_tokens.unwrap_or(0),
+                                )
+                                .ok_or(ProjectionError::Count)?;
+                            summary.turn_decode_millis = summary
+                                .turn_decode_millis
+                                .checked_add(timing.decode_millis)
+                                .ok_or(ProjectionError::Count)?;
+                        }
+                        receipt.response.accounting
+                    }
+                    None => unknown_accounting(&output.usage),
+                },
+                Err(error) => pl_model::runtime::model_failure_receipt(error)?.map_or_else(
+                    || unknown_accounting(&error.usage),
+                    |receipt| receipt.accounting,
+                ),
+            };
+            add_accounting(summary, &accounting)?;
+        }
+    }
+    for change in effect.extensions.iter() {
+        let pl_core::thread::extensions::ExtensionChange::Put { record, .. } = change else {
+            continue;
+        };
+        if record.payload.format() != "pl.studio.compaction" {
+            continue;
+        }
+        // 辅助压缩计费按原路径各纳入一次，但不代表新的上下文长度。
+        if let Some(receipt) = super::compactions::receipt(&record.payload)? {
+            let latest = summary.latest_context_tokens;
+            add_accounting(summary, &receipt.accounting)?;
+            summary.latest_context_tokens = latest;
+        }
+    }
+    Ok(())
+}
+
+/// Test-only: folds the attempts and compaction receipts a snapshot carries, the way the durable
+/// writer folds the committed effects that produced them.
+#[cfg(test)]
+pub(in crate::studio) fn fold_state_for_test(
+    summary: &mut pl_core::thread::UsageSummary,
+    state: &ThreadSnapshot,
+) -> Result<(), ProjectionError> {
+    let mut sequence = 0;
+    for attempt in state.attempts.iter() {
+        sequence += 1;
+        let effect = pl_core::thread::ThreadEffectBatch {
+            thread_id: "thread".into(),
+            sequence,
+            turn: (sequence == 1)
+                .then(|| state.turns.last().cloned())
+                .flatten(),
+            attempt: Some(pl_core::thread::journal::AttemptUpdate {
+                request_metadata: attempt.request_metadata.clone(),
+                tool_projection: attempt.tool_projection.clone(),
+                turn_id: attempt.turn_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                retry_of: attempt.retry_of.clone(),
+                input_revision: attempt.input.revision,
+                tools: attempt.tools.clone(),
+                outcome: attempt.outcome.clone(),
+                // `Option<TokenEstimate>` 是 `Copy`；这里按值取出，与克隆得到的值相同。
+                input_estimate: attempt.input_estimate,
+            }),
+            ..Default::default()
+        };
+        fold_effect_accounting(summary, &effect)?;
+    }
+    for (id, record) in state.extensions.iter() {
+        sequence += 1;
+        let effect = pl_core::thread::ThreadEffectBatch {
+            thread_id: "thread".into(),
+            sequence,
+            extensions: vec![pl_core::thread::extensions::ExtensionChange::Put {
+                id: id.clone(),
+                record: record.clone(),
+            }]
+            .into(),
+            ..Default::default()
+        };
+        fold_effect_accounting(summary, &effect)?;
+    }
+    Ok(())
+}
+
+fn protocol_costs(costs: &[pl_core::thread::UsageCost]) -> Vec<pl_protocol::RuntimeCostAmount> {
+    costs
+        .iter()
+        .map(|cost| pl_protocol::RuntimeCostAmount {
+            currency: cost.currency.clone(),
+            amount: cost.amount,
+        })
+        .collect()
+}
+
+fn add_accounting(
+    target: &mut pl_core::thread::UsageSummary,
     accounting: &InferenceAccounting,
 ) -> Result<(), ProjectionError> {
     let totals = accounting.usage.totals();
@@ -211,18 +310,16 @@ fn add_usage(
         *current = current.checked_add(value).ok_or(ProjectionError::Count)?;
     }
     if let Some((input, read)) = valid_cache_sample(&accounting.usage) {
-        target.cache_usage.input_tokens = target
-            .cache_usage
-            .input_tokens
+        target.cache_input_tokens = target
+            .cache_input_tokens
             .checked_add(input)
             .ok_or(ProjectionError::Count)?;
-        target.cache_usage.cache_read_tokens = target
-            .cache_usage
+        target.cache_read_tokens = target
             .cache_read_tokens
             .checked_add(read)
             .ok_or(ProjectionError::Count)?;
     } else {
-        target.cache_usage.has_incomplete_usage = true;
+        target.cache_incomplete = true;
     }
     if let Some(tokens) = accounting.usage.known_total_tokens() {
         target.latest_context_tokens = tokens;
@@ -256,7 +353,7 @@ fn valid_cache_sample(usage: &UsageReport) -> Option<(u64, u64)> {
 }
 
 fn merge_costs(
-    target: &mut Vec<pl_protocol::RuntimeCostAmount>,
+    target: &mut Vec<pl_core::thread::UsageCost>,
     incoming: &[pl_protocol::RuntimeCostAmount],
 ) {
     for cost in incoming {
@@ -266,7 +363,10 @@ fn merge_costs(
         {
             existing.amount += cost.amount;
         } else {
-            target.push(cost.clone());
+            target.push(pl_core::thread::UsageCost {
+                currency: cost.currency.clone(),
+                amount: cost.amount,
+            });
         }
     }
     target.sort_by(|left, right| left.currency.cmp(&right.currency));
@@ -368,7 +468,9 @@ mod tests {
     }
 
     fn projected_usage(state: &ThreadSnapshot) -> ThreadRuntimeUsage {
-        project_runtime("thread", state, &[])
+        let mut summary = pl_core::thread::UsageSummary::default();
+        fold_state_for_test(&mut summary, state).expect("fold succeeds");
+        project_runtime("thread", state, 0, &summary)
             .expect("projection succeeds")
             .usage
     }
@@ -653,10 +755,14 @@ mod tests {
                 })),
             ),
         ]);
-        assert!(matches!(
-            project_runtime("thread", &state, &[]),
-            Err(super::ProjectionError::Count)
-        ));
+        let mut summary = pl_core::thread::UsageSummary::default();
+        assert!(
+            matches!(
+                fold_state_for_test(&mut summary, &state),
+                Err(super::ProjectionError::Count)
+            ),
+            "累计溢出以类型化错误失败"
+        );
     }
 
     /// Running 尝试不计数也不污染缓存样本完整性。

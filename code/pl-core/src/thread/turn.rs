@@ -253,6 +253,7 @@ impl Owner {
 mod tests {
     use super::*;
     use crate::model::{ModelError, ModelRequest, ModelSession, ModelToolCall, PreparedModelCall};
+    use crate::thread::tests::history_snapshot;
     use crate::tool::opaque::{CallContext, Registration, Tool, ToolError};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -510,16 +511,14 @@ mod tests {
             "Solo mixed batch must be corrected: {result:?}"
         );
         assert_eq!(count.load(Ordering::SeqCst), 1);
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(snapshot.attempts.len(), 2);
         assert_eq!(snapshot.attempts[1].retry_of.as_deref(), Some("attempt:0"));
         assert!(matches!(
             snapshot.attempts[0].outcome,
             AttemptOutcome::Rejected { .. }
         ));
-        let replayed = journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.attempts[1].retry_of.as_deref(), Some("attempt:0"));
-        assert_eq!(replayed.deliveries.len(), 1);
+        assert_eq!(snapshot.deliveries.len(), 1);
         thread.close().await.unwrap();
     }
 
@@ -572,9 +571,12 @@ mod tests {
                     ModelOutputViolation::SoloBatch { .. }
                 ))
             ));
-            assert_eq!(thread.snapshot().attempts.len(), expected_attempts);
+            assert_eq!(
+                history_snapshot(&thread).await.attempts.len(),
+                expected_attempts
+            );
             assert_eq!(count.load(Ordering::SeqCst), 0);
-            assert!(thread.snapshot().deliveries.is_empty());
+            assert!(history_snapshot(&thread).await.deliveries.is_empty());
             thread.close().await.unwrap();
         }
     }
@@ -628,18 +630,15 @@ mod tests {
     #[derive(Debug)]
     struct RejectAttemptStore;
     impl cold::ColdStore for RejectAttemptStore {
-        fn admit(
-            &self,
-            _: &str,
-            _: u64,
-            payload: OpaquePayload,
-        ) -> Result<(), cold::ColdStoreError> {
-            let record: serde_json::Value = serde_json::from_str(payload.content()).unwrap();
-            if record
-                .pointer("/attempt/outcome/kind")
-                .and_then(serde_json::Value::as_str)
-                == Some("rejected")
-            {
+        fn admit(&self, _: &str, write: cold::ThreadWrite) -> Result<(), cold::ColdStoreError> {
+            if matches!(
+                write
+                    .effect
+                    .attempt
+                    .as_ref()
+                    .map(|attempt| &attempt.outcome),
+                Some(AttemptOutcome::Rejected { .. })
+            ) {
                 return Err(cold::ColdStoreError {
                     source: Box::new(std::io::Error::other("rejected attempt persistence failed")),
                 });
@@ -730,9 +729,9 @@ mod tests {
                 ),
                 "unexpected corruption {corruption} failure: {error:?}"
             );
-            assert_eq!(thread.snapshot().attempts.len(), 1);
+            assert_eq!(history_snapshot(&thread).await.attempts.len(), 1);
             assert_eq!(count.load(Ordering::SeqCst), 0);
-            assert!(thread.snapshot().deliveries.is_empty());
+            assert!(history_snapshot(&thread).await.deliveries.is_empty());
             let closed = thread.close().await;
             if corruption != 0 {
                 closed.unwrap();

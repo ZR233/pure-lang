@@ -42,17 +42,23 @@ async fn restored_studio_owner_keeps_exact_model_history_and_opens_an_independen
     }];
     let first = owner.assemble(spec).await.unwrap();
     first.step(step("first", "hello")).await.unwrap();
-    let history = first.journal().await.unwrap();
+    let checkpoint = first.checkpoint(first.snapshot().commit_sequence).unwrap();
     let original = first.snapshot().context;
     owner.close("thread").await.unwrap();
     assert!(owner.thread("thread").is_none());
     let mut spec = actor::specification("thread", route, root.path());
-    spec.history = history;
+    spec.checkpoint = Some(checkpoint);
     let restored = owner.assemble(spec).await.unwrap();
     assert_eq!(restored.snapshot().context, original);
     restored.step(step("second", "followup")).await.unwrap();
-    let replay = pl_core::thread::journal::replay(&restored.journal().await.unwrap()).unwrap();
-    assert_eq!(replay.context, restored.snapshot().context);
+    assert!(
+        restored
+            .snapshot()
+            .context
+            .records
+            .starts_with(original.records.as_ref()),
+        "restarted owner must keep the restored model history"
+    );
     let close_failures = owner.close_all().await;
     assert!(
         close_failures.is_empty(),

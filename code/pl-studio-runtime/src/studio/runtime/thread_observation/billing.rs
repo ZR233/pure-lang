@@ -1,13 +1,13 @@
 //! Billing uses producer receipts and committed timestamps, never current pricing.
 use super::super::ModelPerformanceOwner;
 use anyhow::Result;
-use pl_core::thread::{AttemptOutcome, journal::ThreadCommit};
+use pl_core::thread::{AttemptOutcome, ThreadEffectBatch};
 use pl_protocol::{InferenceAccounting, InferenceBillingRecord};
 
 pub(super) fn record(
     owner: &ModelPerformanceOwner,
     root: &str,
-    commit: &ThreadCommit,
+    commit: &ThreadEffectBatch,
 ) -> Result<()> {
     for change in commit.extensions.iter() {
         if let pl_core::thread::extensions::ExtensionChange::Put { record, .. } = change

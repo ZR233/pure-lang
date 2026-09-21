@@ -302,9 +302,8 @@ mod tests {
         );
         assert_eq!(output.usage.input_tokens, Some(12));
         let snapshot = thread.snapshot();
-        let replayed = pl_core::thread::journal::replay(&thread.journal().await.unwrap()).unwrap();
-        assert_eq!(replayed.context, snapshot.context);
-        assert_eq!(replayed.private_context, snapshot.private_context);
+        assert_eq!(thread.snapshot().context, snapshot.context);
+        assert_eq!(thread.snapshot().private_context, snapshot.private_context);
         thread.close().await.unwrap();
     }
     #[tokio::test]

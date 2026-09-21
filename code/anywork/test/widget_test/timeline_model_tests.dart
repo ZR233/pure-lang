@@ -1327,4 +1327,301 @@ void registerTimelineModelTests() {
 
     expect(find.text('User activated skill · doc'), findsOneWidget);
   });
+
+  testWidgets(
+    'a previewed item renders a visible load path that requests its full body',
+    (tester) async {
+      final item = _threadItemFixture(
+        id: 'bulk-1',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 1,
+        text: 'preview…',
+      );
+      String? requested;
+
+      await tester.pumpWidget(
+        _timelineHarness(
+          threadId: 'thread-1',
+          items: [item],
+          previewedItemIds: const {'bulk-1'},
+          onLoadItemBody: (itemId) => requested = itemId,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 预览预算截断的条目在真实行渲染里给出显式回源入口，并保持阅读位置。
+      expect(
+        find.byKey(StudioDriverKeys.timelineItemBodyNotice('bulk-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.text('This page shows a truncated preview of a large item.'),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(StudioDriverKeys.timelineItemBodyLoad('bulk-1')),
+      );
+      await tester.pump();
+      expect(requested, 'bulk-1');
+    },
+  );
+
+  testWidgets('an in-flight item body load shows a loading notice', (
+    tester,
+  ) async {
+    final item = _threadItemFixture(
+      id: 'bulk-2',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 1,
+      text: 'preview…',
+    );
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        threadId: 'thread-1',
+        items: [item],
+        previewedItemIds: const {'bulk-2'},
+        loadingItemIds: const {'bulk-2'},
+        onLoadItemBody: (_) {},
+      ),
+    );
+    // 加载态含持续动画，不能用 pumpAndSettle。
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.text('Loading full content…'), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.timelineItemBodyLoad('bulk-2')),
+      findsNothing,
+    );
+    // 卸载持续动画，避免测试结束时有活动 Ticker。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('a failed item body load shows the error with a retry path', (
+    tester,
+  ) async {
+    final item = _threadItemFixture(
+      id: 'bulk-3',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 1,
+      text: 'preview…',
+    );
+    var retried = false;
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        threadId: 'thread-1',
+        items: [item],
+        previewedItemIds: const {'bulk-3'},
+        itemBodyErrors: const {'bulk-3': 'body unavailable'},
+        onLoadItemBody: (_) => retried = true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('body unavailable'), findsOneWidget);
+    await tester.tap(
+      find.byKey(StudioDriverKeys.timelineItemBodyRetry('bulk-3')),
+    );
+    await tester.pump();
+    expect(retried, isTrue);
+  });
+
+  testWidgets('an unavailable item body offers no retry that cannot succeed', (
+    tester,
+  ) async {
+    final item = _threadItemFixture(
+      id: 'bulk-4',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 1,
+      text: 'preview…',
+    );
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        threadId: 'thread-1',
+        items: [item],
+        previewedItemIds: const {'bulk-4'},
+        unavailableItemIds: const {'bulk-4'},
+        onLoadItemBody: (_) {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Full content is unavailable from this data source.'),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.timelineItemBodyLoad('bulk-4')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.timelineItemBodyRetry('bulk-4')),
+      findsNothing,
+    );
+  });
+
+  testWidgets(
+    'a previewed tool result loads by canonical item id through its group row',
+    (tester) async {
+      // 同一 Turn 的相邻工具调用被投影成一个合成身份的分组行；回源入口必须按底层
+      // item id 暴露，否则超大工具输出永远打不开。
+      final first = _threadItemFixture(
+        id: 'tool-item-1',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 1,
+        kind: ThreadItemKind.toolCall,
+        tool: const TimelineToolPart(
+          toolCallId: 'tool-call-1',
+          callId: 'call-1',
+          name: 'read_file',
+          result: '…[truncated]',
+        ),
+      );
+      final second = _threadItemFixture(
+        id: 'tool-item-2',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 2,
+        kind: ThreadItemKind.toolCall,
+        tool: const TimelineToolPart(
+          toolCallId: 'tool-call-2',
+          callId: 'call-2',
+          name: 'list_dir',
+          result: 'ok',
+        ),
+      );
+      String? requested;
+
+      await tester.pumpWidget(
+        _timelineHarness(
+          threadId: 'thread-1',
+          items: [first, second],
+          previewedItemIds: const {'tool-item-1'},
+          onLoadItemBody: (itemId) => requested = itemId,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(StudioDriverKeys.timelineItemBodyNotice('tool-item-1')),
+        findsOneWidget,
+      );
+      // 数据来源标签区分同组内的多条回源入口；分组展开不承担完整正文检索。
+      expect(
+        find.text(
+          'read_file · This page shows a truncated preview of a large item.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.timelineItemBodyNotice('tool-item-2')),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.timelineItemBodyLoad('tool-item-1')),
+      );
+      await tester.pump();
+      expect(requested, 'tool-item-1');
+    },
+  );
+
+  testWidgets(
+    'a previewed reasoning body loads by canonical item id through its group row',
+    (tester) async {
+      final first = _threadItemFixture(
+        id: 'reason-item-1',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 1,
+        kind: ThreadItemKind.reasoning,
+        reasoningContent: const ['short'],
+      );
+      final second = _threadItemFixture(
+        id: 'reason-item-2',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 2,
+        kind: ThreadItemKind.reasoning,
+        reasoningContent: const ['…[truncated]'],
+      );
+      String? requested;
+
+      await tester.pumpWidget(
+        _timelineHarness(
+          threadId: 'thread-1',
+          items: [first, second],
+          previewedItemIds: const {'reason-item-2'},
+          onLoadItemBody: (itemId) => requested = itemId,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(StudioDriverKeys.timelineItemBodyNotice('reason-item-2')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.timelineItemBodyNotice('reason-item-1')),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.timelineItemBodyLoad('reason-item-2')),
+      );
+      await tester.pump();
+      expect(requested, 'reason-item-2');
+    },
+  );
+
+  testWidgets('a previewed raw payload exposes the full-body path', (
+    tester,
+  ) async {
+    final raw =
+        _threadItemFixture(
+          id: 'raw-bulk',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 1,
+        ).copyWith(
+          state: ThreadRawItemStateView(
+            const [RawHistoryPayload('future.payload', 99, '…[truncated]')],
+            'Unsupported saved format',
+            DateTime.fromMillisecondsSinceEpoch(1000),
+          ),
+        );
+    String? requested;
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        threadId: 'thread-1',
+        items: [raw],
+        previewedItemIds: const {'raw-bulk'},
+        onLoadItemBody: (itemId) => requested = itemId,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // raw 行仍以 ExpansionTile 呈现已截断载荷；完整正文入口独立于展开。
+    expect(find.byKey(const ValueKey('raw-history-raw-bulk')), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.timelineItemBodyNotice('raw-bulk')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(StudioDriverKeys.timelineItemBodyLoad('raw-bulk')),
+    );
+    await tester.pump();
+    expect(requested, 'raw-bulk');
+  });
 }

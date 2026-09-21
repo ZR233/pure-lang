@@ -42,6 +42,8 @@ import 'package:anywork/src/shared/studio_driver_state.dart';
 part 'widget_test/controller_stream_tests.dart';
 part 'widget_test/reducer_recovery_tests.dart';
 part 'widget_test/timeline_model_tests.dart';
+part 'widget_test/bounded_body_tests.dart';
+part 'widget_test/live_window_tests.dart';
 part 'widget_test/snapshot_settings_tests.dart';
 part 'widget_test/thread_stream_tests.dart';
 part 'widget_test/agent_workspace_tests.dart';
@@ -69,6 +71,8 @@ void main() {
   registerControllerStreamTests();
   registerReducerRecoveryTests();
   registerTimelineModelTests();
+  registerBoundedBodyTests();
+  registerLiveWindowTests();
   registerSnapshotSettingsTests();
   registerThreadStreamTests();
   registerAgentWorkspaceTests();

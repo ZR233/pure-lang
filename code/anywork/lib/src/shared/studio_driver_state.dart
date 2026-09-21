@@ -89,6 +89,24 @@ abstract final class StudioDriverState {
       'timelineWindow': {
         'itemIds':
             _timelineWorkspace?.items.map((item) => item.id).toList() ?? [],
+        // 有界预览与显式回源身份：驱动据此按 canonical item id 定位大正文，
+        // 无需从渲染文本里猜测。
+        'previewedItemIds': [
+          for (final item
+              in _timelineWorkspace?.items ?? const <ThreadItemView>[])
+            if (_history.previewedItemIds.contains(item.id)) item.id,
+        ],
+        'loadedItemIds': [
+          for (final item
+              in _timelineWorkspace?.items ?? const <ThreadItemView>[])
+            if (item.bodyLoaded) item.id,
+        ],
+        // 回源已发出但完整正文尚未可取（例如历史事务尚未 durable）：入口仍可见可重试。
+        'pendingItemBodyIds': [
+          for (final item
+              in _timelineWorkspace?.items ?? const <ThreadItemView>[])
+            if (_history.pendingItemBodyIds.contains(item.id)) item.id,
+        ],
         'cacheCount': _timelineWorkspace?.cachedItems.length ?? 0,
         'tailCount': _timelineWorkspace?.latestItemIds.length ?? 0,
         'hasOlder': _history.hasOlder,

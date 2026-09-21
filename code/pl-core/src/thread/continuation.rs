@@ -8,13 +8,10 @@ impl Owner {
         options: input::InputDriverOptions,
     ) -> Result<input::InputRecord, ThreadError> {
         // Duplicate submissions must not revive a manually paused driver or cancel a newer Turn.
-        if self
-            .state
-            .inputs
-            .iter()
-            .any(|record| record.input.id == input.id)
-        {
-            return self.accept_input(input);
+        // Terminal identities stay resident even after their input body is pruned, so the receipt
+        // is answered from bounded state instead of reviving a paused driver.
+        if let Some(receipt) = input::duplicate_input_receipt(&self.state, &input)? {
+            return Ok(receipt);
         }
         self.validate_continuation_admission()?;
         let record = self.accept_input(input)?;
@@ -28,17 +25,13 @@ impl Owner {
         message: inbox::ThreadMessage,
         options: input::InputDriverOptions,
     ) -> Result<u64, ThreadError> {
-        if let Some(record) = self
-            .state
-            .inbox
-            .iter()
-            .find(|record| record.message.id == message.id)
-        {
-            return if record.message == message {
-                Ok(record.sequence)
-            } else {
-                Err(ThreadError::InvalidIdentity)
-            };
+        // An already accepted identity is answered from its original receipt before any new
+        // admission check or continuation action: a repeat is not new work, so it must not be
+        // refused because the owner is closing, is waiting for an interaction or is under storage
+        // pressure, and it must not interrupt the Turn that is currently running. Only a genuinely
+        // new message takes the admission path, which is what warms the driver and interrupts.
+        if let Some(sequence) = self.accepted_message_receipt(&message)? {
+            return Ok(sequence);
         }
         self.validate_continuation_admission()?;
         let sequence = self.receive_message(message, Some(options))?;
@@ -171,12 +164,13 @@ impl Owner {
 mod tests {
     use super::*;
     use crate::model::{ModelSession, ModelToolCall, PreparedModelCall};
+    use crate::thread::tests::history_snapshot;
     use crate::tool::ToolOutput;
     use crate::tool::opaque::{CallContext, Registration, Tool, ToolError};
     use pretty_assertions::assert_eq;
     use std::sync::{
         Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     };
     use tokio::sync::Notify;
 
@@ -278,11 +272,117 @@ mod tests {
         cleanup.started.notified().await;
         (thread, cleanup, calls)
     }
+    /// Answers every model call with the same tool request, so a Turn can be kept physically running
+    /// until its own cancellation is requested.
+    struct AlwaysToolModel(Arc<AtomicUsize>);
+    impl ModelSession for AlwaysToolModel {
+        async fn prepare(
+            &mut self,
+            request: ModelRequest,
+        ) -> Result<PreparedModelCall, ModelError> {
+            let index = self.0.fetch_add(1, Ordering::SeqCst) + 1;
+            Ok(PreparedModelCall::new(async move {
+                Ok(ModelStepOutput {
+                    attempt_id: request.attempt_id,
+                    base_context_revision: request.context.revision,
+                    content: vec![],
+                    tool_calls: vec![ModelToolCall {
+                        call_id: format!("call-{index}"),
+                        tool_id: "work".into(),
+                        arguments: OpaquePayload::text("work"),
+                    }],
+                    private_context: None,
+                    usage: Default::default(),
+                })
+            }))
+        }
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+    /// A model that answers immediately without a tool call: one Turn consumes its inbox message and
+    /// commits a terminal Turn, leaving no physical resource behind.
+    struct Reply;
+    impl ModelSession for Reply {
+        async fn prepare(
+            &mut self,
+            request: ModelRequest,
+        ) -> Result<PreparedModelCall, ModelError> {
+            Ok(PreparedModelCall::new(async move {
+                Ok(ModelStepOutput {
+                    attempt_id: request.attempt_id,
+                    base_context_revision: request.context.revision,
+                    content: vec![ContextContent::Text {
+                        text: Arc::from("response"),
+                    }],
+                    tool_calls: vec![],
+                    private_context: None,
+                    usage: Default::default(),
+                })
+            }))
+        }
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+    /// Reports a fixed Thread byte budget, so admission pressure is deterministic without IO.
+    #[derive(Debug)]
+    struct PressureStore(Arc<AtomicU64>);
+    impl cold::ColdStore for PressureStore {
+        fn pressure(&self, _: &str) -> cold::StoragePressure {
+            let bytes = self.0.load(Ordering::SeqCst);
+            cold::StoragePressure {
+                thread_bytes: bytes,
+                store_bytes: bytes,
+                error: None,
+            }
+        }
+        fn admit(&self, _: &str, _: cold::ThreadWrite) -> Result<(), cold::ColdStoreError> {
+            Ok(())
+        }
+        async fn flush(&self, _: &str, _: u64) -> Result<(), cold::ColdStoreError> {
+            Ok(())
+        }
+    }
+    /// A parent-authored message with a frozen body, so a repeat can be byte-identical.
+    fn parent_message(id: &str) -> inbox::ThreadMessage {
+        inbox::ThreadMessage {
+            id: id.into(),
+            source_id: "agent:parent".into(),
+            payload: OpaquePayload::text(id),
+            context: vec![ContextContent::Text { text: id.into() }],
+        }
+    }
+    /// A Thread whose first Turn holds a physically running foreground tool call.
+    async fn always_running_thread() -> (ThreadHandle, Arc<Cleanup>, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let cleanup = Arc::new(Cleanup::default());
+        let thread = ThreadHandle::start(
+            "continuation".into(),
+            DynModelSession::new(AlwaysToolModel(calls.clone())),
+        )
+        .unwrap();
+        let registration =
+            Registration::new("work".into(), OpaquePayload::text("work"), cleanup.clone()).unwrap();
+        thread
+            .register_tools(vec![registration.foreground()])
+            .await
+            .unwrap();
+        thread
+            .submit_input_and_continue(prompt("first"), options())
+            .await
+            .unwrap();
+        cleanup.started.notified().await;
+        (thread, cleanup, calls)
+    }
     async fn settled(thread: &ThreadHandle, turns: usize) -> ThreadSnapshot {
         let mut updates = thread.subscribe();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                let state = updates.next().await.unwrap();
+                updates.next().await.unwrap();
+                // Terminal Turns are history facts, so settle on the committed projection while
+                // live driver state (input execution) still comes from the snapshot.
+                let state = history_snapshot(thread).await;
                 if state.turns.len() == turns
                     && state
                         .turns
@@ -345,8 +445,6 @@ mod tests {
                     .count(),
                 1
             );
-            let history = thread.journal().await.unwrap();
-            journal::replay(&history).unwrap();
             thread.close().await.unwrap();
         }
     }
@@ -395,20 +493,34 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(calls.load(Ordering::SeqCst), 1);
-            let history = thread.journal().await.unwrap();
-            let restored = ThreadHandle::restore(
+            let checkpoint = thread
+                .checkpoint(thread.snapshot().commit_sequence)
+                .unwrap();
+            let restored = ThreadHandle::resume(
                 "continuation".into(),
                 DynModelSession::new(ToolModel(calls.clone())),
-                history,
+                Some(checkpoint),
             )
             .unwrap();
             assert!(matches!(
                 restored.snapshot().input_execution,
                 input::InputExecution::Paused
             ));
-            assert_eq!(
-                restored.snapshot().inputs[1].state,
-                input::InputState::Pending
+            assert!(
+                restored
+                    .snapshot()
+                    .inputs
+                    .iter()
+                    .all(|record| record.state == input::InputState::Pending),
+                "a resumed owner keeps only pending queued inputs"
+            );
+            assert!(
+                restored
+                    .snapshot()
+                    .inputs
+                    .iter()
+                    .any(|record| record.input.id == "second"),
+                "the queued input stays pending after an interrupted Turn"
             );
             assert_eq!(calls.load(Ordering::SeqCst), 1);
             restored.close().await.unwrap();
@@ -463,7 +575,146 @@ mod tests {
             .send_message_and_continue(message("redirect"), options())
             .await
             .unwrap();
-        assert_eq!(thread.snapshot().turns.len(), 2);
+        assert_eq!(history_snapshot(&thread).await.turns.len(), 2);
+        thread.close().await.unwrap();
+    }
+
+    /// A repeat of an identity the owner already accepted must never be mistaken for new work: it
+    /// keeps its original receipt and leaves the Turn that is currently running untouched.
+    #[tokio::test]
+    async fn repeated_consumed_identity_keeps_its_receipt_and_never_interrupts_running_work() {
+        let (thread, cleanup, calls) = always_running_thread().await;
+        // A brand-new identity is admitted and interrupts the running Turn, as before.
+        let sequence = thread
+            .send_message_and_continue(parent_message("redirect"), options())
+            .await
+            .unwrap();
+        assert!(
+            cleanup
+                .token
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .is_cancelled()
+        );
+        cleanup.release.notify_one();
+        // The redirect Turn is now running its own physical call and already consumed the message.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            cleanup.started.notified(),
+        )
+        .await
+        .expect("the redirect Turn starts its own tool");
+        let running = thread.snapshot();
+        assert_eq!(running.consumed_messages, sequence);
+        assert!(
+            !cleanup
+                .token
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .is_cancelled()
+        );
+        let committed = history_snapshot(&thread).await.turns.len();
+        // The repeat is answered from the original receipt: no second message, no new Turn and no
+        // interruption of the work that is still running.
+        assert_eq!(
+            thread
+                .send_message_and_continue(parent_message("redirect"), options())
+                .await
+                .unwrap(),
+            sequence
+        );
+        assert!(
+            !cleanup
+                .token
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .is_cancelled(),
+            "a repeated identity must not interrupt the running Turn"
+        );
+        assert_eq!(thread.snapshot().consumed_messages, sequence);
+        assert_eq!(history_snapshot(&thread).await.turns.len(), committed);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        // The same identity carrying a different body stays an identity conflict and is still not
+        // new work: it creates no second message and does not disturb the running Turn.
+        let mut conflicting = parent_message("redirect");
+        conflicting.payload = OpaquePayload::text("different body");
+        assert!(matches!(
+            thread
+                .send_message_and_continue(conflicting, options())
+                .await,
+            Err(ThreadError::InvalidIdentity)
+        ));
+        assert!(
+            !cleanup
+                .token
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .is_cancelled()
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        // Teardown: cancel the running Turn so its physical cleanup can finish.
+        let turn_id = thread.snapshot().turns[0].turn_id.clone();
+        thread.interrupt_turn(Some(turn_id)).await.unwrap();
+        cleanup.release.notify_one();
+        let _ = settled(&thread, 2).await;
+        thread.close().await.unwrap();
+    }
+
+    /// A repeat of an already consumed identity keeps its receipt even when a brand-new message
+    /// would be refused right now: uniqueness is answered from the accepted identity, not re-judged
+    /// against current admission pressure. A new identity still takes the normal admission checks.
+    #[tokio::test]
+    async fn repeated_consumed_identity_keeps_its_receipt_while_admission_is_pressured() {
+        let thread =
+            ThreadHandle::start("continuation".into(), DynModelSession::new(Reply)).unwrap();
+        let sequence = thread
+            .send_message_and_continue(parent_message("redirect"), options())
+            .await
+            .unwrap();
+        let state = settled(&thread, 1).await;
+        assert_eq!(state.consumed_messages, sequence);
+        assert!(
+            thread.snapshot().inbox.is_empty(),
+            "a consumed message leaves the resident queue"
+        );
+
+        let bytes = Arc::new(AtomicU64::new(64 * 1024 * 1024));
+        thread
+            .attach_storage(cold::ColdStoreHandle::new(PressureStore(bytes.clone())))
+            .await
+            .unwrap();
+        assert!(matches!(
+            thread
+                .send_message_and_continue(parent_message("brand-new"), options())
+                .await,
+            Err(ThreadError::StoragePressure)
+        ));
+        assert_eq!(
+            thread
+                .send_message_and_continue(parent_message("redirect"), options())
+                .await
+                .unwrap(),
+            sequence
+        );
+        assert_eq!(thread.snapshot().consumed_messages, sequence);
+        assert_eq!(history_snapshot(&thread).await.turns.len(), 1);
+        let mut conflicting = parent_message("redirect");
+        conflicting.payload = OpaquePayload::text("changed body");
+        assert!(matches!(
+            thread
+                .send_message_and_continue(conflicting, options())
+                .await,
+            Err(ThreadError::InvalidIdentity)
+        ));
+        bytes.store(0, Ordering::SeqCst);
         thread.close().await.unwrap();
     }
 }

@@ -32,11 +32,23 @@ Future<BridgeThreadTurnPage> listThreadTurns({
   request: request,
 );
 
-/// Reads a bounded, bidirectional item page from the canonical journal projection.
+/// Reads a bounded, bidirectional item page from the durable per-Thread history database.
 Future<BridgeTimelinePage> listTimelineItems({
   required ListTimelineItemsRequest request,
 }) => RustLib.instance.api.crateApiStudioHandlersHistoryListTimelineItems(
   request: request,
+);
+
+/// 按 item identity 直接读取一条完整条目正文，绕过页面的单条预览预算。
+///
+/// 返回与分页一致的 item、database identity 与 watermark，使客户端能按 identity 把
+/// 完整载荷合并进既有窗口并替换同身份的预览条目。
+Future<BridgeTimelinePage> readTimelineItem({
+  required String threadId,
+  required String itemId,
+}) => RustLib.instance.api.crateApiStudioHandlersHistoryReadTimelineItem(
+  threadId: threadId,
+  itemId: itemId,
 );
 
 /// Searches the full project/session directory, including archived history.

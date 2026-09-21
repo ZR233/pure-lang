@@ -5,25 +5,50 @@ use anyhow::{Context, Result, bail, ensure};
 use sea_orm::sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};
 #[cfg(test)]
 use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+#[cfg(test)]
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use sea_orm::{
-    ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection,
-    EntityTrait, QueryFilter, QueryOrder, Statement,
+    ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement,
 };
 
+use crate::studio::catalog::CatalogStore;
+#[cfg(test)]
 use crate::studio::entity as entities;
 #[cfg(test)]
 use crate::studio::ids::{new_id, unix_seconds};
+#[cfg(test)]
 use crate::studio::mappers::project_record;
 #[cfg(test)]
 use crate::studio::paths::project_name;
-use crate::studio::paths::{default_db_path, sqlite_read_only_url, sqlite_url};
+use crate::studio::paths::{StudioPaths, default_db_path, sqlite_read_only_url, sqlite_url};
 use crate::studio::records::ProjectRecord;
+use crate::studio::store::settings::SettingsStore;
+use crate::studio::store::workspaces::WorkspaceStore;
 use crate::studio::store::{StudioDatabaseError, StudioStore};
 use crate::studio::store_support::{STUDIO_DATABASE_SCHEMA_VERSION, initialize_studio_schema};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingDatabaseState {
     Current,
+}
+
+/// Whether a resolved Studio home already owns persistent state from an earlier run.
+///
+/// The product database is deliberately *not* part of this decision: every installation, including
+/// a brand-new one, materializes `<home>/studio/studio.sqlite`, so its presence says nothing about
+/// migrated user data. The evidence that matters is state the canonical TOML documents describe:
+/// a published session layout, an unmigrated legacy session database, a started (or partially
+/// published) migration, a legacy attachment root, call facts, attachment-draft state, or a
+/// canonical document that already exists. Call and draft state are usable as evidence because a
+/// fresh open publishes the three canonical documents before it opens the call store and before the
+/// runtime creates its draft root, so either without the documents means the fact source was lost
+/// rather than never written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallationState {
+    /// No prior Studio state: missing documents describe a new, empty installation.
+    Fresh,
+    /// Prior Studio state exists: every canonical document must already be on disk.
+    Existing,
 }
 
 impl StudioStore {
@@ -44,15 +69,28 @@ impl StudioStore {
         .await?;
         initialize_studio_schema(&db).await?;
         validate_database(&db).await?;
-        let attachments_dir = tempfile::Builder::new()
-            .prefix("anywork-memory-attachments-")
+        let home = tempfile::Builder::new()
+            .prefix("anywork-memory-store-")
             .tempdir()?
             .keep();
-        Ok(Self {
+        let paths = StudioPaths::resolve(Some(home))?;
+        let calls =
+            crate::studio::storage::calls::CallsStore::open(&paths.calls_database()).await?;
+        // A brand-new in-memory store for tests starts from empty canonical documents and never
+        // reads the retired product tables.
+        let (catalog, settings, workspaces) =
+            load_canonical_documents(&paths, InstallationState::Fresh).await?;
+        let store = Self {
             db,
-            sessions: pl_core::persistence::SqliteSessionStore::open_memory().await?,
-            attachments_dir,
-        })
+            calls,
+            catalog,
+            settings,
+            workspaces,
+            thread_persistence: Default::default(),
+            attachment_lock: Default::default(),
+            paths,
+        };
+        Ok(store)
     }
 
     pub(super) async fn open_database(path: &Path) -> Result<Self> {
@@ -68,7 +106,18 @@ impl StudioStore {
             );
             None
         };
-
+        // The data root is resolved once; every session, call and attachment path comes from the
+        // canonical layout instead of being re-joined by each consumer.
+        let paths = StudioPaths::resolve(Some(studio_home_from_database(&path)?))?;
+        // The single authoritative publication gate: while a layout switch is announced but not
+        // committed, no opener may classify, read or create the canonical layout. Opening here would
+        // otherwise create an empty canonical `calls/calls.sqlite` / `sessions/` on a half-published
+        // home, which makes publication skip the verified staged roots and drop their facts.
+        crate::studio::session_migration::ensure_layout_committed(&paths).await?;
+        // Decide the canonical-document contract before opening anything that creates state of its
+        // own: this classification must see the home as it was left by the previous run, and every
+        // store below (calls, database) materializes files on a fresh open.
+        let installation = detect_installation(&paths).await?;
         let db = connect_sqlite(
             &sqlite_url(&path),
             SqliteSynchronous::Full,
@@ -76,10 +125,6 @@ impl StudioStore {
         )
         .await?;
         let created = existing_state.is_none();
-        let attachments_dir = path
-            .parent()
-            .context("Studio database path has no parent directory")?
-            .join("attachments");
         let initialization = async {
             if created {
                 initialize_studio_schema(&db).await?;
@@ -111,28 +156,35 @@ impl StudioStore {
                 )),
             };
         }
-        let sessions = match pl_core::persistence::SqliteSessionStore::open(
-            pl_core::persistence::SqliteSessionOptions {
-                path: path.with_file_name("sessions.sqlite"),
-            },
-        )
-        .await
-        {
-            Ok(sessions) => sessions,
+        // Canonical TOML is the only fact source for directory and settings reads. A missing or
+        // corrupt document on an installation that already owns state fails startup instead of
+        // being replaced by an empty default; no retired SQLite table is read here.
+        let documents = match load_canonical_documents(&paths, installation).await {
+            Ok(documents) => documents,
             Err(error) => {
-                return match db.close().await {
-                    Ok(()) => Err(error.into()),
-                    Err(close) => Err(error).context(format!(
-                        "failed to open sessions; product database cleanup also failed: {close}"
+                let close = db.close().await;
+                return Err(match close {
+                    Ok(()) => error,
+                    Err(close_error) => error.context(format!(
+                        "canonical Studio documents failed to load; closing the database also failed: {close_error:#}"
                     )),
-                };
+                });
             }
         };
-        Ok(Self {
+        let (catalog, settings, workspaces) = documents;
+        let calls =
+            crate::studio::storage::calls::CallsStore::open(&paths.calls_database()).await?;
+        let store = Self {
             db,
-            sessions,
-            attachments_dir,
-        })
+            calls,
+            catalog,
+            settings,
+            workspaces,
+            thread_persistence: Default::default(),
+            attachment_lock: Default::default(),
+            paths,
+        };
+        Ok(store)
     }
 
     /// 测试 seed 入口：按 path 直接同步 upsert Project 行。
@@ -158,6 +210,7 @@ impl StudioStore {
             active.last_opened_at = Set(Some(now));
             active.closed = Set(0);
             let model = active.update(&self.db).await?;
+            self.seed_workspace_from_model(&model).await?;
             return Ok(project_record(model));
         }
 
@@ -173,19 +226,45 @@ impl StudioStore {
         }
         .insert(&self.db)
         .await?;
+        self.seed_workspace_from_model(&model).await?;
         Ok(project_record(model))
     }
 
+    #[cfg(test)]
+    async fn seed_workspace_from_model(&self, model: &entities::project::Model) -> Result<()> {
+        self.workspaces()
+            .apply_delta(
+                &crate::studio::store::directory::DirectoryDelta::upsert_project(
+                    crate::studio::store::directory::ProjectDirectoryRecord {
+                        id: model.id.clone(),
+                        name: model.name.clone(),
+                        path: model.path.clone(),
+                        ssh_alias: model.ssh_alias.clone(),
+                        created_at: model.created_at,
+                        updated_at: model.updated_at,
+                        last_opened_at: model.last_opened_at,
+                        closed: model.closed != 0,
+                    },
+                ),
+            )
+            .await
+    }
+
     pub async fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
-        use entities::project;
-        let projects = project::Entity::find()
-            .filter(project::Column::Closed.eq(0))
-            .order_by_desc(project::Column::LastOpenedAt)
-            .order_by_desc(project::Column::UpdatedAt)
-            .order_by_desc(project::Column::Id)
-            .all(&self.db)
-            .await?;
-        Ok(projects.into_iter().map(project_record).collect())
+        let mut entries = self
+            .workspaces()
+            .entries()
+            .into_iter()
+            .filter(|entry| !entry.closed)
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            right
+                .last_opened_at
+                .cmp(&left.last_opened_at)
+                .then_with(|| right.updated_at.cmp(&left.updated_at))
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        Ok(entries.into_iter().map(|entry| entry.project()).collect())
     }
 
     /// 聚合冷加载：按 path 找到既有 Project 行身份事实。
@@ -194,30 +273,40 @@ impl StudioStore {
         path: &str,
         ssh_alias: Option<&str>,
     ) -> Result<Option<ProjectRow>> {
-        use entities::project;
-        let server_filter = match ssh_alias {
-            Some(server_id) => project::Column::SshAlias.eq(server_id.to_string()),
-            None => project::Column::SshAlias.is_null(),
-        };
-        Ok(project::Entity::find()
-            .filter(project::Column::Path.eq(path.to_string()))
-            .filter(server_filter)
-            .one(&self.db)
-            .await?
-            .map(|model| ProjectRow {
-                id: model.id,
-                name: model.name,
-                created_at: model.created_at,
+        Ok(self
+            .workspaces()
+            .find_by_path(path, ssh_alias)
+            .map(|entry| ProjectRow {
+                id: entry.id,
+                name: entry.name,
+                created_at: entry.created_at,
             }))
     }
 
     pub async fn read_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
-        use entities::project;
-        Ok(project::Entity::find_by_id(project_id.to_string())
-            .one(&self.db)
-            .await?
-            .map(project_record))
+        Ok(self
+            .workspaces()
+            .get(project_id)
+            .map(|entry| entry.project()))
     }
+}
+
+/// Derives the Studio home that owns a product database file.
+///
+/// The canonical layout places the product database at `<home>/studio/studio.sqlite`; a database
+/// configured directly in its own directory keeps that directory as the home. Both cases resolve
+/// the same relative layout for sessions, calls and attachments.
+fn studio_home_from_database(database: &Path) -> Result<PathBuf> {
+    let parent = database
+        .parent()
+        .context("Studio database path has no parent directory")?;
+    if parent.file_name().is_some_and(|name| name == "studio") {
+        return parent
+            .parent()
+            .map(Path::to_path_buf)
+            .context("Studio data directory has no parent");
+    }
+    Ok(parent.to_path_buf())
 }
 
 /// `find_project_by_path` 返回的持久身份事实。
@@ -226,6 +315,66 @@ pub(in crate::studio) struct ProjectRow {
     pub(in crate::studio) id: String,
     pub(in crate::studio) name: String,
     pub(in crate::studio) created_at: i64,
+}
+
+/// Classifies the resolved Studio home before any store-owned file is created.
+async fn detect_installation(paths: &StudioPaths) -> Result<InstallationState> {
+    for candidate in [
+        paths.sessions_dir(),
+        paths.legacy_sessions_database(),
+        paths.migrations_dir(),
+        paths.legacy_attachments_dir(),
+        paths.calls_database(),
+        paths.attachment_drafts_dir(),
+        paths.catalog_file(),
+        paths.settings_file(),
+        paths.workspaces_file(),
+    ] {
+        if tokio::fs::try_exists(&candidate).await? {
+            return Ok(InstallationState::Existing);
+        }
+    }
+    Ok(InstallationState::Fresh)
+}
+
+/// Loads the three canonical directory/settings documents.
+///
+/// A fresh installation may start from missing documents: an absent file is the empty document it
+/// will create on its first write. An installation that already owns state must have every
+/// canonical document on disk, because a missing one means the fact source was lost; startup fails
+/// closed instead of silently substituting an empty document and masking migrated user data.
+async fn load_canonical_documents(
+    paths: &StudioPaths,
+    installation: InstallationState,
+) -> Result<(CatalogStore, SettingsStore, WorkspaceStore)> {
+    if installation == InstallationState::Existing {
+        require_canonical_document(&paths.catalog_file(), "catalog.toml").await?;
+        require_canonical_document(&paths.settings_file(), "settings.toml").await?;
+        require_canonical_document(&paths.workspaces_file(), "workspaces.toml").await?;
+    }
+    let catalog = CatalogStore::load(paths.catalog_file()).await?;
+    let settings = SettingsStore::load(paths.settings_file()).await?;
+    let workspaces = WorkspaceStore::load(paths.workspaces_file()).await?;
+    if installation == InstallationState::Fresh {
+        // A truly new installation starts with complete, empty canonical documents: the fact source
+        // exists before the first mutation, and a later missing document is unambiguously a loss
+        // instead of an as-yet unwritten file. Nothing is created when the home already owns state,
+        // because that path fails closed above.
+        catalog.persist_if_absent().await?;
+        settings.persist_if_absent().await?;
+        workspaces.persist_if_absent().await?;
+    }
+    Ok((catalog, settings, workspaces))
+}
+
+async fn require_canonical_document(path: &Path, name: &str) -> Result<()> {
+    ensure!(
+        tokio::fs::try_exists(path).await?,
+        "Studio {name} is missing on an existing installation; refusing to substitute an empty \
+         document and preserving existing data ({})",
+        path.display()
+    );
+    Ok(())
 }
 
 async fn connect_sqlite(

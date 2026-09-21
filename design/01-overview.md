@@ -34,15 +34,17 @@ HTTP → pl-studio-server ───┘                                  ↓
 运行时事实支持完整替换与按 source 原子 patch：独立生产者只 patch 自己的 source，空内容清除该
 source，遗漏 source 保持不变；两者都在 owner 串行边界执行，存在待交付工具调用时拒绝修改。
 
-活动 Thread 的内存快照是唯一可写执行事实源。`sessions.sqlite` 可选保存通用 journal 与不可变资源；
-`studio.sqlite` 保存项目、配置关联和产品目录，两库不共享业务事务。UI snapshot 与 Turn 分页从同一
-日志水位生成；历史模型正文使用保存时的上下文，不调用当前工具重建。
+活动 Thread 的内存快照是唯一可写执行事实源。当前可恢复状态按 Thread 保存到 `state.toml`；
+Timeline 直接写入该 Thread 的 `history.sqlite`，模型/工具调用写入独立 `calls.sqlite`。UI 状态
+snapshot 不携带完整历史，历史页面通过数据库 keyset cursor 查询；历史模型正文使用提交时冻结的
+投影，不调用当前工具或当前配置重建。
 
 ## 1.4 恢复与关闭
 
-纯重放只应用已保存事实，不创建模型、工具或外部副作用。恢复把遗留运行收束为 Interrupted，保留
-待处理输入，清空物理 continuation 与旧 executor 授权；显式激活后装入当前服务实例。关闭先封闭准入
-并取消当前代次，收束结果与交互，再关闭模型/工具并保存最终 commit；失败保留 owner 与重试入口，
+恢复只读取并验证当前 checkpoint，不创建模型、工具或外部副作用。恢复把遗留运行收束为
+Interrupted，保留待处理输入，清空物理 continuation 与旧 executor 授权；显式激活后装入当前服务
+实例。关闭先封闭准入并取消当前代次，收束结果与交互，再关闭模型/工具，等待固定历史/调用水位并
+保存最终 checkpoint；失败保留 owner、未保存事实与重试入口，
 归档只按目录装载冷历史，不为归档重新激活历史会话；先结束已驻留会话树的活动工作
 （中断当前 Turn、取消运行中任务、丢弃未消费输入）并清理该会话树的 worktree 工作树，
 全部关闭成功后再归档；
@@ -50,7 +52,7 @@ source，遗漏 source 保持不变；两者都在 owner 串行边界执行，�
 
 anywork 数据格式演进由 Studio 在正常运行前协调迁移，契约与当前实现缺口见
 [17](./17-studio-storage.md)；配置与凭据关联迁移见 [20](./20-config.md)。
-通用存储与无副作用重放合同见 [15](./15-session-storage.md) 与 [16](./16-core-contracts.md)。
+当前状态、历史与调用记录合同见 [15](./15-session-storage.md) 与 [16](./16-core-contracts.md)。
 
 ## 1.5 工具目录的条件发布
 

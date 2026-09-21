@@ -14,6 +14,9 @@ void registerShellSettingsTests() {
         ),
       );
       await tester.pumpAndSettle();
+      // 首屏只恢复选择，不打开会话（§6.1）：显式打开后才建立订阅。
+      await tester.tap(find.byKey(StudioDriverKeys.openThread('session-1')));
+      await tester.pumpAndSettle();
       api._thread.addError(StateError('history unavailable'));
       await tester.pumpAndSettle();
       expect(find.textContaining('history unavailable'), findsOneWidget);
@@ -1102,6 +1105,10 @@ void registerShellSettingsTests() {
         child: _localizedApp(home: const StudioShell()),
       ),
     );
+    await tester.pumpAndSettle();
+
+    // 首屏只恢复选择：显式打开会话后才订阅（§6.1）。
+    await tester.tap(find.byKey(StudioDriverKeys.openThread('session-1')));
     await tester.pumpAndSettle();
 
     expect(find.byTooltip('Session mode'), findsOneWidget);
@@ -5545,6 +5552,75 @@ void registerShellSettingsTests() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'persistence diagnostics keep unobserved per-Thread watermarks unknown',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(1280, 800));
+      final api = _PersistenceQueueApi(
+        _stateWithPlannerModels(),
+        queue: const PersistenceQueueSnapshot(
+          pendingOperations: 2,
+          pendingBytes: 1024,
+          inFlightBytes: 0,
+          threads: [
+            // 只有 checkpoint 回退诊断、没有 writer 的 Thread：水位是未知而不是零。
+            ThreadPersistenceSnapshot(
+              threadId: 'recovered-thread',
+              lastError: 'checkpoint rollback pending',
+            ),
+            ThreadPersistenceSnapshot(
+              threadId: 'live-thread',
+              stateDirtyRevision: 3,
+              stateDurableRevision: 2,
+              historyAdmittedSequence: 9,
+              historyDurableSequence: 9,
+              callsAdmittedSequence: 4,
+              callsDurableSequence: 4,
+            ),
+          ],
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(StudioDriverKeys.persistenceQueueDiagnostics),
+        findsOneWidget,
+      );
+      // 未观测的水位显示为未知，不折叠成 0/0。
+      expect(
+        find.textContaining(
+          'recovered-thread · state ?/? · history ?/? · calls ?/?',
+        ),
+        findsOneWidget,
+      );
+      // 已观测到的水位按真实值显示（含已观测的零）。
+      expect(
+        find.textContaining(
+          'live-thread · state 2/3 · history 9/9 · calls 4/4',
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+}
+
+/// 仅本测试使用：在通用测试替身上补出持久化队列读能力，以验证未知水位的显示。
+class _PersistenceQueueApi extends _FakeStudioApi
+    implements PersistenceQueueReader {
+  _PersistenceQueueApi(super.initialState, {required this.queue});
+
+  final PersistenceQueueSnapshot queue;
+
+  @override
+  Future<PersistenceQueueSnapshot> readPersistenceQueue() async => queue;
 }
 
 const _sidebarTooltipProjectName =

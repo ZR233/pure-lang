@@ -14,19 +14,24 @@ extension on _TimelineViewState {
               block.rows.single.reasoningGroup?.id,
             );
             final version = block.rows.single.renderVersion;
+            final bodyStates = _itemBodyStates(block.rows.single);
+            final bodyState = _itemBodyCacheKey(bodyStates);
             final cached = _rowWidgets[block.id];
             if (cached == null ||
                 cached.version != version ||
-                cached.expanded != expanded) {
+                cached.expanded != expanded ||
+                cached.body != bodyState) {
               _rowWidgets[block.id] = (
                 version: version,
                 expanded: expanded,
+                body: bodyState,
                 child: _TimelineRowBlock(
                   key: ValueKey(block.id),
                   row: block.rows.single,
                   isCurrentActivity: block.isCurrentActivity,
                   isReasoningExpanded: expanded,
                   onToggleReasoning: _toggleReasoning,
+                  body: bodyStates,
                 ),
               );
             }
@@ -56,6 +61,77 @@ extension on _TimelineViewState {
         row?.toolGroup?.items.firstOrNull?.id ??
         row?.reasoningGroup?.parts.firstOrNull?.id ??
         rowId;
+  }
+
+  /// 行缓存键里的完整正文状态：载荷/加载/错误变化时重建该行，阅读位置不变。
+  ///
+  /// 键包含 canonical item id，因此分组行内某一底层条目回源完成/失败时，只有该行重建，
+  /// 折叠状态与阅读锚点都不受影响。
+  String? _itemBodyCacheKey(List<_ItemBodyState> states) {
+    if (states.isEmpty) return null;
+    return states
+        .map(
+          (state) =>
+              '${state.itemId}|${state.isPreviewed}|${state.isLoading}|'
+              '${state.isPending}|${state.isUnavailable}|${state.error ?? ''}',
+        )
+        .join(',');
+  }
+
+  /// 该行需要“回源完整正文”提示的底层条目；不需要时返回空列表。
+  ///
+  /// 单条行、raw 行与分组行都按 canonical item id 解析：分组行的 `row.id` 是合成身份
+  /// （`tool-group:`/`reasoning-group:`），不能直接拿去查预览/回源状态，否则超大工具输出、
+  /// 推理正文或 raw 载荷永远拿不到回源入口。
+  List<_ItemBodyState> _itemBodyStates(TimelineRow row) {
+    final states = <_ItemBodyState>[];
+    for (final candidate in _rowBodyCandidates(row)) {
+      final state = _itemBodyState(candidate.id, candidate.label);
+      if (state != null) states.add(state);
+    }
+    return states;
+  }
+
+  /// 一行底层承载的条目身份：单条/raw 行是自身条目，分组行是其全部成员条目。
+  List<({String id, String? label})> _rowBodyCandidates(TimelineRow row) {
+    if (row.part case final part?) {
+      return <({String id, String? label})>[(id: part.id, label: null)];
+    }
+    if (row.toolGroup case final group?) {
+      return <({String id, String? label})>[
+        for (final item in group.items) (id: item.id, label: item.name),
+      ];
+    }
+    if (row.reasoningGroup case final group?) {
+      return <({String id, String? label})>[
+        for (final part in group.parts) (id: part.id, label: null),
+      ];
+    }
+    return const [];
+  }
+
+  /// 单个底层条目的“回源完整正文”提示；不需要时返回 null。
+  _ItemBodyState? _itemBodyState(String itemId, String? label) {
+    final previewed = widget.previewedItemIds.contains(itemId);
+    final loading = widget.loadingItemIds.contains(itemId);
+    final error = widget.itemBodyErrors[itemId];
+    final pending = widget.pendingItemBodyIds.contains(itemId);
+    final unavailable = widget.unavailableItemIds.contains(itemId);
+    if (!previewed && !loading && !pending && !unavailable && error == null) {
+      return null;
+    }
+    return _ItemBodyState(
+      itemId: itemId,
+      label: label,
+      isPreviewed: previewed,
+      isLoading: loading,
+      isPending: pending,
+      isUnavailable: unavailable,
+      error: error,
+      onLoad: widget.onLoadItemBody == null
+          ? null
+          : () => widget.onLoadItemBody!(itemId),
+    );
   }
 
   String? _anchorRowId(String itemId) {

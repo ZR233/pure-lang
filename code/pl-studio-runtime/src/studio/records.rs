@@ -141,14 +141,6 @@ pub struct AttachmentRecord {
 }
 
 impl AttachmentRecord {
-    pub(crate) fn session_payload(&self) -> anyhow::Result<pl_core::context::OpaquePayload> {
-        Ok(pl_core::context::OpaquePayload::new(
-            "studio.attachment",
-            1,
-            serde_json::to_string(self)?,
-        )?)
-    }
-
     pub(crate) fn from_session_entry(
         entry: &pl_core::storage::SessionEntry,
     ) -> anyhow::Result<Self> {
@@ -168,7 +160,7 @@ impl AttachmentRecord {
     }
 }
 
-/// Product directory status; runtime state is projected from the Thread journal.
+/// Product directory status; runtime state is projected from the Thread checkpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::studio) struct DirectoryState {

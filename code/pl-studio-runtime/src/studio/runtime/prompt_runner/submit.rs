@@ -81,6 +81,36 @@ impl StudioRuntime {
                 cursor: previous.accepted_sequence,
             });
         }
+        // 跨重启幂等：终态输入已经离开 core 的有界驻留窗口，改由 history.sqlite 的轻量身份
+        // 索引回答重复提交；只读取最小身份记录，不把历史实体搬回 core，也不重放 effect。
+        // 幂等命中必须证明正文身份：索引里的 host 提交摘要与本次请求一致才是重放，不一致或
+        // 索引无法给出摘要都按身份冲突拒绝，不能只凭 ID 返回旧回执。
+        let durable_receipt = match self.ensure_timeline_history(&thread_id).await {
+            Ok(history) => history.input_identity(&input.input_id).await?,
+            // 历史尚未追平 checkpoint fence 时退回普通受理：驻留队列仍然覆盖本 incarnation
+            // 的重复提交，不能因为一次只读索引未就绪而拒绝新输入。
+            Err(_) => None,
+        };
+        if let Some(previous) = durable_receipt {
+            let expected = crate::studio::thread_projection::prompt_request_digest(
+                &input,
+                options.presentation,
+            );
+            match previous.request_digest.as_deref() {
+                Some(stored) => anyhow::ensure!(
+                    stored == expected,
+                    "input identity conflicts with an accepted prompt"
+                ),
+                None => bail!(
+                    "input identity was already accepted with an unverifiable body; use a new inputId"
+                ),
+            }
+            return Ok(StudioSubmitPromptResponse {
+                thread_id,
+                input_id: input.input_id,
+                cursor: previous.entry.accepted_sequence,
+            });
+        }
         if thread_record.parent_thread_id.is_none() {
             self.thread_observations
                 .reconcile_children(&thread_id)
@@ -110,7 +140,7 @@ impl StudioRuntime {
             .promote_attachment_drafts(&thread_id, &drafts)
             .await?;
         let resources = crate::resource_store::FileResourceStore::new(
-            self.store.attachments_dir().join("thread-resources"),
+            self.store.session_resources_dir(&thread_id),
         );
         let mut context = Vec::new();
         if !prompt.is_empty() {
@@ -180,7 +210,8 @@ impl StudioRuntime {
         // Resource bytes are retained before admission; failures never delete user drafts or replay effects.
         self.agent_facility
             .product_events
-            .record_attachments(attachments.clone())?;
+            .record_attachments(attachments.clone())
+            .await?;
         let accepted = thread
             .submit_input_and_continue(
                 pl_core::thread::input::ThreadInput {

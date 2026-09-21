@@ -56,7 +56,7 @@ per-user Inno Setup 安装器和便携 zip；安装器使用稳定 AppId，默�
 快捷方式、WER 配置和卸载清理仅管理 anywork；更新资产以 anywork 为前缀，版本序列、
 签名信任根与更新清单共同约束发布身份。升级后的用户数据和配置分别遵循
 [17](./17-studio-storage.md) 与 [20](./20-config.md) 的版本迁移契约；迁移能力的实现状态
-见 [17.6](./17-studio-storage.md#176-迁移契约的实现缺口)，安装成功不代表数据迁移已通过验收。
+见 [17.7](./17-studio-storage.md#177-迁移实现状态与剩余边界)，安装成功不代表数据迁移已通过验收。
 
 安装器与便携包排除 PDB；Windows 构建必须同时产生独立、带 release version、commit SHA
 与 session protocol version 映射的 symbols artifact，收集 runner 和 Rust bridge 的匹配

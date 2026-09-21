@@ -4,9 +4,11 @@
 //! 通道（design/17 §17.2）；本文件只保留命令路径允许的聚合冷加载与分页查询。
 
 use anyhow::Result;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
+use crate::studio::catalog::CatalogEntry;
+#[cfg(test)]
 use crate::studio::entity as entities;
+#[cfg(test)]
 use crate::studio::mappers::thread_record;
 use crate::studio::records::ThreadRecord;
 use crate::studio::store::StudioStore;
@@ -14,22 +16,6 @@ use crate::studio::store::StudioStore;
 use pl_protocol::ThreadModeId;
 
 impl StudioStore {
-    pub(in crate::studio) async fn with_session_status(
-        &self,
-        mut record: ThreadRecord,
-    ) -> Result<ThreadRecord> {
-        let journal = self.sessions().read_thread_journal(&record.id).await?;
-        if let Some(last) = journal.last() {
-            let snapshot = pl_core::thread::journal::replay(&journal)?;
-            record.status = crate::studio::thread_projection::status(&snapshot);
-            record.runtime_updated_at = Some(last.committed_at);
-            // Cold directory reads preserve metadata for unknown codecs; activation validates them.
-            if let Ok(Some(mode)) = crate::studio::thread_projection::saved_mode(&snapshot) {
-                record.mode = mode;
-            }
-        }
-        Ok(record)
-    }
     /// 测试 seed 入口：直接同步创建 root Thread 行。
     ///
     /// 生产路径的创建必须经 `DirectoryDelta::register_root_thread` +
@@ -74,24 +60,26 @@ impl StudioStore {
         }
         .insert(&self.db)
         .await?;
-        thread_record(model)
+        let record = thread_record(model)?;
+        let thread = pl_protocol::Thread::from(record.clone());
+        self.catalog()
+            .upsert(CatalogEntry::from_thread(&thread))
+            .await?;
+        Ok(record)
     }
 
     pub async fn list_root_threads(&self, project_id: &str) -> Result<Vec<ThreadRecord>> {
-        use entities::thread;
-        let threads = thread::Entity::find()
-            .filter(thread::Column::ProjectId.eq(project_id))
-            .filter(thread::Column::Archived.eq(0))
-            .filter(thread::Column::ParentThreadId.is_null())
-            .order_by_desc(thread::Column::UpdatedAt)
-            .order_by_desc(thread::Column::Id)
-            .all(&self.db)
-            .await?;
-        let mut records = Vec::with_capacity(threads.len());
-        for thread in threads {
-            records.push(self.with_session_status(thread_record(thread)?).await?);
-        }
-        Ok(records)
+        Ok(self
+            .catalog()
+            .entries()
+            .into_iter()
+            .filter(|entry| {
+                entry.project_id == project_id
+                    && !entry.archived
+                    && entry.parent_thread_id.is_none()
+            })
+            .map(|entry| thread_record_from_catalog(&entry))
+            .collect())
     }
 
     /// Archive selection reads only directory facts, not historical journals.
@@ -99,22 +87,20 @@ impl StudioStore {
         &self,
         root_thread_id: &str,
     ) -> Result<Vec<ThreadRecord>> {
-        use entities::thread;
-        let Some(root) = thread::Entity::find_by_id(root_thread_id.to_string())
-            .one(&self.db)
-            .await?
-        else {
+        let Some(root) = self.catalog().get(root_thread_id) else {
             return Ok(Vec::new());
         };
-        let roots = thread::Entity::find()
-            .filter(thread::Column::ProjectId.eq(root.project_id))
-            .filter(thread::Column::Archived.eq(0))
-            .filter(thread::Column::ParentThreadId.is_null())
-            .order_by_desc(thread::Column::UpdatedAt)
-            .order_by_desc(thread::Column::Id)
-            .all(&self.db)
-            .await?;
-        roots.into_iter().map(thread_record).collect()
+        Ok(self
+            .catalog()
+            .entries()
+            .into_iter()
+            .filter(|entry| {
+                entry.project_id == root.project_id
+                    && !entry.archived
+                    && entry.parent_thread_id.is_none()
+            })
+            .map(|entry| thread_record_from_catalog(&entry))
+            .collect())
     }
 
     /// Archive scope includes every active descendant without replaying its journal.
@@ -122,25 +108,15 @@ impl StudioStore {
         &self,
         root_thread_id: &str,
     ) -> Result<Vec<ThreadRecord>> {
-        use entities::thread;
-        let threads = thread::Entity::find()
-            .filter(thread::Column::RootThreadId.eq(root_thread_id))
-            .filter(thread::Column::Archived.eq(0))
-            .order_by_asc(thread::Column::CreatedAt)
-            .order_by_asc(thread::Column::Id)
-            .all(&self.db)
-            .await?;
-        threads.into_iter().map(thread_record).collect()
+        Ok(catalog_tree(self, root_thread_id, false)
+            .into_iter()
+            .map(|entry| thread_record_from_catalog(&entry))
+            .collect())
     }
 
-    /// Runtime observation needs replayed status; archiving uses the directory-only variant.
+    /// Active descendants of one root. The catalog already carries the persisted status summary.
     pub async fn list_threads_for_root(&self, root_thread_id: &str) -> Result<Vec<ThreadRecord>> {
-        let threads = self.list_threads_for_archive(root_thread_id).await?;
-        let mut records = Vec::with_capacity(threads.len());
-        for thread in threads {
-            records.push(self.with_session_status(thread).await?);
-        }
-        Ok(records)
+        self.list_threads_for_archive(root_thread_id).await
     }
 
     /// Cold baseline for explicit archive restoration, including archived descendants.
@@ -148,66 +124,73 @@ impl StudioStore {
         &self,
         root_id: &str,
     ) -> Result<Vec<ThreadRecord>> {
-        use entities::thread;
-        let rows = thread::Entity::find()
-            .filter(thread::Column::RootThreadId.eq(root_id))
-            .order_by_asc(thread::Column::CreatedAt)
-            .all(&self.db)
-            .await?;
-        let mut records = Vec::with_capacity(rows.len());
-        for row in rows {
-            records.push(self.with_session_status(thread_record(row)?).await?);
-        }
-        Ok(records)
+        Ok(catalog_tree(self, root_id, true)
+            .into_iter()
+            .map(|entry| thread_record_from_catalog(&entry))
+            .collect())
     }
 
     /// Project 归档 activation 一次性装载其完整 Thread 目录。
     pub async fn list_threads_for_project(&self, project_id: &str) -> Result<Vec<ThreadRecord>> {
-        use entities::thread;
-        let threads = thread::Entity::find()
-            .filter(thread::Column::ProjectId.eq(project_id))
-            .order_by_asc(thread::Column::CreatedAt)
-            .order_by_asc(thread::Column::Id)
-            .all(&self.db)
-            .await?;
-        let mut records = Vec::with_capacity(threads.len());
-        for thread in threads {
-            records.push(self.with_session_status(thread_record(thread)?).await?);
-        }
-        Ok(records)
+        let mut entries = self
+            .catalog()
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.project_id == project_id)
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        Ok(entries
+            .into_iter()
+            .map(|entry| thread_record_from_catalog(&entry))
+            .collect())
     }
 
     pub async fn list_project_thread_ids(&self, project_id: &str) -> Result<Vec<String>> {
-        use entities::thread;
-        Ok(thread::Entity::find()
-            .filter(thread::Column::ProjectId.eq(project_id))
-            .all(&self.db)
-            .await?
+        Ok(self
+            .catalog()
+            .entries()
             .into_iter()
-            .map(|thread| thread.id)
+            .filter(|entry| entry.project_id == project_id)
+            .map(|entry| entry.id)
             .collect())
     }
 
     pub async fn read_thread(&self, thread_id: &str) -> Result<Option<ThreadRecord>> {
-        match self.read_thread_association(thread_id).await? {
-            Some(record) => Ok(Some(self.with_session_status(record).await?)),
-            None => Ok(None),
-        }
+        Ok(self
+            .catalog()
+            .get(thread_id)
+            .map(|entry| thread_record_from_catalog(&entry)))
     }
 
     pub(in crate::studio) async fn read_thread_association(
         &self,
         thread_id: &str,
     ) -> Result<Option<ThreadRecord>> {
-        use entities::thread;
-        match thread::Entity::find_by_id(thread_id.to_string())
-            .one(&self.db)
-            .await?
-        {
-            Some(row) => Ok(Some(thread_record(row)?)),
-            None => Ok(None),
-        }
+        self.read_thread(thread_id).await
     }
+}
+
+fn thread_record_from_catalog(entry: &CatalogEntry) -> ThreadRecord {
+    ThreadRecord::from_directory_thread(entry.to_thread())
+}
+
+fn catalog_tree(store: &StudioStore, root_id: &str, include_archived: bool) -> Vec<CatalogEntry> {
+    let mut entries = store
+        .catalog()
+        .entries()
+        .into_iter()
+        .filter(|entry| entry.root_thread_id == root_id && (include_archived || !entry.archived))
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        left.created_at
+            .cmp(&right.created_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    entries
 }
 
 #[cfg(test)]
@@ -241,8 +224,12 @@ mod tests {
             .unwrap();
         let thread =
             ThreadHandle::start(record.id.clone(), DynModelSession::new(NoExecution)).unwrap();
+        let persistence = crate::studio::storage::thread_writer::ThreadStorageSink::new(
+            store.clone(),
+            pl_protocol::Thread::from(record.clone()),
+        );
         thread
-            .attach_storage(ColdStoreHandle::new(store.sessions().clone()))
+            .attach_storage(ColdStoreHandle::new(persistence))
             .await
             .unwrap();
         let original =
@@ -259,9 +246,19 @@ mod tests {
         let restored = store.read_thread(&record.id).await.unwrap().unwrap();
         assert_eq!(restored.mode, record.mode);
         assert_eq!(restored.title, record.title);
-        assert_eq!(restored.status, pl_protocol::ThreadStatus::Closed);
-        let replayed = store.sessions().replay_thread(&record.id).await.unwrap();
-        assert_eq!(replayed.extensions["studio.mode"].payload, original);
-        store.sessions().shutdown().await.unwrap();
+        // catalog 的 `status` 只是“最后一次已提交的目录摘要”，由产品观察层刷新；本单测不装观察层，
+        // 因此它保持创建时的摘要值，不能当作冷执行权威。
+        assert_eq!(restored.status, pl_protocol::ThreadStatus::Idle);
+        let checkpoint = store.state(&record.id).load().await.unwrap().unwrap();
+        // 冷执行的权威是 checkpoint 的 lifecycle 与产品投影。
+        assert_eq!(
+            checkpoint.state.lifecycle,
+            pl_core::thread::ThreadLifecycle::Closed
+        );
+        assert_eq!(
+            crate::studio::thread_projection::status(&checkpoint.state),
+            pl_protocol::ThreadStatus::Closed
+        );
+        assert_eq!(checkpoint.state.extensions["studio.mode"].payload, original);
     }
 }

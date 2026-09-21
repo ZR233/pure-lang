@@ -6,72 +6,92 @@ sealed class ThreadStreamFrame {
   factory ThreadStreamFrame.fromFrb(frb.BridgeThreadSubscriptionUpdate value) {
     return value.when(
       snapshot: (snapshot) => ThreadSnapshotFrame(
-        workspace: _threadWorkspaceFromFrb(snapshot),
-        historyCursor: snapshot.historyCursor,
+        workspace: _threadWorkspaceFromSnapshot(snapshot),
       ),
-      notification: (envelope) => envelope.notification.when(
-        turnStarted: (turn) => ThreadNotificationFrame(
-          threadId: envelope.threadId,
-          revision: envelope.revision.toInt(),
-          update: ThreadTurnUpdate(_turnFromFrb(turn)),
-        ),
-        turnUpdated: (turn) => ThreadNotificationFrame(
-          threadId: envelope.threadId,
-          revision: envelope.revision.toInt(),
-          update: ThreadTurnUpdate(_turnFromFrb(turn)),
-        ),
-        turnCompleted: (turn) => ThreadNotificationFrame(
-          threadId: envelope.threadId,
-          revision: envelope.revision.toInt(),
-          update: ThreadTurnUpdate(_turnFromFrb(turn)),
-        ),
-        itemStarted: (item) => ThreadNotificationFrame(
-          threadId: envelope.threadId,
-          revision: envelope.revision.toInt(),
-          update: ThreadItemUpsert(_threadItemFromFrb(item)),
-        ),
-        itemDelta: (delta) => ThreadNotificationFrame(
-          threadId: envelope.threadId,
-          revision: envelope.revision.toInt(),
-          update: ThreadItemDeltaUpdate(_threadItemDeltaFromFrb(delta)),
-        ),
-        itemCompleted: (item) => ThreadNotificationFrame(
-          threadId: envelope.threadId,
-          revision: envelope.revision.toInt(),
-          update: ThreadItemUpsert(_threadItemFromFrb(item)),
-        ),
-        interactionChanged: (interaction) => ThreadNotificationFrame(
-          threadId: envelope.threadId,
-          revision: envelope.revision.toInt(),
-          update: ThreadInteractionUpdate(
-            interaction: _interactionFromFrb(interaction),
-            pending: _interactionIsPending(interaction),
+      notification: (envelope) {
+        final threadId = envelope.threadId;
+        final revision = envelope.revision.toInt();
+        final epoch = envelope.epoch.toInt();
+        final baseRevision = envelope.baseRevision.toInt();
+        return envelope.notification.when(
+          turnStarted: (turn) => ThreadNotificationFrame(
+            threadId: threadId,
+            revision: revision,
+            epoch: epoch,
+            baseRevision: baseRevision,
+            update: ThreadTurnUpdate(_turnFromFrb(turn)),
           ),
-        ),
-        threadRuntimeUpdated: (runtime) => ThreadNotificationFrame(
-          threadId: envelope.threadId,
-          revision: envelope.revision.toInt(),
-          update: ThreadRuntimeUpdate(
-            runtime: _threadRuntimeFromFrb(runtime),
-            todo: _todoFromFrb(runtime.todo),
+          turnUpdated: (turn) => ThreadNotificationFrame(
+            threadId: threadId,
+            revision: revision,
+            epoch: epoch,
+            baseRevision: baseRevision,
+            update: ThreadTurnUpdate(_turnFromFrb(turn)),
           ),
-        ),
-        lagged: (dropped) => ThreadResyncRequiredFrame(
-          threadId: envelope.threadId,
-          dropped: dropped.toInt(),
-        ),
-      ),
+          turnCompleted: (turn) => ThreadNotificationFrame(
+            threadId: threadId,
+            revision: revision,
+            epoch: epoch,
+            baseRevision: baseRevision,
+            update: ThreadTurnUpdate(_turnFromFrb(turn)),
+          ),
+          itemStarted: (item) => ThreadNotificationFrame(
+            threadId: threadId,
+            revision: revision,
+            epoch: epoch,
+            baseRevision: baseRevision,
+            update: ThreadItemUpsert(_threadItemFromFrb(item)),
+          ),
+          itemDelta: (delta) => ThreadNotificationFrame(
+            threadId: threadId,
+            revision: revision,
+            epoch: epoch,
+            baseRevision: baseRevision,
+            update: ThreadItemDeltaUpdate(_threadItemDeltaFromFrb(delta)),
+          ),
+          itemCompleted: (item) => ThreadNotificationFrame(
+            threadId: threadId,
+            revision: revision,
+            epoch: epoch,
+            baseRevision: baseRevision,
+            update: ThreadItemUpsert(_threadItemFromFrb(item)),
+          ),
+          interactionChanged: (interaction) => ThreadNotificationFrame(
+            threadId: threadId,
+            revision: revision,
+            epoch: epoch,
+            baseRevision: baseRevision,
+            update: ThreadInteractionUpdate(
+              interaction: _interactionFromFrb(interaction),
+              pending: _interactionIsPending(interaction),
+            ),
+          ),
+          threadRuntimeUpdated: (runtime) => ThreadNotificationFrame(
+            threadId: threadId,
+            revision: revision,
+            epoch: epoch,
+            baseRevision: baseRevision,
+            update: ThreadRuntimeUpdate(
+              runtime: _threadRuntimeFromFrb(runtime),
+              todo: _todoFromFrb(runtime.todo),
+            ),
+          ),
+          lagged: (dropped) => ThreadResyncRequiredFrame(
+            threadId: threadId,
+            dropped: dropped.toInt(),
+            epoch: epoch,
+          ),
+        );
+      },
     );
   }
 }
 
 final class ThreadSnapshotFrame extends ThreadStreamFrame {
-  const ThreadSnapshotFrame({required this.workspace, this.historyCursor});
+  const ThreadSnapshotFrame({required this.workspace});
 
+  /// 当前内存状态与实时事实；不携带 Timeline 条目，历史由分页 API 提供。
   final ThreadWorkspace workspace;
-
-  /// 快照窗口之外的更旧历史回源锚点（Turn id，before 语义）；null = 无更旧内容。
-  final String? historyCursor;
 }
 
 final class ThreadNotificationFrame extends ThreadStreamFrame {
@@ -79,10 +99,18 @@ final class ThreadNotificationFrame extends ThreadStreamFrame {
     required this.threadId,
     required this.revision,
     required this.update,
+    this.epoch,
+    this.baseRevision,
   });
 
   final String threadId;
   final int revision;
+
+  /// 生产端连续广播生命周期；与当前 epoch 不一致时丢弃或重同步。
+  final int? epoch;
+
+  /// 本通知之前的状态水位；非空且与当前 revision 不一致表示缺口。
+  final int? baseRevision;
   final ThreadWorkspaceUpdate update;
 }
 
@@ -90,10 +118,12 @@ final class ThreadResyncRequiredFrame extends ThreadStreamFrame {
   const ThreadResyncRequiredFrame({
     required this.threadId,
     required this.dropped,
+    this.epoch,
   });
 
   final String threadId;
   final int dropped;
+  final int? epoch;
 }
 
 sealed class ThreadWorkspaceUpdate {
@@ -166,8 +196,14 @@ class TimelinePage {
     this.firstItemId,
     this.lastItemId,
     this.turns = const [],
+    this.databaseId = '',
+    this.truncated = false,
+    this.previews = const [],
   });
   final String threadId;
+
+  /// 该页来自哪个 history 数据库实体；游标身份校验使用。
+  final String databaseId;
   final int watermark;
   final List<ThreadItemView> items;
   final String? olderCursor;
@@ -175,6 +211,31 @@ class TimelinePage {
   final String? firstItemId;
   final String? lastItemId;
   final List<TimelineTurnView> turns;
+
+  /// 是否因为总字节预算在条目上限前截断。
+  final bool truncated;
+
+  /// 因超过单条预览预算而只以预览返回的条目引用。
+  final List<TimelineItemPreviewView> previews;
+}
+
+/// 一条超大条目在页面中只以预览呈现时的显式引用；身份与 ordinal 不变。
+class TimelineItemPreviewView {
+  const TimelineItemPreviewView({
+    required this.itemId,
+    required this.ordinal,
+    required this.revision,
+    required this.totalBytes,
+    required this.previewBytes,
+    required this.omittedBytes,
+  });
+
+  final String itemId;
+  final int ordinal;
+  final int revision;
+  final int totalBytes;
+  final int previewBytes;
+  final int omittedBytes;
 }
 
 TimelineTurnView _timelineTurnFromFrb(frb.BridgeTimelineTurn entry) =>
@@ -188,19 +249,52 @@ TimelineTurnView _timelineTurnFromFrb(frb.BridgeTimelineTurn entry) =>
           : ThreadContextDisposition.active,
     );
 
-ThreadWorkspace _threadWorkspaceFromFrb(frb.BridgeThreadSnapshot value) {
+/// 分页与按 identity 回源共用同一投影：条目、Turn 摘要、database identity、
+/// watermark 与预览引用都来自同一个 page 形状。
+TimelinePage _timelinePageFromFrb(frb.BridgeTimelinePage page) {
+  final turns = page.turns.map(_timelineTurnFromFrb).toList();
+  final dispositions = {
+    for (final entry in turns) entry.turn.turnId: entry.disposition,
+  };
+  return TimelinePage(
+    threadId: page.threadId,
+    databaseId: page.databaseId,
+    watermark: page.watermark.toInt(),
+    items: [
+      for (final item in page.items)
+        _threadItemFromFrb(
+          item,
+          contextDisposition:
+              dispositions[item.turnId] ?? ThreadContextDisposition.active,
+        ),
+    ],
+    olderCursor: page.olderCursor,
+    newerCursor: page.newerCursor,
+    firstItemId: page.firstItemId,
+    lastItemId: page.lastItemId,
+    truncated: page.truncated,
+    previews: [
+      for (final preview in page.previews)
+        TimelineItemPreviewView(
+          itemId: preview.itemId,
+          ordinal: preview.ordinal.toInt(),
+          revision: preview.revision.toInt(),
+          totalBytes: preview.totalBytes.toInt(),
+          previewBytes: preview.previewBytes.toInt(),
+          omittedBytes: preview.omittedBytes.toInt(),
+        ),
+    ],
+    turns: turns,
+  );
+}
+
+/// 订阅首帧只投影当前状态；Timeline 窗口由 `listTimelineItems` 与实时通知维护，
+/// 因此这里不产生任何条目、Turn 摘要或回源锚点。
+ThreadWorkspace _threadWorkspaceFromSnapshot(frb.BridgeThreadSnapshot value) {
   return ThreadWorkspace(
     thread: _threadFromFrb(value.thread),
     revision: value.revision.toInt(),
-    observedLastTurn: value.lastTurn == null
-        ? null
-        : _turnFromFrb(value.lastTurn!),
-    timelineTurns: {
-      for (final entry in value.timelineTurns)
-        entry.turn.id: _timelineTurnFromFrb(entry),
-    },
-    items: value.items.map(_threadItemFromFrb).toList()
-      ..sort(_compareThreadItems),
+    items: const [],
     interactions: value.interactions
         .where(_interactionIsPending)
         .map(_interactionFromFrb)

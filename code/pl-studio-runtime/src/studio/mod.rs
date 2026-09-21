@@ -1,4 +1,5 @@
 mod agent_host;
+pub(crate) mod catalog;
 mod collaboration_migration;
 pub(crate) mod entity;
 mod ids;
@@ -13,11 +14,12 @@ mod recovery_registry;
 mod runtime;
 mod runtime_lock;
 mod runtime_state;
-mod session_migration;
-mod store;
+pub(crate) mod session_migration;
+mod storage;
+pub(crate) mod store;
 mod store_support;
 pub(crate) mod thread;
-mod thread_factory;
+pub(crate) mod thread_factory;
 pub(crate) mod thread_projection;
 
 pub(crate) use ids::{new_id, unix_seconds};

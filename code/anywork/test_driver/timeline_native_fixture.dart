@@ -81,7 +81,8 @@ Future<String> _timelineNativeFixture(String request) async {
   }
   if (action == 'interrupt') {
     final threadId = command['threadId']! as String;
-    final turn = (await api.readThreadSnapshot(threadId)).workspace.activeTurn;
+    // 当前状态快照直接携带活动 Turn（Timeline 条目与 Turn 摘要不再随快照下发）。
+    final turn = (await api.readThreadSnapshot(threadId)).activeTurn;
     if (turn == null || turn.inputId != command['inputId']) {
       throw StateError('fixture interrupt does not match the running input');
     }
@@ -98,8 +99,10 @@ Future<void> _waitTimelineTurn(
 ) async {
   final deadline = DateTime.now().add(const Duration(seconds: 30));
   while (DateTime.now().isBefore(deadline)) {
-    final snapshot = await api.readThreadSnapshot(threadId);
-    final turn = snapshot.workspace.timelineTurns.values
+    // 当前状态快照只携带活动 Turn；终态 Turn 事实从 canonical 历史窗口的 Turn 摘要读取，
+    // 与 GUI 用 `listTimelineItems` 维护最近 Turn 是同一条事实源。
+    final page = await api.listTimelineItems(threadId);
+    final turn = page.turns
         .map((entry) => entry.turn)
         .where((turn) => turn.inputId == inputId)
         .firstOrNull;

@@ -25,7 +25,7 @@ child 的 writablePaths 只约束内置 mutation 工具；worktree child 与会�
 如实区分这些边界。
 
 只读 reviewer 通过自然 final 或 `finish_turn({message})` 结束本轮并汇报审查结论；这不修改
-项目 workspace、Git 或外部系统。root 阅读绑定到真实 reviewer、Turn 与 journal 终态水位的
+项目 workspace、Git 或外部系统。root 阅读绑定到真实 reviewer、Turn 与终态历史的
 完整报告，结合产物与验证判断是否接受，不从字符串口令推断批准。
 
 ## 4.2 分层边界
@@ -93,7 +93,7 @@ HTTP 与 FRB 统一返回脱敏错误信封：稳定错误码、可读消息、�
 ## 4.7 数据切换安全
 
 数据与配置升级分别遵循 [17](./17-studio-storage.md) 与 [20](./20-config.md)，当前实现缺口
-集中记录在 [17.6](./17-studio-storage.md#176-迁移契约的实现缺口)。迁移失败不能授权清空数据库、
+集中记录在 [17.7](./17-studio-storage.md#177-迁移实现状态与剩余边界)。迁移失败不能授权清空数据库、
 删除附件或替换为默认配置；备份与迁移产物具有与原数据相同的私密性，诊断不得泄露凭据。
 
 迁移只操作已确认归属的 anywork 数据，拒绝符号链接 / reparse point 越界，不扫描或修改用户

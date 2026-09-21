@@ -138,19 +138,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get runtimeFatalRetry => 'Retry';
 
   @override
-  String get configRecoveryMessage =>
-      'An incompatible configuration was backed up and replaced with current defaults.';
-
-  @override
-  String configRecoveryBackupPath(String path) {
-    return 'Backup: $path';
-  }
-
-  @override
-  String get configRecoveryDismissTooltip =>
-      'Dismiss configuration recovery notice';
-
-  @override
   String persistenceDegraded(int count) {
     return 'Saving is temporarily unavailable. $count in-memory update(s) are waiting; you can continue the conversation.';
   }
@@ -167,6 +154,71 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get persistenceRetry => 'Retry saving';
+
+  @override
+  String get threadUnopenedTitle => 'Session not opened yet';
+
+  @override
+  String get threadUnopenedBody =>
+      'This session is only selected. Open it to load its current state and history; nothing resumes until you send a message.';
+
+  @override
+  String get threadOpenAction => 'Open session';
+
+  @override
+  String get timelineItemBodyLoad => 'Load full content';
+
+  @override
+  String get timelineItemBodyTruncated =>
+      'This page shows a truncated preview of a large item.';
+
+  @override
+  String get timelineItemBodyLoading => 'Loading full content…';
+
+  @override
+  String get timelineItemBodyPending =>
+      'Full content is not durable yet; retry shortly.';
+
+  @override
+  String get timelineItemBodyRetry => 'Retry';
+
+  @override
+  String get timelineItemBodyUnavailable =>
+      'Full content is unavailable from this data source.';
+
+  @override
+  String get persistenceQueueTitle => 'Persistence diagnostics';
+
+  @override
+  String get persistenceQueueUnavailable =>
+      'Queue pressure is unavailable from this data source.';
+
+  @override
+  String persistenceQueuePending(int operations, int bytes) {
+    return 'Queued: $operations operation(s), $bytes byte(s)';
+  }
+
+  @override
+  String persistenceQueueInFlight(int bytes) {
+    return 'Writing: $bytes byte(s)';
+  }
+
+  @override
+  String persistenceQueueOldestAge(int millis) {
+    return 'Oldest unsaved: $millis ms';
+  }
+
+  @override
+  String get persistenceQueuePressurePaused =>
+      'New inference admission is paused under storage pressure.';
+
+  @override
+  String persistenceQueueError(String message) {
+    return 'Last error: $message';
+  }
+
+  @override
+  String get persistenceQueueRefresh => 'Refresh diagnostics';
 
   @override
   String recoveryGlobalWarning(int count) {

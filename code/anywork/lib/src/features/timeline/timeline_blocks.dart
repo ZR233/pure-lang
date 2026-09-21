@@ -180,6 +180,7 @@ class _TimelineRowBlock extends StatelessWidget {
     required this.isCurrentActivity,
     required this.isReasoningExpanded,
     required this.onToggleReasoning,
+    this.body = const [],
     super.key,
   });
 
@@ -188,28 +189,40 @@ class _TimelineRowBlock extends StatelessWidget {
   final bool isReasoningExpanded;
   final ValueChanged<String> onToggleReasoning;
 
+  /// 该行底层超大条目的完整正文状态；空列表表示该行不需要回源。
+  ///
+  /// 按 canonical item id 携带，因此分组行（工具/推理）可以携带多条互不相同的回源入口。
+  final List<_ItemBodyState> body;
+
   @override
   Widget build(BuildContext context) {
     if (row.raw case final raw?) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 24),
-        child: ExpansionTile(
-          key: ValueKey('raw-history-${row.id}'),
-          title: Text(context.l10n.timelineRawRecord),
-          subtitle: Text(raw.notice),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final payload in raw.payloads)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('${payload.format} · v${payload.version}'),
-                    const SizedBox(height: 8),
-                    SelectableText(payload.content),
-                  ],
-                ),
-              ),
+            ExpansionTile(
+              key: ValueKey('raw-history-${row.id}'),
+              title: Text(context.l10n.timelineRawRecord),
+              subtitle: Text(raw.notice),
+              children: [
+                for (final payload in raw.payloads)
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${payload.format} · v${payload.version}'),
+                        const SizedBox(height: 8),
+                        SelectableText(payload.content),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            // raw 载荷同样可能被单条预览预算截断：展开只显示截断文本，回源入口单独给出。
+            for (final state in body) _ItemBodyNotice(state: state),
           ],
         ),
       );
@@ -293,6 +306,8 @@ class _TimelineRowBlock extends StatelessWidget {
                         ),
                       ),
                     ),
+                  // 分组行的展开只放大已截断文本；完整正文按底层条目身份单独回源。
+                  for (final state in body) _ItemBodyNotice(state: state),
                 ],
               ),
             ),
@@ -329,6 +344,97 @@ class _Avatar extends StatelessWidget {
           dimension: 27,
           child: Icon(icon, size: 15, color: colors.onSurfaceVariant),
         ),
+      ),
+    );
+  }
+}
+
+/// 超大条目的完整正文提示：可见的加载 / 失败 / 重试路径。
+///
+/// 页面只返回同身份预览时给出显式回源入口；回源进行中显示加载态；失败时显示错误与
+/// 重试。所有状态只改变该条目的载荷，不改变身份、ordinal 或用户阅读位置。
+class _ItemBodyNotice extends StatelessWidget {
+  const _ItemBodyNotice({required this.state});
+
+  final _ItemBodyState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final error = state.error;
+    final message = state.isLoading
+        ? context.l10n.timelineItemBodyLoading
+        : error ??
+              (state.isUnavailable
+                  ? context.l10n.timelineItemBodyUnavailable
+                  : state.isPending
+                  ? context.l10n.timelineItemBodyPending
+                  : context.l10n.timelineItemBodyTruncated);
+    // 数据来源标签（例如工具名）让同一分组里的多条回源入口彼此可区分。
+    final source = state.label;
+    final label = source == null || source.isEmpty
+        ? message
+        : '$source · $message';
+    final onLoad = state.onLoad;
+    // "在途/失败" 都是可重试的：只有数据源明确表示身份不可解析时才收起入口。
+    final canLoad =
+        !state.isLoading &&
+        !state.isUnavailable &&
+        state.isPreviewed &&
+        onLoad != null;
+    final needsRetry = error != null || state.isPending;
+    return Padding(
+      key: StudioDriverKeys.timelineItemBodyNotice(state.itemId),
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (state.isLoading) ...[
+            const SizedBox.square(
+              dimension: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 8),
+          ] else ...[
+            Icon(
+              error != null
+                  ? Icons.error_outline
+                  : state.isUnavailable
+                  ? Icons.info_outline
+                  : state.isPending
+                  ? Icons.hourglass_empty
+                  : Icons.unfold_more,
+              size: 15,
+              color: error == null
+                  ? context.colors.onSurfaceVariant
+                  : context.colors.error,
+            ),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: error == null
+                    ? context.colors.onSurfaceVariant
+                    : context.colors.error,
+              ),
+            ),
+          ),
+          if (canLoad) ...[
+            const SizedBox(width: 6),
+            TextButton(
+              key: needsRetry
+                  ? StudioDriverKeys.timelineItemBodyRetry(state.itemId)
+                  : StudioDriverKeys.timelineItemBodyLoad(state.itemId),
+              onPressed: onLoad,
+              child: Text(
+                needsRetry
+                    ? context.l10n.timelineItemBodyRetry
+                    : context.l10n.timelineItemBodyLoad,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

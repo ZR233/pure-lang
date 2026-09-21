@@ -2,7 +2,7 @@
 use pl_core::{
     context::{ContextContent, OpaquePayload},
     thread::{
-        TaskAccess,
+        TaskAccess, ThreadError,
         task::{TaskRecord, TaskStatus},
     },
     tool::{
@@ -155,7 +155,7 @@ impl Tool for TaskControlTool {
             TaskControlKind::Query => {
                 let input: QueryTaskInput =
                     serde_json::from_str(input.content()).map_err(ToolError::new)?;
-                query(access, input)
+                query(access, input).await
             }
             TaskControlKind::Cancel => {
                 let input: CancelTaskInput =
@@ -171,11 +171,29 @@ impl Tool for TaskControlTool {
     }
 }
 
-fn query(access: &TaskAccess, input: QueryTaskInput) -> Result<ToolOutput, ToolError> {
-    let task = access.get(&input.task_id).map_err(ToolError::new)?;
+async fn query(access: &TaskAccess, input: QueryTaskInput) -> Result<ToolOutput, ToolError> {
+    // The owner's task ledgers and effect window are bounded, so a finished task identity may have
+    // left memory entirely. The durable store then answers the identity/status; a missing durable
+    // fact stays a real "unknown task" error instead of reviving the task or faking a terminal.
+    let task = match access.get(&input.task_id) {
+        Ok(task) => task,
+        Err(ThreadError::TaskNotFound { .. }) => match access
+            .durable(&input.task_id)
+            .await
+            .map_err(ToolError::new)?
+        {
+            Some(fact) => fact.task,
+            None => {
+                return Err(ToolError::new(ThreadError::TaskNotFound {
+                    task_id: input.task_id.clone(),
+                }));
+            }
+        },
+        Err(error) => return Err(ToolError::new(error)),
+    };
     let mut view = serde_json::json!({"task":Status::from(&task)});
     if let Some(start) = input.result_cursor
-        && let Some(delivery) = access.result(&input.task_id).map_err(ToolError::new)?
+        && let Some(delivery) = read_result(access, &input.task_id).await?
     {
         let payload = delivery.output.payload();
         let text = payload.content();
@@ -193,6 +211,26 @@ fn query(access: &TaskAccess, input: QueryTaskInput) -> Result<ToolOutput, ToolE
         &serde_json::json!({"task":task,"result":view.get("result")}),
         &view,
     )
+}
+
+/// Reads a terminal result, preferring the owner's resident state and falling back to the durable
+/// committed delivery once the owner has released the body.
+async fn read_result(
+    access: &TaskAccess,
+    task_id: &str,
+) -> Result<Option<pl_core::thread::ToolDelivery>, ToolError> {
+    match access.result(task_id) {
+        Ok(delivery) => Ok(delivery),
+        // `InvalidOutput` means the commit already left the bounded live window: the durable calls
+        // store holds the exact committed delivery, so the read is answered there instead of
+        // reporting a missing result or repeating the tool.
+        Err(ThreadError::InvalidOutput) => Ok(access
+            .durable(task_id)
+            .await
+            .map_err(ToolError::new)?
+            .and_then(|fact| fact.delivery)),
+        Err(error) => Err(ToolError::new(error)),
+    }
 }
 
 fn output(

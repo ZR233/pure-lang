@@ -8,7 +8,16 @@ use crate::{
     ThreadModeId, TodoListSnapshot, Turn,
 };
 
-pub const THREAD_SCHEMA_VERSION: u32 = 12;
+pub const THREAD_SCHEMA_VERSION: u32 = 13;
+
+/// Timeline 游标 token 的版本号。
+///
+/// 读取水位、数据库身份或 ordinal 语义发生变化时递增；客户端持有的旧版本游标会被
+/// 明确拒绝并要求回到数据库重新读取，而不是回落到猜测位置。
+pub const TIMELINE_CURSOR_VERSION: u32 = 1;
+
+/// Timeline 游标的 opaque 前缀；item identity 不会以它开头，因此解码是确定性的。
+const TIMELINE_CURSOR_PREFIX: &str = "tlc1.";
 
 /// 会话级工作区模式：Project 根目录，或从 Project Git 仓库 `HEAD` 派生的独立 checkout。
 ///
@@ -124,8 +133,6 @@ pub struct ThreadSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn: Option<Turn>,
     #[serde(default)]
-    pub items: Vec<ThreadItem>,
-    #[serde(default)]
     pub interactions: Vec<InteractionRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<ThreadRuntimeSnapshot>,
@@ -138,7 +145,6 @@ impl ThreadSnapshot {
             revision: 0,
             thread: Thread::placeholder(thread_id),
             active_turn: None,
-            items: Vec::new(),
             interactions: Vec::new(),
             runtime: None,
         }
@@ -281,13 +287,49 @@ pub enum ThreadNotification {
     },
 }
 
+/// 一条实时增量通知的封套。
+///
+/// `epoch` 是生产端一次连续广播生命周期的标识：重订阅、owner 重建或数据库重同步后
+/// 递增，客户端据此丢弃旧生命周期的迟到帧。`base_revision` 是本通知之前的状态水位，
+/// `revision` 是应用本通知之后的状态水位；`base_revision != 上一条 revision`（或两帧间
+/// `revision` 出现跳变）即表示缺口，客户端必须重同步而不是继续拼接增量。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadNotificationEnvelope {
     pub thread_id: String,
+    pub epoch: u64,
+    pub base_revision: u64,
     pub revision: u64,
     pub emitted_at: i64,
     pub notification: ThreadNotification,
+}
+
+impl ThreadNotificationEnvelope {
+    /// 用生产端水位构造通知；`emitted_at` 由调用方的时钟提供。
+    pub fn new(
+        thread_id: impl Into<String>,
+        epoch: u64,
+        base_revision: u64,
+        revision: u64,
+        emitted_at: i64,
+        notification: ThreadNotification,
+    ) -> Self {
+        Self {
+            thread_id: thread_id.into(),
+            epoch,
+            base_revision,
+            revision,
+            emitted_at,
+            notification,
+        }
+    }
+
+    /// 本通知是否可由客户端接在上一条 `revision` 之后拼接。
+    ///
+    /// 同 epoch 且 `base_revision` 恰好等于客户端已知水位才连续；否则是缺口。
+    pub fn continues_from(&self, epoch: u64, last_revision: u64) -> bool {
+        self.epoch == epoch && self.base_revision == last_revision
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -329,6 +371,10 @@ pub struct ThreadTurnHistory {
 }
 
 /// Stable item query; before/after exclude the cursor, around includes it.
+///
+/// `item_id` 既接受 canonical item identity，也接受 `TimelineCursor` 的 opaque token：
+/// 分页返回的 `older_cursor`/`newer_cursor` 必须原样传回，显式锚点（`around`）可以用
+/// item identity。两类输入都只读数据库，不激活或 flush owner。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
     tag = "kind",
@@ -343,18 +389,208 @@ pub enum TimelineQuery {
     Around { item_id: String },
 }
 
+/// 版本化、自校验的 Timeline 游标。
+///
+/// 游标绑定 Thread 身份、history 数据库身份、条目 ordinal、条目 identity 与读取时的
+/// applied write sequence。任何一项在当前数据库上不成立（Thread 不符、数据库被重建、
+/// 水位回退）都必须拒绝，避免把游标当成"附近某条"的猜测位置。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TimelineCursor {
+    pub version: u32,
+    pub thread_id: String,
+    pub database_id: String,
+    pub ordinal: u64,
+    pub item_id: String,
+    pub applied_write_sequence: u64,
+}
+
+impl TimelineCursor {
+    /// 构造当前版本游标。
+    pub fn new(
+        thread_id: impl Into<String>,
+        database_id: impl Into<String>,
+        ordinal: u64,
+        item_id: impl Into<String>,
+        applied_write_sequence: u64,
+    ) -> Self {
+        Self {
+            version: TIMELINE_CURSOR_VERSION,
+            thread_id: thread_id.into(),
+            database_id: database_id.into(),
+            ordinal,
+            item_id: item_id.into(),
+            applied_write_sequence,
+        }
+    }
+
+    /// 编码为可跨 wire 传输的 opaque token。
+    ///
+    /// # Panics
+    /// 仅在内部 JSON 编码失败时 panic；字段均为可序列化的原始类型。
+    pub fn encode(&self) -> String {
+        let payload = serde_json::to_string(self).expect("timeline cursor is serializable");
+        format!("{TIMELINE_CURSOR_PREFIX}{payload}")
+    }
+
+    /// 解析 opaque token；非游标输入（例如原始 item identity）返回 `None`。
+    pub fn decode(token: &str) -> Option<Self> {
+        let payload = token.strip_prefix(TIMELINE_CURSOR_PREFIX)?;
+        let cursor: Self = serde_json::from_str(payload).ok()?;
+        (cursor.version == TIMELINE_CURSOR_VERSION).then_some(cursor)
+    }
+}
+
 /// An inclusive item range at one canonical commit watermark.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TimelinePage {
     pub thread_id: String,
+    /// 该页来自哪个 history 数据库实体；数据库重建后此值变化。
+    pub database_id: String,
+    /// 读取水位：构造本页时的 applied write sequence。
     pub watermark: u64,
     pub items: Vec<ThreadItem>,
     pub older_cursor: Option<String>,
     pub newer_cursor: Option<String>,
     pub first_item_id: Option<String>,
     pub last_item_id: Option<String>,
+    /// 是否因为总字节预算而在条目上限之前截断。
+    #[serde(default)]
+    pub truncated: bool,
+    /// 因超过单条预览预算而只以预览 + 引用返回的条目；身份与 ordinal 不变。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previews: Vec<TimelineItemPreview>,
     pub turns: Vec<TimelineTurn>,
+}
+
+/// 单条条目的可展示预览预算。
+///
+/// 页面同时限制条目数、总序列化字节与单条预览大小；超过本预算的正文不会整条进入页，
+/// 而是压缩为同身份、同 kind 的预览，并在 [`TimelineItemPreview`] 中给出完整字节数。
+/// 它必须小于页面的总字节预算，这样单条预览永远能落入一页。
+pub const TIMELINE_ITEM_PREVIEW_BYTES: usize = 256 * 1024;
+
+/// 一条超大条目在页面中只以预览呈现时的显式引用。
+///
+/// `item_id` / `ordinal` / `revision` 与被预览的条目完全一致，因此预览不改变身份、
+/// 不改变顺序，也不与实时尾部或其它页的同一身份条目混淆。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineItemPreview {
+    pub item_id: String,
+    pub ordinal: u64,
+    pub revision: u64,
+    /// 完整条目的序列化字节数。
+    pub total_bytes: u64,
+    /// 预览条目的序列化字节数。
+    pub preview_bytes: u64,
+    /// 预览省略的序列化字节数。
+    pub omitted_bytes: u64,
+}
+
+/// 直接读取单条完整条目的请求。
+///
+/// 普通分页仍走纯 SQL 的 [`TimelinePage`]，超出单条预览预算的条目只以
+/// [`TimelineItemPreview`] 返回；此请求用 item identity 直接读数据库，返回未经预览压缩的
+/// 完整 payload，且不改变身份、ordinal、revision 与读取水位语义。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TimelineItemQuery {
+    /// canonical item identity，与分页返回的 item id 完全一致。
+    pub item_id: String,
+}
+
+/// 单条完整条目的直接读取结果。
+///
+/// 与 [`TimelinePage`] 使用同一数据库身份与水位字段，因此消费者可以把完整条目按 item
+/// identity 合并进既有窗口，而无需重新解释 ordinal 或 revision。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineItemRead {
+    pub thread_id: String,
+    /// 该条目来自哪个 history 数据库实体；数据库重建后此值变化。
+    pub database_id: String,
+    /// 读取水位：构造本结果时的 applied write sequence。
+    pub watermark: u64,
+    pub ordinal: u64,
+    pub item: ThreadItem,
+}
+
+/// 预览标记：追加到被截断的字符串正文末尾，说明完整内容已从该页省略。
+const TIMELINE_PREVIEW_MARKER: &str = "…[truncated]";
+
+/// 身份/判别字段名：预览只缩短正文，绝不改写这些键。
+const TIMELINE_IDENTITY_KEYS: [&str; 8] = [
+    "id", "itemId", "threadId", "turnId", "ordinal", "revision", "kind", "type",
+];
+
+/// 把单条条目压缩到 `max_bytes` 以内；未超过预算时原样返回且不产生引用。
+///
+/// 只有字符串正文会被缩短，条目身份字段、状态判别标签与 ordinal 保持不变，因此预览
+/// 不破坏身份和顺序。返回的 `Some(reference)` 给出完整载荷的字节数与省略量。
+pub fn preview_timeline_item(
+    item: &ThreadItem,
+    max_bytes: usize,
+) -> (ThreadItem, Option<TimelineItemPreview>) {
+    let Ok(total) = serde_json::to_string(item) else {
+        return (item.clone(), None);
+    };
+    if total.len() <= max_bytes {
+        return (item.clone(), None);
+    }
+    let Ok(mut value) = serde_json::to_value(item) else {
+        return (item.clone(), None);
+    };
+    // 逐级收紧每个字符串正文的上限，直到整条序列化大小落入预算，或正文已无法再短。
+    for step in [4 * 1024usize, 512, 64, 8] {
+        truncate_preview_strings(&mut value, step);
+        if serialized_bytes(&value).is_some_and(|bytes| bytes <= max_bytes) {
+            break;
+        }
+    }
+    let Ok(preview) = serde_json::from_value::<ThreadItem>(value) else {
+        return (item.clone(), None);
+    };
+    let preview_bytes = serde_json::to_string(&preview).map_or(total.len(), |text| text.len());
+    let reference = TimelineItemPreview {
+        item_id: item.id.clone(),
+        ordinal: item.ordinal,
+        revision: item.revision,
+        total_bytes: total.len() as u64,
+        preview_bytes: preview_bytes as u64,
+        omitted_bytes: total.len().saturating_sub(preview_bytes) as u64,
+    };
+    (preview, Some(reference))
+}
+
+fn serialized_bytes(value: &serde_json::Value) -> Option<usize> {
+    serde_json::to_string(value).ok().map(|text| text.len())
+}
+
+fn truncate_preview_strings(value: &mut serde_json::Value, max_chars: usize) {
+    match value {
+        serde_json::Value::String(text) => {
+            if text.chars().count() > max_chars {
+                let kept = text.chars().take(max_chars).collect::<String>();
+                *text = format!("{kept}{TIMELINE_PREVIEW_MARKER}");
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                truncate_preview_strings(item, max_chars);
+            }
+        }
+        serde_json::Value::Object(entries) => {
+            for (key, entry) in entries.iter_mut() {
+                if TIMELINE_IDENTITY_KEYS.contains(&key.as_str()) {
+                    continue;
+                }
+                truncate_preview_strings(entry, max_chars);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Turn metadata is independent of whether its admission item is in this page.

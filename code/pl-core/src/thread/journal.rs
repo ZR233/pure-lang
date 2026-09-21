@@ -1,4 +1,8 @@
-//! Immutable Thread commit deltas. Model/tool execution never occurs while reading this journal.
+//! Immutable Thread effect batches plus the legacy journal migration reducer.
+//!
+//! An effect batch is the only durable copy of the facts one commit produced. It is built from the
+//! live state right before that state drops terminal execution and exported history, so the delta
+//! describes what changed rather than what the owner currently retains.
 use super::*;
 
 /// Context mutation within an atomic Thread commit.
@@ -37,10 +41,13 @@ pub enum PrivateContextChange {
     Clear,
 }
 
-/// One atomic delta containing context, output, continuation and lifecycle changes.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// One atomic output batch containing context, output, continuation and lifecycle changes.
+///
+/// Runtime owners publish these batches to persistence and live observers. They never replay them
+/// to reconstruct their own state; restart uses [`super::ThreadCheckpoint`] instead.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ThreadCommit {
+pub struct ThreadEffectBatch {
     /// Time this fact batch became canonical in memory, independent from asynchronous database flush.
     pub committed_at: i64,
     #[serde(default)]
@@ -78,15 +85,17 @@ pub enum JournalCodecError {
     Encoding(#[from] serde_json::Error),
 }
 
-impl ThreadCommit {
-    /// Freezes the actual commit as an opaque cold-store payload.
+impl ThreadEffectBatch {
+    /// Freezes the actual effect batch as an opaque persistence payload.
     ///
     /// # Errors
     /// Returns an encoding failure without changing the committed state.
     pub fn encode(&self) -> Result<OpaquePayload, JournalCodecError> {
         let content = serde_json::to_string(self)?;
-        Ok(OpaquePayload::new("pl.core.thread-commit", 3, content)
-            .expect("static nonempty format and nonzero version"))
+        Ok(
+            OpaquePayload::new("pl.core.thread-effect-batch", 1, content)
+                .expect("static nonempty format and nonzero version"),
+        )
     }
 
     /// Loads a framework commit without interpreting nested tool or model payload formats.
@@ -94,7 +103,11 @@ impl ThreadCommit {
     /// # Errors
     /// Rejects an unsupported outer schema or invalid envelope encoding.
     pub fn decode(payload: &OpaquePayload) -> Result<Self, JournalCodecError> {
-        if payload.format() != "pl.core.thread-commit" || payload.version() != 3 {
+        let supported = matches!(
+            (payload.format(), payload.version()),
+            ("pl.core.thread-effect-batch", 1) | ("pl.core.thread-commit", 3)
+        );
+        if !supported {
             return Err(JournalCodecError::Unsupported {
                 format: payload.format().into(),
                 version: payload.version(),
@@ -153,8 +166,19 @@ impl ThreadCommit {
         let tasks: Arc<[task::TaskRecord]> = current.task_changes[previous.task_changes.len()..]
             .to_vec()
             .into();
-        let deliveries: Arc<[ToolDelivery]> = current.deliveries[previous.deliveries.len()..]
-            .to_vec()
+        // Delivered results leave resident state independently of each other, so identify the
+        // changed entries instead of relying on a retained prefix.
+        let exported_deliveries = previous
+            .deliveries
+            .iter()
+            .map(|delivery| delivery.call_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let deliveries: Arc<[ToolDelivery]> = current
+            .deliveries
+            .iter()
+            .filter(|delivery| !exported_deliveries.contains(delivery.call_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>()
             .into();
         let replacements: Arc<[ContextReplacement]> = current.context_replacements
             [previous.context_replacements.len()..]
@@ -166,8 +190,21 @@ impl ThreadCommit {
             [previous.extension_changes.len()..]
             .to_vec()
             .into();
-        let inbox: Arc<[inbox::InboxRecord]> =
-            current.inbox[previous.inbox.len()..].to_vec().into();
+        // Admitted messages are identified by their monotonic sequence, not by their position: the
+        // queue prunes consumed entries, so a positional suffix would mis-export a commit that both
+        // advances the consumption watermark and admits a new message. The lower bound is the highest
+        // sequence the previous snapshot already knew about.
+        let admitted_through = previous
+            .inbox_sequence
+            .max(previous.inbox.last().map_or(0, |record| record.sequence))
+            .max(previous.consumed_messages);
+        let inbox: Arc<[inbox::InboxRecord]> = current
+            .inbox
+            .iter()
+            .filter(|record| record.sequence > admitted_through)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
         let wake_messages_through = (previous.wake_messages_through
             != current.wake_messages_through)
             .then_some(current.wake_messages_through);
@@ -232,11 +269,36 @@ impl ThreadCommit {
     }
 }
 
-/// Reconstructs published facts without creating executors, preparing models or running reducers.
+/// Migration-only reducer over the legacy complete Thread journal.
 ///
-/// # Errors
-/// Rejects missing commit sequences and attempts referencing an unavailable context version.
-pub fn replay(commits: &[Arc<ThreadCommit>]) -> Result<ThreadSnapshot, ThreadError> {
+/// Normal runtime state, recovery, examples and tests must use [`ThreadCheckpoint`] and the bounded
+/// effect window instead of replaying a full journal.
+#[doc(hidden)]
+pub mod legacy_migration {
+    use super::*;
+
+    /// Reconstructs one legacy session's final published state during one-way old-data migration.
+    ///
+    /// # Errors
+    /// Rejects missing commit sequences and attempts referencing an unavailable context version.
+    pub fn replay(commits: &[Arc<ThreadEffectBatch>]) -> Result<ThreadSnapshot, ThreadError> {
+        super::replay_legacy(commits)
+    }
+
+    /// Produces restart settlement facts for one legacy session during one-way migration.
+    ///
+    /// # Errors
+    /// Rejects corrupt history or exhausted commit identities.
+    pub fn recovery_commit(
+        commits: &[Arc<ThreadEffectBatch>],
+    ) -> Result<Option<ThreadEffectBatch>, ThreadError> {
+        super::recovery_commit_legacy(commits)
+    }
+}
+
+pub(crate) fn replay_legacy(
+    commits: &[Arc<ThreadEffectBatch>],
+) -> Result<ThreadSnapshot, ThreadError> {
     let mut state = ThreadSnapshot::default();
     let mut contexts = std::collections::BTreeMap::from([(0, ContextSnapshot::default())]);
     let owner = commits.first().map(|commit| commit.thread_id.as_str());
@@ -368,6 +430,14 @@ pub fn replay(commits: &[Arc<ThreadCommit>]) -> Result<ThreadSnapshot, ThreadErr
                 attempts.push(attempt);
             }
             state.attempts = attempts.into();
+            let usage = state
+                .attempts
+                .last()
+                .and_then(RequestAttempt::usage)
+                .cloned();
+            if usage.is_some() {
+                state.last_attempt_usage = usage;
+            }
         }
         if let Some(declarations) = &commit.discovered_tools {
             let mut ids = std::collections::BTreeSet::new();
@@ -497,10 +567,17 @@ pub fn replay(commits: &[Arc<ThreadCommit>]) -> Result<ThreadSnapshot, ThreadErr
             }
             inbox.push(record.clone());
         }
+        // Highest sequence this commit admits, before this batch advances the watermark.
+        let admitted_through = state
+            .inbox
+            .last()
+            .map_or(0, |record| record.sequence)
+            .max(inbox.last().map_or(0, |record| record.sequence));
         state.inbox = inbox.into();
+        state.inbox_sequence = state.inbox_sequence.max(admitted_through);
         if let Some(watermark) = commit.consumed_messages {
             if watermark < state.consumed_messages
-                || watermark > state.inbox.len() as u64
+                || watermark > admitted_through
                 || !commit
                     .attempt
                     .as_ref()
@@ -613,16 +690,13 @@ pub fn replay(commits: &[Arc<ThreadCommit>]) -> Result<ThreadSnapshot, ThreadErr
     Ok(state)
 }
 
-/// Produces restart settlement facts without constructing a model, tool or execution owner.
-/// Already closed histories remain closed; reactivation is a separate explicit host operation.
-///
-/// # Errors
-/// Rejects corrupt history or exhausted commit identities.
-pub fn recovery_commit(commits: &[Arc<ThreadCommit>]) -> Result<Option<ThreadCommit>, ThreadError> {
+fn recovery_commit_legacy(
+    commits: &[Arc<ThreadEffectBatch>],
+) -> Result<Option<ThreadEffectBatch>, ThreadError> {
     let Some(last) = commits.last() else {
         return Ok(None);
     };
-    let before = replay(commits)?;
+    let before = replay_legacy(commits)?;
     if before.lifecycle == ThreadLifecycle::Closed {
         return Ok(None);
     }
@@ -631,10 +705,91 @@ pub fn recovery_commit(commits: &[Arc<ThreadCommit>]) -> Result<Option<ThreadCom
         .commit_sequence
         .checked_add(1)
         .ok_or(ThreadError::RevisionExhausted)?;
-    Ok(ThreadCommit::between(
+    Ok(ThreadEffectBatch::between(
         &last.thread_id,
         &before,
         &after,
         sequence,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(sequence: u64, id: &str) -> inbox::InboxRecord {
+        inbox::InboxRecord {
+            sequence,
+            message: inbox::ThreadMessage {
+                id: id.to_string(),
+                source_id: "agent:parent".to_string(),
+                payload: OpaquePayload::text(id),
+                context: Vec::new(),
+            },
+        }
+    }
+
+    /// A commit that consumes earlier messages and admits a new one in the same batch exports
+    /// exactly the newly admitted record. The resident queue no longer holds the consumed prefix,
+    /// so a positional suffix would silently drop the new message from durable history.
+    #[test]
+    fn consumed_and_admitted_message_batch_exports_the_new_record() {
+        let before = ThreadSnapshot {
+            inbox: vec![record(1, "initial")].into(),
+            inbox_sequence: 1,
+            ..ThreadSnapshot::default()
+        };
+        let after = ThreadSnapshot {
+            inbox: vec![record(2, "steer")].into(),
+            inbox_sequence: 2,
+            consumed_messages: 1,
+            ..ThreadSnapshot::default()
+        };
+
+        let effect = ThreadEffectBatch::between("thread", &before, &after, 2).expect("effect");
+        assert_eq!(effect.inbox.len(), 1);
+        assert_eq!(effect.inbox[0].sequence, 2);
+        assert_eq!(effect.inbox[0].message.id, "steer");
+        assert_eq!(effect.consumed_messages, Some(1));
+    }
+
+    /// A commit that only advances the consumption watermark does not export an admitted record
+    /// again, and one that only changes a watermark exports no inbox record at all.
+    #[test]
+    fn watermark_only_batch_exports_no_admitted_record() {
+        let before = ThreadSnapshot {
+            inbox: vec![record(1, "initial")].into(),
+            inbox_sequence: 1,
+            ..ThreadSnapshot::default()
+        };
+        let after = ThreadSnapshot {
+            inbox: Vec::new().into(),
+            inbox_sequence: 1,
+            consumed_messages: 1,
+            ..ThreadSnapshot::default()
+        };
+
+        let effect = ThreadEffectBatch::between("thread", &before, &after, 2).expect("effect");
+        assert!(effect.inbox.is_empty());
+        assert_eq!(effect.consumed_messages, Some(1));
+    }
+
+    /// A checkpoint written before the admission watermark existed falls back to the resident tail,
+    /// so the export never repeats a record the previous snapshot already handed off.
+    #[test]
+    fn legacy_snapshot_without_the_watermark_does_not_repeat_exported_records() {
+        let before = ThreadSnapshot {
+            inbox: vec![record(1, "initial"), record(2, "other")].into(),
+            ..ThreadSnapshot::default()
+        };
+        let after = ThreadSnapshot {
+            inbox: vec![record(1, "initial"), record(2, "other"), record(3, "late")].into(),
+            inbox_sequence: 3,
+            ..ThreadSnapshot::default()
+        };
+
+        let effect = ThreadEffectBatch::between("thread", &before, &after, 2).expect("effect");
+        assert_eq!(effect.inbox.len(), 1);
+        assert_eq!(effect.inbox[0].sequence, 3);
+    }
 }

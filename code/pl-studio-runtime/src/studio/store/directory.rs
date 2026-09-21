@@ -1,19 +1,16 @@
 //! Thread/Project 目录事实：内存目录 owner 提交的 delta、write-behind 落库
-//! applier 与 SQLite 冷分页查询。
+//! applier 与 `catalog.toml` 冷分页查询。
 //!
 //! 目录 mutation 一律"内存先行 + delta 异步落库"（见 design/17 §17.2）；本模块
-//! 只承载已经由 owner 决定的事实，不做业务校验或状态转换。
+//! 只承载已经由 owner 决定的事实，不做业务校验或状态转换。SQLite `thread`/`project`
+//! 表是 write-behind 镜像，冷分页/搜索/归档范围只从 `catalog.toml` 读取。
 
 use anyhow::{Result, bail};
 use pl_protocol::{Thread, ThreadModeId, ThreadWorkspaceMode};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 
 use crate::studio::entity as entities;
 use crate::studio::ids::unix_seconds;
-use crate::studio::mappers::thread_record;
 use crate::studio::store::StudioStore;
 use crate::studio::store_support::non_empty_title;
 
@@ -168,10 +165,24 @@ pub(in crate::studio) struct ProjectDirectoryRecord {
 }
 
 /// 在 writer 已开启的事务中幂等应用一次目录 delta。
+///
+/// 除 SQLite 目录镜像外，同一 delta 也经 [`StudioStore::persist_directory_summaries`] 幂等写入
+/// canonical TOML（`catalog.toml` + `workspaces.toml`）。write-behind 批次因此成为目录摘要的
+/// 异步持久化点：观察热路径只把状态摘要并入队列，文件 I/O 由 writer 完成；命令通道已同步写入的
+/// delta 在此重放为 no-op，不推进 revision。
 pub(in crate::studio) async fn apply_directory_delta(
+    store: &StudioStore,
     tx: &sea_orm::DatabaseTransaction,
     delta: &DirectoryDelta,
 ) -> Result<()> {
+    // Parent rows first: `threads.project_id` is a real foreign key to `projects(id)` (ON DELETE
+    // CASCADE), and a coalesced write-behind batch can carry a brand-new Project together with a
+    // Thread (or child Thread) that references it in the same transaction. Upserting the Project rows
+    // before any Thread row keeps the association atomic instead of failing with SQLite extended code
+    // 787 `FOREIGN KEY constraint failed`.
+    for project in &delta.project_upserts {
+        upsert_project_directory_row(tx, project).await?;
+    }
     for thread in &delta.thread_upserts {
         upsert_thread_directory_row(tx, thread).await?;
     }
@@ -198,14 +209,11 @@ pub(in crate::studio) async fn apply_directory_delta(
     for removal in &delta.thread_removals {
         archive_thread_rows(tx, &removal.thread_ids, removal.archived_at).await?;
     }
-    for project in &delta.project_upserts {
-        upsert_project_directory_row(tx, project).await?;
-    }
     for removal in &delta.project_removals {
         archive_thread_rows(tx, &removal.thread_ids, removal.closed_at).await?;
         close_project_row(tx, &removal.project_id, removal.closed_at).await?;
     }
-    Ok(())
+    store.persist_directory_summaries(delta).await
 }
 
 async fn upsert_thread_directory_row(
@@ -391,43 +399,6 @@ impl ThreadDirectoryCursor {
 }
 
 impl StudioStore {
-    /// Reads a cold root directory page. Live overrides are applied by the owner.
-    pub(in crate::studio) async fn query_thread_directory_page(
-        &self,
-        cursor: Option<&ThreadDirectoryCursor>,
-        query: &pl_protocol::studio::ThreadDirectoryQuery,
-        limit: usize,
-    ) -> Result<Vec<Thread>> {
-        use entities::thread;
-        let mut select = thread::Entity::find()
-            .filter(thread::Column::Archived.eq(i32::from(query.archived)))
-            .filter(thread::Column::ParentThreadId.is_null())
-            .order_by_desc(thread::Column::UpdatedAt)
-            .order_by_desc(thread::Column::Id);
-        if let Some(project_id) = &query.project_id {
-            select = select.filter(thread::Column::ProjectId.eq(project_id));
-        }
-        if let Some(cursor) = cursor {
-            select = select.filter(
-                Condition::any()
-                    .add(thread::Column::UpdatedAt.lt(cursor.updated_at))
-                    .add(
-                        Condition::all()
-                            .add(thread::Column::UpdatedAt.eq(cursor.updated_at))
-                            .add(thread::Column::Id.lt(cursor.id.clone())),
-                    ),
-            );
-        }
-        let rows = select.limit(u64::try_from(limit)?).all(&self.db).await?;
-        let mut threads = Vec::with_capacity(rows.len());
-        for row in rows {
-            threads.push(Thread::from(
-                self.with_session_status(thread_record(row)?).await?,
-            ));
-        }
-        Ok(threads)
-    }
-
     /// 未归档 Thread 的冷分页：按 `(updated_at, id)` 倒序 keyset，
     /// cursor 为闭区间锚点（下一页取严格小于该键的条目）。
     pub(in crate::studio) async fn list_thread_directory_page(
@@ -435,29 +406,74 @@ impl StudioStore {
         cursor: Option<&ThreadDirectoryCursor>,
         limit: usize,
     ) -> Result<Vec<Thread>> {
-        use entities::thread;
-        let mut query = thread::Entity::find()
-            .filter(thread::Column::Archived.eq(0))
-            .order_by_desc(thread::Column::UpdatedAt)
-            .order_by_desc(thread::Column::Id);
-        if let Some(cursor) = cursor {
-            query = query.filter(
-                Condition::any()
-                    .add(thread::Column::UpdatedAt.lt(cursor.updated_at))
-                    .add(
-                        Condition::all()
-                            .add(thread::Column::UpdatedAt.eq(cursor.updated_at))
-                            .add(thread::Column::Id.lt(cursor.id.clone())),
-                    ),
-            );
+        // `catalog.toml` is the only cold source for the first screen; no session state is read.
+        self.catalog_page_active(cursor, limit).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_protocol::{Thread, ThreadModeId, ThreadWorkspaceMode};
+    use sea_orm::{EntityTrait, TransactionTrait};
+
+    use super::{DirectoryDelta, ProjectDirectoryRecord, apply_directory_delta};
+    use crate::studio::entity as entities;
+    use crate::studio::store::StudioStore;
+
+    fn root_thread(project_id: &str, thread_id: &str, now: i64) -> Thread {
+        Thread {
+            id: thread_id.to_string(),
+            project_id: project_id.to_string(),
+            title: "Session".to_string(),
+            mode: ThreadModeId::simple(),
+            workspace_mode: ThreadWorkspaceMode::Local,
+            workspace_path: "/repo".to_string(),
+            root_thread_id: thread_id.to_string(),
+            parent_thread_id: None,
+            role: crate::config::StudioRole::Planner.key().to_string(),
+            agent_path: thread_id.to_string(),
+            status: pl_protocol::ThreadStatus::Idle,
+            created_at: now,
+            updated_at: now,
+            archived: false,
         }
-        let models = query.limit(u64::try_from(limit)?).all(&self.db).await?;
-        let mut threads = Vec::with_capacity(models.len());
-        for model in models {
-            threads.push(Thread::from(
-                self.with_session_status(thread_record(model)?).await?,
-            ));
-        }
-        Ok(threads)
+    }
+
+    /// 回归：同一条（可能被 write-behind 合并的）delta 同时携带新 Project 与引用它的 Thread 时，
+    /// `apply_directory_delta` 必须先写父行，否则 `threads.project_id` 外键会以 SQLite 扩展码 787
+    /// `FOREIGN KEY constraint failed` 拒绝整批。
+    #[tokio::test]
+    async fn project_upsert_precedes_thread_upsert_within_one_delta() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let now = 1_700_000_000;
+        let project_id = "project-1";
+        let delta = DirectoryDelta {
+            project_upserts: vec![ProjectDirectoryRecord {
+                id: project_id.to_string(),
+                name: "workspace".to_string(),
+                path: "/repo".to_string(),
+                ssh_alias: None,
+                created_at: now,
+                updated_at: now,
+                last_opened_at: Some(now),
+                closed: false,
+            }],
+            thread_upserts: vec![root_thread(project_id, "thread-1", now)],
+            ..Default::default()
+        };
+
+        let tx = store.database().begin().await.unwrap();
+        let applied = apply_directory_delta(&store, &tx, &delta).await;
+        applied.expect("project and thread rows must apply atomically in one transaction");
+        tx.commit().await.unwrap();
+
+        let row = entities::thread::Entity::find_by_id("thread-1".to_string())
+            .one(store.database())
+            .await
+            .unwrap()
+            .expect("thread directory row");
+        assert_eq!(row.project_id, project_id);
+        // The directory summary is still published from the same delta.
+        assert!(store.read_thread("thread-1").await.unwrap().is_some());
     }
 }

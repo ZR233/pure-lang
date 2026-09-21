@@ -2,7 +2,8 @@ part of '../widget_test.dart';
 
 void registerDemoProjectTests() {
   test('Demo read exposes independent Thread workspaces', () async {
-    final state = await DemoStudioApi().readStudioState();
+    final api = DemoStudioApi();
+    final state = await api.readStudioState();
 
     // 目录窗口按 updatedAt 倒序：main(now) → alt(-3m) → reviewer(-7m)。
     expect(state.threads.map((thread) => thread.id), [
@@ -14,7 +15,11 @@ void registerDemoProjectTests() {
       state.workspacesByThread.keys,
       containsAll(state.threads.map((e) => e.id)),
     );
-    expect(state.workspacesByThread['thread-main']!.items, isNotEmpty);
+    // 产品快照只表达当前状态（§6/§11）：可读历史由分页 API 提供，不能把条目塞回快照。
+    for (final workspace in state.workspacesByThread.values) {
+      expect(workspace.items, isEmpty);
+    }
+    expect((await api.listTimelineItems('thread-main')).items, isNotEmpty);
     expect(
       state.workspacesByThread['thread-reviewer']!.runtime.model,
       'reviewer/model',
@@ -262,12 +267,11 @@ void registerDemoProjectTests() {
       );
       final snapshot =
           await api.subscribeThread('thread-main').first as ThreadSnapshotFrame;
-      final submitted = snapshot.workspace.items.firstWhere(
-        (item) => item.id == receipt.inputId,
-      );
-      final turnItems = snapshot.workspace.items.where(
-        (item) => item.turnId == submitted.turnId,
-      );
+      // 首帧只表达当前状态；持久化条目属于分页窗口。
+      expect(snapshot.workspace.items, isEmpty);
+      final window = (await api.listTimelineItems('thread-main')).items;
+      final submitted = window.firstWhere((item) => item.id == receipt.inputId);
+      final turnItems = window.where((item) => item.turnId == submitted.turnId);
       expect(turnItems, isNotEmpty);
       expect(turnItems.every(_demoItemIsTerminal), isTrue);
     },
@@ -318,8 +322,10 @@ void registerDemoProjectTests() {
       await api.interruptTurn('thread-main', turns.last.turnId);
       final snapshot =
           await api.subscribeThread('thread-main').first as ThreadSnapshotFrame;
+      expect(snapshot.workspace.items, isEmpty);
+      final window = (await api.listTimelineItems('thread-main')).items;
       expect(
-        snapshot.workspace.items.where(
+        window.where(
           (item) =>
               item.state is ThreadTurnItemStateView &&
               (item.state as ThreadTurnItemStateView).state

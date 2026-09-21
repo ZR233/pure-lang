@@ -434,40 +434,11 @@ impl StudioRuntime {
 
     pub(super) async fn append_session_recovery_issues(
         &self,
-        recovery_issues: &mut Vec<StudioRecoveryIssue>,
+        _recovery_issues: &mut Vec<StudioRecoveryIssue>,
     ) -> Result<()> {
-        for project in self.agent_facility.product_events.project_snapshot().await {
-            for thread_id in self.store.list_project_thread_ids(&project.id).await? {
-                let Some(thread) = self.store.read_thread_association(&thread_id).await? else {
-                    continue;
-                };
-                let identity = crate::thread_assembler::ThreadActivation {
-                    id: thread.id.clone(),
-                    parent_id: thread.parent_thread_id.clone(),
-                };
-                let Some(_reservation) = self.threads.reserve_recovery(&identity)? else {
-                    continue;
-                };
-                let result = crate::studio::thread_factory::recovery::recover_journal(
-                    &self.store,
-                    &thread.id,
-                )
-                .await;
-                match result {
-                    Ok(_) => {}
-                    Err(error) => recovery_issues.push(StudioRecoveryIssue {
-                        id: format!("session-context-{}", thread.id),
-                        scope: StudioRecoveryIssueScope::Thread,
-                        category: StudioRecoveryIssueCategory::AgentState,
-                        action: StudioRecoveryIssueAction::CleanupThread,
-                        project_id: Some(project.id.clone()),
-                        thread_id: Some(thread.root_thread_id),
-                        message: format!("Durable Thread {} is invalid: {error}", thread.id),
-                        worktree: None,
-                    }),
-                }
-            }
-        }
+        // A normal startup never traverses historical sessions: legacy journals are converted once
+        // by the locked pre-publication migration coordinator, and current checkpoints are validated
+        // lazily on explicit activation. There is nothing session-scoped to audit here.
         Ok(())
     }
 }
@@ -528,7 +499,7 @@ mod tests {
     use pl_core::{
         context::OpaquePayload,
         model::{DynModelSession, ModelError, ModelRequest, ModelSession, PreparedModelCall},
-        thread::{ThreadHandle, cold::ColdStore, input::ThreadInput},
+        thread::{ThreadHandle, cold::ColdStoreHandle, input::ThreadInput},
     };
 
     struct NoModel;
@@ -542,7 +513,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn corrupt_thread_produces_issue_without_blocking_other_thread_recovery() {
+    async fn startup_recovery_does_not_scan_historical_session_journals() {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
         let runtime = StudioRuntime::with_options(crate::StudioRuntimeOptions {
@@ -560,22 +531,20 @@ mod tests {
             .flush()
             .await
             .unwrap();
-        let bad = runtime
-            .store
-            .create_thread(&project.id, "bad", pl_protocol::ThreadModeId::simple())
-            .await
-            .unwrap();
         let good = runtime
             .store
             .create_thread(&project.id, "good", pl_protocol::ThreadModeId::simple())
             .await
             .unwrap();
-        runtime
-            .store
-            .sessions()
-            .admit(&bad.id, 1, OpaquePayload::text("corrupt journal envelope"))
-            .unwrap();
         let handle = ThreadHandle::start(good.id.clone(), DynModelSession::new(NoModel)).unwrap();
+        let persistence = crate::studio::storage::thread_writer::ThreadStorageSink::new(
+            runtime.store.clone(),
+            runtime.read_thread(&good.id).await.unwrap(),
+        );
+        handle
+            .attach_storage(ColdStoreHandle::new(persistence))
+            .await
+            .unwrap();
         handle
             .submit_input(ThreadInput {
                 id: "pending".into(),
@@ -584,43 +553,21 @@ mod tests {
             })
             .await
             .unwrap();
-        let mut journal = handle.journal().await.unwrap();
-        std::sync::Arc::make_mut(journal.last_mut().unwrap()).turn =
-            Some(pl_core::thread::TurnRecord {
-                turn_id: "unfinished".into(),
-                input_id: None,
-                state: pl_core::thread::TurnState::Running,
-                model_steps: 0,
-                elapsed_ms: None,
-            });
-        for commit in &journal {
-            runtime
-                .store
-                .sessions()
-                .admit(&good.id, commit.sequence, commit.encode().unwrap())
-                .unwrap();
-        }
         handle.close().await.unwrap();
-        runtime.store.sessions().flush().await.unwrap();
         let mut issues = Vec::new();
         runtime
             .append_session_recovery_issues(&mut issues)
             .await
             .unwrap();
-        assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0].thread_id.as_deref(), Some(bad.id.as_str()));
-        assert_eq!(issues[0].action, StudioRecoveryIssueAction::CleanupThread);
-        let restored = runtime
+        assert!(issues.is_empty());
+        let checkpoint = runtime
             .store
-            .sessions()
-            .replay_thread(&good.id)
+            .state(&good.id)
+            .load()
             .await
-            .unwrap();
-        assert!(restored.commit_sequence > journal.last().unwrap().sequence);
-        assert_eq!(
-            restored.turns[0].state,
-            pl_core::thread::TurnState::Interrupted
-        );
+            .unwrap()
+            .expect("current storage must publish a checkpoint");
+        assert!(checkpoint.state_revision > 0);
         runtime.shutdown_runtime().await.unwrap();
     }
     #[tokio::test]
@@ -677,6 +624,14 @@ mod tests {
                     .unwrap();
                 let handle =
                     ThreadHandle::start(record.id.clone(), DynModelSession::new(NoModel)).unwrap();
+                let persistence = crate::studio::storage::thread_writer::ThreadStorageSink::new(
+                    runtime.store.clone(),
+                    runtime.read_thread(&record.id).await.unwrap(),
+                );
+                handle
+                    .attach_storage(ColdStoreHandle::new(persistence))
+                    .await
+                    .unwrap();
                 for input in 0..12 {
                     handle
                         .submit_input(ThreadInput {
@@ -687,13 +642,6 @@ mod tests {
                             context: Vec::new(),
                         })
                         .await
-                        .unwrap();
-                }
-                for commit in handle.journal().await.unwrap() {
-                    runtime
-                        .store
-                        .sessions()
-                        .admit(&record.id, commit.sequence, commit.encode().unwrap())
                         .unwrap();
                 }
                 handle.close().await.unwrap();

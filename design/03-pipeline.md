@@ -8,8 +8,8 @@
 
 Studio 用户输入统一提交：空闲时启动，运行时先受理输入，再取消当前执行并在清理完成后启动新 Turn。
 父 Agent 的补充消息复用同一执行控制。Core 仍提供独立的普通 steer 与排队能力；稳定输入 ID 保证
-重复提交只返回原收据，不重复打断或启动。受理提交保存输入并更新 owner snapshot；产品从 canonical
-输入事实投影 user Item，实际 Turn 和模型上下文在执行准入时关联。只有 presentation 为 visible 的
+重复提交只返回原收据，不重复打断或启动。受理提交保存当前输入并发布 effect；产品从 canonical
+effect 投影 user Item 并写入历史库，实际 Turn 和模型上下文在执行准入时关联。只有 presentation 为 visible 的
 输入生成 user Item，受理不表示模型已开始执行。
 
 MessagePresentation（visible / hidden）是所有消息共用的协议属性，不属于 Plan、Interaction 或
@@ -34,7 +34,8 @@ workflow 变更类工具声明 Solo——同一 response 中若还有任何其�
 查询工具为 Coexist。工作流状态调用在 working-state 克隆上计算；成功调用的 assistant tool call、
 tool result 与新 working state 必须由一个 Thread checkpoint 原子提交，失败时三者共同回滚。工具
 结果在同一 Turn 立即返回新阶段约束，下一 Turn 与 context compaction 后由最新 workflow 投影继续
-约束。完整工具契约见 [09](./09-tool-runtime.md) 与 [11](./11-thread-mode.md)。
+约束。当前 workflow 状态进入 checkpoint；历史工具 Item 由 effect 直接写入历史库，不从完整运行态
+重建。完整工具契约见 [09](./09-tool-runtime.md) 与 [11](./11-thread-mode.md)。
 
 普通 `write_file`、`apply_patch` 与 `write_stdin` 可同批共存：Thread 按模型给出的调用顺序等待每个
 前台调用完成再执行下一个；它们不因此获得结束 Turn 或扩展变更等控制权限，真正 Solo 的工具仍禁止

@@ -1,5 +1,5 @@
-//! Read-only execution diagnostics derived from canonical core Thread commits.
-use pl_core::thread::{AttemptOutcome, ToolOutcome, journal::ThreadCommit};
+//! Read-only execution diagnostics derived from canonical core Thread effects.
+use pl_core::thread::{AttemptOutcome, ThreadEffectBatch, ToolOutcome};
 use serde::{Deserialize, Serialize};
 
 /// Observed invocation counts. These counts do not assert provider cache hits or token estimates.
@@ -21,15 +21,16 @@ pub struct ThreadDiagnostics {
     pub usage: pl_core::model::ModelUsage,
 }
 
-/// Summarizes immutable facts; callers validate/replay the journal through core before diagnosis.
+/// Summarizes immutable committed effects; callers supply effects they already own from the
+/// current bounded window or a migration projection. No normal runtime path replays a complete
+/// journal to build diagnostics.
 /// No tool, provider protocol or product configuration is consulted.
 ///
 /// # Errors
-/// Returns core journal validation failures instead of reporting statistics from corrupt history.
+/// Returns typed failures while folding decoded attempt/accounting facts.
 pub fn diagnose(
-    commits: &[std::sync::Arc<ThreadCommit>],
+    commits: &[std::sync::Arc<ThreadEffectBatch>],
 ) -> Result<ThreadDiagnostics, pl_core::thread::ThreadError> {
-    pl_core::thread::journal::replay(commits)?;
     let mut report = ThreadDiagnostics::default();
     let mut usage = UsageAccumulator::default();
     for commit in commits {

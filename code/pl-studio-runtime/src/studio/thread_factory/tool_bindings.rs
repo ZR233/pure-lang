@@ -280,10 +280,7 @@ impl StudioThreadFactory {
         };
         let route = config.models.resolve_route(role, &selector)?;
         let resources = crate::resource_store::FileResourceStore::new(
-            self.services
-                .store
-                .attachments_dir()
-                .join("thread-resources"),
+            self.services.store.session_resources_dir(&thread.id),
         );
         let remote = match &project.ssh_alias {
             Some(server) => {
@@ -471,16 +468,59 @@ mod tests {
         let cleared = catalog_fact(String::new(), initial, &after).unwrap();
         thread.patch_runtime_facts(vec![cleared]).await.unwrap();
         let disabled = thread.snapshot();
+        // 当前事实按 source 就地替换（core `write_fact`）：清空把既有记录改写成失效 tombstone，
+        // 既不追加历史记录，也绝不重写前面的 source 前缀。
+        assert_eq!(disabled.context.records.len(), after.context.records.len());
         assert_eq!(
-            disabled.context.records.len(),
-            after.context.records.len() + 1
+            &disabled.context.records[..before.context.records.len()],
+            before.context.records.as_ref()
         );
+        let skills_records = |snapshot: &ThreadSnapshot| {
+            snapshot
+                .context
+                .records
+                .iter()
+                .filter(|record| {
+                    matches!(
+                        &record.source,
+                        ContextSource::Runtime { source_id } if source_id == "studio.skills"
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let tombstone = skills_records(&disabled);
+        assert_eq!(
+            tombstone.len(),
+            1,
+            "a cleared source keeps exactly one in-place identity record"
+        );
+        assert_ne!(tombstone[0].content, skills_records(&after)[0].content);
         assert!(catalog_fact(String::new(), initial, &disabled).is_none());
         assert!(
             disabled
                 .runtime_facts
                 .iter()
                 .any(|fact| fact.source_id == "studio.workflow" && !fact.content.is_empty())
+        );
+        // 同一 source 的后续更新同样只在位改写：记录数是每 source 有界，不随历史增长。
+        let refreshed = catalog_fact("# Skills\nthird tool".into(), initial, &disabled).unwrap();
+        thread.patch_runtime_facts(vec![refreshed]).await.unwrap();
+        let replaced = thread.snapshot();
+        assert_eq!(replaced.context.records.len(), after.context.records.len());
+        assert_eq!(
+            &replaced.context.records[..before.context.records.len()],
+            before.context.records.as_ref()
+        );
+        let replaced_skills = skills_records(&replaced);
+        assert_eq!(replaced_skills.len(), 1);
+        // `catalog_fact` 传入的是完整目录正文，记录内容必须与这份完整事实逐字一致。
+        assert_eq!(
+            replaced_skills[0].content,
+            vec![ContextContent::Text {
+                text: "# Skills\nthird tool".into()
+            }],
+            "the later update replaces the same source record in place"
         );
         thread.close().await.unwrap();
     }

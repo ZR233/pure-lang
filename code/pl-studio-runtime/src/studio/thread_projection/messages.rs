@@ -1,13 +1,13 @@
 //! Parent dialogue is projected from durable inbox admission and consumption, never model context.
 use super::{ProjectionError, order};
-use pl_core::thread::journal::ThreadCommit;
+use pl_core::thread::ThreadEffectBatch;
 use pl_protocol::{ThreadItem, ThreadItemState, ThreadRawItem};
 use std::{collections::BTreeMap, sync::Arc};
 
 pub(super) fn project_messages(
     thread_id: &str,
     parent_id: Option<&str>,
-    journal: &[Arc<ThreadCommit>],
+    journal: &[Arc<ThreadEffectBatch>],
     through: u64,
 ) -> Result<Vec<ThreadItem>, ProjectionError> {
     let Some(parent_id) = parent_id else {

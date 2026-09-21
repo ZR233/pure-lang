@@ -15,7 +15,7 @@ use pl_protocol::studio::{
     SetModelRoleRequest, SetThreadModeRequest, SetThreadModelRouteRequest,
     StudioAttachmentAdmissionContext, StudioAttachmentDraftSource, StudioError,
     StudioSettingsSnapshot, SubmitPromptRequest, ThreadModelRouteUpdateResponse, ThreadPageQuery,
-    UpdateDeepSeekWebSearchSettingsRequest, UpdateGeneralSettingsRequest,
+    TimelinePageQuery, UpdateDeepSeekWebSearchSettingsRequest, UpdateGeneralSettingsRequest,
     UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest, UpdatePermissionSettingsRequest,
     UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest, UpdateWebSearchSettingsRequest,
 };
@@ -129,6 +129,8 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(set_thread_mode))
         .routes(routes!(set_thread_model_route))
         .routes(routes!(list_thread_turns))
+        .routes(routes!(list_thread_timeline))
+        .routes(routes!(read_thread_timeline_item))
         .routes(routes!(submit_prompt))
         .routes(routes!(interrupt_turn))
         .routes(routes!(admit_attachment_drafts))
@@ -153,6 +155,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(check_provider_usage))
         .routes(routes!(read_recovery, retry_recovery))
         .routes(routes!(retry_persistence))
+        .routes(routes!(read_persistence_queue))
         .routes(routes!(read_skills))
         .routes(routes!(discover_skills))
         .routes(routes!(search_skills))
@@ -364,6 +367,42 @@ async fn list_thread_turns(
         state
             .runtime
             .list_thread_turns(&thread_id, query.cursor.as_deref(), query.limit())
+            .await
+            .map_err(ApiError::from)?,
+    ))
+}
+
+#[utoipa::path(get, path = "/api/v1/threads/{thread_id}/timeline", operation_id = "thread.listTimeline", params(("thread_id" = String, Path), ("kind" = Option<String>, Query), ("itemId" = Option<String>, Query), ("limit" = Option<u32>, Query)), responses(StudioApiErrors, (status = 200)))]
+async fn list_thread_timeline(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    ApiQuery(query): ApiQuery<TimelinePageQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let timeline = query
+        .timeline_query()
+        .map_err(|message| ApiError(StudioError::invalid_argument(message)))?;
+    Ok(Json(
+        state
+            .runtime
+            .list_timeline_items(&thread_id, timeline, query.limit())
+            .await
+            .map_err(ApiError::from)?,
+    ))
+}
+
+/// 按 item identity 直接读取一条完整条目正文，绕过 `/timeline` 的单条预览预算。
+///
+/// 与分页返回同一 `databaseId` 与 `watermark`，因此客户端能按 identity 把完整载荷合并进
+/// 既有窗口并替换同身份的预览条目。只读数据库：不激活 owner、不 flush writer、不触发恢复。
+#[utoipa::path(get, path = "/api/v1/threads/{thread_id}/timeline/items/{item_id}", operation_id = "thread.readTimelineItem", params(("thread_id" = String, Path), ("item_id" = String, Path)), responses(StudioApiErrors, (status = 200)))]
+async fn read_thread_timeline_item(
+    State(state): State<AppState>,
+    Path((thread_id, item_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .read_timeline_item(&thread_id, &item_id)
             .await
             .map_err(ApiError::from)?,
     ))
@@ -809,6 +848,14 @@ async fn retry_persistence(State(state): State<AppState>) -> Result<impl IntoRes
             .await
             .map_err(ApiError::from)?,
     ))
+}
+
+/// 进程级持久化队列压力与逐 Thread 水位；纯读取，不触发写入、重试或恢复。
+#[utoipa::path(get, path = "/api/v1/runtime/persistence/queue", operation_id = "persistence.readQueue", responses(StudioApiErrors, (status = 200)))]
+async fn read_persistence_queue(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.runtime.persistence_queue_snapshot()))
 }
 
 #[utoipa::path(get, path = "/api/v1/runtime/projects/{project_id}/skills", operation_id = "skills.read", params(("project_id" = String, Path)), responses(StudioApiErrors, (status = 200, body = crate::skills_schema::SkillsStateSnapshotSchema)))]

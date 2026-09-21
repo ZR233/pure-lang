@@ -42,14 +42,25 @@ fn capture(source: &(dyn Error + 'static)) -> Vec<String> {
     }
     chain
 }
-fn restore<E: serde::de::Error>(chain: Vec<String>) -> Result<Source, E> {
+/// Diagnostic chain text of one source, exactly as serialization records it.
+pub(crate) fn chain_text(source: &(dyn Error + 'static)) -> Vec<String> {
+    capture(source)
+}
+
+/// Rebuilds the recorded chain a persisted diagnostic decodes to; an empty chain has no source.
+///
+/// The persisted form keeps only the chain text, so a rebuilt chain serializes and reports exactly
+/// like the original without loading provider or plugin code.
+pub(crate) fn chain_source(chain: Vec<String>) -> Option<Box<dyn Error + Send + Sync>> {
     let mut source = None;
     for message in chain.into_iter().rev() {
         source = Some(Box::new(RecordedSource { message, source }));
     }
-    source
-        .map(|source| source as Source)
-        .ok_or_else(|| E::custom("recorded error chain is empty"))
+    source.map(|source| source as Source)
+}
+
+fn restore<E: serde::de::Error>(chain: Vec<String>) -> Result<Source, E> {
+    chain_source(chain).ok_or_else(|| E::custom("recorded error chain is empty"))
 }
 
 pub(crate) mod required {
@@ -138,6 +149,14 @@ mod tests {
             capture(&Cyclic),
             vec!["cycle", "[cyclic error source omitted]"]
         );
+    }
+
+    #[test]
+    fn recorded_chain_rebuilds_exactly_and_an_empty_chain_has_no_source() {
+        let chain = vec!["outer".to_owned(), "inner\0".to_owned()];
+        let source = chain_source(chain.clone()).expect("a non-empty chain rebuilds a source");
+        assert_eq!(chain_text(source.as_ref()), chain);
+        assert!(chain_source(Vec::new()).is_none());
     }
 
     #[test]

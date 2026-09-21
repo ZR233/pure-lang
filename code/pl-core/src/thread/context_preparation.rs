@@ -89,6 +89,7 @@ impl Owner {
                 .attempts
                 .last()
                 .and_then(RequestAttempt::usage)
+                .or(self.state.last_attempt_usage.as_ref())
                 .cloned(),
         };
         let result = self
@@ -143,6 +144,8 @@ impl Owner {
 mod tests {
     use super::*;
     use crate::model::{ModelSession, PreparedModelCall};
+    use crate::thread::extensions::ExtensionChange;
+    use crate::thread::tests::history_snapshot;
     use pretty_assertions::assert_eq;
 
     struct Echo;
@@ -244,7 +247,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let snapshot = thread.snapshot();
+        let snapshot = history_snapshot(&thread).await;
         assert_eq!(snapshot.attempts[0].input.records[0].id, "summary");
         assert_eq!(
             snapshot.attempts[0].input.records[1].content,
@@ -252,21 +255,27 @@ mod tests {
                 text: "new input".into()
             }]
         );
-        let journal = thread.journal().await.unwrap();
-        let mut first = None;
-        for end in 1..=journal.len() {
-            let state = journal::replay(&journal[..end]).unwrap();
-            if state.extensions.contains_key("accounting") {
-                first = Some(state);
-                break;
-            }
-        }
-        let state = first.unwrap();
-        assert_eq!(state.context.records[0].id, "summary");
+        let effects = thread.effects().await.unwrap();
+        let extension = effects
+            .iter()
+            .position(|effect| {
+                effect.extensions.iter().any(|change| {
+                    matches!(
+                        change,
+                        ExtensionChange::Put { id, .. } if id.as_str() == "accounting"
+                    )
+                })
+            })
+            .expect("preparation accounting must be committed");
+        let attempt = effects
+            .iter()
+            .position(|effect| effect.attempt.is_some())
+            .expect("the main model request must be committed");
         assert!(
-            state.attempts.is_empty(),
+            extension < attempt,
             "preparation must commit before the main request"
         );
+        assert_eq!(thread.snapshot().context.records[0].id, "summary");
         thread.close().await.unwrap();
     }
     #[tokio::test]

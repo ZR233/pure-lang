@@ -13,7 +13,7 @@ import 'thread_stream.dart';
 import 'thread_stream/item.dart';
 part 'history.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 enum BridgeThreadContextDisposition { active, rolledBack }
 
@@ -60,36 +60,91 @@ class BridgeThreadTurnPage {
           nextCursor == other.nextCursor;
 }
 
+/// 一条超大条目在页面中只以预览呈现时的显式引用。
+class BridgeTimelineItemPreview {
+  final String itemId;
+  final BigInt ordinal;
+  final BigInt revision;
+  final BigInt totalBytes;
+  final BigInt previewBytes;
+  final BigInt omittedBytes;
+
+  const BridgeTimelineItemPreview({
+    required this.itemId,
+    required this.ordinal,
+    required this.revision,
+    required this.totalBytes,
+    required this.previewBytes,
+    required this.omittedBytes,
+  });
+
+  @override
+  int get hashCode =>
+      itemId.hashCode ^
+      ordinal.hashCode ^
+      revision.hashCode ^
+      totalBytes.hashCode ^
+      previewBytes.hashCode ^
+      omittedBytes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTimelineItemPreview &&
+          runtimeType == other.runtimeType &&
+          itemId == other.itemId &&
+          ordinal == other.ordinal &&
+          revision == other.revision &&
+          totalBytes == other.totalBytes &&
+          previewBytes == other.previewBytes &&
+          omittedBytes == other.omittedBytes;
+}
+
 class BridgeTimelinePage {
   final String threadId;
+
+  /// 本页来自哪个 history 数据库实体；用于校验游标身份。
+  final String databaseId;
   final BigInt watermark;
   final List<BridgeThreadItem> items;
   final String? olderCursor;
   final String? newerCursor;
   final String? firstItemId;
   final String? lastItemId;
+
+  /// 是否因为总字节预算而在条目上限之前截断。
+  final bool truncated;
+
+  /// 因超过单条预览预算而只以预览返回的条目引用；身份与 ordinal 不变。
+  final List<BridgeTimelineItemPreview> previews;
   final List<BridgeTimelineTurn> turns;
 
   const BridgeTimelinePage({
     required this.threadId,
+    required this.databaseId,
     required this.watermark,
     required this.items,
     this.olderCursor,
     this.newerCursor,
     this.firstItemId,
     this.lastItemId,
+    required this.truncated,
+    required this.previews,
     required this.turns,
   });
 
   @override
   int get hashCode =>
       threadId.hashCode ^
+      databaseId.hashCode ^
       watermark.hashCode ^
       items.hashCode ^
       olderCursor.hashCode ^
       newerCursor.hashCode ^
       firstItemId.hashCode ^
       lastItemId.hashCode ^
+      truncated.hashCode ^
+      previews.hashCode ^
       turns.hashCode;
 
   @override
@@ -98,12 +153,15 @@ class BridgeTimelinePage {
       other is BridgeTimelinePage &&
           runtimeType == other.runtimeType &&
           threadId == other.threadId &&
+          databaseId == other.databaseId &&
           watermark == other.watermark &&
           items == other.items &&
           olderCursor == other.olderCursor &&
           newerCursor == other.newerCursor &&
           firstItemId == other.firstItemId &&
           lastItemId == other.lastItemId &&
+          truncated == other.truncated &&
+          previews == other.previews &&
           turns == other.turns;
 }
 

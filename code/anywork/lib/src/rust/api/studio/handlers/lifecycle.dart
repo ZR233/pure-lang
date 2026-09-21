@@ -10,9 +10,9 @@ import '../types/runtime.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bridge_config_recovery`, `publish_startup_stage`, `shutdown_runtime_for_update`
+// These functions are ignored because they are not marked as `pub`: `publish_startup_stage`, `shutdown_runtime_for_update`
 
-Future<BridgeStudioStartupResult> startStudioRuntime() =>
+Future<RuntimeSnapshot> startStudioRuntime() =>
     RustLib.instance.api.crateApiStudioHandlersLifecycleStartStudioRuntime();
 
 Future<RuntimeSnapshot> shutdownRuntime() =>

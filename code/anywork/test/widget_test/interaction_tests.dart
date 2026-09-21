@@ -90,14 +90,24 @@ void registerInteractionTests() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull, reason: 'Plan layout at $size');
+      final layoutException = tester.takeException();
+      if (layoutException is FlutterError) {
+        // 溢出等布局错误只在 FlutterError 详情里指出具体 RenderFlex 与 widget，
+        // 打印出来便于定位（断言本身仍要求无异常）。
+        debugPrint(layoutException.toStringDeep());
+      }
+      expect(layoutException, isNull, reason: 'Plan layout at $size');
       expect(find.byKey(StudioDriverKeys.planApprove), findsOneWidget);
       await tester.tap(find.byKey(StudioDriverKeys.planDetailsClose));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(StudioDriverKeys.planSummary));
       await tester.tap(find.byKey(StudioDriverKeys.planSummary));
       await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull, reason: 'Plan reopened at $size');
+      final reopenedException = tester.takeException();
+      if (reopenedException is FlutterError) {
+        debugPrint(reopenedException.toStringDeep());
+      }
+      expect(reopenedException, isNull, reason: 'Plan reopened at $size');
     }
   });
 
@@ -721,6 +731,7 @@ void registerInteractionTests() {
     );
     addTearDown(container.dispose);
     await container.read(studioControllerProvider.future);
+    await _openSelectedThread(container);
 
     final response = container
         .read(studioControllerProvider.notifier)
@@ -990,6 +1001,9 @@ StudioState _stateWithPlanConfirmation() {
   final initial = _emptyState();
   final threadId = initial.selectedThreadId!;
   return initial.copyWith(
+    // 待决 Plan 交互属于已打开会话：显式标记为已打开，使布局与打开后的真实会话一致，
+    // 而不是在“尚未打开”的占位横幅下渲染 Plan 面板。
+    openedThreadIds: {threadId},
     workspacesByThread: {
       ...initial.workspacesByThread,
       threadId: initial.selectedWorkspace!.copyWith(

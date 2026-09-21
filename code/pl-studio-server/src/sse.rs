@@ -9,6 +9,7 @@ use pl_protocol::{ThreadNotification, ThreadSubscriptionRequest, ThreadSubscript
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
 use crate::error::ApiError;
@@ -20,6 +21,18 @@ struct StaleEvent {
     reason: &'static str,
     dropped: Option<u64>,
     resync: &'static str,
+}
+
+/// Product 事件是可合并的目录/状态更新：缓冲满时丢弃该条并经一次 `stale` 让客户端
+/// 从 `/api/v1/state` 重同步。`stale` 等待容量后送达，因此慢消费者不会因为缓冲满被
+/// 静默断开；连接本身的终态由流的关闭表达。
+enum Delivery {
+    Sent,
+    /// 缓冲已满：该条更新被合并，需要先送达一次 `stale` 标记。
+    Stalled,
+    /// 该帧无法送达：接收端已关闭，或事件无法编码。调用方应结束该流，让客户端重连重同步，
+    /// 不把未送达的观测当成已送达。
+    Closed,
 }
 
 #[utoipa::path(
@@ -44,16 +57,16 @@ pub(crate) async fn product_events(
     tokio::spawn(async move {
         let _permit = permit;
         if has_cursor
-            && !send_json(
+            && !flush_stale(
                 &sender,
-                "stale",
-                None,
-                &StaleEvent {
+                &shutdown,
+                StaleEvent {
                     reason: "replayUnsupported",
                     dropped: None,
                     resync: "/api/v1/state",
                 },
             )
+            .await
         {
             return;
         }
@@ -62,21 +75,37 @@ pub(crate) async fn product_events(
                 _ = shutdown.cancelled() => break,
                 event = events.recv() => match event {
                     Ok(event) => {
-                        if !send_json(&sender, "event", Some(&event.event_id), &event) {
-                            return;
+                        match try_send_json(&sender, "event", Some(&event.event_id), &event) {
+                            Delivery::Sent => {}
+                            Delivery::Stalled => {
+                                if !flush_stale(
+                                    &sender,
+                                    &shutdown,
+                                    StaleEvent {
+                                        reason: "slowConsumer",
+                                        dropped: None,
+                                        resync: "/api/v1/state",
+                                    },
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                            }
+                            Delivery::Closed => return,
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(dropped)) => {
-                        if !send_json(
+                        if !flush_stale(
                             &sender,
-                            "stale",
-                            None,
-                            &StaleEvent {
+                            &shutdown,
+                            StaleEvent {
                                 reason: "lagged",
                                 dropped: Some(dropped),
                                 resync: "/api/v1/state",
                             },
                         )
+                        .await
                         {
                             return;
                         }
@@ -85,6 +114,7 @@ pub(crate) async fn product_events(
                 }
             }
         }
+        // 终态标记是尽力而为：shutdown 必须立即结束连接，不能用等待容量阻塞优雅关闭。
         let _ = sender.try_send(Ok(Event::default().event("closed").data("{}")));
     });
     Ok(Sse::new(ReceiverStream::new(receiver))
@@ -133,6 +163,7 @@ pub(crate) async fn thread_events(
                     resync: "resubscribe",
                 },
             )
+            .await
         {
             return;
         }
@@ -145,7 +176,13 @@ pub(crate) async fn thread_events(
                         Ok(Some(update)) => update,
                         Ok(None) => break,
                         Err(error) => {
-                            send_json(&sender, "error", None, &serde_json::json!({"message": error.to_string()}));
+                            send_json(
+                                &sender,
+                                "error",
+                                None,
+                                &serde_json::json!({"message": error.to_string()}),
+                            )
+                            .await;
                             break;
                         }
                     };
@@ -160,10 +197,18 @@ pub(crate) async fn thread_events(
                             } else {
                                 "notification"
                             };
-                            (name, Some(format!("thread:{}", notification.revision)))
+                            // 事件 id 携带 stream epoch 与 revision；客户端据此判断缺口，
+                            // 重连时 SSE 仍然只发 `stale`，由数据库窗口重同步。
+                            (
+                                name,
+                                Some(format!(
+                                    "thread:{}:{}",
+                                    notification.epoch, notification.revision
+                                )),
+                            )
                         }
                     };
-                    if !send_json(&sender, event_name, event_id.as_deref(), &update) {
+                    if !send_json(&sender, event_name, event_id.as_deref(), &update).await {
                         return;
                     }
                 }
@@ -175,18 +220,69 @@ pub(crate) async fn thread_events(
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("")))
 }
 
-fn send_json(
+/// Lossless send: awaits channel capacity so transcript/turn terminal frames are never dropped.
+async fn send_json(
     sender: &mpsc::Sender<Result<Event, Infallible>>,
     event_name: &'static str,
     event_id: Option<&str>,
     value: &impl Serialize,
 ) -> bool {
+    let Ok(event) = encode_event(event_name, event_id, value) else {
+        return false;
+    };
+    sender.send(Ok(event)).await.is_ok()
+}
+
+/// Best-effort send for coalescable product updates: reports a full buffer instead of dropping
+/// silently, so the caller can deliver one `stale` marker and keep the stream alive.
+fn try_send_json(
+    sender: &mpsc::Sender<Result<Event, Infallible>>,
+    event_name: &'static str,
+    event_id: Option<&str>,
+    value: &impl Serialize,
+) -> Delivery {
+    let Ok(event) = encode_event(event_name, event_id, value) else {
+        return Delivery::Closed;
+    };
+    match sender.try_send(Ok(event)) {
+        Ok(()) => Delivery::Sent,
+        Err(mpsc::error::TrySendError::Full(_)) => Delivery::Stalled,
+        Err(mpsc::error::TrySendError::Closed(_)) => Delivery::Closed,
+    }
+}
+
+/// 无损送达一次 `stale`：等待缓冲容量，因此慢消费者一定收到重同步指令而不是被静默断开。
+///
+/// 返回 `false` 表示接收端已关闭或事件编码失败，调用方应结束该流。
+async fn flush_stale(
+    sender: &mpsc::Sender<Result<Event, Infallible>>,
+    shutdown: &CancellationToken,
+    stale: StaleEvent,
+) -> bool {
+    let permit = tokio::select! {
+        _ = shutdown.cancelled() => return false,
+        permit = sender.reserve() => match permit {
+            Ok(permit) => permit,
+            Err(_) => return false,
+        },
+    };
+    let Ok(event) = encode_event("stale", None, &stale) else {
+        return false;
+    };
+    // 已持有保留容量：`reserve()` 成功即保证这次 `send` 不会失败（接收端关闭会在上面的
+    // `reserve()` 分支就已经返回 false），因此这里返回 true 是真实送达，而不是乐观假设。
+    permit.send(Ok(event));
+    true
+}
+
+fn encode_event(
+    event_name: &'static str,
+    event_id: Option<&str>,
+    value: &impl Serialize,
+) -> Result<Event, axum::Error> {
     let mut event = Event::default().event(event_name);
     if let Some(event_id) = event_id {
         event = event.id(event_id);
     }
-    let Ok(event) = event.json_data(value) else {
-        return false;
-    };
-    sender.try_send(Ok(event)).is_ok()
+    event.json_data(value)
 }

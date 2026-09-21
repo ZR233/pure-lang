@@ -46,7 +46,7 @@ impl StudioRuntime {
         let route = match context {
             StudioAttachmentAdmissionContext::ExistingThread { thread_id } => {
                 let thread = self.read_owned_thread(thread_id).await?;
-                let (state, _) = self.read_thread_facts(thread_id).await?;
+                let state = self.read_thread_state(thread_id).await?;
                 let (_, selector) = crate::studio::model_route::route_record(
                     &state,
                     thread.parent_thread_id.is_some(),
@@ -83,9 +83,8 @@ impl StudioRuntime {
     ) -> Result<Vec<u8>> {
         self.read_owned_thread(&thread_id).await?;
         if attachment_id.starts_with(RESOURCE_ID_PREFIX) {
-            let (facts, _) = self.read_thread_facts(&thread_id).await?;
-            let store =
-                FileResourceStore::new(self.store.attachments_dir().join("thread-resources"));
+            let facts = self.read_thread_state(&thread_id).await?;
+            let store = FileResourceStore::new(self.store.session_resources_dir(&thread_id));
             return crate::studio::thread_projection::read_persisted_media(
                 &store,
                 &facts.deliveries,

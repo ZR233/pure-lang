@@ -22,6 +22,10 @@ class StudioController extends _$StudioController {
   late ProductStreamCoordinator _productCoordinator;
   late ThreadStreamCoordinator _threadCoordinator;
   final Set<String> _historyRequests = {};
+  final Map<String, int> _windowLoadGeneration = {};
+
+  /// 每个会话已观测到的实时广播 epoch；临时 map，断开或重订阅时释放。
+  final Map<String, int> _streamEpochByThread = {};
   final Set<String> _archivingThreadIds = {};
   final Set<String> _renamingThreadIds = {};
 
@@ -31,7 +35,11 @@ class StudioController extends _$StudioController {
 
   @override
   Future<StudioState> build() async {
-    _productCoordinator = ProductStreamCoordinator(_api, _handleProductEvent);
+    _productCoordinator = ProductStreamCoordinator(
+      _api,
+      _handleProductEvent,
+      _onProductStreamTerminated,
+    );
     _threadCoordinator = ThreadStreamCoordinator(
       _api,
       _handleThreadFrame,
@@ -40,6 +48,9 @@ class StudioController extends _$StudioController {
     ref.onDispose(() {
       unawaited(_productCoordinator.dispose());
       unawaited(_threadCoordinator.dispose());
+      _windowLoadGeneration.clear();
+      _streamEpochByThread.clear();
+      _historyRequests.clear();
     });
     final startupWatch = Stopwatch()..start();
     final catalog = await _api.loadProviderCatalog();
@@ -53,11 +64,9 @@ class StudioController extends _$StudioController {
       ),
     );
     _productCoordinator.start();
-    unawaited(
-      Future<void>.microtask(
-        () => _subscribeThread(bootstrapped.selectedThreadId),
-      ),
-    );
+    // §6.1：启动只读取全局配置、工作区与会话目录，并恢复“选择”；不打开任何会话。
+    // 首个 GUI 屏上已加载会话状态 / 已打开 history 数据库 / 已加载历史条目都为 0，
+    // 打开会话由用户显式交互触发（openThread），且打开不自动恢复模型或工具执行。
     _activateStartupProject(bootstrapped);
     debugPrint(
       'startup_stage=controller_ready elapsed_ms=${startupWatch.elapsedMilliseconds}',
@@ -256,12 +265,6 @@ class StudioController extends _$StudioController {
     );
   }
 
-  void dismissConfigRecoveryNotice() {
-    final current = state.value;
-    if (current == null || current.configRecoveryNotice == null) return;
-    state = AsyncData(current.copyWith(configRecoveryNotice: null));
-  }
-
   /// Adds explicitly queried cold directory identities without replacing live facts
   /// or applying a project-scoped cursor to the global directory window.
   void includeDirectoryThreads(List<StudioThread> threads) {
@@ -287,8 +290,13 @@ class StudioController extends _$StudioController {
   Future<void> restoreThread(String threadId) async {
     final thread = await _api.restoreThread(threadId);
     await _reloadProductState(
-      selection: _ProjectDefaultSelection(thread.projectId),
+      selection: _ExactThreadSelection(
+        projectId: thread.projectId,
+        threadId: thread.id,
+      ),
     );
+    // 恢复已归档会话是显式用户动作：选中后直接打开它。
+    await openThread(thread.id);
   }
 
   Future<void> archiveThread(String threadId) async {
@@ -313,7 +321,15 @@ class StudioController extends _$StudioController {
       final latest = state.value;
       if (latest == null) return;
       final previousThreadId = latest.selectedThreadId;
-      final next = _applyArchiveResult(latest, result);
+      var next = _applyArchiveResult(latest, result);
+      // 归档移除了这些会话：它们的 epoch/首窗 generation/在途标记一并释放。
+      for (final removedId in result.removedThreadIds) {
+        _releaseThreadSession(removedId);
+      }
+      if (previousThreadId != next.selectedThreadId) {
+        // 归档后自动落到的新根会话同样在这里打开：订阅与阅读面保持一致。
+        next = _markThreadOpened(next, next.selectedThreadId);
+      }
       state = AsyncData(next);
       if (previousThreadId != next.selectedThreadId) {
         await _subscribeThread(next.selectedThreadId);
@@ -396,7 +412,6 @@ class StudioController extends _$StudioController {
   Future<void> _selectThread(String threadId) async {
     final current = state.value;
     if (current == null ||
-        current.selectedThreadId == threadId ||
         !current.threads.any((thread) => thread.id == threadId) ||
         current.recoveryIssue(
               scope: RecoveryIssueScope.thread,
@@ -405,13 +420,29 @@ class StudioController extends _$StudioController {
             null) {
       return;
     }
+    if (current.selectedThreadId == threadId) {
+      // 已选中但可能尚未打开：显式点击同一会话即打开它，而不是永远停在未打开状态。
+      await openThread(threadId);
+      return;
+    }
+    final previousThreadId = current.selectedThreadId;
+    // 切换即释放上一个会话的历史载荷与全部会话级 map：整体内存随当前/近期窗口有界，
+    // 回到该会话时由新的订阅与首窗读取重建。
+    final base = previousThreadId == null
+        ? current
+        : releaseThreadHistoryPayload(current, previousThreadId);
+    if (previousThreadId != null) {
+      _releaseThreadSession(previousThreadId);
+    }
     state = AsyncData(
       _withWorkspaceUi(
-        current.copyWith(
+        base.copyWith(
           selectedThreadId: threadId,
           selectedProjectId: current.threads
               .firstWhere((thread) => thread.id == threadId)
               .projectId,
+          // 显式点击会话即打开它：标记为已打开，随后建立订阅。
+          openedThreadIds: {...base.openedThreadIds, threadId},
         ),
         threadId,
         (ui) => ui.copyWith(syncState: AgentWorkspaceSyncState.loading),
@@ -433,9 +464,59 @@ class StudioController extends _$StudioController {
     await _subscribeThread(threadId);
   }
 
+  /// 显式打开一个已选中的会话。
+  ///
+  /// 打开流程：读取一次当前状态、建立该会话的事件接收端，并在首个权威帧之后读取首个
+  /// 历史窗口。打开不等于恢复执行——不会重发模型请求、重跑工具或续跑未完成工作流；
+  /// 已打开或正在打开时为空操作。
+  Future<void> openThread(String threadId) async {
+    final current = state.value;
+    if (current == null || current.selectedThreadId != threadId) return;
+    if (current.openedThreadIds.contains(threadId) ||
+        _workspaceUi(current, threadId).syncState ==
+            AgentWorkspaceSyncState.loading) {
+      return;
+    }
+    state = AsyncData(
+      _withWorkspaceUi(
+        current.copyWith(
+          openedThreadIds: {...current.openedThreadIds, threadId},
+        ),
+        threadId,
+        (ui) => ui.copyWith(syncState: AgentWorkspaceSyncState.loading),
+      ),
+    );
+    await _subscribeThread(threadId);
+  }
+
+  /// 打开当前选中的会话；没有选中会话时不做任何事。
+  ///
+  /// 供未打开占位视图的显式入口与测试使用，语义与 [openThread] 完全一致。
+  Future<void> openSelectedThread() async {
+    final threadId = state.value?.selectedThreadId;
+    if (threadId == null) return;
+    await openThread(threadId);
+  }
+
+  /// 显式用户交互（输入、提交、滚动、跳转、切换模式）触发的懒打开。
+  ///
+  /// 首屏恢复的选择不算交互，因此这里才激活：先建立订阅、读取一次当前状态，随后由首个
+  /// 权威帧读取首个历史窗口。已打开或未选中该会话时为空操作。
+  Future<void> _ensureThreadOpen(String threadId) async {
+    final current = state.value;
+    if (current == null ||
+        current.selectedThreadId != threadId ||
+        current.openedThreadIds.contains(threadId)) {
+      return;
+    }
+    await openThread(threadId);
+  }
+
   Future<void> _subscribeThread(String? threadId) async {
     final generation = _threadCoordinator.switchThread(threadId);
     if (!ref.mounted || threadId == null) return;
+    // 重订阅开启新的广播生命周期：旧 epoch 立即失效。
+    _streamEpochByThread.remove(threadId);
     final current = state.value;
     if (current == null || current.selectedThreadId != threadId) return;
     state = AsyncData(
@@ -445,16 +526,139 @@ class StudioController extends _$StudioController {
         (ui) => ui.copyWith(subscriptionGeneration: generation),
       ),
     );
+    // 首个历史窗口的读取由“首个权威帧”驱动（见 [_handleThreadFrame] 的 snapshot 分支）：
+    // Dart 的 `.listen()` 返回只代表已发起订阅，原生接收端注册与固定持久化屏障必须由
+    // 首个 snapshot 帧证明完成后，SQL 才能被当作权威窗口读取。
   }
 
-  Future<void> loadOlderHistory(String threadId) =>
-      _loadTimelinePage(threadId, TimelineDirection.older);
-  Future<void> loadNewerHistory(String threadId) =>
-      _loadTimelinePage(threadId, TimelineDirection.newer);
+  /// 释放一个会话级的临时 map：切换、归档/关闭或 controller 销毁时调用，避免
+  /// epoch / 首窗 generation / 在途请求标记随访问过的会话无限增长。
+  void _releaseThreadSession(String threadId) {
+    _windowLoadGeneration.remove(threadId);
+    _streamEpochByThread.remove(threadId);
+    _historyRequests.remove(threadId);
+  }
+
+  /// 把某个会话标记回“未打开”；仅用于非显式选择变化，不触发订阅或释放。
+  StudioState _markThreadUnopened(StudioState current, String? threadId) {
+    if (threadId == null || !current.openedThreadIds.contains(threadId)) {
+      return current;
+    }
+    return current.copyWith(
+      openedThreadIds: {...current.openedThreadIds}..remove(threadId),
+    );
+  }
+
+  /// 把一个会话标记为“已打开”（调用方随后已建立或即将建立订阅）。
+  StudioState _markThreadOpened(StudioState current, String? threadId) {
+    if (threadId == null || current.openedThreadIds.contains(threadId)) {
+      return current;
+    }
+    return current.copyWith(
+      openedThreadIds: {...current.openedThreadIds, threadId},
+    );
+  }
+
+  Future<void> loadOlderHistory(String threadId) async {
+    await _ensureThreadOpen(threadId);
+    await _loadTimelinePage(threadId, TimelineDirection.older);
+  }
+
+  Future<void> loadNewerHistory(String threadId) async {
+    await _ensureThreadOpen(threadId);
+    await _loadTimelinePage(threadId, TimelineDirection.newer);
+  }
+
+  /// 读取一条完整条目正文：原生 bridge 与 demo 直接按 identity 读取完整 payload；
+  /// 其它实现退化为围绕该身份的一页，仍由同一身份/revision 规则决定是否采纳。
+  Future<TimelinePage> _readTimelineItemBody(String threadId, String itemId) {
+    final api = _api;
+    // 声明式模式绑定：只有实现该可选能力的 API 才走按 identity 的完整正文回源，
+    // 其它实现（测试替身等）退化为围绕该身份的一页，不编造完整载荷。
+    if (api case final TimelineItemBodyReader reader) {
+      return reader.readTimelineItem(threadId, itemId);
+    }
+    return api.listTimelineItems(
+      threadId,
+      kind: TimelineQueryKind.around,
+      itemId: itemId,
+      limit: 1,
+    );
+  }
+
+  /// 按 item identity 回源一条被页面预览预算截断的完整正文。
+  ///
+  /// 加载期间在窗口状态里显式标记该条目；回源结果与窗口共享 database identity 与
+  /// watermark，因此只按同一身份合并，窗口过期时改为重读权威窗口而不是拼接旧载荷。
+  Future<void> loadItemBody(String threadId, String itemId) async {
+    await _ensureThreadOpen(threadId);
+    final current = state.value;
+    if (current == null ||
+        current.selectedThreadId != threadId ||
+        !current.workspacesByThread.containsKey(threadId) ||
+        !_workspaceUi(
+          current,
+          threadId,
+        ).history.previewedItemIds.contains(itemId)) {
+      return;
+    }
+    if (_workspaceUi(
+      current,
+      threadId,
+    ).history.loadingItemIds.contains(itemId)) {
+      return;
+    }
+    state = AsyncData(startItemBodyLoad(current, threadId, itemId));
+    try {
+      final page = await _readTimelineItemBody(threadId, itemId);
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest == null ||
+          latest.selectedThreadId != threadId ||
+          !latest.workspacesByThread.containsKey(threadId)) {
+        return;
+      }
+      if (timelinePageIsStale(
+        _workspaceUi(latest, threadId).history,
+        page,
+        // 按 identity 回源只能并入同一数据库实体：身份不同或水位回退都拒绝。
+        replaceWindow: false,
+      )) {
+        // 回源页来自已被替换的数据库实体：不并入，改读权威窗口。
+        state = AsyncData(
+          _withWorkspaceUi(latest, threadId, (ui) {
+            final loadingItemIds = {...ui.history.loadingItemIds}
+              ..remove(itemId);
+            return ui.copyWith(
+              history: ui.history.copyWith(loadingItemIds: loadingItemIds),
+            );
+          }),
+        );
+        unawaited(
+          _reloadTimelineWindow(
+            threadId,
+            _threadCoordinator.generation,
+            force: true,
+          ),
+        );
+        return;
+      }
+      state = AsyncData(applyItemBodyPage(latest, threadId, itemId, page));
+    } catch (error) {
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest == null) return;
+      state = AsyncData(
+        failItemBodyLoad(latest, threadId, itemId, error.toString()),
+      );
+    }
+  }
 
   void updateTimelineAnchor(String threadId, TimelineAnchor anchor) {
     final current = state.value;
     if (current == null) return;
+    // 先落地阅读锚点，再（未打开时）激活会话：激活读取的是含锚点的最新状态，
+    // 因此打开写下的 opened/subscriptionGeneration 不会被本方法用旧快照覆盖。
     state = AsyncData(
       _withWorkspaceUi(
         current,
@@ -467,39 +671,86 @@ class StudioController extends _$StudioController {
         ),
       ),
     );
+    // 滚动/定位是显式交互：未打开的会话在此激活。
+    unawaited(_ensureThreadOpen(threadId));
   }
 
   Future<void> jumpToLatest(String threadId) async {
     final current = state.value;
     if (current == null) return;
+    await _ensureThreadOpen(threadId);
     state = AsyncData(jumpTimelineToLatest(current, threadId));
-    if (current.selectedThreadId == threadId) await _subscribeThread(threadId);
+    if (current.selectedThreadId != threadId) return;
+    await _reloadTimelineWindow(
+      threadId,
+      _threadCoordinator.generation,
+      force: true,
+    );
   }
 
-  Future<void> _loadTimelinePage(
+  /// 订阅建立后的权威窗口读取：首窗与重连直接用数据库最新窗口替换阅读范围，
+  /// 已离开底部（存在非跟随锚点）时改为围绕锚点读取，保持用户位置。
+  ///
+  /// 只有成功读取后才把该 generation 记为已读取，因此在更早的读取被跳过
+  /// （例如 owner 尚未激活）时，同一 generation 的首帧仍会补做一次。
+  Future<void> _reloadTimelineWindow(
+    String threadId,
+    int generation, {
+    bool force = false,
+  }) async {
+    final current = state.value;
+    if (current == null ||
+        generation != _threadCoordinator.generation ||
+        current.selectedThreadId != threadId ||
+        _workspaceUi(current, threadId).subscriptionGeneration != generation ||
+        (!force && _windowLoadGeneration[threadId] == generation)) {
+      return;
+    }
+    final anchor = _workspaceUi(current, threadId).history.anchor;
+    final loaded = anchor != null && !anchor.followingBottom
+        ? await _loadTimelinePage(
+            threadId,
+            TimelineDirection.older,
+            aroundItemId: anchor.itemId,
+          )
+        : await _loadTimelinePage(
+            threadId,
+            TimelineDirection.newer,
+            resetWindow: true,
+          );
+    if (loaded) {
+      _windowLoadGeneration[threadId] = generation;
+    }
+  }
+
+  /// 读取一页历史窗口；返回是否真正发起了请求。
+  Future<bool> _loadTimelinePage(
     String threadId,
     TimelineDirection direction, {
     String? aroundItemId,
+    bool resetWindow = false,
   }) async {
     final current = state.value;
-    if (current == null) return;
+    if (current == null) return false;
     final workspace = current.workspacesByThread[threadId];
+    if (workspace == null) return false;
     final history = _workspaceUi(current, threadId).history;
     final older = direction == TimelineDirection.older;
     final anchor =
         aroundItemId ??
         (older
-            ? history.olderCursor ?? workspace?.items.firstOrNull?.id
-            : history.newerCursor ?? workspace?.items.lastOrNull?.id);
-    if (workspace == null ||
-        anchor == null ||
-        history.isLoading ||
-        _historyRequests.contains(threadId) ||
-        (aroundItemId == null &&
-            !(older ? history.hasOlder : history.hasNewer))) {
-      return;
+            ? history.olderCursor ?? workspace.items.firstOrNull?.id
+            : history.newerCursor ?? workspace.items.lastOrNull?.id);
+    if (history.isLoading || _historyRequests.contains(threadId)) return false;
+    if (!resetWindow &&
+        (anchor == null ||
+            (aroundItemId == null &&
+                !(older ? history.hasOlder : history.hasNewer)))) {
+      return false;
     }
     final epoch = history.epoch;
+    final replaceWindow = resetWindow || aroundItemId != null;
+    var stale = false;
     _historyRequests.add(threadId);
     state = AsyncData(
       _withWorkspaceUi(
@@ -518,36 +769,55 @@ class StudioController extends _$StudioController {
     try {
       final page = await _api.listTimelineItems(
         threadId,
-        kind: aroundItemId != null
+        kind: resetWindow
+            ? TimelineQueryKind.latest
+            : aroundItemId != null
             ? TimelineQueryKind.around
             : older
             ? TimelineQueryKind.before
             : TimelineQueryKind.after,
-        itemId: anchor,
+        itemId: resetWindow ? null : anchor,
       );
-      if (!ref.mounted) return;
+      if (!ref.mounted) return true;
       final latest = state.value;
       if (latest == null ||
           !latest.workspacesByThread.containsKey(threadId) ||
           _workspaceUi(latest, threadId).history.epoch != epoch) {
-        return;
+        return true;
       }
-      state = AsyncData(
-        applyTimelinePage(
-          latest,
-          threadId,
-          page,
-          direction,
-          replaceWindow: aroundItemId != null,
-        ),
-      );
+      // 页面必须与当前窗口属于同一数据库且水位不早于已采纳水位；否则只读不并入。
+      if (timelinePageIsStale(
+        _workspaceUi(latest, threadId).history,
+        page,
+        replaceWindow: replaceWindow,
+      )) {
+        stale = true;
+        state = AsyncData(
+          _withWorkspaceUi(
+            latest,
+            threadId,
+            (ui) => ui.copyWith(history: ui.history.copyWith(isLoading: false)),
+          ),
+        );
+      } else {
+        state = AsyncData(
+          applyTimelinePage(
+            latest,
+            threadId,
+            page,
+            direction,
+            replaceWindow: replaceWindow,
+            followBottom: resetWindow,
+          ),
+        );
+      }
     } catch (error) {
-      if (!ref.mounted) return;
+      if (!ref.mounted) return true;
       final latest = state.value;
       if (latest == null ||
           !latest.workspacesByThread.containsKey(threadId) ||
           _workspaceUi(latest, threadId).history.epoch != epoch) {
-        return;
+        return true;
       }
       state = AsyncData(
         _withWorkspaceUi(
@@ -580,6 +850,14 @@ class StudioController extends _$StudioController {
         }
       }
     }
+    if (stale && ref.mounted) {
+      // 过期页不并入；用最新窗口替换当前窗口，采纳新的数据库身份与水位。
+      unawaited(
+        _loadTimelinePage(threadId, TimelineDirection.newer, resetWindow: true),
+      );
+      return false;
+    }
+    return true;
   }
 
   /// 侧栏触底加载下一页会话目录；内存未命中时由 bridge 从数据库分页取回。
@@ -611,6 +889,8 @@ class StudioController extends _$StudioController {
   void updateComposer(String threadId, String value) {
     final current = state.value;
     if (current == null || current.selectedThreadId != threadId) return;
+    // 先落地草稿，再（未打开时）激活会话：激活基于含草稿的最新状态，避免本方法随后
+    // 用打开前的旧快照覆盖 opened/subscriptionGeneration，导致首窗读取与实时帧被丢弃。
     state = AsyncData(
       _withWorkspaceUi(
         current,
@@ -618,6 +898,8 @@ class StudioController extends _$StudioController {
         (ui) => ui.copyWith(composer: ui.composer.updateDraft(value)),
       ),
     );
+    // 在输入区输入是显式交互：未打开的会话在此激活。
+    unawaited(_ensureThreadOpen(threadId));
   }
 
   void updateNewThreadComposer(String value) {
@@ -972,6 +1254,10 @@ class StudioController extends _$StudioController {
       selectedThreadId: shouldSelect
           ? result.thread.id
           : latest.selectedThreadId,
+      // 新建会话是显式用户动作：创建后直接打开它。
+      openedThreadIds: shouldSelect
+          ? {...next.openedThreadIds, result.thread.id}
+          : next.openedThreadIds,
       newThreadComposerByProject: {
         ...next.newThreadComposerByProject,
         projectId: shouldSelect ? const ComposerThreadState.idle() : active,
@@ -984,6 +1270,8 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> submitComposer(String threadId) async {
+    // 提交是显式交互：未打开的会话先激活，随后才受理输入。
+    await _ensureThreadOpen(threadId);
     final current = state.value;
     final composer = current == null
         ? const ComposerThreadState.idle()
@@ -1102,6 +1390,8 @@ class StudioController extends _$StudioController {
         current.runtime.hasActiveWorkflow) {
       return;
     }
+    // 切换会话模式是显式交互：未打开的会话先激活。
+    await _ensureThreadOpen(thread.id);
     await _api.setThreadMode(threadId: thread.id, mode: mode);
     if (!ref.mounted) return;
     final latest = state.value;
@@ -1495,6 +1785,19 @@ class StudioController extends _$StudioController {
     state = AsyncData(applyPersistenceState(latest, persistence));
   }
 
+  /// 读取进程级持久化队列压力；只在当前 API 实现该观测能力时返回，否则为未知。
+  ///
+  /// 该值用于诊断展示，不写入会话状态、也不驱动任何执行：它是协调器已观测到的真实
+  /// 队列压力，调用方据此区分“落后量已知”与“无法观测”，而不是编造本地计数。
+  Future<PersistenceQueueSnapshot?> readPersistenceQueue() async {
+    final api = _api;
+    // 声明式模式绑定：未实现该观测能力的 API 返回 null（未知），不编造本地计数。
+    if (api case final PersistenceQueueReader reader) {
+      return reader.readPersistenceQueue();
+    }
+    return null;
+  }
+
   Future<void> resolveActiveInteraction(
     String threadId,
     String interactionId,
@@ -1559,11 +1862,30 @@ class StudioController extends _$StudioController {
       return;
     }
     final previousThreadId = current.selectedThreadId;
-    final next = reduceStudioEvent(current, event).state;
-    state = AsyncData(next);
-    if (previousThreadId != next.selectedThreadId) {
-      unawaited(_subscribeThread(next.selectedThreadId));
+    var next = reduceStudioEvent(current, event).state;
+    // 归档/关闭会从 workspaces 移除该会话：立即释放它的会话级 map。
+    for (final threadId in current.workspacesByThread.keys) {
+      if (!next.workspacesByThread.containsKey(threadId)) {
+        _releaseThreadSession(threadId);
+      }
     }
+    if (previousThreadId != next.selectedThreadId) {
+      if (previousThreadId != null) {
+        _releaseThreadSession(previousThreadId);
+        next = releaseThreadHistoryPayload(next, previousThreadId);
+      }
+      // 非显式选择变化不继承“已打开”：新选中会话保持未打开，等待用户交互（§6.1）。
+      next = _markThreadUnopened(next, next.selectedThreadId);
+      state = AsyncData(next);
+      return;
+    }
+    state = AsyncData(next);
+  }
+
+  /// Product 流终止（bridge 的 failure/closed）不是正常结束：读取一次 canonical
+  /// snapshot 重同步；协调器随后有界重订阅，内存状态与实时更新都不会静默停摆。
+  void _onProductStreamTerminated() {
+    unawaited(_reloadProductState());
   }
 
   Future<void> _reloadProductState({
@@ -1602,35 +1924,30 @@ class StudioController extends _$StudioController {
       return;
     }
     switch (frame) {
-      case ThreadSnapshotFrame(:final workspace, :final historyCursor):
-        final next = applyThreadSnapshot(
-          current,
-          workspace,
-          historyCursor: historyCursor,
-        );
-        state = AsyncData(next);
-        final history = _workspaceUi(next, threadId).history;
-        final anchor = history.anchor;
-        if (anchor != null &&
-            !anchor.followingBottom &&
-            history.errorMessage == null &&
-            !next.workspacesByThread[threadId]!.items.any(
-              (item) => item.id == anchor.itemId,
-            )) {
-          unawaited(
-            _loadTimelinePage(
-              threadId,
-              TimelineDirection.older,
-              aroundItemId: anchor.itemId,
-            ),
-          );
-        }
+      case ThreadSnapshotFrame(:final workspace):
+        // 首帧只替换当前状态；历史条目由订阅建立后的窗口读取提供。生产端把
+        // (重)订阅建立表达为首个 snapshot：这里以它为界读取一次权威窗口，覆盖
+        // owner 尚未激活时被跳过的首窗读取，并采纳数据库身份/水位。同一订阅世代
+        // 只读一次，避免每个 snapshot 重复全窗读取。
+        state = AsyncData(applyThreadSnapshot(current, workspace));
+        unawaited(_reloadTimelineWindow(threadId, generation));
       case ThreadNotificationFrame(:final revision, :final update):
+        final epoch = frame.epoch;
+        final knownEpoch = _streamEpochByThread[threadId];
+        if (epoch != null && knownEpoch != null && knownEpoch != epoch) {
+          // 生产端连续广播生命周期切换：旧 epoch 的帧全部作废，重新订阅。
+          unawaited(_resyncThread(threadId, generation));
+          return;
+        }
+        if (epoch != null) {
+          _streamEpochByThread[threadId] = epoch;
+        }
         final reduced = applyThreadUpdate(
           current,
           threadId: threadId,
           revision: revision,
           update: update,
+          baseRevision: frame.baseRevision,
         );
         if (reduced.resyncThreadId != null) {
           unawaited(_resyncThread(threadId, generation));
@@ -1658,6 +1975,7 @@ class StudioController extends _$StudioController {
     int generation, [
     Object? error,
   ]) {
+    _streamEpochByThread.remove(threadId);
     final current = state.value;
     if (current == null ||
         generation != _threadCoordinator.generation ||
@@ -1694,16 +2012,24 @@ class StudioController extends _$StudioController {
     final current = state.value;
     final previousThreadId = current?.selectedThreadId;
     // 选择已由显式 selection intent 解析并随 incoming 携带；这里不再改写。
-    final next = current == null
+    var next = current == null
         ? incoming
         : _mergeProductSnapshots(
             current,
             incoming,
           ).copyWith(providerCatalog: current.providerCatalog);
-    state = AsyncData(next);
-    if (previousThreadId != next.selectedThreadId) {
-      await _subscribeThread(next.selectedThreadId);
+    if (previousThreadId != next.selectedThreadId && previousThreadId != null) {
+      // 选择切换（例如目录事件把焦点移到别的 Thread）同样释放上一个会话的历史载荷。
+      _releaseThreadSession(previousThreadId);
+      next = releaseThreadHistoryPayload(next, previousThreadId);
     }
+    if (previousThreadId != next.selectedThreadId) {
+      // 非显式选择变化不继承“已打开”：新选中会话保持未打开，等待用户交互（§6.1）。
+      next = _markThreadUnopened(next, next.selectedThreadId);
+    }
+    state = AsyncData(next);
+    // 选择变化只更新选择并释放旧载荷：产品快照/目录事件不是“用户打开会话”，
+    // 新选中的会话保持未打开，等待显式交互（§6.1）。
   }
 }
 
@@ -1732,7 +2058,12 @@ StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
 }
 
 WorkspaceUiState _workspaceUi(StudioState state, String threadId) {
-  return state.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
+  // 首屏只恢复选择，不打开会话（§6.1）：从未打开的会话没有 UI 条目，语义是
+  // `idle`（尚未打开），不能沿用 `WorkspaceUiState` 的默认 `loading`——否则
+  // `openThread` 会把“尚未打开”当成“正在打开”而直接返回，用户永远打不开首屏
+  // 已选中的会话。与 `StudioState.selectedWorkspaceUi` 的判读保持一致。
+  return state.workspaceUiByThread[threadId] ??
+      const WorkspaceUiState(syncState: AgentWorkspaceSyncState.idle);
 }
 
 StudioState _withWorkspaceUi(

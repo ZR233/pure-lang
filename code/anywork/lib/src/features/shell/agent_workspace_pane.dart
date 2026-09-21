@@ -94,6 +94,9 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                   : null,
               body: Column(
                 children: [
+                  // 首屏恢复的上次选择只表达选择，不等于打开会话（§6.1）：未打开时
+                  // 给出显式打开入口，同时保留输入区，便于用户直接开始交互。
+                  if (layout.needsOpen) _OpenThreadBanner(threadId: threadId),
                   Expanded(
                     child: Stack(
                       children: [
@@ -308,6 +311,60 @@ class _AdaptiveFooter extends StatelessWidget {
   }
 }
 
+/// 已选中但尚未打开的会话：显式打开入口。
+///
+/// 此处不读取会话状态、不打开 history 数据库、不加载历史（§6.1）。用户点击“打开会话”
+/// （或在输入区输入/提交、滚动历史）才会激活会话；打开只恢复当前状态与订阅，不自动
+/// 续跑模型/工具执行。
+class _OpenThreadBanner extends ConsumerWidget {
+  const _OpenThreadBanner({required this.threadId});
+
+  final String threadId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ColoredBox(
+      key: StudioDriverKeys.unopenedThread,
+      color: context.colors.surfaceContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        child: Row(
+          children: [
+            Tooltip(
+              message: context.l10n.threadUnopenedTitle,
+              child: Icon(
+                Icons.play_circle_outline,
+                size: 18,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                context.l10n.threadUnopenedBody,
+                style: Theme.of(context).textTheme.labelSmall
+                    ?.copyWith(color: context.colors.onSurfaceVariant),
+              ),
+            ),
+            KeyedSubtree(
+              key: StudioDriverKeys.openSelectedThread,
+              child: FilledButton(
+                key: StudioDriverKeys.openThread(threadId),
+                onPressed: () => unawaited(
+                  ref
+                      .read(studioControllerProvider.notifier)
+                      .openThread(threadId),
+                ),
+                child: Text(context.l10n.threadOpenAction),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _StudioStartPage extends StatelessWidget {
   const _StudioStartPage({required this.view});
 
@@ -415,6 +472,16 @@ class _AgentTimelineHost extends ConsumerWidget {
           olderCursor: timeline.history.olderCursor,
           newerCursor: timeline.history.newerCursor,
           windowEpoch: timeline.history.epoch,
+          previewedItemIds: timeline.history.previewedItemIds,
+          loadingItemIds: timeline.history.loadingItemIds,
+          itemBodyErrors: timeline.history.itemBodyErrors,
+          pendingItemBodyIds: timeline.history.pendingItemBodyIds,
+          unavailableItemIds: timeline.history.unavailableItemIds,
+          onLoadItemBody: (itemId) => unawaited(
+            ref
+                .read(studioControllerProvider.notifier)
+                .loadItemBody(threadId, itemId),
+          ),
           onAnchorChanged: (anchor) => ref
               .read(studioControllerProvider.notifier)
               .updateTimelineAnchor(threadId, anchor),
