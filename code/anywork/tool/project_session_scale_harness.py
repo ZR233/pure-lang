@@ -26,7 +26,7 @@ For every requested size this harness:
   avoid a TEMP B-TREE), while a lost keyset bound, a missing index on the
   kind/lifecycle/Turn predicates or a sort is a fixture failure;
 * opens each fixture with the real Linux native Studio (`cargo xtask run-gui
-  --driver`), records the unopened startup snapshot, opens the saved Thread,
+  --driver`), observes the selected Thread opening automatically at startup,
   waits for the bounded first window and records its identity, then polls only
   the leaf GUI process' `/proc/<pid>/smaps_rollup` (falling back to
   `/proc/<pid>/status` VmRSS/VmHWM) for the whole run.
@@ -1279,10 +1279,7 @@ def _run_once(root, base, fixture, label, repeat, output, args, user_home_before
             'startupToFirstScreenMs': (
                 timeline.get('startupAtMs', 0) - launch_started_ms
             ),
-            'openLatencyMs': (
-                timeline.get('firstWindowAtMs', 0) - timeline.get('openTappedAtMs', 0)
-            ),
-            'startupToFirstWindowMs': (
+            'launchToFirstWindowMs': (
                 timeline.get('firstWindowAtMs', 0) - launch_started_ms
             ),
         }
@@ -1291,7 +1288,7 @@ def _run_once(root, base, fixture, label, repeat, output, args, user_home_before
                 'startup': _phase_summary(
                     sampler.samples,
                     launch_started_ms,
-                    timeline.get('openTappedAtMs') or launch_started_ms,
+                    timeline.get('firstWindowAtMs') or launch_started_ms,
                     ('pssKb', 'rssKb', 'vmRssKb', 'vmHwmKb'),
                 ),
                 'opened': _phase_summary(
@@ -1323,8 +1320,8 @@ def _comparison(runs):
         ]
         data[label] = {
             'repeats': len(entries),
-            'openLatencyMs': [
-                e.get('stages', {}).get('openLatencyMs') for e in entries
+            'launchToFirstWindowMs': [
+                e.get('stages', {}).get('launchToFirstWindowMs') for e in entries
             ],
             'startupToFirstScreenMs': [
                 e.get('stages', {}).get('startupToFirstScreenMs') for e in entries
@@ -1515,9 +1512,9 @@ def _run_verdict(summary):
     if (sampling.get('sampleCount') or 0) <= 0:
         problems.append('no leaf GUI process memory samples were collected')
 
-    latency = (summary.get('stages') or {}).get('openLatencyMs')
+    latency = (summary.get('stages') or {}).get('launchToFirstWindowMs')
     if not isinstance(latency, int) or latency < 0:
-        problems.append('open-phase timing evidence is missing')
+        problems.append('launch-to-first-window timing evidence is missing')
 
     if (summary.get('wireIndex') or {}).get('available') is not True:
         problems.append('the provider wire index is unavailable')

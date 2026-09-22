@@ -94,8 +94,8 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                   : null,
               body: Column(
                 children: [
-                  // 首屏恢复的上次选择只表达选择，不等于打开会话（§6.1）：未打开时
-                  // 给出显式打开入口，同时保留输入区，便于用户直接开始交互。
+                  // 首帧后自动打开当前选择；打开前仍保留显式入口与输入区，
+                  // 便于用户直接开始交互或在失败后重试。
                   if (layout.needsOpen) _OpenThreadBanner(threadId: threadId),
                   Expanded(
                     child: Stack(

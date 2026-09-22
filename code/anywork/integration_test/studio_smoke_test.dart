@@ -29,7 +29,7 @@ void main() {
       ),
     );
     await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.shell));
-    expect(find.byKey(const ValueKey('recovery-check-status')), findsOneWidget);
+    expect(find.byKey(const ValueKey('recovery-check-status')), findsNothing);
     await tester.tap(find.byKey(StudioDriverKeys.settingsOpen));
     await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.settingsPage));
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('agents')));
@@ -37,8 +37,8 @@ void main() {
       tester,
       find.byKey(const ValueKey('agent-profile-add')),
     );
-    // Both routes expose the status banner while navigation is animating. The
-    // recovery spinner stays active, so wait for the route rather than all frames.
+    // Agents shows the in-progress check. Wait for the route rather than all
+    // frames because the recovery spinner stays active.
     await _pumpUntilFound(
       tester,
       find.byElementPredicate(
@@ -54,14 +54,15 @@ void main() {
       find.byKey(const ValueKey('recovery-check-retry')),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('recovery-check-retry')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('recovery-check-status')), findsNothing);
     expect(find.byKey(const ValueKey('agent-profile-add')), findsOneWidget);
-    expect(tester.takeException(), isNull);
     await tester.tap(find.byKey(StudioDriverKeys.settingsBack));
     await tester.pumpAndSettle();
     expect(find.byKey(StudioDriverKeys.shell), findsOneWidget);
+    expect(find.byKey(const ValueKey('recovery-check-retry')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('recovery-check-retry')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('recovery-check-status')), findsNothing);
+    expect(tester.takeException(), isNull);
     await api.shutdownRuntime();
     await tester.pumpWidget(const SizedBox());
   });
@@ -82,14 +83,8 @@ void main() {
 
     expect(find.byKey(StudioDriverKeys.shell), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.sidebar), findsOneWidget);
-    // §6.1: the first screen only restores the selection, so it shows the
-    // explicit open affordance and the timeline is not rendered yet.
-    expect(find.byKey(StudioDriverKeys.unopenedThread), findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.timeline), findsNothing);
-
-    // Opening the selected Thread is what establishes the subscription and the
-    // first history window that renders the timeline.
-    await tester.tap(find.byKey(StudioDriverKeys.openSelectedThread));
+    // The selected Thread opens after the first usable frame; the subscription
+    // snapshot then drives the first history window.
     await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.timeline));
     expect(find.byKey(StudioDriverKeys.unopenedThread), findsNothing);
 

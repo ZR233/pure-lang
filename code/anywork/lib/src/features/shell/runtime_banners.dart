@@ -160,9 +160,7 @@ class _PersistenceStatusPanelState
     final state = snapshot.state;
     final attention = state.needsAttention;
     final queue = _queue;
-    final backlog =
-        queue != null && (queue.isBacklogged || queue.pressurePaused);
-    if (!attention && !backlog) {
+    if (!attention && queue?.pressurePaused != true) {
       return const SizedBox.shrink();
     }
     final colors = Theme.of(context).colorScheme;

@@ -140,9 +140,8 @@ void registerProjectSidebarTests() {
       final api = _FakeStudioApi(
         _twoProjectState(selectedProjectId: 'project-a'),
       );
-      // 本用例要观察“切换到初始窗口外的会话”时的加载面：按住首个权威帧，
-      // 使 loading 状态可观察（发布后仍由同一帧驱动首窗读取）。
-      api.publishSnapshotOnSubscribe = false;
+      // 启动选中的会话正常打开；切换到初始窗口外的会话时再拦住首帧，
+      // 使目标会话的 loading 状态可观察。
       api.directoryPages['old'] = ThreadDirectoryPage(
         threads: [
           StudioThread(
@@ -171,6 +170,7 @@ void registerProjectSidebarTests() {
         ),
       );
       await tester.pumpAndSettle();
+      api.publishSnapshotOnSubscribe = false;
       await tester.enterText(
         find.byKey(const ValueKey('sidebar-search')),
         'ancient',

@@ -64,9 +64,9 @@ class StudioController extends _$StudioController {
       ),
     );
     _productCoordinator.start();
-    // §6.1：启动只读取全局配置、工作区与会话目录，并恢复“选择”；不打开任何会话。
-    // 首个 GUI 屏上已加载会话状态 / 已打开 history 数据库 / 已加载历史条目都为 0，
-    // 打开会话由用户显式交互触发（openThread），且打开不自动恢复模型或工具执行。
+    // 启动只读取全局配置、工作区与会话目录，并恢复“选择”；首个 GUI 帧
+    // 不加载会话状态或历史。GUI 在首帧之后通过 openSelectedThread 打开当前会话，
+    // 不自动恢复模型或工具执行。
     _activateStartupProject(bootstrapped);
     debugPrint(
       'startup_stage=controller_ready elapsed_ms=${startupWatch.elapsedMilliseconds}',
@@ -464,7 +464,7 @@ class StudioController extends _$StudioController {
     await _subscribeThread(threadId);
   }
 
-  /// 显式打开一个已选中的会话。
+  /// 打开一个已选中的会话（GUI 首帧之后或用户显式操作）。
   ///
   /// 打开流程：读取一次当前状态、建立该会话的事件接收端，并在首个权威帧之后读取首个
   /// 历史窗口。打开不等于恢复执行——不会重发模型请求、重跑工具或续跑未完成工作流；
@@ -491,17 +491,17 @@ class StudioController extends _$StudioController {
 
   /// 打开当前选中的会话；没有选中会话时不做任何事。
   ///
-  /// 供未打开占位视图的显式入口与测试使用，语义与 [openThread] 完全一致。
+  /// 供 GUI 首帧、未打开占位视图与测试使用，语义与 [openThread] 完全一致。
   Future<void> openSelectedThread() async {
     final threadId = state.value?.selectedThreadId;
     if (threadId == null) return;
     await openThread(threadId);
   }
 
-  /// 显式用户交互（输入、提交、滚动、跳转、切换模式）触发的懒打开。
+  /// 用户交互（输入、提交、滚动、跳转、切换模式）触发的懒打开。
   ///
-  /// 首屏恢复的选择不算交互，因此这里才激活：先建立订阅、读取一次当前状态，随后由首个
-  /// 权威帧读取首个历史窗口。已打开或未选中该会话时为空操作。
+  /// GUI 首帧之后也会打开当时选中的会话；在此之前发生交互时沿同一路径建立订阅，
+  /// 首个权威帧再驱动历史首窗。已打开或未选中该会话时为空操作。
   Future<void> _ensureThreadOpen(String threadId) async {
     final current = state.value;
     if (current == null ||

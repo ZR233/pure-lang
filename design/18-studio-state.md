@@ -52,6 +52,8 @@ settlement。审计结果按当前 lease revision 和已清理问题过滤，不
 并加载 Thread checkpoint、working state 与 pending Interaction，全部成功后一次安装 owner。
 Mode snapshot 和 workflow projection 与 session 同时恢复，不存在独立任务 runtime 恢复扫描。
 Timeline 首窗在订阅建立后由 HistoryReader 查询；产品交互回答前按保存的父子顺序激活所需 Thread。
+GUI 首个可用画面之后若已选中 Thread，复用普通打开命令激活该 Thread，不遍历其他 Thread，
+也不自动继续模型或工具执行。
 
 创建根会话是可失败的类型化命令，请求同时携带 Mode 与会话工作区模式。`worktree` 模式在发布
 Thread 之前完成仓库解析、worktree 创建与 lease 落库；任一阶段失败都让命令失败、不留下已发布

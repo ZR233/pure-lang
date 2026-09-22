@@ -140,6 +140,11 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                 debugPrint(
                   'startup_stage=first_usable_frame elapsed_ms=${_startupClock.elapsedMilliseconds}',
                 );
+                unawaited(
+                  ref
+                      .read(studioControllerProvider.notifier)
+                      .openSelectedThread(),
+                );
               }
             });
           }
@@ -273,7 +278,7 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                                 _ApplicationRecoveryBanner(
                                   issues: chrome.applicationRecoveryIssues,
                                 ),
-                              const RecoveryCheckStatus(),
+                              const RecoveryCheckStatus(showChecking: false),
                               const Divider(height: 1),
                               const Expanded(child: AgentWorkspacePane()),
                             ],

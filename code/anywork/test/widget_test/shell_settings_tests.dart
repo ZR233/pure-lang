@@ -14,9 +14,7 @@ void registerShellSettingsTests() {
         ),
       );
       await tester.pumpAndSettle();
-      // 首屏只恢复选择，不打开会话（§6.1）：显式打开后才建立订阅。
-      await tester.tap(find.byKey(StudioDriverKeys.openThread('session-1')));
-      await tester.pumpAndSettle();
+      expect(api.threadSubscriptions, ['session-1']);
       api._thread.addError(StateError('history unavailable'));
       await tester.pumpAndSettle();
       expect(find.textContaining('history unavailable'), findsOneWidget);
@@ -909,9 +907,7 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    // 首屏只恢复选择：显式打开会话后才订阅（§6.1）。
-    await tester.tap(find.byKey(StudioDriverKeys.openThread('session-1')));
-    await tester.pumpAndSettle();
+    expect(api.threadSubscriptions, ['session-1']);
 
     expect(find.byTooltip('Session mode'), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
@@ -4435,6 +4431,7 @@ void registerShellSettingsTests() {
           pendingOperations: 2,
           pendingBytes: 1024,
           inFlightBytes: 0,
+          pressurePaused: true,
           threads: [
             // 只有 checkpoint 回退诊断、没有 writer 的 Thread：水位是未知而不是零。
             ThreadPersistenceSnapshot(

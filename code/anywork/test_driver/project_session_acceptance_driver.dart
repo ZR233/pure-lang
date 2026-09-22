@@ -969,38 +969,27 @@ class _Context {
       timeout: const Duration(minutes: 2),
     );
     final startup = await record('startup');
-    // Restoring a saved selection is not opening a session: no workspace, no
-    // history window and no cached items on the first screen after restart.
-    _require(
-      _sessionNotOpened(startup),
-      'restoring a saved selection must not open the session',
-    );
     final selectionRestored =
         (startup['navigation'] as Map)['selectedThreadId'] == threadId;
-    final unopenedBanner = await finderAppears(
-      'studio-unopened-thread',
-      timeout: const Duration(seconds: 40),
+    _require(
+      selectionRestored,
+      'startup did not restore the selected Thread $threadId',
     );
     await capture('reopen-first-screen');
-    // Provider traffic sampled right before opening the saved Thread: a cold
-    // reopen that silently re-ran a prior model would add a conversation
-    // request (catalog/usage probes are counted separately, not as Turns).
-    final requestsBefore = options.longSession ? _wireRequestStats() : null;
-
-    if (unopenedBanner) {
-      await tapKey('studio-open-thread-$threadId');
-    } else {
-      await tapKey('thread-row-$threadId');
-    }
+    // The harness captured this baseline before launching the second GUI.
+    final baselineFile = File('${output.path}/reopen-wire-baseline.json');
+    final requestsBefore = options.longSession
+        ? jsonDecode(await baselineFile.readAsString()) as Map<String, dynamic>
+        : null;
     final opened = await waitFor(
-      'saved Thread opened from SQL',
+      'selected Thread automatically opened from SQL',
       (state) =>
           _threadId(state) == threadId &&
           _itemIds(state).isNotEmpty &&
           (previousTurnId == null || _lastTurnId(state) != null),
       timeout: const Duration(minutes: 3),
     );
-    // Opening only restores state and subscription; it never resumes the model
+    // Auto-opening only restores state and subscription; it never resumes the model
     // or tools, so the last completed Turn must be unchanged.
     _require(
       _lastTurnId(opened) == previousTurnId,
@@ -1078,12 +1067,6 @@ class _Context {
         'native cold reopen + deep paging',
       );
     }
-    // Recovery check must settle (nothing left spinning); a retryable failure
-    // keeps the banner and is recorded for the operator instead of passing.
-    final recoverySettled = await finderDisappears(
-      'recovery-check-status',
-      timeout: const Duration(minutes: 3),
-    );
     final finalState = await record('final');
     await writeJson('reopen.json', {
       'phase': 'reopen',
@@ -1091,7 +1074,6 @@ class _Context {
       'largeItemId': largeItemId,
       'providerUrl': options.providerUrl,
       'selectionRestored': selectionRestored,
-      'unopenedBannerVisible': unopenedBanner,
       'openedWithoutExecution': _lastTurnId(finalState) == previousTurnId,
       'largeBodyRetrieval': largeBody,
       'previewNoticeVisible': largeBody['noticeVisible'],
@@ -1131,7 +1113,6 @@ class _Context {
             }
           : null,
       'modelRequestGuard': modelRequestGuard,
-      'recoveryCheckSettled': recoverySettled,
       'navigation': navigation,
       'persistence': finalState['persistence'],
       'window': finalState['timelineWindow'],

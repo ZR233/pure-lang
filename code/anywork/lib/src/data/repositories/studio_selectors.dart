@@ -95,7 +95,7 @@ AsyncValue<WorkspaceLayoutView?> selectedWorkspaceLayout(Ref ref) {
         return (
           threadId: workspace.threadId,
           isLoading: workspace.isLoading,
-          // 打开是显式用户动作：首屏恢复的选择不在 openedThreadIds 中。
+          // 首帧之后自动打开所选会话；打开完成前仍展示未打开状态。
           needsOpen: !state.openedThreadIds.contains(workspace.threadId),
           loadError: workspace.loadError,
           todo: workspace.todo,

@@ -10,8 +10,7 @@
 //     [--expected-large-item-id <itemId>] [--window-timeout-ms <ms>]
 //
 // 本驱动只回答存储规模问题，不派生任何性能“通过”结论：
-//   1. 未激活会话的启动快照必须没有任何历史/缓存/尾部/正文（打开前无历史加载）；
-//   2. 打开保存的 Thread 后，首个窗口必须是有界的一页，且确实还有更旧的历史；
+//   1. 启动时所选 Thread 自动打开，首个窗口必须是有界的一页，且确实还有更旧的历史；
 //   3. 首窗最新条目仍是真实基线的最后 Turn 与超长正文条目；
 //   4. 打开不得执行模型：wire-index.jsonl 的 conversation 计数不得增加；
 //   5. 记录启动/打开阶段的时间戳与窗口身份，供外部 `/proc` 采样对齐；
@@ -20,8 +19,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_driver/flutter_driver.dart';
-
-import 'raw_tap.dart';
 
 /// 有界历史窗口预算：打开后只允许持有有限的一页（与 reducer 的窗口/缓存预算一致）。
 const _historyWindowBudget = 500;
@@ -99,7 +96,7 @@ class _Context {
       find.byValueKey('studio-shell'),
       timeout: const Duration(minutes: 3),
     );
-    // 侧栏只有在控制器发布权威状态后才渲染，因此这一步让“首屏未打开会话”的断言有意义。
+    // 侧栏只有在控制器发布权威状态后才渲染。
     await driver.waitFor(
       find.byValueKey('sidebar-open-project'),
       timeout: const Duration(minutes: 3),
@@ -108,16 +105,17 @@ class _Context {
     final startupAtMs = _nowMs();
     await _writeJson('startup.json', startup);
     _require(
-      _sessionNotOpened(startup),
-      'the pre-open screen already holds session state, history or a live tail: '
-      '${jsonEncode(_brief(startup))}',
+      (startup['navigation'] as Map)['selectedThreadId'] == options.threadId,
+      'startup did not restore the selected Thread ${options.threadId}',
     );
     await capture('first-screen');
 
-    final requestsBefore = _wireRequestStats();
-    // 打开耗时从"最后一次由驱动发起的、真正触发打开的那次点击"开始算，
-    // 这样"先选中侧栏行再走显式入口"的回退路径不会把等待时间算进打开耗时。
-    final openTappedAtMs = await _openThread(options.threadId);
+    // wire-index.jsonl is created empty before the GUI is launched.
+    final requestsBefore = <String, Object?>{
+      'available': true,
+      'total': 0,
+      'conversation': 0,
+    };
     final opened = await _waitFirstWindow();
     final firstWindowAtMs = _nowMs();
     await _writeJson('opened.json', opened);
@@ -192,10 +190,8 @@ class _Context {
       'fixture': options.fixture,
       'threadId': options.threadId,
       'startupAtMs': startupAtMs,
-      'openTappedAtMs': openTappedAtMs,
       'firstWindowAtMs': firstWindowAtMs,
       'openedObservedEndAtMs': _nowMs(),
-      'openLatencyMs': firstWindowAtMs - openTappedAtMs,
       'startupToFirstWindowMs': firstWindowAtMs - startupAtMs,
     });
     await _writeJson('scale.json', {
@@ -203,7 +199,7 @@ class _Context {
       'threadId': options.threadId,
       'historyWindowBudget': _historyWindowBudget,
       'startup': {
-        'sessionNotOpened': true,
+        'selectedThreadRestored': true,
         'navigation': startup['navigation'],
         'persistence': startup['persistence'],
       },
@@ -249,51 +245,6 @@ class _Context {
     return jsonDecode(raw) as Map<String, dynamic>;
   }
 
-  /// 打开保存的 Thread，并返回触发打开的那次点击的时间戳。
-  ///
-  /// 恢复的选择只是一种选择，因此必要时先点开侧栏里的那一行，再走显式打开入口。
-  Future<int> _openThread(String threadId) async {
-    final unopened = await _finderAppears(
-      'studio-unopened-thread',
-      const Duration(seconds: 40),
-    );
-    if (unopened) {
-      await _tapKey('studio-open-thread-$threadId');
-      return _nowMs();
-    }
-    await _tapKey('thread-row-$threadId');
-    final rowTappedAtMs = _nowMs();
-    // 点行本身可能已经打开；只有确实没打开时才回退到显式入口。
-    if (await _windowAppears(const Duration(seconds: 5))) {
-      return rowTappedAtMs;
-    }
-    final openById = await _finderAppears(
-      'studio-open-thread-$threadId',
-      const Duration(seconds: 10),
-    );
-    if (openById) {
-      // 未打开占位里的"打开会话"按钮就是 `studio-open-thread-<id>`
-      // （同侧栏占位上的 `studio-open-selected-thread`），因此这里命中一次即可。
-      await _tapKey('studio-open-thread-$threadId');
-      return _nowMs();
-    }
-    return rowTappedAtMs;
-  }
-
-  /// 用于区分"点行即打开"与"点行只选中"的短轮询。
-  Future<bool> _windowAppears(Duration timeout) async {
-    final deadline = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(deadline)) {
-      final state = await readSnapshot();
-      final window = state['timelineWindow'] as Map;
-      if (_itemIds(state).isNotEmpty && window['loading'] != true) {
-        return true;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    return false;
-  }
-
   /// 等到 SQL 首窗真正落地：窗口非空且不再处于加载态。
   Future<Map<String, dynamic>> _waitFirstWindow() async {
     final deadline = DateTime.now().add(options.windowTimeout);
@@ -303,7 +254,9 @@ class _Context {
       state = await readSnapshot();
       final window = state['timelineWindow'] as Map;
       if (window['loading'] == true) sawLoading = true;
-      if (_itemIds(state).isNotEmpty && window['loading'] != true) {
+      if ((state['workspace'] as Map?)?['threadId'] == options.threadId &&
+          _itemIds(state).isNotEmpty &&
+          window['loading'] != true) {
         return state;
       }
       await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -312,23 +265,6 @@ class _Context {
       'timed out waiting for the first history window '
       '(sawLoading=$sawLoading, observed ${jsonEncode(_brief(state))})',
     );
-  }
-
-  Future<void> _tapKey(String key) async {
-    final finder = find.byValueKey(key);
-    await driver.waitFor(finder, timeout: const Duration(seconds: 40));
-    await driver.sendCommand(
-      RawTap(finder, timeout: const Duration(seconds: 30)),
-    );
-  }
-
-  Future<bool> _finderAppears(String key, Duration timeout) async {
-    try {
-      await driver.waitFor(find.byValueKey(key), timeout: timeout);
-      return true;
-    } on Object {
-      return false;
-    }
   }
 
   Future<void> capture(String name) async {
@@ -417,21 +353,6 @@ List<String> _loadedItemIds(Map<String, dynamic> state) =>
 
 String? _lastTurnId(Map<String, dynamic> state) =>
     ((state['workspace'] as Map?)?['lastTurn'] as Map?)?['id'] as String?;
-
-String _timelineText(Map<String, dynamic> state) =>
-    ((state['workspace'] as Map?)?['timeline'] as List? ?? [])
-        .map((row) => (row as Map)['text'] ?? '')
-        .join('\n');
-
-/// True when no session state, DB-backed history or live tail is loaded yet.
-bool _sessionNotOpened(Map<String, dynamic> state) {
-  final window = state['timelineWindow'] as Map;
-  return _itemIds(state).isEmpty &&
-      window['cacheCount'] == 0 &&
-      window['tailCount'] == 0 &&
-      _timelineText(state).isEmpty &&
-      _lastTurnId(state) == null;
-}
 
 Map<String, Object?> _brief(Map<String, dynamic> state) => {
   'selectedThreadId': (state['navigation'] as Map?)?['selectedThreadId'],

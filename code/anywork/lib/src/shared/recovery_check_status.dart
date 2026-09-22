@@ -7,7 +7,10 @@ import '../domain/models/studio_models.dart';
 import '../l10n/studio_l10n.dart';
 
 class RecoveryCheckStatus extends ConsumerWidget {
-  const RecoveryCheckStatus({super.key});
+  const RecoveryCheckStatus({this.showChecking = true, super.key});
+
+  final bool showChecking;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final resource = ref.watch(
@@ -23,7 +26,9 @@ class RecoveryCheckStatus extends ConsumerWidget {
       DegradedObservedResource(:final error) => error,
       _ => null,
     };
-    if (!checking && error == null) return const SizedBox.shrink();
+    if ((!checking || !showChecking) && error == null) {
+      return const SizedBox.shrink();
+    }
     return Material(
       key: const ValueKey('recovery-check-status'),
       color: context.colors.surfaceContainerLow,

@@ -615,6 +615,17 @@ def main():
     failure = None
     try:
         for phase in ('create', 'reopen'):
+            if phase == 'reopen':
+                # Capture provider traffic before launching the GUI: the
+                # selected Thread can open before the driver connects.
+                wire = _wire_index_summary(output)
+                (output / 'reopen-wire-baseline.json').write_text(
+                    json.dumps({
+                        'available': wire['available'],
+                        'total': wire.get('requests', 0),
+                        'conversation': wire.get('conversationRequests', 0),
+                    })
+                )
             gui, log, vm = _launch(root, output, env, phase, args.display)
             try:
                 _run_driver(
