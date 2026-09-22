@@ -222,13 +222,12 @@ fn debug_symbols_extension() -> Option<&'static str> {
     None
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
     #[test]
-    #[cfg(target_os = "linux")]
     fn cached_cmake_install_observes_current_demo_mode() {
         let source = include_str!("../../../code/anywork/linux/CMakeLists.txt");
         let staging = source
