@@ -11,16 +11,14 @@
 //
 // 本驱动只回答存储规模问题，不派生任何性能“通过”结论：
 //   1. 启动时所选 Thread 自动打开，SQL 首窗有界，且确实还有更旧的历史；
-//   3. 首窗最新条目仍是真实基线的最后 Turn 与超长正文条目；
-//   4. 打开不得执行模型：wire-index.jsonl 的 conversation 计数不得增加；
-//   5. 记录启动/打开阶段的时间戳与窗口身份，供外部 `/proc` 采样对齐；
-//   6. `shutdown-await` 之后 Studio 必须干净关闭。
+//   2. 首窗最新条目仍是真实基线的最后 Turn 与超长正文条目；
+//   3. 打开不得执行模型：wire-index.jsonl 的 conversation 计数不得增加；
+//   4. 记录启动/打开阶段的时间戳与窗口身份，供外部 `/proc` 采样对齐；
+//   5. `shutdown-await` 之后 Studio 必须干净关闭。
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_driver/flutter_driver.dart';
-
-import 'raw_tap.dart';
 
 /// SQL 历史窗口上限：打开后只允许持有有限的一页；运行中 overlay 不设上限。
 const _sqlHistoryWindowLimit = 500;

@@ -109,8 +109,8 @@ REQUIRED_INDEXES = (
     'history_turns_by_last_ordinal',
 )
 
-# The bounded first window the GUI may hold after opening (`_historyWindowBudget`).
-HISTORY_WINDOW_BUDGET = 500
+# SQL history page limit; live overlay entries are counted separately.
+SQL_HISTORY_WINDOW_LIMIT = 500
 
 
 def _size_label(size):
@@ -1315,7 +1315,7 @@ def _comparison(runs):
     data = {}
     for label, entries in by_label.items():
         opened_window = [
-            (e.get('scale', {}).get('window') or {}).get('itemCount')
+            (e.get('scale', {}).get('window') or {}).get('historyCount')
             for e in entries
         ]
         data[label] = {
@@ -1476,12 +1476,13 @@ def _run_verdict(summary):
         problems.append('scale.json is missing, so the open was never judged')
     else:
         window = scale.get('window') or {}
-        item_count = window.get('itemCount')
-        if not isinstance(item_count, int) or not (
-            1 <= item_count <= HISTORY_WINDOW_BUDGET
+        history_count = window.get('historyCount')
+        if not isinstance(history_count, int) or not (
+            1 <= history_count <= SQL_HISTORY_WINDOW_LIMIT
         ):
             problems.append(
-                f'the first window item count is not a bounded page: {item_count}'
+                'the first SQL history count is not a bounded page: '
+                f'{history_count}'
             )
         if window.get('hasOlder') is not True:
             problems.append('the first window reports no older history')
