@@ -314,6 +314,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     /// Latest committed Turn record per identity, folded from the effect stream in commit order.
+    #[cfg(target_os = "linux")]
     fn committed_turns(
         effects: &[std::sync::Arc<pl_core::thread::ThreadEffectBatch>],
     ) -> Vec<pl_core::thread::TurnRecord> {
@@ -334,6 +335,7 @@ mod tests {
     }
 
     /// Latest committed record per task identity, folded from the effect stream.
+    #[cfg(target_os = "linux")]
     fn committed_tasks(
         effects: &[std::sync::Arc<pl_core::thread::ThreadEffectBatch>],
     ) -> std::collections::BTreeMap<String, pl_core::thread::task::TaskRecord> {
