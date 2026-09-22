@@ -81,14 +81,6 @@ mod tests {
     }
 
     #[test]
-    fn loopback_names_and_addresses_are_accepted() {
-        assert!(is_loopback_host("localhost"));
-        assert!(is_loopback_host("127.0.0.1"));
-        assert!(is_loopback_host("::1"));
-        assert!(!is_loopback_host("example.com"));
-    }
-
-    #[test]
     fn host_is_required_and_must_be_loopback() {
         let missing = Request::builder().body(Body::empty()).unwrap();
         assert!(validate_headers(&missing).is_err());
@@ -98,6 +90,14 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         assert!(validate_headers(&remote).is_err());
+
+        for host in ["localhost:1421", "127.0.0.1:1421"] {
+            let local = Request::builder()
+                .header(HOST, host)
+                .body(Body::empty())
+                .unwrap();
+            assert!(validate_headers(&local).is_ok(), "{host}");
+        }
 
         let ipv6 = Request::builder()
             .header(HOST, "[::1]:1421")

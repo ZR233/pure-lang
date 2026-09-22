@@ -407,6 +407,7 @@ mod tests {
         assert_eq!(restored.purpose, None);
         let mut history = TurnBillingRecord::new();
         history.append(record.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&history).unwrap()["version"], 6);
         let mut changed = record;
         changed.purpose = Some("review".into());
         assert!(history.append(changed).is_err());
@@ -425,10 +426,5 @@ mod tests {
         assert_eq!(observation.match_state(), ModelMatchState::Mismatched);
         observation.reported_model = None;
         assert_eq!(observation.match_state(), ModelMatchState::Unreported);
-    }
-
-    #[test]
-    fn turn_billing_uses_current_version() {
-        assert_eq!(TurnBillingRecord::new().version, 6);
     }
 }

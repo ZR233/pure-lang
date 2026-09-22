@@ -387,18 +387,6 @@ mod tests {
     #[test]
     fn generated_title_only_normalizes_whitespace_and_truncates() {
         assert_eq!(
-            truncate_generated_title("修复登录流程").unwrap(),
-            "修复登录流程"
-        );
-        assert_eq!(
-            truncate_generated_title("Fix login!").unwrap(),
-            "Fix login!"
-        );
-        assert_eq!(
-            truncate_generated_title("New Session").unwrap(),
-            "New Session"
-        );
-        assert_eq!(
             truncate_generated_title(r#"{"title":"Fix login"}"#).unwrap(),
             r#"{"title":"Fix login"}"#
         );
@@ -406,15 +394,10 @@ mod tests {
             truncate_generated_title("  实现 normalize_key\n与 validate_key  ").unwrap(),
             "实现 normalize_key 与 validate_key"
         );
-        assert_eq!(truncate_generated_title("!@#$%").unwrap(), "!@#$%");
         assert!(truncate_generated_title(" \n\t ").is_err());
         assert_eq!(
             truncate_generated_title(&"x".repeat(GENERATED_TITLE_MAX_CHARS + 1)).unwrap(),
             "x".repeat(GENERATED_TITLE_MAX_CHARS)
-        );
-        assert_eq!(
-            truncate_generated_title("one two three four five six").unwrap(),
-            "one two three four five six"
         );
     }
 

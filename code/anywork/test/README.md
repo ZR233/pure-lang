@@ -50,6 +50,15 @@ Driver demo 暂时显示真实启动页，记录动画区域坐标、连续截�
 保留目录分页、过期响应、并发保存、取消和关闭的结果测试：这些保护数据与生命周期，不是中间步骤。
 保留无障碍、键盘、滚动恢复和 reduced-motion 测试：这些是用户可观察的行为。
 
+## 最新主线复核
+
+| 处理 | 依据与保留的证明 |
+| --- | --- |
+| 删除字段回读与重复解析 | `ToolCall` 身份回读、Skill frontmatter 二次解析、无动作的空会话 key 检查和 root/child fixture 自测不再独立占用用例；原始工具参数保全、Skill 目录发现、会话提交和实际 Thread 切换继续验证结果。 |
+| 并入完整流程 | schema 排序方向、billing wire 版本、兼容模型的 chat endpoint、loopback 请求头与未初始化的 Skill 搜索拒绝并入各自行为测试，不放松原有失败断言。 |
+| 删除跨层重复 | worktree 选择/标记在 widget 流程已覆盖，demo integration 不再重复执行这两条路径；原生集成仍保留提交、重定向、停止、恢复和 provider 设置旅程。 |
+| 保留独特失败 | checkpoint schema、迁移归档与碰撞、权限拒绝、HTTP/FRB 契约、进程回收、LSP 错误及 Provider 工具策略仍保留；纯 Dart 测试不能替代真实外部边界。 |
+
 新增/扩展结果场景包括三类指令独立保存、供应商草稿跨页面保留、技能展开后过滤与返回目录、
 供应商完整用量与两类刷新、计划确认与代理状态栏的布局归属。纯 Dart/demo 不代表真实 provider
 联网或真实 SSH/MCP/LSP 验收；对应生产后端能力继续由原有契约和 opt-in live harness 保护。

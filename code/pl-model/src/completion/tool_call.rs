@@ -205,18 +205,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tool_call_identity_exposes_item_and_call_ids() {
-        let call = ToolCall::function("item-1", "read_file", serde_json::json!({}), "call-1");
-
-        assert_eq!(
-            call.identity(),
-            ToolCallIdentity {
-                item_id: "item-1".to_string(),
-                call_id: "call-1".to_string(),
-            }
-        );
-    }
-    #[test]
     fn history_keeps_raw_function_parameters_instead_of_reserializing_their_fields() {
         let raw = "{ \"z\": 12345678901234567890, \"a\": \"中文\" }\n";
         let call = ToolCall::function_raw("item", "unknown_tool", raw.into(), "call");

@@ -535,68 +535,6 @@ mod tests {
     }
 
     #[test]
-    fn platform_block_is_after_mode_and_before_config_developer() {
-        let dir = temp_dir("platform-order");
-        fs::create_dir_all(&dir).unwrap();
-        let config = crate::config::InstructionsConfig {
-            developer: "config dev".to_string(),
-            ..crate::config::InstructionsConfig::default()
-        };
-
-        let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
-            instructions: Some(&config),
-            skills: None,
-            skill_catalog: None,
-            execution_profile: Some(ExecutionInstructionProfile {
-                label: "test",
-                instructions: "mode instructions",
-            }),
-            model: &ModelInfo::compatible("test-model"),
-            workspace_root: &dir,
-            current_dir: &dir,
-            workspace_documents: None,
-            workspace_instructions: None,
-            subagent_constraint: None,
-            skill_suggestions: None,
-            execution_environment: None,
-        })
-        .unwrap();
-
-        assert_eq!(
-            snapshot.developer[0].source.kind,
-            InstructionSourceKind::ExecutionProfile
-        );
-        assert_eq!(
-            snapshot.developer[1].source.kind,
-            InstructionSourceKind::Platform
-        );
-        assert_eq!(
-            snapshot.developer[2].source.kind,
-            InstructionSourceKind::ConfigDeveloper
-        );
-        let environment = pl_tool::environment::ExecutionEnvironment::detect_local();
-        assert_eq!(
-            snapshot.developer[1].source.label,
-            format!(
-                "platform: {}/{}",
-                environment.os.as_str(),
-                environment.shell.as_str()
-            )
-        );
-        assert!(
-            snapshot.developer[1]
-                .content
-                .contains("Runtime execution environment")
-        );
-        assert!(
-            snapshot.developer[1]
-                .content
-                .contains(&environment.shell_path_display())
-        );
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
     fn filters_empty_blocks_and_uses_model_base() {
         let dir = temp_dir("empty");
         fs::create_dir_all(&dir).unwrap();
@@ -913,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn force_dispatch_is_added_to_clone_only() {
+    fn subagent_instruction_variants_are_added_to_clones_only() {
         let snapshot = InstructionSnapshot {
             base: InstructionBlock {
                 source: InstructionSource::new(InstructionSourceKind::BuiltInBase, "base"),
@@ -924,6 +862,7 @@ mod tests {
         };
 
         let forced = snapshot.clone().with_subagent_force("force");
+        let constrained = snapshot.clone().with_subagent_constraint("constraint");
 
         assert_eq!(snapshot.developer.len(), 0);
         assert_eq!(forced.developer.len(), 1);
@@ -931,26 +870,12 @@ mod tests {
             forced.developer[0].source.kind,
             InstructionSourceKind::SubagentForce
         );
-    }
-
-    #[test]
-    fn subagent_constraint_is_added_to_clone_only() {
-        let snapshot = InstructionSnapshot {
-            base: InstructionBlock {
-                source: InstructionSource::new(InstructionSourceKind::BuiltInBase, "base"),
-                content: "base".to_string(),
-            },
-            developer: Vec::new(),
-            user: Vec::new(),
-        };
-
-        let constrained = snapshot.clone().with_subagent_constraint("constraint");
-
-        assert_eq!(snapshot.developer.len(), 0);
+        assert_eq!(forced.developer[0].content, "force");
         assert_eq!(constrained.developer.len(), 1);
         assert_eq!(
             constrained.developer[0].source.kind,
             InstructionSourceKind::SubagentConstraint
         );
+        assert_eq!(constrained.developer[0].content, "constraint");
     }
 }

@@ -63,19 +63,6 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     #[test]
-    fn tools_are_sorted_by_model_visible_name() {
-        let tools = stable_tool_schemas(vec![
-            ToolSpec::function("zeta", "", serde_json::json!({"b": 2, "a": 1})),
-            ToolSpec::function("alpha", "", serde_json::json!({})),
-        ]);
-
-        assert_eq!(
-            tools.iter().map(ToolSpec::name).collect::<Vec<_>>(),
-            vec!["alpha", "zeta"]
-        );
-    }
-
-    #[test]
     fn tool_schemas_are_canonicalized_and_sorted_across_key_orders() {
         let first = stable_tool_schemas(vec![
             ToolSpec::function(
@@ -111,6 +98,10 @@ mod tests {
         assert_eq!(
             serde_json::to_vec(&first).unwrap(),
             serde_json::to_vec(&second).unwrap()
+        );
+        assert_eq!(
+            first.iter().map(ToolSpec::name).collect::<Vec<_>>(),
+            vec!["git_diff", "git_status"]
         );
     }
 

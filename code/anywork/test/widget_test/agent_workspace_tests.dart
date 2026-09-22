@@ -21,24 +21,13 @@ void registerAgentWorkspaceTests() {
     expect(state.selectedTodoList!.items.single.step, 'review child');
     expect(state.activeInteraction!.id, 'child-interaction');
     expect(state.composer.draft, 'child draft');
-  });
 
-  test('root and child Composer state remain independent UI state', () {
-    final state = _rootAndChildState();
-
-    expect(
-      state.workspaceUiByThread['session-1']!.composer.draft,
-      'root draft',
-    );
-    expect(state.workspaceUiByThread['child-1']!.composer.draft, 'child draft');
-    expect(
-      state.workspacesByThread['session-1']!.items.single.text,
-      'root timeline',
-    );
-    expect(
-      state.workspacesByThread['child-1']!.items.single.text,
-      'child timeline',
-    );
+    await container
+        .read(studioControllerProvider.notifier)
+        .selectAgentThread('session-1');
+    final restored = container.read(studioControllerProvider).requireValue;
+    expect(restored.selectedThreadId, 'session-1');
+    expect(restored.composer.draft, 'root draft');
   });
 
   test('child snapshot updates only the child current state, never items', () {

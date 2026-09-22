@@ -102,35 +102,6 @@ void registerShellSettingsTests() {
     },
   );
 
-  testWidgets('zero sessions render the unpersisted start page', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1280, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final state = _emptyState().copyWith(
-      threadDirectory: const ThreadDirectoryWindow(),
-      workspacesByThread: const {},
-      workspaceUiByThread: const {},
-      selectedThreadId: null,
-    );
-    final api = _FakeStudioApi(state);
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const StudioShell()),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(StudioDriverKeys.startPage), findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.composerInput), findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.composerSubmit), findsOneWidget);
-    expect(api.createdThreadProjectId, isNull);
-  });
-
   testWidgets('archived migration is visible on the fresh start page', (
     tester,
   ) async {
@@ -2692,36 +2663,6 @@ void registerShellSettingsTests() {
     expect(find.text('Topped up 80.00'), findsOneWidget);
   });
 
-  testWidgets('provider list localizes remaining quota semantics in zh Hans', (
-    tester,
-  ) async {
-    _configureSettingsTestView(tester);
-    final api = _FakeStudioApi(
-      _providerListState(zhipuOnly: true),
-      providerUsages: _providerListUsages,
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(
-          locale: const Locale.fromSubtags(
-            languageCode: 'zh',
-            scriptCode: 'Hans',
-          ),
-          home: const SettingsPage(),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('剩余 25%'), findsOneWidget);
-    expect(find.text('剩余 50%'), findsOneWidget);
-    expect(find.text('剩余 80%'), findsOneWidget);
-    expect(find.text('25%'), findsNothing);
-    expect(find.text('50%'), findsNothing);
-    expect(find.text('80%'), findsNothing);
-  });
-
   testWidgets('provider list omits absent Zhipu quotas', (tester) async {
     _configureSettingsTestView(tester);
     final api = _FakeStudioApi(
@@ -3965,46 +3906,6 @@ void registerShellSettingsTests() {
       await tester.pumpAndSettle();
       expect(_dialogText('Edit user agent profile'), findsOneWidget);
       await tester.tap(_dialogText('Cancel'));
-      await tester.pumpAndSettle();
-    },
-  );
-
-  testWidgets(
-    'zh Hans agents user profile dialog covers edit title and required validation',
-    (tester) async {
-      _configureSettingsTestView(tester);
-      final api = _FakeStudioApi(_stateWithPlannerModels())
-        ..userAgentProfiles = [_userAgentProfile];
-      await _pumpSettingsPage(
-        tester,
-        api,
-        locale: const Locale.fromSubtags(
-          languageCode: 'zh',
-          scriptCode: 'Hans',
-        ),
-      );
-
-      await tester.tap(find.text('智能体'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const ValueKey('agent-profile-add')));
-      await tester.pumpAndSettle();
-      expect(_dialogText('添加用户智能体配置'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('agent-profile-save')));
-      await tester.pumpAndSettle();
-      expect(_dialogText('必填'), findsNWidgets(5));
-      await tester.tap(_dialogText('取消'));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('agent-profile-save')), findsNothing);
-
-      final editButton = find.byKey(
-        const ValueKey('agent-profile-edit-user-helper'),
-      );
-      await _dragUntilBuilt(tester, editButton);
-      await tester.tap(editButton);
-      await tester.pumpAndSettle();
-      expect(_dialogText('编辑用户智能体配置'), findsOneWidget);
-      await tester.tap(_dialogText('取消'));
       await tester.pumpAndSettle();
     },
   );

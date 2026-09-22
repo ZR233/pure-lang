@@ -131,16 +131,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn unknown_project_reads_as_uninitialized_without_discovery() {
-        let runtime = SkillCatalogRuntime::default();
-
-        let snapshot = runtime.read("project").await;
-
-        assert_eq!(snapshot.state.kind(), ObservedResourceKind::Uninitialized);
-        assert_eq!(runtime.read("project").await, snapshot);
-    }
-
-    #[tokio::test]
     async fn search_uses_cached_full_catalog_without_discovery_or_revision_change() {
         let root = tempfile::tempdir().unwrap();
         let release_dir = root.path().join(".agents/skills/release-build-triage");
@@ -158,6 +148,11 @@ mod tests {
         )
         .unwrap();
         let runtime = SkillCatalogRuntime::default();
+        assert_eq!(
+            runtime.read("project").await.state.kind(),
+            ObservedResourceKind::Uninitialized
+        );
+        assert!(runtime.search("project", "Rust release", 10).await.is_err());
         let published = runtime
             .discover("project", root.path(), &SkillsConfig::default())
             .await

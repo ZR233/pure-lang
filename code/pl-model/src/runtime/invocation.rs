@@ -1477,6 +1477,12 @@ mod tests {
             chat_success_sse("mimo ok"),
         )
         .await;
+        let generic_chat = capture_model_http_request(
+            ProviderEndpoint::compatible("Chat Gateway", "https://gateway.example/v1"),
+            ModelInfo::compatible("generic-chat"),
+            chat_success_sse("generic ok"),
+        )
+        .await;
         let flash = capture_model_http_request(
             ProviderEndpoint::deepseek(None),
             find_model("deepseek-flash"),
@@ -1500,6 +1506,7 @@ mod tests {
 
         assert_eq!(glm.request_line, "POST /chat/completions HTTP/1.1");
         assert_eq!(mimo.request_line, "POST /chat/completions HTTP/1.1");
+        assert_eq!(generic_chat.request_line, "POST /chat/completions HTTP/1.1");
         assert_eq!(flash.request_line, "POST /responses HTTP/1.1");
         assert_eq!(pro.request_line, "POST /responses HTTP/1.1");
         assert_eq!(gpt.request_line, "POST /responses HTTP/1.1");
@@ -1536,33 +1543,6 @@ mod tests {
         assert_eq!(captured.body["stream"], serde_json::json!(true));
         assert!(captured.body.get("prompt_cache_key").is_none());
         assert_complete_workflow_wire_body(&captured.body);
-    }
-
-    #[tokio::test]
-    async fn openai_compatible_chat_provider_uses_chat_endpoint() {
-        use pretty_assertions::assert_eq;
-
-        let sse_body = concat!(
-            "data: {\"choices\":[{\"delta\":{\"content\":\"<final>mimo ok</final>\"},\"finish_reason\":null}]}\n\n",
-            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
-            "data: [DONE]\n\n"
-        )
-        .to_string();
-        let (base_url, handle) = serve_sse_once(sse_body).await;
-        let mut model = ModelInfo::compatible("mimo-chat");
-        model.context_window = Some(128_000);
-        let provider =
-            InvocationRunner::new(ProviderEndpoint::compatible("MiMo", base_url), model).unwrap();
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-
-        let response = provider
-            .complete(minimal_request("mimo-chat"), invocation(event_tx))
-            .await
-            .unwrap();
-        let captured = handle.await.unwrap();
-
-        assert_eq!(response.content.as_deref(), Some("mimo ok"));
-        assert_eq!(captured.request_line, "POST /chat/completions HTTP/1.1");
     }
 
     #[tokio::test]

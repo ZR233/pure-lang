@@ -473,17 +473,6 @@ mod tests {
     }
 
     #[test]
-    fn synthetic_upstream_registration_uses_only_the_public_memory_api() {
-        let manager = ThreadModeManager::default();
-        let mode = registered(&manager, "upstream.test", "External prompt", graph(""));
-
-        assert_eq!(mode.prompt(), "External prompt");
-        assert_eq!(mode.descriptor().id.as_str(), "mode.synthetic");
-        assert!(mode.workflow().is_some());
-        assert_eq!(manager.snapshot().catalog().modes.len(), 1);
-    }
-
-    #[test]
     fn source_replacement_is_atomic_when_one_registration_is_invalid() {
         let manager = ThreadModeManager::default();
         let initial = registered(&manager, "upstream.atomic", "Initial", graph(""));

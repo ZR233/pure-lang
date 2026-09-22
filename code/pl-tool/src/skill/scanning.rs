@@ -409,23 +409,3 @@ fn ensure_real_skill_path(skill_dir: &Path, path: &Path) -> Result<()> {
         error: error.to_string(),
     })
 }
-
-#[cfg(test)]
-mod tests {
-
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn parses_valid_frontmatter() {
-        let content =
-            "---\nname: rust-flow\ndescription: Rust flow\nplatforms: [windows]\n---\nBody";
-
-        let metadata = validate_skill_document(content, Some("rust-flow")).unwrap();
-
-        assert_eq!(metadata.name, "rust-flow");
-        assert_eq!(metadata.description, "Rust flow");
-        assert_eq!(metadata.platforms, vec!["windows".to_string()]);
-    }
-}
