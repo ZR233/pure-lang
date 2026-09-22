@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
+import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/studio_models.dart';
@@ -23,6 +24,9 @@ class StudioController extends _$StudioController {
   late ThreadStreamCoordinator _threadCoordinator;
   final Set<String> _historyRequests = {};
   final Map<String, int> _windowLoadGeneration = {};
+  final Map<String, Timer> _terminalRefreshTimers = {};
+  final List<(ThreadNotificationFrame, String, int)> _pendingThreadDeltas = [];
+  bool _deltaFrameScheduled = false;
 
   /// 每个会话已观测到的实时广播 epoch；临时 map，断开或重订阅时释放。
   final Map<String, int> _streamEpochByThread = {};
@@ -51,6 +55,11 @@ class StudioController extends _$StudioController {
       _windowLoadGeneration.clear();
       _streamEpochByThread.clear();
       _historyRequests.clear();
+      for (final timer in _terminalRefreshTimers.values) {
+        timer.cancel();
+      }
+      _terminalRefreshTimers.clear();
+      _pendingThreadDeltas.clear();
     });
     final startupWatch = Stopwatch()..start();
     final catalog = await _api.loadProviderCatalog();
@@ -537,6 +546,8 @@ class StudioController extends _$StudioController {
     _windowLoadGeneration.remove(threadId);
     _streamEpochByThread.remove(threadId);
     _historyRequests.remove(threadId);
+    _terminalRefreshTimers.remove(threadId)?.cancel();
+    _pendingThreadDeltas.removeWhere((entry) => entry.$2 == threadId);
   }
 
   /// 把某个会话标记回“未打开”；仅用于非显式选择变化，不触发订阅或释放。
@@ -676,11 +687,11 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> jumpToLatest(String threadId) async {
-    final current = state.value;
-    if (current == null) return;
+    if (state.value == null) return;
     await _ensureThreadOpen(threadId);
+    final current = state.value;
+    if (current == null || current.selectedThreadId != threadId) return;
     state = AsyncData(jumpTimelineToLatest(current, threadId));
-    if (current.selectedThreadId != threadId) return;
     await _reloadTimelineWindow(
       threadId,
       _threadCoordinator.generation,
@@ -739,8 +750,8 @@ class StudioController extends _$StudioController {
     final anchor =
         aroundItemId ??
         (older
-            ? history.olderCursor ?? workspace.items.firstOrNull?.id
-            : history.newerCursor ?? workspace.items.lastOrNull?.id);
+            ? history.olderCursor ?? workspace.historyItems.firstOrNull?.id
+            : history.newerCursor ?? workspace.historyItems.lastOrNull?.id);
     if (history.isLoading || _historyRequests.contains(threadId)) return false;
     if (!resetWindow &&
         (anchor == null ||
@@ -858,6 +869,101 @@ class StudioController extends _$StudioController {
       return false;
     }
     return true;
+  }
+
+  void _scheduleTerminalRefresh(String threadId) {
+    if (_terminalRefreshTimers.containsKey(threadId)) return;
+    _terminalRefreshTimers[threadId] = Timer(
+      const Duration(milliseconds: 48),
+      () async {
+        _terminalRefreshTimers.remove(threadId);
+        final current = state.value;
+        if (!ref.mounted ||
+            current == null ||
+            current.selectedThreadId != threadId ||
+            current.workspacesByThread[threadId]?.liveItems.values.any(
+                  (item) => item.isTerminal,
+                ) !=
+                true) {
+          return;
+        }
+        if (current.selectedWorkspaceUi.history.isLoading ||
+            _historyRequests.contains(threadId)) {
+          _scheduleTerminalRefresh(threadId);
+          return;
+        }
+        if (current.selectedWorkspaceUi.history.detached) {
+          await _confirmDetachedTerminalItems(threadId);
+          return;
+        }
+        await _loadTimelinePage(
+          threadId,
+          TimelineDirection.newer,
+          resetWindow: true,
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmDetachedTerminalItems(String threadId) async {
+    final current = state.value;
+    if (current == null) return;
+    final history = current.selectedWorkspaceUi.history;
+    final pending = current.workspacesByThread[threadId]?.liveItems.values
+        .where((item) => item.isTerminal)
+        .toList();
+    if (pending == null || pending.isEmpty) return;
+    final ids = {for (final item in pending) item.id};
+    final oldestOrdinal = pending
+        .map((item) => item.ordinal)
+        .reduce((a, b) => a < b ? a : b);
+    try {
+      var page = await _api.listTimelineItems(
+        threadId,
+        kind: TimelineQueryKind.latest,
+      );
+      final databaseId = page.databaseId;
+      final confirmed = <(ThreadItemView, int)>[];
+      String? previousCursor;
+      while (page.threadId == threadId && page.databaseId == databaseId) {
+        final omitted = {
+          for (final preview in page.previews)
+            preview.itemId: preview.omittedBytes,
+        };
+        confirmed.addAll(
+          page.items
+              .where((item) => ids.contains(item.id))
+              .map((item) => (item, omitted[item.id] ?? 0)),
+        );
+        if (page.items.isEmpty || page.items.first.ordinal <= oldestOrdinal) {
+          break;
+        }
+        final cursor = page.olderCursor;
+        if (cursor == null || cursor == previousCursor) break;
+        previousCursor = cursor;
+        page = await _api.listTimelineItems(
+          threadId,
+          kind: TimelineQueryKind.before,
+          itemId: cursor,
+        );
+      }
+      final latest = state.value;
+      if (!ref.mounted ||
+          latest == null ||
+          latest.selectedThreadId != threadId ||
+          !latest.selectedWorkspaceUi.history.detached ||
+          latest.selectedWorkspaceUi.history.epoch != history.epoch ||
+          (history.databaseId.isNotEmpty && history.databaseId != databaseId)) {
+        return;
+      }
+      state = AsyncData(
+        confirmDetachedTimelineItems(latest, threadId, confirmed),
+      );
+    } catch (error) {
+      // A failed confirmation cannot evict the in-memory body. The next page
+      // load or terminal notification can retry using the same SQL identity.
+      debugPrint('timeline terminal confirmation failed: $error');
+    }
   }
 
   /// 侧栏触底加载下一页会话目录；内存未命中时由 bridge 从数据库分页取回。
@@ -1880,6 +1986,17 @@ class StudioController extends _$StudioController {
       return;
     }
     state = AsyncData(next);
+    if (event.payload is PersistenceStateChangedPayload &&
+        next.persistenceState.state.pendingCommits == 0) {
+      final threadId = next.selectedThreadId;
+      if (threadId != null &&
+          next.workspacesByThread[threadId]?.liveItems.values.any(
+                (item) => item.isTerminal,
+              ) ==
+              true) {
+        _scheduleTerminalRefresh(threadId);
+      }
+    }
   }
 
   /// Product 流终止（bridge 的 failure/closed）不是正常结束：读取一次 canonical
@@ -1906,6 +2023,65 @@ class StudioController extends _$StudioController {
   }
 
   void _handleThreadFrame(
+    ThreadStreamFrame frame,
+    String threadId,
+    int generation,
+  ) {
+    if (frame case ThreadNotificationFrame(update: ThreadItemDeltaUpdate())) {
+      _pendingThreadDeltas.add((frame, threadId, generation));
+      if (!_deltaFrameScheduled) {
+        _deltaFrameScheduled = true;
+        SchedulerBinding.instance.scheduleFrameCallback((_) {
+          _deltaFrameScheduled = false;
+          _flushThreadDeltas();
+        });
+      }
+      return;
+    }
+    _flushThreadDeltas();
+    _applyThreadFrame(frame, threadId, generation);
+  }
+
+  void _flushThreadDeltas() {
+    if (_pendingThreadDeltas.isEmpty || !ref.mounted) return;
+    final pending = List<(ThreadNotificationFrame, String, int)>.of(
+      _pendingThreadDeltas,
+    );
+    _pendingThreadDeltas.clear();
+    var next = state.value;
+    for (final (frame, threadId, generation) in pending) {
+      if (next == null ||
+          generation != _threadCoordinator.generation ||
+          next.selectedThreadId != threadId ||
+          _workspaceUi(next, threadId).subscriptionGeneration != generation) {
+        continue;
+      }
+      final epoch = frame.epoch;
+      final knownEpoch = _streamEpochByThread[threadId];
+      if (epoch != null && knownEpoch != null && knownEpoch != epoch) {
+        unawaited(_resyncThread(threadId, generation));
+        return;
+      }
+      if (epoch != null) _streamEpochByThread[threadId] = epoch;
+      final reduced = applyThreadUpdate(
+        next,
+        threadId: threadId,
+        revision: frame.revision,
+        update: frame.update,
+        baseRevision: frame.baseRevision,
+      );
+      if (reduced.resyncThreadId != null) {
+        unawaited(_resyncThread(threadId, generation));
+        return;
+      }
+      next = reduced.state;
+    }
+    if (next != null && !identical(next, state.value)) {
+      state = AsyncData(next);
+    }
+  }
+
+  void _applyThreadFrame(
     ThreadStreamFrame frame,
     String threadId,
     int generation,
@@ -1954,6 +2130,9 @@ class StudioController extends _$StudioController {
           return;
         }
         state = AsyncData(reduced.state);
+        if (update case ThreadItemUpsert(:final item) when item.isTerminal) {
+          _scheduleTerminalRefresh(threadId);
+        }
       case ThreadResyncRequiredFrame():
         unawaited(_resyncThread(threadId, generation));
     }

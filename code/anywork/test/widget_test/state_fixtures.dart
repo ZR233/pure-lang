@@ -4,34 +4,9 @@ part of '../widget_test.dart';
 ThreadWorkspace _currentStateOnly(ThreadWorkspace workspace) {
   return workspace.copyWith(
     items: const [],
-    cachedItems: const {},
-    latestItemIds: const [],
+    liveItems: const {},
     timelineTurns: const {},
     latestTurn: null,
-  );
-}
-
-/// 测试专用：用一页历史把条目装进有界窗口，等价于订阅建立后的窗口读取。
-StudioState _seedTimelineWindow(
-  StudioState state,
-  String threadId,
-  List<ThreadItemView> items, {
-  String? olderCursor,
-}) {
-  return applyTimelinePage(
-    state,
-    threadId,
-    TimelinePage(
-      threadId: threadId,
-      watermark: 0,
-      items: items,
-      olderCursor: olderCursor,
-      firstItemId: items.firstOrNull?.id,
-      lastItemId: items.lastOrNull?.id,
-    ),
-    TimelineDirection.newer,
-    replaceWindow: true,
-    followBottom: true,
   );
 }
 

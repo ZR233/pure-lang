@@ -12,11 +12,13 @@
 - `closed`：Thread 或 runtime 已关闭。
 
 驻留 Thread 的订阅实现先注册 receiver，再读取 Thread owner 的小型 authoritative snapshot，最后
-发送 snapshot。打开/重连协调器在 receiver 建立后把当前活跃草稿推进 history writer，等待固定
-写入屏障，再通过 `listTimelineItems(Latest)` 读取可见历史窗口；期间实时事件按 item ID 和 revision
-合并。普通滚动分页不得查询 owner 或触发 flush。未驻留 Thread 只有执行或读取当前状态时才显式
-激活；单纯历史查询直接读取 `history.sqlite`。实时流没有 durable replay，缺口通过数据库 cursor
-重同步，不通过完整 snapshot 或内存 journal 补丁恢复。
+发送 snapshot。打开/重连协调器在 receiver 建立后冻结 owner 已提交的 revision，等待该 revision
+对应的 history 与 checkpoint writer 水位（不通过正执行模型的 owner 命令队列），再通过
+`listTimelineItems(Latest)` 读取已完成历史的 SQL 首窗；未终态正文只进入实时
+overlay，按 item ID 和 revision 与 SQL 窗口合并。普通滚动分页不得查询 owner 或触发 flush。
+未驻留 Thread 只有执行或读取当前状态时才显式激活；单纯历史查询直接读取 `history.sqlite`。
+实时流没有 durable replay，缺口通过数据库 cursor 重同步，不通过完整 snapshot 或内存 journal
+补丁恢复。
 
 实时事件总线只拥有 Turn、Item、Interaction、runtime 与 live overlay 的实时投影，不拥有
 Thread directory 元数据。订阅注册完成后，Studio 运行时必须用内存 Thread directory owner 的
@@ -64,10 +66,15 @@ TurnFinished 是最终校验与 worker 失败的终态投影边界：非正常�
 Turn；上下文压力触发的正常压缩不属于停止预算。
 
 Item delta 只携带 threadId、turnId、itemId、field、revision、delta 和可选 chunkIndex；field
-固定为 agent message text、reasoning summary/content、plan text、tool arguments/output。
-terminal Item 携带完整 authoritative payload 并清除 UI overlay。文本 Item 的 channel 穷尽区分
-`user`、`parentAgent`、`commentary` 与 `final`；`parentAgent` 只由 runtime 冻结的 mailbox 来源
-产生，所有 transport 和 Flutter reducer 都机械透传，不在客户端推导。
+固定为 agent message text、reasoning summary/content、plan text、tool arguments/output。delta
+只更新内存组装与实时投影，不形成 history 写入。terminal Item 携带完整 authoritative payload
+并随同一 `ThreadEffectBatch` 交给唯一 history writer；UI overlay 待 SQL 返回同身份终态后清除。文本 Item 的 channel
+穷尽区分 `user`、`parentAgent`、`commentary` 与 `final`；`parentAgent` 只由 runtime 冻结的
+mailbox 来源产生，所有 transport 和 Flutter reducer 都机械透传，不在客户端推导。
+
+模型失败或主动取消时，失败事实携带最后一次已发布的完整 `ModelProgress`，投影按原 Item
+身份及已预留 ordinal 提交失败/取消终态正文。未终结期间的 progress 仍只驻留内存；进程异常退出
+的未终结正文允许丢失，重启恢复产生的中断终态不伪造先前前缀。
 
 直接父代理的初始任务与后续 inbox 消息均参与同一 Timeline 投影。消息准入后即使尚未消费
 也可见；持久消息身份用于去重，准入事实确定时间和稳定顺序，消费事实将消息关联到实际
@@ -102,6 +109,14 @@ Thread directory 是 Thread 元数据的唯一 canonical cache。snapshot 中携
 切换 Thread 时增加 generation、立即创建新订阅并取消旧订阅；旧 generation 的 frame、error 和
 done 全部丢弃。Item delta 只允许命中当前未终态 Item 且 revision 严格递增；缺口、未知变体或
 lagged 统一重新订阅。
+新代的首个 authoritative snapshot 重置该代通知水位，即使旧代的实时通知 revision 更高也必须
+采纳；旧代未终态预览作废，尚待 SQL 同身份确认的终态条目继续保留至分页确认。只允许同一代的
+后续通知按 `base_revision` 连续拼接。
+
+Timeline workspace 由 SQL 历史窗口与实时 overlay 组成：前者只消费 HistoryReader page，后者
+只保存运行中 Item 以及 writer 尚未用同 item ID/revision 确认的终态 Item。两者按 canonical
+身份与 ordinal 归并为同一单列视图，不维护独立实时尾部或第二份 item cache。历史阅读保持
+当前锚点；显式跳最新时以 SQL `Latest` 首窗为权威，再合并实时 overlay。
 
 ## 7.5 Product stream
 

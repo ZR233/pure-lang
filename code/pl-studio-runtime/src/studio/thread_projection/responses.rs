@@ -177,30 +177,13 @@ pub(super) fn project_attempt(
             else {
                 return Ok(items);
             };
-            let reasoning = preview
-                .progress
-                .reasoning
-                .as_ref()
-                .map(|payload| {
-                    if payload.format() != "text/plain" || payload.version() != 1 {
-                        return Err(ProjectionError::UnsupportedOutput(
-                            "unsupported live reasoning format".into(),
-                        ));
-                    }
-                    Ok(payload.content().to_owned())
-                })
-                .transpose()?;
             (
-                ResponseContent {
-                    text: text_content(&preview.progress.content),
-                    reasoning,
-                },
+                progress_content(&preview.progress)?,
                 ThreadContentLifecycle::streaming(),
                 ThreadTextChannel::Commentary,
             )
         }
-        // 已经开始的 streaming overlay 必须由同一条目的终态收束：失败、取消或中断仍然发出该
-        // attempt 的 text/reasoning 终态项（正文为空），否则实时侧会留下永远 streaming 的条目。
+        // 已经开始的 overlay 由同一身份的终态收束；重启中断没有可恢复的正文。
         AttemptOutcome::Interrupted => (
             ResponseContent {
                 text: String::new(),
@@ -213,18 +196,12 @@ pub(super) fn project_attempt(
             ThreadTextChannel::Commentary,
         ),
         AttemptOutcome::Failed(error) => (
-            ResponseContent {
-                text: String::new(),
-                reasoning: None,
-            },
+            failure_content(error)?,
             ThreadContentLifecycle::failed(updated_at, error.to_string()),
             ThreadTextChannel::Commentary,
         ),
         AttemptOutcome::Cancelled { result: Err(error) } => (
-            ResponseContent {
-                text: String::new(),
-                reasoning: None,
-            },
+            failure_content(error)?,
             ThreadContentLifecycle::cancelled(updated_at, error.to_string()),
             ThreadTextChannel::Commentary,
         ),
@@ -232,7 +209,7 @@ pub(super) fn project_attempt(
     // 上述终态即使正文为空也要发出，但只对**实际开始过 streaming 的同一 identity channel**
     // 收束；`finalize.contains` 是一次 durable 事实查询的结果，因此 writer 与 live 对同一
     // identity 落相同终态，而从未开始的 channel 不会凭空出现空条目。
-    let terminal_without_content = matches!(
+    let terminates_live_channels = matches!(
         attempt.outcome,
         AttemptOutcome::Interrupted
             | AttemptOutcome::Failed(_)
@@ -253,7 +230,7 @@ pub(super) fn project_attempt(
                 lifecycle.clone(),
             )),
         ));
-    } else if terminal_without_content
+    } else if terminates_live_channels
         && finalize.contains(&super::order::response_id(&attempt.attempt_id, "reasoning"))
     {
         items.push(ThreadItem::new(
@@ -287,7 +264,7 @@ pub(super) fn project_attempt(
                 lifecycle,
             )),
         ));
-    } else if terminal_without_content
+    } else if terminates_live_channels
         && finalize.contains(&super::order::response_id(&attempt.attempt_id, "text"))
     {
         items.push(ThreadItem::new(
@@ -387,6 +364,48 @@ struct ResponseContent {
     text: String,
     reasoning: Option<String>,
 }
+
+fn failure_content(error: &pl_core::model::ModelError) -> Result<ResponseContent, ProjectionError> {
+    let progress = if error
+        .details
+        .as_ref()
+        .is_some_and(|details| details.format() == "pl.model.failure")
+    {
+        pl_model::runtime::model_failure_receipt(error)?
+            .and_then(|receipt| receipt.partial_progress)
+    } else {
+        None
+    };
+    match progress {
+        Some(progress) => progress_content(&progress),
+        None => Ok(ResponseContent {
+            text: String::new(),
+            reasoning: None,
+        }),
+    }
+}
+
+fn progress_content(
+    progress: &pl_core::model::ModelProgress,
+) -> Result<ResponseContent, ProjectionError> {
+    let reasoning = progress
+        .reasoning
+        .as_ref()
+        .map(|payload| {
+            if payload.format() != "text/plain" || payload.version() != 1 {
+                return Err(ProjectionError::UnsupportedOutput(
+                    "unsupported live reasoning format".into(),
+                ));
+            }
+            Ok(payload.content().to_owned())
+        })
+        .transpose()?;
+    Ok(ResponseContent {
+        text: text_content(&progress.content),
+        reasoning,
+    })
+}
+
 fn response_content(output: &ModelStepOutput) -> Result<ResponseContent, ProjectionError> {
     let receipt = pl_model::runtime::model_response_receipt(output)?;
     for content in &output.content {
@@ -418,7 +437,11 @@ fn response_content(output: &ModelStepOutput) -> Result<ResponseContent, Project
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pl_core::context::OpaquePayload;
+    use pl_core::{
+        context::{ContextSnapshot, OpaquePayload},
+        model::{ModelError, ModelFailureKind, ModelProgress, ModelUsage},
+        thread::RequestAttempt,
+    };
     use pretty_assertions::assert_eq;
 
     fn output(content: Vec<ContextContent>) -> ModelStepOutput {
@@ -458,5 +481,86 @@ mod tests {
             output.content,
             vec![ContextContent::Opaque { payload: original }]
         );
+    }
+
+    #[test]
+    fn failed_and_cancelled_attempts_finalize_the_published_body_on_the_original_item() {
+        let receipt = pl_model::runtime::ModelFailureReceipt {
+            provider_failure: None,
+            message: "stream stopped".into(),
+            binding: pl_model::runtime::ModelCallBinding {
+                provider_instance_id: "fixture".into(),
+                requested_model: "fixture-model".into(),
+                adapter: pl_model::provider::ProviderAdapterKind::DeepSeek,
+                protocol: pl_model::provider::ProviderWireProtocol::ChatCompletions,
+                isolation: "fixture".into(),
+                purpose: "turn".into(),
+                context_window: None,
+            },
+            accounting: Default::default(),
+            model_observation: None,
+            partial_progress: Some(ModelProgress {
+                content: vec![ContextContent::Text {
+                    text: "first\nsecond\n".into(),
+                }],
+                reasoning: None,
+            }),
+        };
+        let error = Arc::new(ModelError {
+            details: Some(Box::new(
+                OpaquePayload::new(
+                    "pl.model.failure",
+                    1,
+                    serde_json::to_string(&receipt).unwrap(),
+                )
+                .unwrap(),
+            )),
+            kind: ModelFailureKind::Unavailable,
+            usage: ModelUsage::default(),
+            source: None,
+        });
+        let item_id = super::super::order::response_id("attempt", "text");
+        let finalized = BTreeSet::from([item_id.clone()]);
+        for outcome in [
+            AttemptOutcome::Failed(error.clone()),
+            AttemptOutcome::Cancelled {
+                result: Err(error.clone()),
+            },
+        ] {
+            let is_failed = matches!(outcome, AttemptOutcome::Failed(_));
+            let attempt = RequestAttempt {
+                request_metadata: None,
+                tool_projection: None,
+                turn_id: "turn".into(),
+                attempt_id: "attempt".into(),
+                retry_of: None,
+                input: ContextSnapshot::default(),
+                tools: Arc::from([]),
+                outcome,
+                input_estimate: None,
+            };
+            let items = project_attempt(
+                "thread",
+                &ThreadSnapshot::default(),
+                &attempt,
+                7,
+                100,
+                8,
+                101,
+                &finalized,
+            )
+            .unwrap();
+            let item = items.iter().find(|item| item.id == item_id).unwrap();
+            assert_eq!(item.ordinal, 7);
+            assert_eq!(item.revision, 8);
+            let text = item.text().unwrap();
+            assert_eq!(text.text(), "first\nsecond\n");
+            assert_eq!(text.channel(), ThreadTextChannel::Commentary);
+            assert!(if is_failed {
+                matches!(text.lifecycle(), ThreadContentLifecycle::Failed(_))
+            } else {
+                matches!(text.lifecycle(), ThreadContentLifecycle::Cancelled(_))
+            });
+        }
     }
 }

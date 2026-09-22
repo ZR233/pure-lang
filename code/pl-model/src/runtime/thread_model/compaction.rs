@@ -162,6 +162,7 @@ impl ThreadModel {
                             model_observation: result.3.map(Box::new),
                             cancelled: false,
                         },
+                        None,
                     ));
                 }
                 result
@@ -175,7 +176,7 @@ impl ThreadModel {
                         }),
                     ));
                 }
-                return Err(receipt::failure_error(binding, error));
+                return Err(receipt::failure_error(binding, error, None));
             }
         };
         let content = if let Some(item) = item {
@@ -184,6 +185,7 @@ impl ThreadModel {
                     binding.clone(),
                     accounting.clone(),
                     model_observation.clone(),
+                    None,
                     failure(ModelFailureKind::InvalidResponse, error),
                 )
             })?;
@@ -193,6 +195,7 @@ impl ThreadModel {
                         binding.clone(),
                         accounting.clone(),
                         model_observation.clone(),
+                        None,
                         failure(ModelFailureKind::InvalidResponse, error),
                     )
                 })?,

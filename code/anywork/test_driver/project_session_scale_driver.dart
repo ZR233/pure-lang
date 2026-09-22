@@ -10,7 +10,7 @@
 //     [--expected-large-item-id <itemId>] [--window-timeout-ms <ms>]
 //
 // 本驱动只回答存储规模问题，不派生任何性能“通过”结论：
-//   1. 启动时所选 Thread 自动打开，首个窗口必须是有界的一页，且确实还有更旧的历史；
+//   1. 启动时所选 Thread 自动打开，SQL 首窗有界，且确实还有更旧的历史；
 //   3. 首窗最新条目仍是真实基线的最后 Turn 与超长正文条目；
 //   4. 打开不得执行模型：wire-index.jsonl 的 conversation 计数不得增加；
 //   5. 记录启动/打开阶段的时间戳与窗口身份，供外部 `/proc` 采样对齐；
@@ -20,10 +20,10 @@ import 'dart:io';
 
 import 'package:flutter_driver/flutter_driver.dart';
 
-/// 有界历史窗口预算：打开后只允许持有有限的一页（与 reducer 的窗口/缓存预算一致）。
-const _historyWindowBudget = 500;
-const _cacheBudget = 900;
-const _liveTailBudget = 400;
+import 'raw_tap.dart';
+
+/// SQL 历史窗口上限：打开后只允许持有有限的一页；运行中 overlay 不设上限。
+const _sqlHistoryWindowLimit = 500;
 
 int _nowMs() => DateTime.now().millisecondsSinceEpoch;
 
@@ -123,27 +123,20 @@ class _Context {
 
     final window = opened['timelineWindow'] as Map;
     final itemIds = _itemIds(opened);
-    final itemCount = itemIds.length;
-    _require(itemCount > 0, 'the opened Thread published no history window');
-    // 打开后只能有有限的一页：百万级历史不得整段驻留。
+    final visibleItemCount = itemIds.length;
+    final historyCount = _windowHistoryCount(window);
+    _require(historyCount > 0, 'the opened Thread published no SQL history');
+    // 打开后只能持有有限的 SQL 一页：百万级历史不得整段驻留。
     _require(
-      itemCount <= _historyWindowBudget,
-      'the first window holds $itemCount items, above the '
-      '$_historyWindowBudget-item budget',
-    );
-    _require(
-      ((window['cacheCount'] as num?) ?? 0) <= _cacheBudget,
-      'the business-layer cache exceeds $_cacheBudget items after open',
-    );
-    _require(
-      ((window['tailCount'] as num?) ?? 0) <= _liveTailBudget,
-      'the live tail exceeds $_liveTailBudget items after open',
+      historyCount <= _sqlHistoryWindowLimit,
+      'the first SQL history window holds $historyCount items, above the '
+      '$_sqlHistoryWindowLimit-item limit',
     );
     // 历史总量远大于一页，因此打开后的首窗必须还有更旧的一页可翻。
     _require(
       window['hasOlder'] == true,
       'the opened window claims no older history, but the fixture holds far '
-      'more than one window (itemCount=$itemCount)',
+      'more than one window (historyCount=$historyCount)',
     );
     // 打开不执行工作。
     final workspace = opened['workspace'] as Map?;
@@ -197,14 +190,16 @@ class _Context {
     await _writeJson('scale.json', {
       'fixture': options.fixture,
       'threadId': options.threadId,
-      'historyWindowBudget': _historyWindowBudget,
+      'sqlHistoryWindowLimit': _sqlHistoryWindowLimit,
       'startup': {
         'selectedThreadRestored': true,
         'navigation': startup['navigation'],
         'persistence': startup['persistence'],
       },
       'window': {
-        'itemCount': itemCount,
+        'visibleItemCount': visibleItemCount,
+        'historyCount': historyCount,
+        'overlayCount': _windowOverlayCount(window),
         'firstItemId': itemIds.first,
         'lastItemId': itemIds.last,
         'itemIds': itemIds,
@@ -214,8 +209,6 @@ class _Context {
         'hasNewer': window['hasNewer'],
         'loading': window['loading'],
         'epoch': window['epoch'],
-        'cacheCount': window['cacheCount'],
-        'tailCount': window['tailCount'],
       },
       'open': {
         'lastTurnId': _lastTurnId(opened),
@@ -351,6 +344,12 @@ List<String> _loadedItemIds(Map<String, dynamic> state) =>
         .whereType<String>()
         .toList();
 
+int _windowHistoryCount(Map window) =>
+    ((window['historyCount'] as num?) ?? 0).toInt();
+
+int _windowOverlayCount(Map window) =>
+    ((window['overlayCount'] as num?) ?? 0).toInt();
+
 String? _lastTurnId(Map<String, dynamic> state) =>
     ((state['workspace'] as Map?)?['lastTurn'] as Map?)?['id'] as String?;
 
@@ -358,7 +357,7 @@ Map<String, Object?> _brief(Map<String, dynamic> state) => {
   'selectedThreadId': (state['navigation'] as Map?)?['selectedThreadId'],
   'workspaceThreadId': (state['workspace'] as Map?)?['threadId'],
   'lastTurnId': _lastTurnId(state),
-  'itemCount': _itemIds(state).length,
+  'visibleItemCount': _itemIds(state).length,
   'persistence': state['persistence'],
   'window': state['timelineWindow'],
 };

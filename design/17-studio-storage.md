@@ -72,7 +72,7 @@ repo/path/branch/base/revision。目录展示与物理 ownership 是不同职责
 3. 读取并验证一次 `state.toml`；
 4. 纯恢复内存 owner，不执行模型/工具；
 5. 建立增量订阅；
-6. history writer 执行固定屏障后，HistoryReader 查询首个可见窗口。
+6. 已受理 effect 通过 history writer 固定屏障后，HistoryReader 查询首个 SQL 可见窗口。
 
 读取历史页面不激活 owner。离开 GUI 页面只释放订阅和远离窗口的 GUI 数据，不自动停止仍在执行
 的 Thread。空闲、无订阅、无待保存数据且没有必须存活资源的 owner 在最终 checkpoint 后可释放。
@@ -96,6 +96,10 @@ repo/path/branch/base/revision。目录展示与物理 ownership 是不同职责
 recorder 消费模型/工具调用事实并写 `calls.sqlite`。两者都不保存 owner snapshot，也不向执行
 路径提供可变状态。
 
+已写入但尚未关联 Turn 的消息条目，随后可以用同一身份与 ordinal 绑定到它的 Turn。若它
+早于该 Turn 已持久化的首项，writer 必须在更新该条目的同一事务中向前扩展
+`history_turns.first_ordinal`；除此合法绑定之外，Turn 首项不能被任意改写。
+
 产品投影在 effect 提交时形成 canonical Turn/Item/Interaction 增量：
 
 ```text
@@ -109,9 +113,16 @@ Thread owner
 首次 Thread snapshot 只包含当前状态、pending interaction、runtime、workflow 和目录引用，不含
 完整 Timeline。History API 使用 `Latest/Before/After/Around` 直接 SQL 分页；热 Thread 与冷
 Thread 使用相同 reader，不建立驻留期全历史 `TimelineIndex`。
+活跃 Thread 的 reader 与 writer 复用同一数据库身份与初始化状态；新库创建至 schema/meta
+完成之间，reader 等待本句柄 writer 初始化，而冷读不存在的库仍返回空且不创建文件。损坏库
+继续按错误上报，不以重试将其伪装成空历史。
 
-打开或重连为避免间隙，先注册事件接收端，再请求当前草稿进入 writer，等待固定写入屏障，最后
-查询数据库窗口；这就是首窗屏障。期间收到的事件按版本化通知封套合并：封套携带
+打开或重连为避免间隙，先注册事件接收端，再冻结 owner 当前已提交的 revision，直接等待唯一
+writer 的 history 与 checkpoint 水位覆盖该 revision，最后查询数据库窗口；这就是首窗屏障。
+它不向正在执行 provider 流的 owner 排队 `Flush`，后续 effect 仍由已注册接收端交付。
+未终态流式正文不进入 writer 或
+`history.sqlite`，只作为实时 overlay 与 SQL 首窗合并。期间收到的事件按版本化通知封套合并；
+封套携带
 `epoch` + `base_revision` + `revision`，同 `epoch` 且 `base_revision` 等于客户端已知水位才连续，
 否则即为缺口。Item delta 还要求命中当前未终态 Item 且 revision 严格递增。任何缺口、未知变体
 或 `lagged` 一律重新订阅并从数据库窗口重建，不拼接空洞、不向 owner 索取已释放的历史 effect。

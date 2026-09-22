@@ -21,8 +21,9 @@ Timeline；历史读取不得经过 Thread owner、会话激活或 journal repla
 私有 continuation、当前运行事实与未完成状态仍由 owner 持有；用于展示和审计的历史记录具有
 独立生命周期。上下文可以压缩、替换或裁剪，已提交历史不因此删除。
 
-允许存在的有界临时数据只有：当前输出块、尚未受理或尚未持久化的写入批次、一次 SQL 查询
-结果和 GUI 可见窗口。writer 确认固定写入水位后立即释放对应 payload，不把队列变成历史缓存。
+允许存在的临时数据只有：当前运行 Item 的完整内存正文与输出组装、尚未受理或尚未持久化的
+写入批次、一次 SQL 查询结果和 GUI 可见窗口。未终态正文不周期写入历史；writer 确认固定
+写入水位后立即释放对应 effect payload，不把队列变成历史缓存。
 
 ## 15.2 Core 状态与输出事实
 
@@ -125,7 +126,8 @@ owner 的串行提交边界同时产出可持久化的幂等回执，使重复�
 → sync 目录
 ```
 
-发布新 checkpoint 前必须先：
+`history_fence` 只能指向已由唯一 history writer 固定确认的 effect 水位；未终态正文没有
+history 事实，也不能成为 checkpoint fence。发布新 checkpoint 前必须先：
 
 1. `history.flush_through(checkpoint.history_fence)`；
 2. 等待 checkpoint 引用的新 blob 已持久化；
@@ -241,9 +243,11 @@ payload 是条目自身的 JSON 正文，不含独立 `payload_format`/`payload_
 `applied_write_seq` 是游标与水位身份，`history_message_identities.digest` 可空，仅用于迁移回填
 留下的“身份已知、正文不可验证”行（读取方 fail-closed）。
 
-流式输出在块开始时分配身份与 ordinal，delta 只更新内存组装和 GUI；完成时立即保存最终版本，
-持续超过一秒的块可每秒合并保存一次最新草稿。草稿和最终结果更新同一 item，不持久化 token
-事件日志。
+流式输出在块开始时分配身份并通过 `history_ordinals` 预留稳定 ordinal；delta 只更新内存组装
+与 GUI，不写入 `history_items`，也不因时间间隔保存中间草稿。成功、失败或取消的终态事实随
+同一 `ThreadEffectBatch` 受理，由该 Thread 的唯一 history writer 写入同 item 的最终 revision；
+输入与消息身份回执仍与该 effect 在同一事务生效。结果不持久化 token 事件日志，checkpoint
+必须继续等待 writer fence。
 
 ## 15.6 SQL 分页与 cursor
 
@@ -290,6 +294,8 @@ durable_write_seq)` 记录每个 Thread 的调用队列水位，供 `flush_throu
 
 同一调用身份重试写入幂等，冲突明确失败；未结束调用可以更新为终态，但终态不可被较旧观察
 覆盖。计费和性能统计从调用库或其明确产品投影读取，不扫描会话历史。
+effect 窗口缺口恢复计费时先等待已受理写入的固定 ticket，再只查询缺少 `billing_ref` 的
+调用事实；已有计费正文不可从摘要列重构后再次投递，否则同身份的有损正文会触发冲突。
 
 ## 15.8 SQLite 与关闭
 

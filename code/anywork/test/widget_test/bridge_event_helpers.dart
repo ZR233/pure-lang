@@ -18,34 +18,6 @@ ThreadNotificationFrame _threadItemFrame({
   );
 }
 
-ThreadNotificationFrame _threadDeltaFrame({
-  required String threadId,
-  required int workspaceRevision,
-  required String itemId,
-  required int itemRevision,
-  required String field,
-  required String delta,
-}) {
-  return ThreadNotificationFrame(
-    threadId: threadId,
-    revision: workspaceRevision,
-    update: ThreadItemDeltaUpdate(
-      ThreadItemDeltaView(
-        itemId: itemId,
-        revision: itemRevision,
-        state: switch (field) {
-          'text' => ThreadTextDeltaView(delta),
-          'reasoning.summary' => ThreadThinkingSummaryDeltaView(0, delta),
-          'reasoning.content' => ThreadThinkingContentDeltaView(0, delta),
-          'tool.arguments' => ThreadToolArgumentsDeltaView(delta),
-          'tool.result' => ThreadToolResultDeltaView(delta),
-          _ => throw ArgumentError.value(field, 'field', 'unknown delta'),
-        },
-      ),
-    ),
-  );
-}
-
 ThreadNotificationFrame _threadTurnFrame({
   required String threadId,
   required int workspaceRevision,

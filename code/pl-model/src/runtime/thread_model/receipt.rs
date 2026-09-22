@@ -4,7 +4,7 @@ use crate::{
     provider::{ProviderAdapterKind, ProviderWireProtocol},
     runtime::ModelRuntime,
 };
-use pl_core::model::{ModelError, ModelStepOutput};
+use pl_core::model::{ModelError, ModelProgress, ModelStepOutput};
 use serde::{Deserialize, Serialize};
 
 /// Non-secret binding facts selected before execution; diagnostic purpose is not a permission.
@@ -62,6 +62,8 @@ pub struct ModelFailureReceipt {
     pub accounting: crate::completion::InferenceAccounting,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_observation: Option<crate::completion::InferenceModelObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partial_progress: Option<ModelProgress>,
 }
 
 /// Reads a producer-owned failure receipt without repricing history using current configuration.
@@ -90,6 +92,7 @@ pub fn model_failure_receipt(
 pub(super) fn failure_error(
     binding: ModelCallBinding,
     failure: crate::completion::CompletionFailure,
+    partial_progress: Option<ModelProgress>,
 ) -> ModelError {
     // The invocation's own cancellation fact, recorded at the observation point, decides the
     // class. Provider failures, timeouts and transport errors keep the previous classification.
@@ -106,6 +109,7 @@ pub(super) fn failure_error(
         binding,
         accounting: (*failure.accounting).clone(),
         model_observation,
+        partial_progress,
     };
     let details = failure_details(&receipt);
     ModelError {
@@ -120,6 +124,7 @@ pub(super) fn postprocess_failure_error(
     binding: ModelCallBinding,
     accounting: crate::completion::InferenceAccounting,
     model_observation: Option<crate::completion::InferenceModelObservation>,
+    partial_progress: Option<ModelProgress>,
     error: ModelError,
 ) -> ModelError {
     let receipt = ModelFailureReceipt {
@@ -128,6 +133,7 @@ pub(super) fn postprocess_failure_error(
         binding,
         accounting,
         model_observation,
+        partial_progress,
     };
     let details = failure_details(&receipt);
     ModelError {
@@ -332,6 +338,12 @@ mod tests {
             purpose: "review".into(),
             context_window: Some(1_000_000),
         };
+        let partial_progress = ModelProgress {
+            content: vec![pl_core::context::ContextContent::Text {
+                text: "visible before failure".into(),
+            }],
+            reasoning: None,
+        };
         let error = failure_error(
             binding,
             crate::completion::CompletionFailure {
@@ -342,6 +354,7 @@ mod tests {
                 model_observation: Some(Box::new(model_observation.clone())),
                 cancelled: false,
             },
+            Some(partial_progress.clone()),
         );
         let encoded = serde_json::to_string(&error).unwrap();
         let restored: ModelError = serde_json::from_str(&encoded).unwrap();
@@ -352,6 +365,10 @@ mod tests {
         assert_eq!(receipt.binding.provider_instance_id, "original-provider");
         assert_eq!(receipt.binding.context_window, Some(1_000_000));
         assert_eq!(receipt.model_observation, Some(model_observation));
+        assert_eq!(
+            receipt.partial_progress.unwrap().content,
+            partial_progress.content
+        );
     }
 
     #[tokio::test]
@@ -386,7 +403,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        let error = failure_error(binding.clone(), failure);
+        let error = failure_error(binding.clone(), failure, None);
         assert_eq!(error.kind, pl_core::model::ModelFailureKind::Cancelled);
         assert_eq!(
             model_failure_receipt(&error)
@@ -417,7 +434,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(!failure.is_cancelled());
-        let error = failure_error(binding, failure);
+        let error = failure_error(binding, failure, None);
         assert_eq!(error.kind, pl_core::model::ModelFailureKind::Unavailable);
         assert_eq!(
             model_failure_receipt(&error)
@@ -437,7 +454,7 @@ mod tests {
         );
         assert!(!failure.is_cancelled());
         let runtime = catalog_runtime("deepseek-flash");
-        let error = failure_error(ModelCallBinding::capture(&runtime, "turn"), failure);
+        let error = failure_error(ModelCallBinding::capture(&runtime, "turn"), failure, None);
         assert_eq!(error.kind, pl_core::model::ModelFailureKind::Unavailable);
     }
 
@@ -450,10 +467,17 @@ mod tests {
             reported_model: Some("deepseek-v4-202609".into()),
         };
         let accounting = crate::completion::InferenceAccounting::default();
+        let progress = ModelProgress {
+            content: vec![pl_core::context::ContextContent::Text {
+                text: "streamed before invalid response".into(),
+            }],
+            reasoning: None,
+        };
         let error = postprocess_failure_error(
             ModelCallBinding::capture(&runtime, "turn"),
             accounting.clone(),
             Some(observation.clone()),
+            Some(progress),
             super::super::failure(
                 pl_core::model::ModelFailureKind::InvalidResponse,
                 std::io::Error::other("receipt encoding failed"),
@@ -463,5 +487,6 @@ mod tests {
         let receipt = model_failure_receipt(&error).unwrap().unwrap();
         assert_eq!(receipt.accounting, accounting);
         assert_eq!(receipt.model_observation, Some(observation));
+        assert_eq!(receipt.partial_progress.unwrap().content.len(), 1);
     }
 }

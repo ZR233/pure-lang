@@ -9,6 +9,7 @@ import 'package:anywork/src/app/studio_shutdown.dart';
 import 'package:anywork/src/data/frb/studio_api.dart';
 import 'package:anywork/src/data/repositories/studio_repository.dart';
 import 'package:anywork/src/shared/studio_driver_state.dart';
+import 'package:anywork/src/rust/api/studio/types/error.dart';
 
 import 'raw_tap_extension.dart';
 
@@ -130,7 +131,17 @@ Future<String> _handleDriverData(String? message) async {
         await (_shutdownTask ??= _runShutdown());
         return jsonEncode({'shutdown': 'completed'});
       } on Object catch (error) {
-        return jsonEncode({'shutdown': 'failed', 'error': error.toString()});
+        return jsonEncode({
+          'shutdown': 'failed',
+          'error': error is BridgeError
+              ? {
+                  'code': error.code.name,
+                  'message': error.message,
+                  'correlationId': error.correlationId,
+                  'details': error.detailsJson,
+                }
+              : error.toString(),
+        });
       }
     case final String mode
         when mode.startsWith('set-new-thread-workspace-mode:'):

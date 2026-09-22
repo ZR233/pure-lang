@@ -28,22 +28,46 @@ Future<String> _timelineNativeFixture(String request) async {
       ThreadModeId.simple,
     );
     await _waitTimelineTurn(api, root.thread.id, root.receipt.inputId);
-    for (var index = 0; index < 160; index++) {
-      final receipt = await api.submitPrompt(
-        root.thread.id,
-        StudioPromptInput(
-          inputId: newPromptInputId(),
-          text: 'timeline-seed-$index',
-          attachmentDraftIds: const [],
-        ),
-      );
+    final childAgent = (await api.readStudioState()).agentDirectory.values
+        .where(
+          (agent) =>
+              agent.rootThreadId == root.thread.id &&
+              agent.threadId != root.thread.id,
+        )
+        .firstOrNull;
+    if (childAgent == null) {
+      throw StateError('scripted provider did not create a child Thread');
+    }
+    final childThread = (await api.readThreadSnapshot(childAgent.threadId))
+        .thread;
+    for (var index = 0; index < 96; index++) {
+      late final SubmitPromptReceipt receipt;
+      try {
+        receipt = await api.submitPrompt(
+          root.thread.id,
+          StudioPromptInput(
+            inputId: newPromptInputId(),
+            text: 'timeline-seed-$index',
+            attachmentDraftIds: const [],
+          ),
+        );
+      } catch (error) {
+        final queue = await (api as FrbStudioApi).readPersistenceQueue();
+        throw StateError(
+          'seed $index failed: $error; persistence: ${queue.lastError}; '
+          'threads: ${[for (final thread in queue.threads) '${thread.threadId}: ${thread.lastError} '
+                '(admitted ${thread.historyAdmittedSequence}, '
+                'durable ${thread.historyDurableSequence})']}',
+        );
+      }
       await _waitTimelineTurn(api, root.thread.id, receipt.inputId);
     }
     final controller = _container.read(studioControllerProvider.notifier);
     await controller.debugReloadForTest();
     await controller.selectProject(project.id);
+    controller.includeDirectoryThreads([childThread]);
     await controller.selectThread(root.thread.id);
-    return jsonEncode({'rootId': root.thread.id});
+    return jsonEncode({'rootId': root.thread.id, 'childId': childThread.id});
   }
   if (action == 'benchmark') {
     final threadId = command['threadId']! as String;
@@ -78,16 +102,6 @@ Future<String> _timelineNativeFixture(String request) async {
       ),
     );
     return jsonEncode({'inputId': receipt.inputId});
-  }
-  if (action == 'interrupt') {
-    final threadId = command['threadId']! as String;
-    // 当前状态快照直接携带活动 Turn（Timeline 条目与 Turn 摘要不再随快照下发）。
-    final turn = (await api.readThreadSnapshot(threadId)).activeTurn;
-    if (turn == null || turn.inputId != command['inputId']) {
-      throw StateError('fixture interrupt does not match the running input');
-    }
-    await api.interruptTurn(threadId, turn.turnId);
-    return jsonEncode({'interrupted': turn.turnId});
   }
   throw StateError('unknown native fixture action');
 }

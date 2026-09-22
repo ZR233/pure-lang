@@ -89,16 +89,14 @@ StudioState applyThreadSnapshot(StudioState current, ThreadWorkspace snapshot) {
   final threadId = snapshot.thread.id;
   if (threadId.isEmpty) return current;
   final previous = current.workspacesByThread[threadId];
-  if (previous != null && snapshot.revision < previous.revision) {
-    return current;
-  }
-  // 首次订阅没有可复用的窗口：快照本身必须是不带条目的当前状态。
+  // Each accepted snapshot begins a new subscription generation. Its watermark may be lower
+  // than the old generation's live-notification revision; only that generation's frames may
+  // advance it. Retain terminal items until SQL confirms them, not stale running previews.
   final base =
       previous ??
       snapshot.copyWith(
         items: const [],
-        cachedItems: const {},
-        latestItemIds: const [],
+        liveItems: const {},
         timelineTurns: const {},
       );
   final directory = current.threads
@@ -107,6 +105,10 @@ StudioState applyThreadSnapshot(StudioState current, ThreadWorkspace snapshot) {
   final next = base.copyWith(
     thread: directory ?? snapshot.thread,
     revision: snapshot.revision,
+    liveItems: {
+      for (final item in base.liveItems.values)
+        if (item.isTerminal) item.id: item,
+    },
     activeTurn: snapshot.activeTurn,
     interactions: snapshot.interactions,
     runtime: snapshot.runtime,
@@ -124,7 +126,7 @@ StudioState applyThreadSnapshot(StudioState current, ThreadWorkspace snapshot) {
 }
 
 /// 最近 Turn 事实：同 Turn 先比 revision（终态不被迟到的 busy 载荷拉回），
-/// 不同 Turn 以 updatedAt 判定先后。
+/// 不同 Turn 先比 updatedAt；同秒时用 canonical revision 判定先后。
 StudioTurnView? _newestTurn(StudioTurnView? left, StudioTurnView? right) {
   if (left == null) return right;
   if (right == null) return left;
@@ -134,7 +136,10 @@ StudioTurnView? _newestTurn(StudioTurnView? left, StudioTurnView? right) {
     }
     return right.revision > left.revision ? right : left;
   }
-  return right.updatedAt.isAfter(left.updatedAt) ? right : left;
+  final timeOrder = right.updatedAt.compareTo(left.updatedAt);
+  return timeOrder > 0 || (timeOrder == 0 && right.revision > left.revision)
+      ? right
+      : left;
 }
 
 StudioReduceResult applyThreadUpdate(
@@ -159,7 +164,6 @@ StudioReduceResult applyThreadUpdate(
   if (revision != workspace.revision + 1) {
     return StudioReduceResult(current, resyncThreadId: threadId);
   }
-  final followBottom = !_workspaceUi(current, threadId).history.detached;
   final updated = switch (update) {
     ThreadTurnUpdate(:final turn) => _applyThreadTurn(
       workspace,
@@ -170,7 +174,6 @@ StudioReduceResult applyThreadUpdate(
       workspace,
       revision,
       item,
-      followBottom: followBottom,
     ),
     ThreadItemDeltaUpdate(:final delta) => _appendThreadItemDelta(
       workspace,
@@ -190,10 +193,13 @@ StudioReduceResult applyThreadUpdate(
   }
   final ui = _workspaceUi(current, threadId);
   final syncedUi = syncItemBodyState(ui, updated);
-  final eviction = _liveEvictionHistory(syncedUi, workspace, updated);
-  final nextUi = eviction == null
-      ? syncedUi
-      : syncedUi.copyWith(history: eviction);
+  final hasNewItem =
+      update is ThreadItemUpsert &&
+      !workspace.historyItems.any((item) => item.id == update.item.id) &&
+      !workspace.liveItems.containsKey(update.item.id);
+  final nextUi = hasNewItem && ui.history.detached
+      ? syncedUi.copyWith(history: syncedUi.history.copyWith(hasNewer: true))
+      : syncedUi;
   return StudioReduceResult(
     identical(nextUi, ui)
         ? current.copyWith(
@@ -219,47 +225,9 @@ WorkspaceUiState _workspaceUi(StudioState state, String threadId) {
   return state.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
 }
 
-/// 实时流导致的窗口淘汰必须同时前移历史窗口的旧边界。
-///
-/// 跟随底部时 `_boundedTimeline(..., TimelineDirection.newer)` 会把最旧的常驻条目挤出
-/// 窗口与缓存；如果只有 `applyTimelinePage` 会更新 `hasOlder`/`olderCursor`，被实时裁剪
-/// 过的窗口就永远分不出更旧的 SQL 页（`onLoadOlder` 一直为 null，用户滚到顶也回不去）。
-///
-/// 规则：
-/// - 触发条件是**窗口最旧条目真的离开窗口与缓存**（真实淘汰），不是"有新数据流入"；
-///   因此不会因为尚未持久化的新帧到达就宣称存在更旧历史；
-/// - 新的旧边界就是淘汰后的第一条常驻条目本身（canonical item identity，与
-///   `applyTimelinePage` 在自身裁剪时写入的原始身份形式一致），由存储侧按该 identity
-///   解析 ordinal，页面仍只读 SQL；
-/// - 数据库身份、已采纳写水位、newer 边界、锚点、epoch 与 detached 都不动：这里只表达
-///   "阅读窗口的旧边界前移"，不引入新页、不伪造水位、不改变用户位置；
-/// - 已由 SQL 页携带的游标在旧边界未移动时被完整保留（见 `jumpTimelineToLatest`）。
-ThreadHistoryWindow? _liveEvictionHistory(
-  WorkspaceUiState ui,
-  ThreadWorkspace previous,
-  ThreadWorkspace next,
-) {
-  final previousFirst = previous.items.firstOrNull;
-  final nextFirst = next.items.firstOrNull;
-  if (previousFirst == null ||
-      nextFirst == null ||
-      previousFirst.id == nextFirst.id) {
-    return null;
-  }
-  // 旧首条仍在窗口或实时尾部/缓存里，说明只是窗口方向变化而非淘汰。
-  if (next.items.any((item) => item.id == previousFirst.id) ||
-      next.cachedItems.containsKey(previousFirst.id)) {
-    return null;
-  }
-  if (ui.history.hasOlder && ui.history.olderCursor == nextFirst.id) {
-    return null;
-  }
-  return ui.history.copyWith(hasOlder: true, olderCursor: nextFirst.id);
-}
-
 /// 由窗口条目的正文状态推导预览/加载/错误标记：条目本身是唯一事实源。
 ///
-/// 实时有界预览与历史页预览因此落到同一个状态；条目被显式回源（`bodyLoaded`）
+/// 历史页预览因此落到同一个状态；条目被显式回源（`bodyLoaded`）
 /// 或正文回到完整时，预览标记自然消失，不会残留成第二份事实。
 ///
 /// 回源相关的 UI 状态（加载/待落盘/错误/缺席）只在条目仍然“需要回源”时才有意义：
@@ -270,7 +238,7 @@ WorkspaceUiState syncItemBodyState(
   ThreadWorkspace workspace,
 ) {
   final previewed = {
-    for (final item in workspace.items)
+    for (final item in workspace.historyItems)
       if (item.bodyPreviewed) item.id,
   };
   final loading = ui.history.loadingItemIds.where(previewed.contains).toSet();
@@ -306,8 +274,7 @@ bool _sameIds(Set<String> left, Set<String> right) {
   return left.length == right.length && left.containsAll(right);
 }
 
-/// 历史页只拥有它声明的范围。[replaceWindow] 表示用新的权威窗口（首窗、重连或
-/// 跳回最新）替换整个窗口；否则按方向合并。活跃预览不被较旧的历史载荷覆盖。
+/// SQL pages own the reading window; live frames own the independent overlay.
 StudioState applyTimelinePage(
   StudioState current,
   String threadId,
@@ -323,87 +290,72 @@ StudioState applyTimelinePage(
     for (final item in page.items)
       if (item.threadId == threadId) item,
   ];
-  final pageIds = {for (final item in pageItems) item.id};
-  final firstPageOrdinal = pageItems.firstOrNull?.ordinal;
-  final lastPageOrdinal = pageItems.lastOrNull?.ordinal;
-  final cache = {
-    ...workspace.cachedItems,
-    for (final item in workspace.items) item.id: item,
+  final historyItems = <String, ThreadItemView>{
+    if (!replaceWindow)
+      for (final item in workspace.historyItems) item.id: item,
   };
-  // 页声明的单条预览省略量：页正文未超预算时归零，超预算时由客户端预算接管。
   final pagePreviewOmitted = {
     for (final preview in page.previews) preview.itemId: preview.omittedBytes,
   };
   for (final item in pageItems) {
-    final existing = cache[item.id];
-    if (existing == null) {
-      cache[item.id] = boundThreadItemBody(
-        item,
-        previewOmittedUnits: pagePreviewOmitted[item.id] ?? 0,
-      );
-      continue;
-    }
-    final merged = _preferPageItem(
-      existing,
-      item,
-      pageWatermark: page.watermark,
-      workspaceRevision: workspace.revision,
-    );
-    if (merged == null) continue;
-    if (existing.bodyLoaded && merged.revision <= existing.revision) {
-      // 用户已显式回源的完整正文不被同 revision 的页载荷退回预览。
-      continue;
-    }
-    cache[item.id] = boundThreadItemBody(
+    final existing = historyItems[item.id];
+    final merged = existing == null
+        ? item
+        : _preferPageItem(
+                existing,
+                item,
+                pageWatermark: page.watermark,
+                workspaceRevision: workspace.revision,
+              ) ??
+              existing;
+    historyItems[item.id] = boundThreadItemBody(
       merged,
       previewOmittedUnits: pagePreviewOmitted[item.id] ?? 0,
     );
   }
-  // 替换整个窗口时仍保留页范围之外的实时条目：跟随底部时留在窗口，已离开
-  // 底部时只进实时尾部，避免移动用户正在阅读的范围。
-  final liveOutside = [
-    for (final item in workspace.items)
-      if (!pageIds.contains(item.id) &&
-          firstPageOrdinal != null &&
-          lastPageOrdinal != null &&
-          (item.ordinal < firstPageOrdinal || item.ordinal > lastPageOrdinal))
-        item.id,
-  ];
-  final tail = [
-    if (replaceWindow && !followBottom) ...liveOutside,
-    ...workspace.latestItemIds.where((id) => !pageIds.contains(id)),
-  ];
-  final ids = {
-    if (!replaceWindow) ...workspace.items.map((item) => item.id),
-    if (replaceWindow && followBottom) ...liveOutside,
-    ...pageIds,
-  };
-  final items = [for (final id in ids) cache[id]!]..sort(_compareItems);
+  final items = historyItems.values.toList()..sort(_compareItems);
   final trimmed = items.length > maxTimelineWindowItems;
   var latestTurn = workspace.latestTurn;
   for (final entry in page.turns) {
     latestTurn = _newestTurn(latestTurn, entry.turn);
   }
+  final overlay = Map<String, ThreadItemView>.from(workspace.liveItems);
+  for (final item in pageItems) {
+    final pending = overlay[item.id];
+    if (pending == null ||
+        !pending.isTerminal ||
+        !item.isTerminal ||
+        item.revision < pending.revision) {
+      continue;
+    }
+    // Preserve the visible complete body when the SQL page only holds a preview.
+    if (ui.history.anchor?.itemId == item.id ||
+        (followBottom &&
+            workspace.liveItems.values.lastOrNull?.id == item.id)) {
+      historyItems[item.id] = pending.copyWith(
+        contextDisposition: item.contextDisposition,
+        bodyLoaded: true,
+      );
+    }
+    overlay.remove(item.id);
+  }
+  final confirmedItems = historyItems.values.toList()..sort(_compareItems);
   final next = _boundedTimeline(
     workspace.copyWith(
-      items: items,
-      cachedItems: cache,
-      latestItemIds: tail,
+      items: confirmedItems,
+      liveItems: overlay,
       latestTurn: latestTurn,
       timelineTurns: {
-        ...workspace.timelineTurns,
+        if (!replaceWindow) ...workspace.timelineTurns,
         for (final entry in page.turns) entry.turn.turnId: entry,
       },
     ),
     direction,
     anchorId: ui.history.anchor?.itemId,
   );
-  final droppedOlder = next.items.firstOrNull?.id != items.firstOrNull?.id;
-  final droppedNewer = next.items.lastOrNull?.id != items.lastOrNull?.id;
-  // 窗口身份：database identity 与 applied write sequence 一起表达"窗口的水位"；
-  // 数据库重建或水位回退时窗口整体过期，由页携带的身份纠正（见 timelinePageIsStale）。
-  // 预览/加载状态只由条目的正文状态推导：窗口内条目是唯一事实源，实时有界预览与
-  // 历史页预览落到同一状态，显式回源完成后标记自然消失。
+  final droppedOlder =
+      next.historyItems.firstOrNull?.id != items.firstOrNull?.id;
+  final droppedNewer = next.historyItems.lastOrNull?.id != items.lastOrNull?.id;
   final synced = syncItemBodyState(ui, next);
   final previewedItemIds = synced.history.previewedItemIds;
   final loadingItemIds = synced.history.loadingItemIds;
@@ -418,21 +370,12 @@ StudioState applyTimelinePage(
       : (page.watermark > ui.history.appliedWriteSequence
             ? page.watermark
             : ui.history.appliedWriteSequence);
-  // 跟随底部的窗口（首窗/重连/跳回最新）只在**确实存在更旧历史**时声明旧边界。
-  //
-  // 窗口里有条目本身不构成"可以继续向旧翻页"的证据：页既没有给出更旧游标、也没有
-  // 裁剪出更旧范围时，`olderCursor` 必须保持为空。否则一个没有更旧历史的阅读窗口会
-  // 带着一个凭空而来的旧边界（离开底部或被实时流推进后仍在状态里），把"窗口里有内容"
-  // 误表示成"旧边界已前移"。
-  //
-  // 真裁剪（页范围比窗口更旧）用裁剪后的第一条常驻身份——与实时淘汰写游标的形式一致；
-  // 边界未移动时保留页携带的游标 token，交给存储侧解析身份与水位，不退化成原始身份。
   final followHasOlder = droppedOlder || page.olderCursor != null;
   final followOlderCursor = !followHasOlder
       ? null
       : droppedOlder
-      ? next.items.firstOrNull?.id
-      : page.olderCursor ?? next.items.firstOrNull?.id;
+      ? next.historyItems.firstOrNull?.id
+      : page.olderCursor ?? next.historyItems.firstOrNull?.id;
   final history = followBottom
       ? ui.history.copyWith(
           olderCursor: followOlderCursor,
@@ -453,12 +396,12 @@ StudioState applyTimelinePage(
         )
       : ui.history.copyWith(
           olderCursor: droppedOlder
-              ? next.items.firstOrNull?.id
+              ? next.historyItems.firstOrNull?.id
               : (replaceWindow || direction == TimelineDirection.older)
               ? page.olderCursor
               : ui.history.olderCursor,
           newerCursor: droppedNewer
-              ? next.items.lastOrNull?.id
+              ? next.historyItems.lastOrNull?.id
               : (replaceWindow || direction == TimelineDirection.newer)
               ? page.newerCursor
               : ui.history.newerCursor,
@@ -496,6 +439,49 @@ StudioState applyTimelinePage(
     workspaceUiByThread: {
       ...current.workspaceUiByThread,
       threadId: ui.copyWith(history: history),
+    },
+  );
+}
+
+/// Confirms off-window terminal items without changing the reader's SQL page or anchor.
+StudioState confirmDetachedTimelineItems(
+  StudioState current,
+  String threadId,
+  Iterable<(ThreadItemView, int)> persisted,
+) {
+  final workspace = current.workspacesByThread[threadId];
+  if (workspace == null || workspace.liveItems.isEmpty) return current;
+  final visibleIndices = {
+    for (var index = 0; index < workspace.historyItems.length; index++)
+      workspace.historyItems[index].id: index,
+  };
+  final historyItems = workspace.historyItems.toList();
+  final overlay = Map<String, ThreadItemView>.from(workspace.liveItems);
+  final anchorId =
+      current.workspaceUiByThread[threadId]?.history.anchor?.itemId;
+  for (final (item, omittedUnits) in persisted) {
+    final pending = overlay[item.id];
+    if (pending != null &&
+        pending.isTerminal &&
+        item.isTerminal &&
+        item.revision >= pending.revision) {
+      final visibleIndex = visibleIndices[item.id];
+      if (visibleIndex != null) {
+        historyItems[visibleIndex] = anchorId == item.id
+            ? pending.copyWith(
+                contextDisposition: item.contextDisposition,
+                bodyLoaded: true,
+              )
+            : boundThreadItemBody(item, previewOmittedUnits: omittedUnits);
+      }
+      overlay.remove(item.id);
+    }
+  }
+  if (overlay.length == workspace.liveItems.length) return current;
+  return current.copyWith(
+    workspacesByThread: {
+      ...current.workspacesByThread,
+      threadId: workspace.copyWith(items: historyItems, liveItems: overlay),
     },
   );
 }
@@ -579,9 +565,9 @@ StudioState applyItemBodyPage(
   final incoming = page.items
       .where((item) => item.id == itemId && item.threadId == threadId)
       .firstOrNull;
-  final existing =
-      workspace.cachedItems[itemId] ??
-      workspace.items.where((item) => item.id == itemId).firstOrNull;
+  final existing = workspace.historyItems
+      .where((item) => item.id == itemId)
+      .firstOrNull;
   // 数据源仍把该条目按预览返回：回源没有真正取到完整正文，不能假装已回源。
   final stillPreviewed = page.previews.any(
     (preview) => preview.itemId == itemId,
@@ -631,12 +617,11 @@ StudioState applyItemBodyPage(
       ? workspace
       : workspace.copyWith(
           items: existing == null
-              ? ([...workspace.items, merged]..sort(_compareItems))
+              ? ([...workspace.historyItems, merged]..sort(_compareItems))
               : [
-                  for (final item in workspace.items)
+                  for (final item in workspace.historyItems)
                     item.id == itemId ? merged : item,
                 ],
-          cachedItems: {...workspace.cachedItems, merged.id: merged},
         );
   return current.copyWith(
     workspacesByThread: {
@@ -735,8 +720,12 @@ StudioState applyRecoveredDispositions(
 ) {
   final workspace = current.workspacesByThread[threadId];
   if (workspace == null) return current;
-  final items = _overlayRolledBackItems(workspace.items, page.items, threadId);
-  if (identical(items, workspace.items)) return current;
+  final items = _overlayRolledBackItems(
+    workspace.historyItems,
+    page.items,
+    threadId,
+  );
+  if (identical(items, workspace.historyItems)) return current;
   return current.copyWith(
     workspacesByThread: {
       ...current.workspacesByThread,
@@ -771,27 +760,13 @@ List<ThreadItemView> _overlayRolledBackItems(
 
 const int maxTimelineWindowItems = 500;
 
-/// 最新尾部独立上限：detached 读者的实时尾部最多 400 条，与阅读窗口（500）分开计费。
-///
-/// 两者共享一个上限会让尾部比设计契约多出 100 条——离开底部的读者会多保留 100 条
-/// 永远不会进入窗口的载荷（design/19-studio-ui.md 的“500 窗口 + 400 尾部”）。
-const int maxLiveTailItems = 400;
-
-/// 实时尾部有界：超出上限时只保留最新的 [maxLiveTailItems] 条（尾部语义是“比窗口新”）。
-List<String> _boundedTailIds(List<String> ids) {
-  if (ids.length <= maxLiveTailItems) return ids;
-  return ids.sublist(ids.length - maxLiveTailItems);
-}
-
-/// 有界 Timeline 窗口：超出上限时按方向淘汰远端（[TimelineDirection.older]
-/// 保留更旧一侧、[TimelineDirection.newer] 保留更新一侧），并保证 [anchorId]
-/// 仍在窗口内。实时尾部只保留窗口之外的条目。
+/// Only SQL pages are bounded. Live output is owned by the overlay.
 ThreadWorkspace _boundedTimeline(
   ThreadWorkspace workspace,
   TimelineDirection direction, {
   String? anchorId,
 }) {
-  final all = workspace.items;
+  final all = workspace.historyItems;
   var start =
       all.length <= maxTimelineWindowItems ||
           direction == TimelineDirection.older
@@ -808,84 +783,31 @@ ThreadWorkspace _boundedTimeline(
     start,
     (start + maxTimelineWindowItems).clamp(start, all.length),
   );
-  final windowIds = {for (final item in items) item.id};
-  final tail = _boundedTailIds([
-    for (final id in workspace.latestItemIds)
-      if (!windowIds.contains(id)) id,
-  ]);
-  final ids = {...windowIds, ...tail};
-  final cache = {
-    ...workspace.cachedItems,
-    for (final item in items) item.id: item,
-  }..removeWhere((id, _) => !ids.contains(id));
-  final turns = cache.values.map((item) => item.turnId).toSet();
+  final turns = items.map((item) => item.turnId).toSet();
   return workspace.copyWith(
-    items: [for (final item in items) cache[item.id]!],
-    cachedItems: cache,
-    latestItemIds: tail,
+    items: items,
     timelineTurns: {...workspace.timelineTurns}
       ..removeWhere((id, _) => !turns.contains(id)),
   );
 }
 
-/// 回到最新：先用实时尾部本地回显（随后由控制器的权威最新窗口替换），并提升
-/// epoch 使在途的旧分页响应失效。
+/// Discard the detached SQL page; keep only live output until Latest arrives.
 StudioState jumpTimelineToLatest(StudioState current, String threadId) {
   final workspace = current.workspacesByThread[threadId];
   if (workspace == null) return current;
   final ui = current.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
-  final items = [...workspace.items, ...workspace.latestItems];
-  final windowIds = {for (final item in items) item.id};
-  final previewedItemIds = ui.history.previewedItemIds
-      .where(windowIds.contains)
-      .toSet();
-  final loadingItemIds = ui.history.loadingItemIds
-      .where(windowIds.contains)
-      .toSet();
-  final pendingItemBodyIds = ui.history.pendingItemBodyIds
-      .where(windowIds.contains)
-      .toSet();
-  final itemBodyErrors = {
-    for (final entry in ui.history.itemBodyErrors.entries)
-      if (windowIds.contains(entry.key)) entry.key: entry.value,
-  };
-  final unavailableItemIds = ui.history.unavailableItemIds
-      .where(windowIds.contains)
-      .toSet();
-  // 跳到最新时窗口的旧边界没有移动（首条仍是原来的首条），因此必须保留下方已由 SQL
-  // 页携带的游标 token，而不是把它丢掉退化成原始 item identity。
-  final olderEdgeMoved =
-      workspace.items.firstOrNull?.id != items.firstOrNull?.id;
-  final hasOlder = ui.history.hasOlder || olderEdgeMoved;
-  final olderCursor = !hasOlder
-      ? null
-      : olderEdgeMoved
-      ? items.firstOrNull?.id
-      : ui.history.olderCursor ?? items.firstOrNull?.id;
   return current.copyWith(
     workspacesByThread: {
       ...current.workspacesByThread,
-      threadId: _boundedTimeline(
-        workspace.copyWith(items: items, latestItemIds: const []),
-        TimelineDirection.newer,
-      ),
+      threadId: workspace.copyWith(items: const [], timelineTurns: const {}),
     },
     workspaceUiByThread: {
       ...current.workspaceUiByThread,
       threadId: ui.copyWith(
         history: ThreadHistoryWindow(
-          isLoading: ui.history.isLoading,
-          direction: ui.history.direction,
-          hasOlder: hasOlder,
-          olderCursor: olderCursor,
           epoch: ui.history.epoch + 1,
           databaseId: ui.history.databaseId,
           appliedWriteSequence: ui.history.appliedWriteSequence,
-          previewedItemIds: previewedItemIds,
-          loadingItemIds: loadingItemIds,
-          itemBodyErrors: itemBodyErrors,
-          pendingItemBodyIds: pendingItemBodyIds,
-          unavailableItemIds: unavailableItemIds,
         ),
       ),
     },
@@ -899,9 +821,6 @@ bool _historyWindowTouched(ThreadHistoryWindow? window) {
       window.hasNewer ||
       window.olderCursor != null ||
       window.newerCursor != null ||
-      window.epoch != 0 ||
-      window.detached ||
-      window.anchor != null ||
       window.errorMessage != null ||
       window.newerError != null ||
       window.databaseId.isNotEmpty ||
@@ -915,17 +834,15 @@ bool _historyWindowTouched(ThreadHistoryWindow? window) {
 
 /// 切换/关闭 Thread 时释放该会话的历史载荷。
 ///
-/// 有界 Timeline 窗口、实时尾部、缓存载荷与 Turn 摘要全部丢弃，预览/回源状态一并
-/// 清空，因此内存只随当前窗口增长；Thread 身份、交互、runtime、Todo 与 composer/UI
-/// 状态保留。重新选中该会话时由新订阅与首窗读取重建窗口。
+/// SQL window, live overlay and Turn summaries are released together on switch.
+/// 阅读锚点保留为轻量身份；重新选中时围绕它从 SQL 重建当前阅读位置。
 StudioState releaseThreadHistoryPayload(StudioState current, String threadId) {
   final workspace = current.workspacesByThread[threadId];
   if (workspace == null) return current;
   final ui = current.workspaceUiByThread[threadId];
   final alreadyEmpty =
-      workspace.items.isEmpty &&
-      workspace.cachedItems.isEmpty &&
-      workspace.latestItemIds.isEmpty &&
+      workspace.historyItems.isEmpty &&
+      workspace.liveItems.isEmpty &&
       workspace.timelineTurns.isEmpty &&
       !_historyWindowTouched(ui?.history);
   if (alreadyEmpty) return current;
@@ -934,8 +851,7 @@ StudioState releaseThreadHistoryPayload(StudioState current, String threadId) {
       ...current.workspacesByThread,
       threadId: workspace.copyWith(
         items: const [],
-        cachedItems: const {},
-        latestItemIds: const [],
+        liveItems: const {},
         timelineTurns: const {},
       ),
     },
@@ -943,7 +859,13 @@ StudioState releaseThreadHistoryPayload(StudioState current, String threadId) {
         ? current.workspaceUiByThread
         : {
             ...current.workspaceUiByThread,
-            threadId: ui.copyWith(history: const ThreadHistoryWindow()),
+            threadId: ui.copyWith(
+              history: ThreadHistoryWindow(
+                anchor: ui.history.anchor,
+                detached: ui.history.detached,
+                epoch: ui.history.epoch + 1,
+              ),
+            ),
           },
   );
 }
@@ -1130,112 +1052,37 @@ String planFollowUpPrompt(
   return interaction.body.trim();
 }
 
-/// Timeline item 的唯一合并规则（实时帧与历史页共用）：
-/// 身份 = itemId + threadId + turnId + kind；同 id 时仅当 incoming.revision
-/// >= existing 才替换；新 id 插入后按 (ordinal, id) 全序排序。ordinal 是
-/// Rust 事件总线一次性分配的不可变顺序事实，不参与身份比较。
-ThreadWorkspace? mergeThreadItems(
-  ThreadWorkspace workspace,
-  List<ThreadItemView> incomingItems,
-) {
-  if (incomingItems.isEmpty) return workspace;
-  var changed = false;
-  final items = [...workspace.items];
-  for (final incoming in incomingItems) {
-    if (incoming.threadId != workspace.thread.id || incoming.id.isEmpty) {
-      continue;
-    }
-    final index = items.indexWhere((item) => item.id == incoming.id);
-    if (index >= 0) {
-      final existing = items[index];
-      if (!_sameItemIdentity(existing, incoming) ||
-          incoming.revision < existing.revision) {
-        continue;
-      }
-      // 防御性不可变：ordinal 由 Rust 总线一次性分配，替换载荷时保留已加载
-      // 值，忽略迟到载荷中的 ordinal 漂移。
-      items[index] = incoming.ordinal == existing.ordinal
-          ? incoming
-          : incoming.copyWith(ordinal: existing.ordinal);
-      changed = true;
-    } else {
-      items.add(incoming);
-      changed = true;
-    }
-  }
-  if (!changed) return workspace;
-  items.sort(_compareItems);
-  return workspace.copyWith(items: items);
-}
-
-/// 实时 Item 只进入有界窗口（跟随底部）或实时尾部（已离开底部）；身份不可变、
-/// 旧 revision 不覆盖，载荷来源与历史页完全一致（同一身份 + revision 规则）。
+/// Live frames never mutate the SQL window. The writer owns durable content.
 ThreadWorkspace? _upsertThreadItem(
   ThreadWorkspace workspace,
   int workspaceRevision,
-  ThreadItemView incoming, {
-  required bool followBottom,
-}) {
+  ThreadItemView incoming,
+) {
   if (incoming.threadId != workspace.thread.id || incoming.id.isEmpty) {
     return null;
   }
-  return _insertLiveItem(
-    workspace,
-    incoming,
-    followBottom: followBottom,
-  ).copyWith(revision: workspaceRevision);
-}
-
-ThreadWorkspace _insertLiveItem(
-  ThreadWorkspace workspace,
-  ThreadItemView incoming, {
-  required bool followBottom,
-}) {
-  final existing = workspace.cachedItems[incoming.id];
+  final existing =
+      workspace.liveItems[incoming.id] ??
+      workspace.historyItems
+          .where((item) => item.id == incoming.id)
+          .firstOrNull;
   if (existing != null) {
     if (!_sameItemIdentity(existing, incoming) ||
         incoming.revision < existing.revision) {
-      return workspace;
+      return workspace.copyWith(revision: workspaceRevision);
     }
-    final adopted = incoming.ordinal == existing.ordinal
-        ? incoming
-        : incoming.copyWith(ordinal: existing.ordinal);
-    // 用户已显式回源的完整正文不被同 revision 的实时/快照载荷退回预览。
-    final merged = existing.bodyLoaded && adopted.revision <= existing.revision
-        ? existing
-        : boundThreadItemBody(adopted);
-    return workspace.copyWith(
-      items: [
-        for (final item in workspace.items)
-          item.id == merged.id ? merged : item,
-      ],
-      cachedItems: {...workspace.cachedItems, merged.id: merged},
-    );
+    if (existing.isTerminal && incoming.revision <= existing.revision) {
+      return workspace.copyWith(revision: workspaceRevision);
+    }
   }
-  final bounded = boundThreadItemBody(incoming);
-  if (!followBottom) {
-    return _boundLiveTail(
-      workspace.copyWith(
-        cachedItems: {...workspace.cachedItems, bounded.id: bounded},
-        latestItemIds: [...workspace.latestItemIds, bounded.id],
-      ),
-    );
-  }
-  final merged = mergeThreadItems(workspace, [bounded]);
-  if (merged == null) return workspace;
-  return _boundedTimeline(merged, TimelineDirection.newer);
-}
-
-/// 实时尾部有界：超过 [maxLiveTailItems] 时淘汰最旧的尾部载荷，窗口内条目的载荷不受影响。
-ThreadWorkspace _boundLiveTail(ThreadWorkspace workspace) {
-  final bounded = _boundedTailIds(workspace.latestItemIds);
-  if (bounded.length == workspace.latestItemIds.length) return workspace;
-  final kept = bounded.toSet();
-  final windowIds = {for (final item in workspace.items) item.id};
   return workspace.copyWith(
-    latestItemIds: bounded,
-    cachedItems: {...workspace.cachedItems}
-      ..removeWhere((id, _) => !kept.contains(id) && !windowIds.contains(id)),
+    revision: workspaceRevision,
+    liveItems: {
+      ...workspace.liveItems,
+      incoming.id: existing == null || incoming.ordinal == existing.ordinal
+          ? incoming
+          : incoming.copyWith(ordinal: existing.ordinal),
+    },
   );
 }
 
@@ -1244,29 +1091,8 @@ ThreadWorkspace? _appendThreadItemDelta(
   int workspaceRevision,
   ThreadItemDeltaView delta,
 ) {
-  final items = [...workspace.items];
-  final index = items.indexWhere((item) => item.id == delta.itemId);
-  if (index < 0) {
-    // Delta 只命中窗口或实时尾部中的未终态 Item；未知 Item 说明流与窗口
-    // 已不连续，必须重新订阅并由数据库窗口校正。
-    final tail = workspace.cachedItems[delta.itemId];
-    if (tail == null || tail.isTerminal) return null;
-    if (delta.revision <= tail.revision) {
-      return workspace.copyWith(revision: workspaceRevision);
-    }
-    if (delta.revision != tail.revision + 1) return null;
-    final nextTail = tail.appendDelta(
-      delta: delta.state,
-      nextRevision: delta.revision,
-    );
-    if (nextTail == null) return null;
-    return workspace.copyWith(
-      revision: workspaceRevision,
-      cachedItems: {...workspace.cachedItems, nextTail.id: nextTail},
-    );
-  }
-  final item = items[index];
-  if (item.isTerminal) return null;
+  final item = workspace.liveItems[delta.itemId];
+  if (item == null || item.isTerminal) return null;
   if (delta.revision <= item.revision) {
     return workspace.copyWith(revision: workspaceRevision);
   }
@@ -1276,11 +1102,9 @@ ThreadWorkspace? _appendThreadItemDelta(
     nextRevision: delta.revision,
   );
   if (nextItem == null) return null;
-  items[index] = nextItem;
   return workspace.copyWith(
     revision: workspaceRevision,
-    items: items,
-    cachedItems: {...workspace.cachedItems, nextItem.id: nextItem},
+    liveItems: {...workspace.liveItems, nextItem.id: nextItem},
   );
 }
 

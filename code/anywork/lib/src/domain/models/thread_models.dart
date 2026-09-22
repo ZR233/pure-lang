@@ -27,11 +27,8 @@ enum AgentMessageChannel { commentary, finalAnswer }
 
 enum ThreadTextChannel { user, parentAgent, commentary, finalAnswer }
 
-/// 单条流式正文在客户端的渲染/内存预算（UTF-16 code units）。
-///
-/// canonical 全文仍由 Rust 持久化，并继续作为下一次模型上下文的完整事实；客户端
-/// 只为渲染与序列化保留有界的实时预览（最近的尾部），超出的部分只能经由 canonical
-/// item id 显式回源。这样单次 delta 的处理开销与 delta 同阶，整条流不再 O(n²)。
+/// SQL 历史页单条正文的客户端预览预算（UTF-16 code units）。
+/// 运行中的正文完整保留在 overlay，待终态由 SQL 确认后释放。
 const int kTimelineItemBodyBudget = 8 * 1024;
 
 class ThreadAttachmentView {
@@ -795,14 +792,12 @@ class ThreadItemView {
         ),
         ThreadTextDeltaView(:final delta),
       ):
-        final bounded = _boundedBodyAppend(text, delta, bodyOmittedUnits);
         nextState = ThreadTextItemStateView(
           channel: channel,
-          text: bounded.text,
+          text: '$text$delta',
           attachments: attachments,
           lifecycle: const StreamingThreadContentView(),
         );
-        nextOmittedUnits = bounded.omittedUnits;
       case (
         ThreadThinkingItemStateView(
           :final summary,
@@ -866,16 +861,10 @@ class ThreadItemView {
         ),
         ThreadToolArgumentsDeltaView(:final delta),
       ):
-        final bounded = _boundedBodyAppend(
-          invocation.arguments,
-          delta,
-          bodyOmittedUnits,
-        );
         nextState = ThreadToolItemStateView(
-          invocation: invocation.withArguments(bounded.text),
+          invocation: invocation.withArguments('${invocation.arguments}$delta'),
           lifecycle: const StreamingThreadToolView(),
         );
-        nextOmittedUnits = bounded.omittedUnits;
       case (
         ThreadToolItemStateView(
           :final invocation,
@@ -883,16 +872,10 @@ class ThreadItemView {
         ),
         ThreadToolResultDeltaView(:final delta),
       ):
-        final bounded = _boundedBodyAppend(
-          streamedOutput,
-          delta,
-          bodyOmittedUnits,
-        );
         nextState = ThreadToolItemStateView(
           invocation: invocation,
-          lifecycle: RunningThreadToolView(bounded.text),
+          lifecycle: RunningThreadToolView('$streamedOutput$delta'),
         );
-        nextOmittedUnits = bounded.omittedUnits;
       default:
         nextState = null;
     }
@@ -934,16 +917,15 @@ class ThreadWorkspace {
   const ThreadWorkspace({
     required this.thread,
     required this.revision,
-    required this.items,
+    required List<ThreadItemView> items,
     required this.interactions,
     required this.runtime,
     this.activeTurn,
     this.latestTurn,
-    this.cachedItems = const {},
-    this.latestItemIds = const [],
+    this.liveItems = const {},
     this.timelineTurns = const {},
     this.todo,
-  });
+  }) : historyItems = items;
 
   /// Thread 身份；由 Thread directory 重绑，不作为 mode/role/status 的事实源。
   final StudioThread thread;
@@ -951,8 +933,28 @@ class ThreadWorkspace {
   /// 当前状态 revision（snapshot 与实时事件共用）；历史页 watermark 不属于它。
   final int revision;
 
-  /// 有界 Timeline 窗口：只由历史页与实时事件维护，snapshot 不携带条目。
-  final List<ThreadItemView> items;
+  /// SQL-backed reading window. Live frames never change this page.
+  final List<ThreadItemView> historyItems;
+  final Map<String, ThreadItemView> liveItems;
+
+  /// Current visible history plus the live overlay, keyed by canonical item ID.
+  List<ThreadItemView> get items {
+    if (liveItems.isEmpty) return historyItems;
+    final merged = <String, ThreadItemView>{
+      for (final item in historyItems) item.id: item,
+    };
+    for (final item in liveItems.values) {
+      final existing = merged[item.id];
+      if (existing == null || item.revision >= existing.revision) {
+        merged[item.id] = item;
+      }
+    }
+    return merged.values.toList()..sort((a, b) {
+      final order = a.ordinal.compareTo(b.ordinal);
+      return order != 0 ? order : a.id.compareTo(b.id);
+    });
+  }
+
   final List<PendingInteraction> interactions;
   final ThreadRuntimeView runtime;
 
@@ -962,17 +964,8 @@ class ThreadWorkspace {
   /// 最近一次已知 Turn 事实（live turn 通知或历史页 turn 摘要）。
   final StudioTurnView? latestTurn;
 
-  /// 窗口与实时尾部条目的载荷；窗口外可回源，实时尾部用于回到最新。
-  final Map<String, ThreadItemView> cachedItems;
-
-  /// 窗口之外的实时条目（detached 期间追加），按 ordinal 升序。
-  final List<String> latestItemIds;
-
   /// 窗口覆盖的 Turn 摘要（来自历史页），用于行投影与终态行去重。
   final Map<String, TimelineTurnView> timelineTurns;
-  List<ThreadItemView> get latestItems => [
-    for (final id in latestItemIds) ?cachedItems[id],
-  ];
   final TimelineTodoListUpdate? todo;
 
   /// 最近 Turn 事实：当前执行的 Turn 不早于已观测到的终态 Turn。
@@ -992,17 +985,15 @@ class ThreadWorkspace {
     ThreadRuntimeView? runtime,
     Object? activeTurn = _workspaceUnset,
     Object? latestTurn = _workspaceUnset,
-    Map<String, ThreadItemView>? cachedItems,
-    List<String>? latestItemIds,
+    Map<String, ThreadItemView>? liveItems,
     Map<String, TimelineTurnView>? timelineTurns,
     Object? todo = _workspaceUnset,
   }) {
     return ThreadWorkspace(
       thread: thread ?? this.thread,
       revision: revision ?? this.revision,
-      items: items ?? this.items,
-      cachedItems: cachedItems ?? this.cachedItems,
-      latestItemIds: latestItemIds ?? this.latestItemIds,
+      items: items ?? historyItems,
+      liveItems: liveItems ?? this.liveItems,
       timelineTurns: timelineTurns ?? this.timelineTurns,
       interactions: interactions ?? this.interactions,
       runtime: runtime ?? this.runtime,
@@ -1325,28 +1316,7 @@ ThreadItemView boundThreadItemBody(
   return (text: text.substring(start), omittedUnits: baseOmittedUnits + start);
 }
 
-/// 流式追加：先拼接再收敛，因此内存/渲染/序列化只与 delta 和预算同阶。
-({String text, int omittedUnits}) _boundedBodyAppend(
-  String current,
-  String delta,
-  int omittedUnits,
-) {
-  final combined = current.isEmpty ? delta : '$current$delta';
-  final drop = combined.length - kTimelineItemBodyBudget;
-  if (drop <= 0) return (text: combined, omittedUnits: omittedUnits);
-  var start = drop;
-  while (start < combined.length &&
-      _isLowSurrogate(combined.codeUnitAt(start))) {
-    start += 1;
-  }
-  return (text: combined.substring(start), omittedUnits: omittedUnits + start);
-}
-
-/// 推理条目的流式追加：summary/content 共享一个正文预算。
-///
-/// 生产者 chunkIndex 是逻辑下标；本地列表只保留最近的尾部，靠 `*ChunkBase` 还原
-/// 下标，因此被丢弃分块之后的 delta 仍然写进正确分块，也不会把缺块误判成新块。
-/// 属于已丢弃分块的 delta 只累计省略量（内容仍在 canonical 历史里，可回源）。
+/// 实时推理正文按 chunkIndex 完整追加；历史页的预算另行处理。
 ({
   List<String> summary,
   int summaryChunkBase,
@@ -1380,7 +1350,7 @@ _boundedReasoningAppend({
   } else {
     nextContent = appended;
   }
-  return _boundedReasoningChannels(
+  return (
     summary: nextSummary,
     summaryChunkBase: summaryChunkBase,
     content: nextContent,

@@ -44,12 +44,10 @@ import 'package:flutter_driver/flutter_driver.dart';
 import 'raw_tap.dart';
 
 const _largeSentinel = 'NATIVE_ACCEPT_LARGE_END';
-const _historyWindowBudget = 500;
-const _cacheBudget = 900;
-const _liveTailBudget = 400;
+const _sqlHistoryWindowLimit = 500;
 
 /// Long-session mode needs more Turns than one window can hold: at four items
-/// per Turn, 130 Turns already exceed the 500-item bounded window.
+/// per Turn, 130 Turns already exceed the 500-item SQL history window.
 const _minLongTurns = 130;
 
 /// One bounded drag step of the deep-history walk; each round watches a single
@@ -456,7 +454,7 @@ class _Context {
       final liveWindow = await record('live-window');
       final liveHistory = liveWindow['timelineWindow'] as Map;
       final liveIds = _itemIds(liveWindow);
-      _checkBudgets(liveWindow, liveHistory);
+      _checkSqlHistoryWindow(liveHistory);
       // Live window eviction must have advanced the older boundary, otherwise
       // the trimmed window can never page back into durable SQL history in the
       // session that created it. This is a hard failure, not a recorded
@@ -680,8 +678,8 @@ class _Context {
 
   Future<Map<String, Object?>> _navigateBoundedWindow() async {
     final rounds = <Map<String, Object?>>[];
-    // Older direction first, then back to the tail; every intermediate state
-    // must keep the history window and the live tail independently bounded.
+    // Older direction first, then back to the newest page. SQL history stays
+    // bounded; the live overlay is observed but intentionally has no count cap.
     for (final direction in ['older', 'newer']) {
       final delta = direction == 'older' ? 6500.0 : -6500.0;
       for (var round = 0; round < 12; round++) {
@@ -698,13 +696,13 @@ class _Context {
           timeout: const Duration(seconds: 60),
         );
         final window = state['timelineWindow'] as Map;
-        _checkBudgets(state, window);
+        _checkSqlHistoryWindow(window);
         rounds.add({
           'direction': direction,
           'round': round,
-          'itemCount': _itemIds(state).length,
-          'cacheCount': window['cacheCount'],
-          'tailCount': window['tailCount'],
+          'visibleItemCount': _itemIds(state).length,
+          'historyCount': _windowHistoryCount(window),
+          'overlayCount': _windowOverlayCount(window),
           'hasOlder': window['hasOlder'],
           'hasNewer': window['hasNewer'],
           'anchorFollowingBottom':
@@ -719,12 +717,10 @@ class _Context {
     final finalState = await record('window-final');
     final window = finalState['timelineWindow'] as Map;
     return {
-      'historyWindowBudget': _historyWindowBudget,
-      'cacheBudget': _cacheBudget,
-      'liveTailBudget': _liveTailBudget,
-      'finalItemCount': _itemIds(finalState).length,
-      'finalCacheCount': window['cacheCount'],
-      'finalTailCount': window['tailCount'],
+      'sqlHistoryWindowLimit': _sqlHistoryWindowLimit,
+      'finalVisibleItemCount': _itemIds(finalState).length,
+      'finalHistoryCount': _windowHistoryCount(window),
+      'finalOverlayCount': _windowOverlayCount(window),
       'finalHasOlder': window['hasOlder'],
       'finalHasNewer': window['hasNewer'],
       'rounds': rounds,
@@ -737,7 +733,7 @@ class _Context {
   /// scroll/pagination path to the oldest page and back to the newest page,
   /// asserting that previously nonresident canonical items become reachable and
   /// that the exact first/latest item identities appear at the window
-  /// boundaries. Every observed window stays inside the strict item budgets.
+  /// boundaries. Every observed SQL history window stays inside its hard limit.
   Future<Map<String, Object?>> _navigateLongSession({
     required String threadId,
     required String firstItemId,
@@ -746,7 +742,7 @@ class _Context {
     final initial = await record('long-initial');
     final initialIds = _itemIds(initial);
     final initialWindow = initial['timelineWindow'] as Map;
-    _checkBudgets(initial, initialWindow);
+    _checkSqlHistoryWindow(initialWindow);
     _require(
       initialWindow['hasOlder'] == true,
       'the long session must start with older items outside the bounded window',
@@ -774,7 +770,7 @@ class _Context {
       _requireThread(state, threadId);
       final window = state['timelineWindow'] as Map;
       final ids = _itemIds(state);
-      _checkBudgets(state, window);
+      _checkSqlHistoryWindow(window);
       if (observe(ids) > 0) olderPagesLoaded += 1;
       olderRounds.add(_walkRecord(round, ids, window));
       if (window['hasOlder'] != true) break;
@@ -787,7 +783,7 @@ class _Context {
       if (_itemIds(state).firstOrNull == firstItemId) break;
       await _dragTimeline('older');
       state = await _awaitWindow('oldest edge settled');
-      _checkBudgets(state, state['timelineWindow'] as Map);
+      _checkSqlHistoryWindow(state['timelineWindow'] as Map);
       if (observe(_itemIds(state)) > 0) olderPagesLoaded += 1;
     }
     final oldestWindow = state['timelineWindow'] as Map;
@@ -803,9 +799,10 @@ class _Context {
       '(oldest window starts at ${oldestIds.firstOrNull})',
     );
     _require(
-      discovered.length > _historyWindowBudget,
+      discovered.length > _sqlHistoryWindowLimit,
       'deep navigation discovered only ${discovered.length} distinct items, '
-      'which does not exceed one $_historyWindowBudget-item window',
+      'which does not exceed one $_sqlHistoryWindowLimit-item SQL history '
+      'window',
     );
     _require(
       olderPagesLoaded >= 1,
@@ -813,8 +810,8 @@ class _Context {
       'window, so no durable SQL history was actually paged in',
     );
     _require(
-      oldestIds.length <= _historyWindowBudget,
-      'oldest history window exceeds $_historyWindowBudget items',
+      _windowHistoryCount(oldestWindow) <= _sqlHistoryWindowLimit,
+      'oldest SQL history window exceeds $_sqlHistoryWindowLimit items',
     );
 
     for (var round = 0; round < _longRoundCap; round++) {
@@ -823,7 +820,7 @@ class _Context {
       _requireThread(state, threadId);
       final window = state['timelineWindow'] as Map;
       final ids = _itemIds(state);
-      _checkBudgets(state, window);
+      _checkSqlHistoryWindow(window);
       discovered.addAll(ids);
       newerRounds.add(_walkRecord(round, ids, window));
       if (window['hasNewer'] != true) break;
@@ -832,7 +829,7 @@ class _Context {
       if (_itemIds(state).lastOrNull == latestItemId) break;
       await _dragTimeline('newer');
       state = await _awaitWindow('newest edge settled');
-      _checkBudgets(state, state['timelineWindow'] as Map);
+      _checkSqlHistoryWindow(state['timelineWindow'] as Map);
       discovered.addAll(_itemIds(state));
     }
     final newestWindow = state['timelineWindow'] as Map;
@@ -849,7 +846,7 @@ class _Context {
     );
 
     final finalState = await record('long-final');
-    _checkBudgets(finalState, finalState['timelineWindow'] as Map);
+    _checkSqlHistoryWindow(finalState['timelineWindow'] as Map);
     final directory = finalState['sidebarDirectory'] as Map;
     final navigation = finalState['navigation'] as Map;
     final isolation = {
@@ -870,10 +867,10 @@ class _Context {
       'deep navigation activated an unrelated Thread: $isolation',
     );
     return {
-      'historyWindowBudget': _historyWindowBudget,
-      'cacheBudget': _cacheBudget,
-      'liveTailBudget': _liveTailBudget,
-      'initialItemCount': initialIds.length,
+      'sqlHistoryWindowLimit': _sqlHistoryWindowLimit,
+      'initialVisibleItemCount': initialIds.length,
+      'initialHistoryCount': _windowHistoryCount(initialWindow),
+      'initialOverlayCount': _windowOverlayCount(initialWindow),
       'initialHasOlder': initialWindow['hasOlder'],
       'initialHasNewer': initialWindow['hasNewer'],
       'initialFirstItemId': initialIds.firstOrNull,
@@ -882,11 +879,15 @@ class _Context {
       'firstIdentityInitiallyResident': initialIds.contains(firstItemId),
       'firstIdentityReached': firstIdentityReached,
       'olderPagesLoaded': olderPagesLoaded,
-      'oldestItemCount': oldestIds.length,
+      'oldestVisibleItemCount': oldestIds.length,
+      'oldestHistoryCount': _windowHistoryCount(oldestWindow),
+      'oldestOverlayCount': _windowOverlayCount(oldestWindow),
       'oldestHasOlder': oldestWindow['hasOlder'],
       'latestItemId': latestItemId,
       'latestIdentityReached': latestIdentityReached,
-      'newestItemCount': newestIds.length,
+      'newestVisibleItemCount': newestIds.length,
+      'newestHistoryCount': _windowHistoryCount(newestWindow),
+      'newestOverlayCount': _windowOverlayCount(newestWindow),
       'newestHasNewer': newestWindow['hasNewer'],
       'cumulativeDistinctItems': discovered.length,
       // The driver snapshot has no raw page cursor tokens, so the observed
@@ -904,19 +905,11 @@ class _Context {
     };
   }
 
-  /// 有界窗口/缓存/实时尾部的硬预算，深分页每一步都必须满足。
-  void _checkBudgets(Map<String, dynamic> state, Map window) {
+  /// SQL 历史窗口的硬上限；深分页每一步都必须满足。
+  void _checkSqlHistoryWindow(Map window) {
     _require(
-      _itemIds(state).length <= _historyWindowBudget,
-      'history window exceeds $_historyWindowBudget items',
-    );
-    _require(
-      (window['cacheCount'] as num) <= _cacheBudget,
-      'business-layer cache exceeds $_cacheBudget items',
-    );
-    _require(
-      (window['tailCount'] as num) <= _liveTailBudget,
-      'live tail exceeds $_liveTailBudget items',
+      _windowHistoryCount(window) <= _sqlHistoryWindowLimit,
+      'SQL history window exceeds $_sqlHistoryWindowLimit items',
     );
   }
 
@@ -1008,7 +1001,7 @@ class _Context {
         firstItemId != null && latestItemId != null,
         'long-session reopen requires firstItemId/latestItemId from the create phase',
       );
-      _checkBudgets(opened, openedWindow);
+      _checkSqlHistoryWindow(openedWindow);
       // The restored window must be a bounded page: the long session holds more
       // items than one window, so older pages must still be reachable from SQL.
       _require(
@@ -1097,13 +1090,14 @@ class _Context {
       'latestItemId': latestItemId,
       'coldReopen': options.longSession
           ? {
-              'initialWindowItemCount':
+              'initialVisibleItemCount':
                   (openedWindow['itemIds'] as List).length,
+              'initialHistoryCount': _windowHistoryCount(openedWindow),
+              'initialOverlayCount': _windowOverlayCount(openedWindow),
               'initialWindowHasOlder': openedWindow['hasOlder'],
               'initialWindowHasNewer': openedWindow['hasNewer'],
-              'boundedInitialWindow':
-                  (openedWindow['itemIds'] as List).length <=
-                  _historyWindowBudget,
+              'initialHistoryWithinSqlLimit':
+                  _windowHistoryCount(openedWindow) <= _sqlHistoryWindowLimit,
               'firstIdentityReached': navigation['firstIdentityReached'],
               'olderPagesLoaded': navigation['olderPagesLoaded'],
               'latestIdentityReached': navigation['latestIdentityReached'],
@@ -1188,6 +1182,12 @@ List<String> _loadedItemIds(Map<String, dynamic> state) =>
         .whereType<String>()
         .toList();
 
+int _windowHistoryCount(Map window) =>
+    ((window['historyCount'] as num?) ?? 0).toInt();
+
+int _windowOverlayCount(Map window) =>
+    ((window['overlayCount'] as num?) ?? 0).toInt();
+
 /// Per-Turn progression evidence: identities plus bounded-window facts only, so
 /// 130+ Turns stay a compact artifact instead of per-Turn full snapshots.
 Map<String, Object?> _turnRecord(int index, Map<String, dynamic> state) {
@@ -1197,26 +1197,26 @@ Map<String, Object?> _turnRecord(int index, Map<String, dynamic> state) {
     'turn': index,
     'turnId': _lastTurnId(state),
     'turnStatus': _lastTurnStatus(state),
-    'itemCount': ids.length,
+    'visibleItemCount': ids.length,
     'firstItemId': ids.firstOrNull,
     'lastItemId': ids.lastOrNull,
     'hasOlder': window['hasOlder'],
     'hasNewer': window['hasNewer'],
-    'cacheCount': window['cacheCount'],
-    'tailCount': window['tailCount'],
+    'historyCount': _windowHistoryCount(window),
+    'overlayCount': _windowOverlayCount(window),
   };
 }
 
 /// One observed window of the deep-history walk.
 Map<String, Object?> _walkRecord(int round, List<String> ids, Map window) => {
   'round': round,
-  'itemCount': ids.length,
+  'visibleItemCount': ids.length,
   'firstItemId': ids.firstOrNull,
   'lastItemId': ids.lastOrNull,
   'hasOlder': window['hasOlder'],
   'hasNewer': window['hasNewer'],
-  'cacheCount': window['cacheCount'],
-  'tailCount': window['tailCount'],
+  'historyCount': _windowHistoryCount(window),
+  'overlayCount': _windowOverlayCount(window),
 };
 
 Map<String, Object?> _brief(Map<String, dynamic> state) => {
@@ -1224,17 +1224,17 @@ Map<String, Object?> _brief(Map<String, dynamic> state) => {
   'workspaceThreadId': _threadId(state),
   'lastTurnId': _lastTurnId(state),
   'lastTurnStatus': _lastTurnStatus(state),
-  'itemCount': _itemIds(state).length,
+  'visibleItemCount': _itemIds(state).length,
   'persistence': state['persistence'],
   'window': state['timelineWindow'],
 };
 
-/// True when no session state, DB-backed history or live tail is loaded yet.
+/// True when no session state, SQL history or live overlay is loaded yet.
 bool _sessionNotOpened(Map<String, dynamic> state) {
   final window = state['timelineWindow'] as Map;
   return _itemIds(state).isEmpty &&
-      window['cacheCount'] == 0 &&
-      window['tailCount'] == 0 &&
+      _windowHistoryCount(window) == 0 &&
+      _windowOverlayCount(window) == 0 &&
       _timelineText(state).isEmpty &&
       _lastTurnId(state) == null;
 }

@@ -259,7 +259,9 @@ class _TimelineViewState extends State<TimelineView> {
       if (hasNewEvent || widget.hasNewer) _pendingNewEvents += 1;
       if (anchor != null && _anchorRowId(anchor.itemId) != null) {
         _programmaticScroll = true;
-        _controller.position.correctPixels(-anchor.offset);
+        if (_controller.hasClients) {
+          _controller.position.correctPixels(-anchor.offset);
+        }
         _centerId = _anchorRowId(anchor.itemId);
         _pendingRestore = _TimelineRestore.anchor(anchor);
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -564,6 +566,7 @@ class _TimelineViewState extends State<TimelineView> {
         _detachedByUser = false;
         _pendingNewEvents = 0;
       });
+      _saveThreadState(widget.threadId);
     });
   }
 

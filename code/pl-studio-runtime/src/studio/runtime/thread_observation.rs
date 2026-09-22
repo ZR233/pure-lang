@@ -121,6 +121,10 @@ impl ThreadObservations {
                             source: source.into_boxed_dyn_error(),
                         }
                     };
+                    // 该身份查询是冷读路径：没有活跃 writer 时 `history` 只是一个不做 IO 的句柄，
+                    // 不建库也不升级它；有活跃 writer 时它正是这个 Thread 的同一权威句柄，读会等
+                    // 本句柄 writer 完成建表与 identity meta，因此不会读到半初始化库。这里刻意不
+                    // 走 `history_writer`，避免未启动的冷读凭空登记出第二写者身份。
                     let history = store.history(&thread_id).await.map_err(identity_error)?;
                     if let Some(identity) =
                         history.message_identity(&message_id).await.map_err(identity_error)?
@@ -453,7 +457,8 @@ fn turn_item_id(item_id: &str) -> String {
 /// Re-records the durable billing facts of the effects a window gap dropped.
 ///
 /// The call index is the durable source and `(thread_id, call_id)` its identity, so re-admitting a
-/// fact that already exists is idempotent. Only a bounded revision window is read per page, and the
+/// fact that already has a billing body must not be reconstructed from lossy summary columns.
+/// Only a bounded revision window is read per page, and the
 /// revision cursor advances with the facts themselves, so a lagging observer never has to scan the
 /// whole call history to come back in sync.
 async fn recover_skipped_billing(
@@ -463,12 +468,14 @@ async fn recover_skipped_billing(
     skipped: std::ops::RangeInclusive<u64>,
 ) -> Result<()> {
     const BILLING_PAGE: usize = 256;
+    // Earlier effects may have admitted billing asynchronously. Wait for the fixed admission
+    // watermark before deciding which durable calls still need recovery.
+    let calls = projector.store.calls();
+    calls.flush_through(calls.admitted_ticket()).await?;
     let root = product.root_thread_id.clone();
     let mut after = skipped.start().saturating_sub(1);
     loop {
-        let facts = projector
-            .store
-            .calls()
+        let facts = calls
             .model_call_facts_between(id, after, *skipped.end(), BILLING_PAGE)
             .await?;
         if facts.is_empty() {
@@ -885,6 +892,15 @@ mod tests {
         observers.synchronize(Some(&product.id)).await.unwrap();
         let billed = performance.snapshot().await;
         assert_eq!(billed.revision, 1);
+        recover_skipped_billing(
+            &observers.0.projector,
+            &product.id,
+            &product,
+            1..=thread.snapshot().commit_sequence,
+        )
+        .await
+        .unwrap();
+        assert_eq!(performance.snapshot().await, billed);
         observers.synchronize(Some(&product.id)).await.unwrap();
         assert_eq!(performance.snapshot().await, billed);
         assert_eq!(calls.load(Ordering::SeqCst), 1);

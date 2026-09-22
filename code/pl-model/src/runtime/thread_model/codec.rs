@@ -429,11 +429,17 @@ pub(super) fn response(
     let failure_binding = context.binding.clone();
     let failure_accounting = response.accounting.clone();
     let failure_model_observation = response.model_observation.clone();
+    let failure_progress = context
+        .request
+        .progress
+        .as_ref()
+        .map(|progress| progress.latest());
     response_inner(context, response).map_err(|error| {
         super::receipt::postprocess_failure_error(
             failure_binding,
             failure_accounting,
             failure_model_observation,
+            failure_progress,
             error,
         )
     })

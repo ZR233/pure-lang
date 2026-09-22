@@ -647,8 +647,9 @@ impl CallsStore {
 
     /// 有界读取一个 Thread 在给定 effect 序号区间内已 durable 的模型调用事实。
     ///
-    /// 产品观察在 effect 窗口缺口后用它恢复必要终态/计费：只读、按 revision 游标分页，既不
-    /// 全表扫描，也不因为窗口丢失就静默跳过。根 Thread 与子 Thread 走同一条只读路径。
+    /// 产品观察在 effect 窗口缺口后用它恢复尚未计费的调用事实：已有 `billing_ref`
+    /// 保存了完整计费正文，摘要列无法无损重建它，重复提交会触发身份冲突。按 revision
+    /// 游标分页，根 Thread 与子 Thread 走同一条只读路径。
     pub(crate) async fn model_call_facts_between(
         &self,
         thread_id: &str,
@@ -664,7 +665,7 @@ impl CallsStore {
             .db
             .query_all_raw(statement(
                 "SELECT * FROM model_calls
-                 WHERE thread_id=? AND revision > ? AND revision <= ?
+                 WHERE thread_id=? AND revision > ? AND revision <= ? AND billing_ref IS NULL
                  ORDER BY revision ASC, call_id ASC LIMIT ?",
                 vec![
                     thread_id.to_owned().into(),
@@ -3348,6 +3349,51 @@ mod tests {
         legacy_call_store_fingerprint, legacy_call_store_identity, sidecar_path, statement,
         write_legacy_call_store_fixture,
     };
+
+    #[tokio::test]
+    async fn skipped_billing_recovery_reads_only_calls_without_a_durable_billing_body() {
+        let root = tempfile::tempdir().unwrap();
+        let calls = super::CallsStore::open(&root.path().join("calls.sqlite"))
+            .await
+            .unwrap();
+        for (revision, call_id, billing_ref) in [
+            (5_i64, "billed", Some("existing-body")),
+            (6_i64, "unbilled", None),
+        ] {
+            calls
+                .writer
+                .db
+                .execute_raw(statement(
+                    "INSERT INTO model_calls(thread_id,call_id,turn_id,attempt_id,revision,admitted_at,started_at,status,terminal,billing_ref) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    vec![
+                        "thread".into(),
+                        call_id.into(),
+                        "turn".into(),
+                        call_id.into(),
+                        revision.into(),
+                        1_i64.into(),
+                        1_i64.into(),
+                        "committed".into(),
+                        1_i64.into(),
+                        billing_ref.map(str::to_owned).into(),
+                    ],
+                ))
+                .await
+                .unwrap();
+        }
+        let pending = calls
+            .model_call_facts_between("thread", 0, 6, 10)
+            .await
+            .unwrap();
+        assert_eq!(
+            pending
+                .iter()
+                .map(|fact| fact.call_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["unbilled"]
+        );
+        calls.shutdown().await.unwrap();
+    }
 
     fn write_file(path: &Path, bytes: &[u8]) {
         std::fs::create_dir_all(path.parent().expect("path has a parent")).unwrap();

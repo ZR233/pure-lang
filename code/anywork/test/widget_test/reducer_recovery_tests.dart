@@ -11,7 +11,7 @@ void registerReducerRecoveryTests() {
         ),
       },
     );
-    final seeded = _seedTimelineWindow(current, 'session-1', [
+    final seeded = _seedReducerWindow(current, 'session-1', [
       _threadItemFixture(
         id: 'canonical',
         threadId: 'session-1',
@@ -33,7 +33,7 @@ void registerReducerRecoveryTests() {
 
   test('snapshot without window content never injects timeline items', () {
     final current = _emptyState();
-    final seeded = _seedTimelineWindow(current, 'session-1', [
+    final seeded = _seedReducerWindow(current, 'session-1', [
       _threadItemFixture(
         id: 'window-item',
         threadId: 'session-1',
@@ -70,7 +70,7 @@ void registerReducerRecoveryTests() {
       ordinal: 0,
       status: 'streaming',
     );
-    final seeded = _seedTimelineWindow(current, 'session-1', [item]);
+    final seeded = _seedReducerWindow(current, 'session-1', [item]);
     final withItem = applyThreadSnapshot(
       seeded,
       seeded.selectedWorkspace!.copyWith(revision: 2),
@@ -103,7 +103,7 @@ void registerReducerRecoveryTests() {
       status: 'streaming',
       text: 'new',
     );
-    final seeded = _seedTimelineWindow(_emptyState(), 'session-1', [item]);
+    final seeded = _seedReducerWindow(_emptyState(), 'session-1', [item]);
     final current = applyThreadSnapshot(
       seeded,
       seeded.selectedWorkspace!.copyWith(revision: 5),
@@ -138,7 +138,7 @@ void registerReducerRecoveryTests() {
       ordinal: 3,
       revision: 0,
     );
-    final seeded = _seedTimelineWindow(_emptyState(), 'session-1', [item]);
+    final seeded = _seedReducerWindow(_emptyState(), 'session-1', [item]);
     final current = applyThreadSnapshot(
       seeded,
       seeded.selectedWorkspace!.copyWith(revision: 1),
@@ -177,7 +177,7 @@ void registerReducerRecoveryTests() {
       ordinal: 0,
       status: 'completed',
     );
-    final seeded = _seedTimelineWindow(_emptyState(), 'session-1', [item]);
+    final seeded = _seedReducerWindow(_emptyState(), 'session-1', [item]);
     final current = applyThreadSnapshot(
       seeded,
       seeded.selectedWorkspace!.copyWith(revision: 1),
@@ -198,57 +198,25 @@ void registerReducerRecoveryTests() {
 
     expect(result.resyncThreadId, 'session-1');
   });
+}
 
-  test('detached live tail is bounded at 400, not the window cap', () {
-    // 阅读窗口 500、实时尾部 400 是两条独立契约：detached 读者不应因为共享一个上限而
-    // 多保留 100 条永远不会进入窗口的尾部载荷（design/19-studio-ui.md§19.10）。
-    final anchor = _threadItemFixture(
-      id: 'item-0',
-      threadId: 'session-1',
-      turnId: 'turn-0',
-      ordinal: 0,
-      text: 'anchor',
-    );
-    var state = _seedTimelineWindow(_emptyState(), 'session-1', [anchor]);
-    final seededUi = state.workspaceUiByThread['session-1']!;
-    state = state.copyWith(
-      workspaceUiByThread: {
-        ...state.workspaceUiByThread,
-        'session-1': seededUi.copyWith(
-          history: seededUi.history.copyWith(
-            detached: true,
-            anchor: const TimelineAnchor('item-0', 0),
-          ),
-        ),
-      },
-    );
-
-    for (var n = 1; n <= 420; n++) {
-      final workspace = state.selectedWorkspace!;
-      final result = applyThreadUpdate(
-        state,
-        threadId: 'session-1',
-        revision: workspace.revision + 1,
-        baseRevision: workspace.revision,
-        update: ThreadItemUpsert(
-          _threadItemFixture(
-            id: 'live-$n',
-            threadId: 'session-1',
-            turnId: 'turn-live',
-            ordinal: n,
-            text: 'live $n',
-          ),
-        ),
-      );
-      expect(result.resyncThreadId, isNull);
-      state = result.state;
-    }
-
-    final tail = state.selectedWorkspace!;
-    expect(tail.latestItemIds.length, 400);
-    // 最新的尾部条目保留、最旧的被淘汰，窗口本身不受影响。
-    expect(tail.latestItemIds.last, 'live-420');
-    expect(tail.latestItemIds.first, 'live-21');
-    expect(tail.items.map((item) => item.id), ['item-0']);
-  });
+StudioState _seedReducerWindow(
+  StudioState state,
+  String threadId,
+  List<ThreadItemView> items,
+) {
+  return applyTimelinePage(
+    state,
+    threadId,
+    TimelinePage(
+      threadId: threadId,
+      watermark: 0,
+      items: items,
+      firstItemId: items.firstOrNull?.id,
+      lastItemId: items.lastOrNull?.id,
+    ),
+    TimelineDirection.newer,
+    replaceWindow: true,
+    followBottom: true,
+  );
 }

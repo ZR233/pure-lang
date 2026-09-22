@@ -1484,13 +1484,11 @@ class DemoStudioApi
     return _snapshotOf(workspace);
   }
 
-  /// Thread 首帧/读取只暴露当前状态：条目、Turn 摘要与实时尾部属于分页历史，
-  /// 由 [listTimelineItems] 与实时通知提供。
+  /// Thread 首帧/读取只暴露当前状态：已完成条目由分页历史提供，
+  /// 未终态条目由实时通知提供。
   ThreadWorkspace _snapshotOf(ThreadWorkspace workspace) {
     return workspace.copyWith(
       items: const [],
-      cachedItems: const {},
-      latestItemIds: const [],
       timelineTurns: const {},
       latestTurn: null,
     );

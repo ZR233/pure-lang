@@ -98,7 +98,8 @@ pub struct ModelRequest {
 }
 
 /// A complete live preview of the current request, separate from committed model output.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelProgress {
     pub content: Vec<ContextContent>,
     pub reasoning: Option<OpaquePayload>,
@@ -115,6 +116,11 @@ impl ModelProgressSender {
     /// Publishes a complete preview. It cannot advance a Thread context or grant execution authority.
     pub fn publish(&self, progress: ModelProgress) {
         self.0.send_replace(progress);
+    }
+
+    /// Captures the last published preview for a terminal failure receipt.
+    pub fn latest(&self) -> ModelProgress {
+        self.0.borrow().clone()
     }
 }
 

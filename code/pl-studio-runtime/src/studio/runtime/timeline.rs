@@ -71,21 +71,48 @@ impl StudioRuntime {
 
     /// 订阅/重连的固定持久化屏障。
     ///
-    /// 调用时机固定在事件接收端注册之后、首个历史窗口读取之前：先把活跃 owner 的当前
-    /// 草稿推进 writer 并等待固定 ticket 落盘，再确认数据库水位覆盖 owner 已提交的
-    /// revision。只有屏障通过后，`list_timeline_items(Latest)` 才是权威且无缺口的窗口。
+    /// 注册事件接收端之后冻结 owner 当前提交 revision，再等 writer 的 history 与
+    /// checkpoint 覆盖该固定目标。模型执行中的 owner 不处理 Flush 命令，订阅不能
+    /// 通过该命令等待，否则首帧可能被进行中的 provider 流无限期阻塞。
     pub(in crate::studio) async fn await_timeline_barrier(&self, thread_id: &str) -> Result<()> {
         let history = self.store.history(thread_id).await?;
         let thread = self.read_protocol_thread(thread_id).await?;
         let desired = match self.threads.thread(thread_id) {
             Some(handle) => {
-                // 固定目标必须在 flush 之前取样：`flush` 处理命令时才冻结自己的 ticket，因此它
-                // 保证的 durable 水位一定覆盖这里取到的 revision。若先 flush 再取 snapshot，
-                // flush 期间被受理的新 effect 会把 `desired` 抬到屏障覆盖范围之外，让一次成功的
-                // 持久化反而被判定成“待恢复的持久化失败”。屏障之后受理的 effect 本来就不在这
-                // 个窗口里：订阅已在屏障之前注册，它们按 live 事件到达。
-                let desired = handle.snapshot().commit_sequence;
-                handle.flush().await?;
+                let snapshot = handle.snapshot();
+                let desired = snapshot.commit_sequence;
+                anyhow::ensure!(
+                    snapshot.persistence.admitted_sequence >= desired,
+                    "Thread history is behind its admitted effects; pending persistence must recover first"
+                );
+                if desired > snapshot.persistence.durable_sequence {
+                    let mut progress = self.store.thread_persistence().subscribe();
+                    loop {
+                        let status = progress
+                            .borrow()
+                            .threads
+                            .iter()
+                            .find(|status| status.thread_id == thread_id)
+                            .cloned();
+                        let Some(status) = status else {
+                            anyhow::bail!(
+                                "Thread persistence writer disappeared before its checkpoint became durable"
+                            );
+                        };
+                        if let Some(error) = status.last_error {
+                            anyhow::bail!(
+                                "Thread persistence failed before its checkpoint became durable: {error}"
+                            );
+                        }
+                        if status.state_durable_revision.unwrap_or(0) >= desired
+                            && status.history_durable_sequence.unwrap_or(0) >= desired
+                            && status.calls_durable_sequence.unwrap_or(0) >= desired
+                        {
+                            break;
+                        }
+                        progress.changed().await?;
+                    }
+                }
                 desired
             }
             None => crate::studio::thread_factory::recovery::load_checkpoint(&self.store, &thread)

@@ -50,9 +50,17 @@ impl StudioStore {
     ///
     /// 冷读（分页、按身份读条目、Turn 页）只读打开**已存在**的库并校验 schema、Thread 与
     /// 数据库身份，绝不创建目录/数据库或执行 schema 变更；只有显式写入（历史 writer 的
-    /// commit/reserve 或迁移 export）才会创建并升级它。句柄本身不做 IO，每次调用返回新句柄，
-    /// 用完即随句柄释放，因此不存在无界连接缓存，也不会在启动时 eager 建库。
+    /// commit/reserve 或迁移 export）才会创建并升级它。打开句柄本身不做 IO，用完即随句柄释放，
+    /// 因此不存在无界连接缓存，也不会在启动时 eager 建库。
+    ///
+    /// 该 Thread 已有活跃 writer 持有者时返回**同一个**权威句柄：reader 与 writer 复用同一份
+    /// 数据库身份与初始化状态，冷读会等待本句柄 writer 完成建表与 identity meta，而不是在新库
+    /// `connect(mode=rwc)` 刚创建文件后就把它当成损坏库。没有活跃持有者时仍返回新的只读句柄，
+    /// 不存在的库继续读成空且不被创建。
     pub(crate) async fn history(&self, thread_id: &str) -> anyhow::Result<HistoryStore> {
+        if let Some(shared) = self.thread_persistence.shared_history(thread_id) {
+            return Ok(shared);
+        }
         HistoryStore::open(
             &self.thread_storage_dir(thread_id).join("history.sqlite"),
             thread_id,
@@ -129,6 +137,10 @@ mod tests {
         // sink 与订阅从两条不同调用链取用，但必须是同一个有序写者。
         let second = store.history_writer("thread-1").await.unwrap();
         assert!(first.is_same_handle(&second));
+
+        // 同一 Thread 的冷读句柄同样收敛到这个权威句柄：reader 与 writer 复用同一初始化状态。
+        let reader = store.history("thread-1").await.unwrap();
+        assert!(reader.is_same_handle(&first));
 
         // 另一个 Thread 是另一个写者身份，绝不共享连接。
         let other = store.history_writer("thread-2").await.unwrap();

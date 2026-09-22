@@ -161,6 +161,7 @@ impl CoreModelSession for ThreadModelSession {
         let runtime = self.runtime.clone();
         let binding = receipt::ModelCallBinding::capture(&runtime, &self.purpose);
         let request_metadata = receipt::request_metadata(&binding, &encoded)?;
+        let terminal_progress = request.progress.clone();
         let observed = self.observed.clone();
         let marker = OpaquePayload::new("pl.model.continuation", 1, request.attempt_id.clone())
             .map_err(|error| failure(ModelFailureKind::InvalidResponse, error))?;
@@ -182,7 +183,13 @@ impl CoreModelSession for ThreadModelSession {
             let response = runtime
                 .complete(encoded, invocation)
                 .await
-                .map_err(|error| receipt::failure_error(binding.clone(), error))?;
+                .map_err(|error| {
+                    receipt::failure_error(
+                        binding.clone(),
+                        error,
+                        terminal_progress.as_ref().map(|sender| sender.latest()),
+                    )
+                })?;
             let output = codec::response(
                 codec::ResponseContext {
                     request: &request,

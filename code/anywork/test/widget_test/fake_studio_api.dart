@@ -32,19 +32,12 @@ class _FakeStudioApi implements StudioApi {
   bool publishSnapshotOnSubscribe = true;
   final List<String> loadedSessionIds = [];
   final List<String> threadSubscriptions = [];
-  final List<({String threadId, String? cursor})> historyRequests = [];
-
-  /// 分页 API 覆盖表：`null` 键表示订阅后的权威最新窗口，其余键按查询锚点覆盖。
-  final Map<String, Map<String?, ThreadHistoryPage>> historyPagesByThread = {};
 
   /// 模拟 `history.sqlite` 的窗口外历史；缺省从当前状态首次读取时装载。
   final Map<String, List<ThreadItemView>> timelineDb = {};
   final List<String?> directoryPageRequests = [];
   final Map<String?, ThreadDirectoryPage> directoryPages = {};
 
-  /// 排队的历史响应闸门：每次 listThreadTurns 消费队首 Completer，
-  /// 用于构造"响应在窗口重建之后才返回"的竞态。
-  final List<Completer<void>> historyGates = [];
   final StreamController<StudioShutdownProgress> _shutdownProgress =
       StreamController<StudioShutdownProgress>.broadcast();
   bool shutdownRuntimeCalled = false;
@@ -910,34 +903,7 @@ class _FakeStudioApi implements StudioApi {
     String? itemId,
     int limit = 100,
   }) async {
-    historyRequests.add((threadId: threadId, cursor: itemId));
-    if (historyGates.isNotEmpty) await historyGates.removeAt(0).future;
     final all = _timeline(threadId);
-    final override =
-        historyPagesByThread[threadId]?[kind == TimelineQueryKind.latest
-            ? null
-            : itemId];
-    if (override != null) {
-      return TimelinePage(
-        threadId: threadId,
-        watermark: _currentState.workspacesByThread[threadId]?.revision ?? 0,
-        items: override.items,
-        olderCursor: switch (kind) {
-          TimelineQueryKind.latest ||
-          TimelineQueryKind.before ||
-          TimelineQueryKind.around => override.nextCursor,
-          TimelineQueryKind.after => null,
-        },
-        newerCursor: switch (kind) {
-          TimelineQueryKind.after ||
-          TimelineQueryKind.around => override.nextCursor,
-          TimelineQueryKind.latest || TimelineQueryKind.before => null,
-        },
-        firstItemId: override.items.firstOrNull?.id,
-        lastItemId: override.items.lastOrNull?.id,
-        turns: _fakeTimelineTurns(override.items),
-      );
-    }
     final window = _fakeWindow(all, kind, itemId, limit);
     return TimelinePage(
       threadId: threadId,
@@ -981,7 +947,7 @@ class _FakeStudioApi implements StudioApi {
   List<ThreadItemView> _timeline(String threadId) {
     return timelineDb.putIfAbsent(
       threadId,
-      () => [...?_currentState.workspacesByThread[threadId]?.items],
+      () => [...?_currentState.workspacesByThread[threadId]?.historyItems],
     );
   }
 
@@ -1019,12 +985,7 @@ class _FakeStudioApi implements StudioApi {
     String? cursor,
     int limit = 50,
   }) async {
-    historyRequests.add((threadId: threadId, cursor: cursor));
-    if (historyGates.isNotEmpty) {
-      await historyGates.removeAt(0).future;
-    }
-    return historyPagesByThread[threadId]?[cursor] ??
-        const ThreadHistoryPage(items: [], nextCursor: null);
+    return const ThreadHistoryPage(items: [], nextCursor: null);
   }
 
   @override

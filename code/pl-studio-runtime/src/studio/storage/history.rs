@@ -72,6 +72,17 @@ struct HistoryStoreState {
     writer: tokio::sync::OnceCell<HistoryConnection>,
     /// A read-only connection to an *existing* database, opened on the first cold read.
     reader: tokio::sync::OnceCell<HistoryConnection>,
+    /// Serializes the first writer initialization against every cold read-only open.
+    ///
+    /// The writer's `connect(mode=rwc)` creates the file before `initialize` commits the schema and
+    /// the identity row, so a read that observed the file inside that window would validate a
+    /// half-initialized database and fail closed on a store that is merely still being created. The
+    /// writer therefore holds the write side for its whole connect+initialize, while every cold open
+    /// takes the read side first: a reader runs either before the file exists (an empty history) or
+    /// after the database is fully initialized. Once the writer connection is published both paths
+    /// return through the `writer.get()` fast path above it, so the lock is only ever contended
+    /// during that first initialization.
+    init: tokio::sync::RwLock<()>,
 }
 
 /// One live connection plus the database identity it validated.
@@ -170,6 +181,7 @@ impl HistoryStore {
                 thread_id: thread_id.to_owned(),
                 writer: tokio::sync::OnceCell::new(),
                 reader: tokio::sync::OnceCell::new(),
+                init: tokio::sync::RwLock::new(()),
             }),
         })
     }
@@ -216,8 +228,19 @@ impl HistoryStore {
     /// The writer connection, once opened, is authoritative for reads too, so a hot writer and an
     /// in-memory test store never observe two divergent databases. Otherwise the existing file is
     /// opened read-only and validated; a missing file is reported as an empty history and is never
-    /// created here, so a cold read leaves an absent store absent.
+    /// created here, so a cold read leaves an absent store absent. A read that races the first
+    /// writer initialization waits behind it instead of validating the half-initialized database
+    /// that `connect(mode=rwc)` just created.
     async fn reader(&self) -> Result<Option<&HistoryConnection>> {
+        if let Some(writer) = self.state.writer.get() {
+            return Ok(Some(writer));
+        }
+        // The first writer may have created the file with `connect(mode=rwc)` while its schema and
+        // identity are still uncommitted. Take the read side of the initialization lock before
+        // touching the file, so we either run before the file exists or after it is fully
+        // initialized; never against a half-initialized database.
+        let _initializing = self.state.init.read().await;
+        // Re-check under the guard: the writer may have published its connection while we waited.
         if let Some(writer) = self.state.writer.get() {
             return Ok(Some(writer));
         }
@@ -237,7 +260,16 @@ impl HistoryStore {
     }
 
     /// The single writer connection, created and upgraded on first use.
+    ///
+    /// The whole first connect+initialize runs under the write side of the initialization lock, so a
+    /// cold read that races it cannot observe the created-but-uninitialized database. The guard is
+    /// released as soon as the connection is published, and every later call returns through the
+    /// fast path above it.
     async fn writer(&self) -> Result<&HistoryConnection> {
+        if let Some(writer) = self.state.writer.get() {
+            return Ok(writer);
+        }
+        let _initializing = self.state.init.write().await;
         self.state
             .writer
             .get_or_try_init(|| async {
@@ -674,6 +706,16 @@ impl HistoryStore {
                 ],
             ))
             .await?;
+            if old_turn.is_empty() && !item.turn_id.is_empty() {
+                // A queued message may predate its Turn. Binding that *same* item identity to
+                // the Turn can extend the indexed start backwards, but no unrelated write may
+                // change the first ordinal checked by `upsert_turn` below.
+                db.execute_raw(statement(
+                    "UPDATE history_turns SET first_ordinal=MIN(first_ordinal, ?) WHERE turn_id=?",
+                    vec![old_ordinal.into(), item.turn_id.clone().into()],
+                ))
+                .await?;
+            }
             return Ok(());
         }
         if item.ordinal == 0 {
@@ -2999,6 +3041,43 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn binding_a_preexisting_message_to_a_turn_extends_its_indexed_start() {
+        let store = HistoryStore::open_memory("thread").await.unwrap();
+        store
+            .commit(
+                1,
+                &[
+                    turn_scoped_item("queued-message", 1, "", 0),
+                    turn_scoped_item("turn-item", 2, "turn-a", 0),
+                ],
+                &[],
+            )
+            .await
+            .unwrap();
+        publish_turn(&store, "turn-a", "turn-item").await;
+
+        let mut bound = turn_scoped_item("queued-message", 1, "turn-a", 0);
+        bound.revision = 2;
+        store.commit(2, &[bound], &[]).await.unwrap();
+
+        let writer = store.writer().await.unwrap();
+        store
+            .upsert_turn(
+                &writer.db,
+                2,
+                &timeline_turn(
+                    "turn-a",
+                    "turn-item",
+                    pl_protocol::ThreadContextDisposition::Active,
+                ),
+            )
+            .await
+            .unwrap();
+        let page = store.turn_page(None, 10).await.unwrap();
+        assert_eq!(page_item_ids(&page), vec!["queued-message", "turn-item"]);
+    }
+
     /// 字节预算在 Turn 内部用尽时，游标停在真实返回的条目上，下一页接着取回剩余条目。
     #[tokio::test]
     async fn a_turn_page_is_a_bounded_keyset_that_never_skips_a_turn_or_an_item() {
@@ -3537,5 +3616,44 @@ mod tests {
             .unwrap();
         assert_eq!(repeated, reserved);
         assert_eq!(writer.watermark().await.unwrap(), 1);
+    }
+
+    /// 新库从 writer 的 `connect(mode=rwc)` 创建文件到 schema/identity 提交之间，同一句柄上的
+    /// 冷读必须等待初始化，而不得把半初始化库当成损坏库上报（现场即 `read durable message
+    /// identity` 失败）。
+    ///
+    /// 交错是确定构造的：writer 初始化整段都持有初始化锁的写侧，因此这里手动持有它并模拟
+    /// `connect(mode=rwc)` 已建文件、`initialize` 尚未提交的时刻；此时同一句柄的冷读必须停在锁上
+    /// 而不是读到半初始化库。提交 schema 与 identity 后，同一句柄的冷读必须成功，说明它读的是
+    /// 完整初始化后的库，而不是被泛化成“空历史”或“损坏库”。
+    #[tokio::test]
+    async fn cold_read_waits_for_writer_initialization_over_a_half_initialized_database() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite");
+        let store = HistoryStore::open(&path, "thread").await.unwrap();
+
+        // writer 初始化临界区：文件已由 `connect(mode=rwc)` 创建，schema/identity 尚未提交。
+        let initializing = store.state.init.write().await;
+        let creating = connect(crate::studio::paths::sqlite_url(&path))
+            .await
+            .unwrap();
+        assert!(path.exists(), "connect 已经创建了文件");
+
+        // 同一句柄的冷读必须等待本句柄 writer 初始化，而不是在半初始化库上立即失败。
+        let blocked = tokio::time::timeout(
+            Duration::from_millis(300),
+            store.message_identity("message-1"),
+        )
+        .await;
+        assert!(
+            blocked.is_err(),
+            "冷读必须等待 writer 初始化，而不是把半初始化库当成损坏库"
+        );
+
+        // 初始化提交 schema 与 identity 后，同一句柄的冷读必须成功读到一个完整库（此处身份未知）。
+        let database_id = initialize(&creating, "thread").await.unwrap();
+        assert!(!database_id.is_empty());
+        drop(initializing);
+        assert!(store.message_identity("message-1").await.unwrap().is_none());
     }
 }

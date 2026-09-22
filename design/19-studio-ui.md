@@ -288,44 +288,53 @@ attachment，不由 Flutter 解析 opaque 工具载荷；实时、历史分页�
 Turn 的失败、取消与预算限制从历史中持久化的 typed Turn item 派生，在该轮内容末尾显示
 终态提示；不能因活动 Turn 清空而丢失。活动 Turn 与最近 Turn 分别表达：活动 Turn 清空
 后仍保留 canonical 最近终态及原因；同一 Turn 的旧 revision 不得覆盖终态，新 Turn 不受
-旧 Turn 迟到事件覆盖；GUI 和 Driver 使用同一 typed Turn 数据源，不缓存最后看到的
+旧 Turn 迟到事件覆盖；不同 Turn 同秒更新时按 canonical revision 判定较新的 Turn。GUI 和
+Driver 使用同一 typed Turn 数据源，不缓存最后看到的
 running 状态来推测最近 Turn。计划摘要与活动块按内容高度参与滚动布局，短内容贴底的
 空白不压缩真实内容；不用固定高度或裁剪隐藏溢出。最终文本只解析一次，保留真实换行与
 代码中的字面反斜杠。
 
 ## 19.10 连续历史阅读
 
-每 Thread 独立持有最多 500 条的阅读窗口和最多 400 条的最新尾部，按稳定 item 身份共享
-正文。分页每页默认 100 条，支持 latest、around、before、after；大 Turn 可跨页，终态提示
-只属于包含该 Turn 末条的覆盖范围。完整 Turn 历史消费者保留原查询接口。
+每 Thread 独立持有最多 500 条的 SQL 阅读窗口；不保留 400 条独立实时尾部，也不维护第二份
+`cachedItems` 正文缓存。分页每页默认 100 条，支持 latest、around、before、after；大 Turn
+可跨页，终态提示只属于包含该 Turn 末条的覆盖范围。完整 Turn 历史消费者保留原查询接口。
 
-新订阅快照更新 canonical 运行状态、活动预览与最新尾部，不因窗口外条目缺席删除已加载
-历史。订阅代次、窗口代次与单次历史请求分别判旧；同 Thread 只允许一个历史请求在途。
-重同步重新建立订阅并消费首帧，不并行回灌单次快照；跳到最新立即采用缓存尾部并作废旧
-窗口请求。
+Timeline workspace 由 SQL 阅读窗口和实时 overlay 组成，并渲染为同一单列视图：SQL 窗口只由
+HistoryReader page 替换或扩展；overlay 只保存运行中 Item 以及 writer 尚未用同 item
+ID/revision 确认的终态 Item。新订阅快照更新 canonical 运行状态与活动预览，不把实时数据
+写成另一个历史尾部队列。订阅代次、窗口代次与单次历史请求分别判旧；同 Thread 只允许一个
+历史请求在途。重同步重新建立订阅并消费首帧，不并行回灌单次快照；显式跳最新时重新读取
+SQL `Latest` 首窗并合并 overlay，作废旧窗口请求。阅读历史时实时事件只更新内容与新内容
+提示，不抢占当前阅读锚点或跟随底部状态；窗口外终态由 SQL 页按身份和 revision
+确认后释放其 overlay 正文，后台确认不替换正在阅读的页面。
 
 历史页只走 `history.sqlite` 的 keyset 分页（latest/around/before/after），不经过 Thread owner、
 不读取驻留内存历史；增量事件按版本化封套（`epoch`/`base_revision`/`revision`）判连续，item
 delta 还要求命中当前未终态 Item 且 revision 严格递增，缺口或 `lagged` 时重新订阅并从数据库窗口
 重建（见 [07](./07-streaming.md)、[17](./17-studio-storage.md) §17.4）。
 
-客户端为渲染保留有界的实时预览：单条正文最多 `kTimelineItemBodyBudget = 8 * 1024`（UTF-16
-code units，保留最近的尾部），reasoning 的 summary 与 content 合计同样受限。超出预览的部分
-只经 canonical item identity 显式回源：`loadItemBody` 通过 `readTimelineItem` 读取完整条目
-（测试替身退化为围绕该身份的 `around` 一页），按同一 database identity 与水位合并，窗口过期时
-重读权威窗口而不是拼接旧载荷。回源请求已发出但正文尚未 durable 时，条目进入
-`pendingItemBodyIds`：仍然可见、可为重试，不当作身份缺席。Rust 实时 FRB 传输仍发送完整 delta，
-上述预算只是客户端渲染/内存约束，**不**代表 transport 本身有字节上限。
+运行中以及 writer 未确认终态的 overlay Item 在内存保存完整流式正文，按 item/revision 追加
+delta；Rust 实时 FRB 传输发送完整 delta，客户端不为 transport 截断正文。后续 HistoryReader
+页或既有按身份读回返回同 item ID/revision 后，该终态才算 SQL 确认；非可见正文此时可释放，
+之后需要时再走历史回源。已完成且非可见的正文可使用现有
+`kTimelineItemBodyBudget = 8 * 1024` 客户端预览；SQL 页继续使用 `TimelineItemPreview`
+的单条预览预算。超大正文经 canonical item identity 显式回源：`loadItemBody` 通过
+`readTimelineItem` 读取完整条目（测试替身退化为围绕该身份的 `around` 一页），按同一
+database identity 与水位合并，窗口过期时重读权威窗口而不是拼接旧载荷。回源请求已发出
+但正文尚未 durable 时，条目进入
+`pendingItemBodyIds`：仍然可见、可为重试，不当作身份缺席。
 
 沿滚动方向距边缘 1.5 个视口时预取；不足一屏自动补齐，直到填满、到端或失败。向旧加载
 淘汰远端新条目，向新加载淘汰远端旧条目；可见条目与阅读锚点优先保留。失败保留正文，
 在对应边缘提供显式重试，另一方向不受影响；超过 150ms 才显示不占正文高度的加载提示。
 
 位置由 item 身份、条目内偏移和跟随末尾状态表达。切回优先显示缓存，插入、淘汰、窗口
-变化和图片展开均按同一可见锚点校正，不根据总滚动高度差猜测。GUI 只保留当前可见页、前后少量
-预取页、当前流式尾部和少量尚未确认落盘的条目，远离窗口的 page 与非选中 Thread workspace 可
-释放。历史浏览只提示新内容，
-流式末尾跟随按帧合并，不反复启动动画。Markdown 展示可按内容版本复用，不改变原始文本。
+变化和图片展开均按同一可见锚点校正，不根据总滚动高度差猜测。GUI 只保留 SQL 窗口内当前
+可见页、前后少量预取页，以及运行中和 writer 未确认终态的 overlay；同一终态被 SQL 同
+ID/revision 确认后，非可见正文即可释放，远离窗口的 page 与非选中 Thread workspace 也可
+释放。历史浏览只提示新内容，流式末尾跟随按帧合并渲染，不逐 token 查询 SQL，也不反复
+启动动画。Markdown 展示可按内容版本复用，不改变原始文本。
 
 ## 19.11 运行中发送消息
 

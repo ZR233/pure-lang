@@ -107,8 +107,8 @@ abstract final class StudioDriverState {
               in _timelineWorkspace?.items ?? const <ThreadItemView>[])
             if (_history.pendingItemBodyIds.contains(item.id)) item.id,
         ],
-        'cacheCount': _timelineWorkspace?.cachedItems.length ?? 0,
-        'tailCount': _timelineWorkspace?.latestItemIds.length ?? 0,
+        'historyCount': _timelineWorkspace?.historyItems.length ?? 0,
+        'overlayCount': _timelineWorkspace?.liveItems.length ?? 0,
         'hasOlder': _history.hasOlder,
         'hasNewer': _history.hasNewer,
         'loading': _history.isLoading,

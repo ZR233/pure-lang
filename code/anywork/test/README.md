@@ -65,6 +65,22 @@ Driver demo 暂时显示真实启动页，记录动画区域坐标、连续截�
 
 ## 真实 timeline 验收回归
 
+Timeline 展示的窗口/尾部/行投影专项自动化用例已移除；原生验收为按需手动检查，
+不是 `verify-gui` 自动门禁。从仓库根目录运行：
+
+```sh
+python3 code/anywork/tool/timeline_native_harness.py --output /tmp/anywork-timeline-acceptance
+```
+
+完整阶段失败后保留同一隔离 home 并单独复核冷启动时，可再次运行上述命令并追加
+`--reopen-only`；工具只在自己的临时 fixture 工作目录缺失时重建该目录。
+
+此入口使用隔离 Studio home、真实 Rust/FRB/SQLite 与本地脚本 provider，启动 Linux 原生
+GUI 的 full/reopen 两阶段。逐阶段人工核对 `*.png`、`*.tree.txt`、`snapshots.jsonl`、
+`gui*.log`、`driver*.log`、查询与滚动 trace；检查回看双向翻页、切会话恢复锚点、
+跳最新、实时完整正文、运行中 GUI 输入、失败/取消及关闭重开后的历史。
+Driver 退出码或 `result.json` 不替代视觉和历史终态判断。
+
 - 成功工具展开后可读取完整参数和长输出，不再丢失返回内容。
 - 历史中的失败 Turn 显示于所属轮次末尾，不依赖 activeTurn 或 Driver 缓存。
 - Rust TurnFinished 为缺失 trace 的终态失败发布持久化 Item，前端通过原有 typed 协议消费。
