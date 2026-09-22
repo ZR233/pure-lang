@@ -229,7 +229,7 @@ pub(super) async fn prepare(paths: StudioPaths, owner: &RuntimeLock) -> Result<(
     }
 }
 
-pub(crate) use recovery::{RecoveryNotice, finalize, read_notice};
+pub(crate) use recovery::{RecoveryNotice, finalize};
 
 /// The one-time conversion phase machine shared by normal startup and the explicit command.
 async fn run_migration(

@@ -99,17 +99,11 @@ impl StudioRuntime {
             tracing::error!(error = %error, "failed to initialize SSH server registry");
             pl_protocol::studio::StudioError::storage()
         })?;
-        crate::studio::session_migration::finalize(&resolved.paths)
-            .await
-            .map_err(|error| {
-                tracing::error!(error = %error, "failed to commit Studio fresh-start recovery");
-                pl_protocol::studio::StudioError::storage()
-            })?;
         runtime.startup_recovery_notice =
-            crate::studio::session_migration::read_notice(&resolved.paths)
+            crate::studio::session_migration::finalize(&resolved.paths)
                 .await
                 .map_err(|error| {
-                    tracing::error!(error = %error, "failed to read Studio recovery notice");
+                    tracing::error!(error = %error, "failed to commit Studio fresh-start recovery");
                     pl_protocol::studio::StudioError::storage()
                 })?;
         if let Some(notice) = &runtime.startup_recovery_notice {

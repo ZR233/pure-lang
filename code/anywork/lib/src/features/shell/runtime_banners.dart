@@ -41,20 +41,40 @@ class _StudioFatalError extends ConsumerWidget {
   );
 }
 
-class _ApplicationRecoveryBanner extends StatelessWidget {
+class _ApplicationRecoveryBanner extends StatefulWidget {
   const _ApplicationRecoveryBanner({required this.issues});
 
   final List<StudioRecoveryIssue> issues;
 
   @override
+  State<_ApplicationRecoveryBanner> createState() =>
+      _ApplicationRecoveryBannerState();
+}
+
+class _ApplicationRecoveryBannerState
+    extends State<_ApplicationRecoveryBanner> {
+  bool _archiveDismissed = false;
+
+  @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final archived = issues.where(
-      (issue) => issue.category == RecoveryIssueCategory.storage,
-    );
-    final otherIssues = issues.length - archived.length;
+    final archiveIssues = widget.issues
+        .where((issue) => issue.id == 'fresh-start-archive')
+        .toList();
+    final otherIssues = widget.issues
+        .where((issue) => issue.id != 'fresh-start-archive')
+        .toList();
+    final archived = _archiveDismissed
+        ? const <StudioRecoveryIssue>[]
+        : archiveIssues;
+    if (archived.isEmpty && otherIssues.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return Tooltip(
-      message: issues.map((issue) => issue.detail).join('\n'),
+      message: [
+        ...archived,
+        ...otherIssues,
+      ].map((issue) => issue.detail).join('\n'),
       child: ColoredBox(
         color: colors.errorContainer,
         child: Padding(
@@ -72,11 +92,20 @@ class _ApplicationRecoveryBanner extends StatelessWidget {
                       Text(context.l10n.recoveryArchiveNotice),
                       SelectableText(issue.detail),
                     ],
-                    if (otherIssues > 0)
-                      Text(context.l10n.recoveryGlobalWarning(otherIssues)),
+                    if (otherIssues.isNotEmpty)
+                      Text(
+                        context.l10n.recoveryGlobalWarning(otherIssues.length),
+                      ),
                   ],
                 ),
               ),
+              if (archived.isNotEmpty)
+                IconButton(
+                  key: const ValueKey('recovery-archive-dismiss'),
+                  tooltip: context.l10n.recoveryArchiveDismiss,
+                  onPressed: () => setState(() => _archiveDismissed = true),
+                  icon: const Icon(Icons.close),
+                ),
             ],
           ),
         ),

@@ -74,6 +74,7 @@
   "persistenceQueueRefresh": "刷新诊断",
   "recoveryGlobalWarning": "有 {count} 个恢复问题需要处理",
   "recoveryArchiveNotice": "迁移无法继续，旧数据已归档。糊来帮现以初始配置运行；归档位置：",
+  "recoveryArchiveDismiss": "关闭归档提示",
   "sidebarNew": "新建",
   "sidebarOpen": "打开",
   "shellNoSession": "新会话",

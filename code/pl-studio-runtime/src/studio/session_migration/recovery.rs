@@ -2,13 +2,14 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 use super::PermanentMigrationReason;
 use crate::studio::paths::StudioPaths;
 
 const MARKER: &str = "fresh-start-recovery.json";
+// Previous releases kept this notice after a successful startup.
 const NOTICE: &str = "fresh-start-notice.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,7 +122,7 @@ pub(super) async fn archive_failed_home(
     reason: PermanentMigrationReason,
 ) -> Result<()> {
     ensure!(
-        load(&marker_path(paths)).await?.is_none() && load(&notice_path(paths)).await?.is_none(),
+        load(&marker_path(paths)).await?.is_none(),
         "another fresh-start recovery already exists; existing data preserved"
     );
     let home = paths.home();
@@ -231,40 +232,45 @@ async fn move_entry(source: &Path, target: &Path) -> Result<()> {
 }
 
 /// Commits the recovery only after the default database and configuration were initialized.
-pub(crate) async fn finalize(paths: &StudioPaths) -> Result<()> {
+/// The archive notice belongs to this runtime, not to future launches.
+pub(crate) async fn finalize(paths: &StudioPaths) -> Result<Option<RecoveryNotice>> {
     let path = marker_path(paths);
-    let Some(marker) = load(&path).await? else {
-        return Ok(());
+    let notice = if let Some(marker) = load(&path).await? {
+        ensure!(
+            marker.phase == Phase::Archived,
+            "fresh-start archive is incomplete"
+        );
+        let archive = archive_path(paths, &marker)?;
+        ensure!(
+            tokio::fs::try_exists(&archive).await?,
+            "fresh-start archive is missing"
+        );
+        tokio::fs::remove_file(&path).await?;
+        super::sync_directory(paths.data_dir()).await?;
+        Some(RecoveryNotice {
+            archive,
+            reason: marker.reason,
+        })
+    } else {
+        None
     };
-    ensure!(
-        marker.phase == Phase::Archived,
-        "fresh-start archive is incomplete"
-    );
-    let archive = archive_path(paths, &marker)?;
-    ensure!(
-        tokio::fs::try_exists(&archive).await?,
-        "fresh-start archive is missing"
-    );
-    let notice = notice_path(paths);
-    if entry_exists(&notice).await? {
-        bail!("fresh-start notice already exists; refusing to overwrite it");
-    }
-    tokio::fs::rename(&path, &notice).await?;
-    super::sync_directory(paths.data_dir()).await
+    retire_legacy_notice(paths).await;
+    Ok(notice)
 }
 
-pub(crate) async fn read_notice(paths: &StudioPaths) -> Result<Option<RecoveryNotice>> {
-    let Some(marker) = load(&notice_path(paths)).await? else {
-        return Ok(None);
-    };
-    ensure!(
-        marker.phase == Phase::Archived,
-        "fresh-start notice is incomplete"
-    );
-    Ok(Some(RecoveryNotice {
-        archive: archive_path(paths, &marker)?,
-        reason: marker.reason,
-    }))
+async fn retire_legacy_notice(paths: &StudioPaths) {
+    let path = notice_path(paths);
+    match tokio::fs::remove_file(&path).await {
+        Ok(()) => {
+            if let Err(error) = super::sync_directory(paths.data_dir()).await {
+                tracing::warn!(%error, path = %path.display(), "failed to sync retired recovery notice");
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            tracing::warn!(%error, path = %path.display(), "failed to retire obsolete recovery notice");
+        }
+    }
 }
 
 async fn entry_exists(path: &Path) -> Result<bool> {
@@ -325,9 +331,20 @@ mod tests {
             std::fs::read(archive.join("migrations/session-migration.json")).unwrap(),
             b"old report"
         );
-        finalize(&paths).await.unwrap();
+        assert_eq!(finalize(&paths).await.unwrap().unwrap().archive, archive);
         assert!(!resume(&paths).await.unwrap());
-        assert_eq!(read_notice(&paths).await.unwrap().unwrap().archive, archive);
+        assert!(finalize(&paths).await.unwrap().is_none());
+        assert!(!marker_path(&paths).exists());
+        assert!(!notice_path(&paths).exists());
+    }
+
+    #[tokio::test]
+    async fn completed_legacy_notice_is_retired_without_reopening_recovery() {
+        let (_root, paths, _archive, marker) = fixture();
+        store(&notice_path(&paths), &marker).await.unwrap();
+
+        assert!(finalize(&paths).await.unwrap().is_none());
+        assert!(!notice_path(&paths).exists());
     }
 
     #[tokio::test]

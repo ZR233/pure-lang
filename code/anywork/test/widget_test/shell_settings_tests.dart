@@ -136,6 +136,11 @@ void registerShellSettingsTests() {
     expect(find.textContaining('Previous data was archived'), findsOneWidget);
     expect(find.text(archive), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.startPage), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('recovery-archive-dismiss')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Previous data was archived'), findsNothing);
+    expect(find.text(archive), findsNothing);
+    expect(find.byKey(StudioDriverKeys.startPage), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

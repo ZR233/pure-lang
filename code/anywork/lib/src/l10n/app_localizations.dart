@@ -470,6 +470,12 @@ abstract class AppLocalizations {
   /// **'Migration could not continue. Previous data was archived and anywork started with default settings. Archive:'**
   String get recoveryArchiveNotice;
 
+  /// No description provided for @recoveryArchiveDismiss.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss archive notice'**
+  String get recoveryArchiveDismiss;
+
   /// No description provided for @sidebarNew.
   ///
   /// In en, this message translates to:

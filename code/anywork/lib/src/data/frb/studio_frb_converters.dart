@@ -804,8 +804,7 @@ StudioRecoveryIssue _recoveryIssueFromFrb(
         RecoveryIssueCategory.agentState,
       frb.BridgeRecoveryIssueCategory.repository =>
         RecoveryIssueCategory.repository,
-      frb.BridgeRecoveryIssueCategory.storage =>
-        RecoveryIssueCategory.storage,
+      frb.BridgeRecoveryIssueCategory.storage => RecoveryIssueCategory.storage,
     },
     availableActions: [
       for (final action in issue.availableActions)

@@ -182,7 +182,7 @@ mod tests {
         std::fs::create_dir_all(home.join("studio")).unwrap();
         std::fs::write(home.join("studio/studio.sqlite"), b"").unwrap();
         let runtime = StudioRuntime::with_options(crate::StudioRuntimeOptions {
-            studio_home: Some(home),
+            studio_home: Some(home.clone()),
             host: crate::StudioHostKind::Test,
         })
         .await
@@ -205,5 +205,31 @@ mod tests {
                 .is_file()
         );
         runtime.shutdown_runtime().await.unwrap();
+        drop(runtime);
+
+        let reopened = StudioRuntime::with_options(crate::StudioRuntimeOptions {
+            studio_home: Some(home.clone()),
+            host: crate::StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        reopened.start_runtime().await.unwrap();
+        background_task::finish(&reopened.recovery_task)
+            .await
+            .unwrap();
+        assert!(
+            reopened
+                .recovery_issues()
+                .iter()
+                .all(|issue| issue.category != crate::StudioRecoveryIssueCategory::Storage)
+        );
+        assert!(!home.join("studio/fresh-start-recovery.json").exists());
+        assert!(!home.join("studio/fresh-start-notice.json").exists());
+        assert!(
+            std::path::Path::new(&issue.message)
+                .join("studio/studio.sqlite")
+                .is_file()
+        );
+        reopened.shutdown_runtime().await.unwrap();
     }
 }
