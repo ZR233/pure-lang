@@ -294,7 +294,16 @@ async fn cleanup_created_blobs(paths: Vec<PathBuf>) {
 /// skipped on Windows, which has no equivalent operation.
 async fn sync_blob(path: &std::path::Path) -> Result<()> {
     let file = path.to_owned();
-    tokio::task::spawn_blocking(move || std::fs::File::open(file)?.sync_all()).await??;
+    // Windows backs `sync_all` with `FlushFileBuffers`, which requires a writable handle;
+    // opening the blob read-only returns `ERROR_ACCESS_DENIED` there.
+    tokio::task::spawn_blocking(move || {
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(file)?;
+        handle.sync_all()
+    })
+    .await??;
     #[cfg(unix)]
     if let Some(directory) = path.parent() {
         let directory = directory.to_owned();

@@ -606,9 +606,10 @@ fn aggregate(
                 ..Default::default()
             });
     }
-    if snapshot.error.is_none() {
-        snapshot.error = recovery.values().next().cloned();
-    }
+    // 回退诊断只属于发生恢复的那个 Thread：它已作为该 Thread 的 `last_error` 发布，
+    // 不是进程级 writer 失败，因此绝不写入 `snapshot.error`。把它升级为进程级阻塞错误
+    // 会让与之无关的 `wait_for_drain`（runtime shutdown/drain）因别人的恢复诊断失败，
+    // 而真实 writer 失败仍通过各 incarnation 的 `failure()` 照常阻断 drain。
     snapshot
 }
 
@@ -687,6 +688,102 @@ mod tests {
                 .shared_history("thread")
                 .expect("reactivated writer")
                 .is_same_handle(&reactivated)
+        );
+    }
+
+    /// 测试用：登记一次 `state.prev.toml` 回退诊断，并在作用域结束（含 panic 展开）时清除它。
+    ///
+    /// checkpoint 层的登记表是进程级静态状态，回归自身不得把诊断遗留给同进程内的其他测试。
+    struct RecoveryDiagnosticGuard {
+        thread_id: String,
+    }
+
+    impl RecoveryDiagnosticGuard {
+        fn register(thread_id: impl Into<String>, diagnostic: impl Into<String>) -> Self {
+            let thread_id = thread_id.into();
+            crate::studio::storage::state::record_checkpoint_recovery(
+                &thread_id,
+                diagnostic.into(),
+            );
+            Self { thread_id }
+        }
+    }
+
+    impl Drop for RecoveryDiagnosticGuard {
+        fn drop(&mut self) {
+            crate::studio::storage::state::clear_checkpoint_recovery(&self.thread_id);
+        }
+    }
+
+    /// `state.prev.toml` 回退诊断只属于发生恢复的 Thread，绝不升级为进程级阻塞错误。
+    ///
+    /// 诊断必须继续在对应 Thread 的行上可见，但与它无关的 `wait_for_drain`（runtime
+    /// shutdown/drain）不能因此失败——回退是一次真实恢复，不是 writer 失败。
+    #[tokio::test]
+    async fn checkpoint_recovery_diagnostic_never_blocks_unrelated_drain() {
+        let coordinator = ThreadPersistenceCoordinator::default();
+        let diagnostic = "recovered the Thread checkpoint from state.prev.toml (state.toml 不可读)";
+        // 唯一 Thread 名 + 显式清理，避免污染同进程内其他测试的全局诊断状态。
+        let guard = RecoveryDiagnosticGuard::register("recovery-only-thread", diagnostic);
+
+        // 该 Thread 没有 writer；一次聚合就应仅凭诊断把它作为 per-Thread 行暴露出来。
+        coordinator.report_calls(CallsQueueMetrics::default());
+
+        let snapshot = coordinator.snapshot();
+        let row = snapshot
+            .threads
+            .iter()
+            .find(|row| row.thread_id == "recovery-only-thread")
+            .expect("恢复诊断必须在其 Thread 的行上可见");
+        assert_eq!(row.last_error.as_deref(), Some(diagnostic));
+        assert!(
+            snapshot.error.is_none(),
+            "恢复诊断不得升级为进程级阻塞错误：{:?}",
+            snapshot.error
+        );
+        // 立即清除全局登记以缩小对其他测试的可见窗口；watch 中的快照保持不变。
+        drop(guard);
+
+        // 与恢复无关的 drain 必须成功，而不是因为别人的恢复诊断报错。
+        coordinator
+            .wait_for_drain()
+            .await
+            .expect("unrelated drain must not be blocked by a checkpoint recovery diagnostic");
+    }
+
+    /// 真实 writer 失败仍然阻断进程级 drain：恢复诊断不再是阻断源后必须守住这条边界。
+    #[tokio::test]
+    async fn a_real_writer_failure_still_blocks_drain() {
+        let coordinator = ThreadPersistenceCoordinator::default();
+        // 同一进程内并存一个恢复诊断，验证它不会掩盖或冒充真实的 writer 失败。
+        let guard = RecoveryDiagnosticGuard::register(
+            "recovered-thread",
+            "recovered the Thread checkpoint from state.prev.toml",
+        );
+
+        coordinator.claim("failing-thread", 1);
+        coordinator.update(
+            "failing-thread",
+            1,
+            std::iter::empty(),
+            false,
+            Some("checkpoint publish failed".to_owned()),
+            ThreadPersistenceMetrics::default(),
+        );
+
+        // 进程级错误只来自 writer 失败，而不是同时存在的恢复诊断。
+        assert_eq!(
+            coordinator.snapshot().error.as_deref(),
+            Some("checkpoint publish failed")
+        );
+        drop(guard);
+        let error = coordinator
+            .wait_for_drain()
+            .await
+            .expect_err("a real writer failure must still fail the drain");
+        assert!(
+            error.to_string().contains("checkpoint publish failed"),
+            "drain 必须以真实 writer 失败为原因：{error}"
         );
     }
 }
