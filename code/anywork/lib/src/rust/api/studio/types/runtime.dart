@@ -534,7 +534,12 @@ enum BridgeRecoveryIssueAction {
   cleanupWorktree,
 }
 
-enum BridgeRecoveryIssueCategory { processLease, agentState, repository }
+enum BridgeRecoveryIssueCategory {
+  processLease,
+  agentState,
+  repository,
+  storage,
+}
 
 enum BridgeRecoveryIssueScope { application, project, thread }
 

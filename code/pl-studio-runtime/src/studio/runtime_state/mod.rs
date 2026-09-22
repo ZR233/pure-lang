@@ -46,12 +46,14 @@ pub enum StudioRecoveryIssueCategory {
     ProcessLease,
     AgentState,
     Repository,
+    Storage,
 }
 
 /// UI 可执行的恢复动作。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum StudioRecoveryIssueAction {
+    None,
     Retry,
     CleanupThread,
     RemoveProject,

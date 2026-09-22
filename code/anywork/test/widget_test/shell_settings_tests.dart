@@ -174,6 +174,43 @@ void registerShellSettingsTests() {
     expect(api.createdThreadProjectId, isNull);
   });
 
+  testWidgets('archived migration is visible on the fresh start page', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(640, 720));
+    const archive = 'C:\\Users\\example\\.anywork.recovery-fixture';
+    final state = _emptyState().copyWith(
+      threadDirectory: const ThreadDirectoryWindow(),
+      workspacesByThread: const {},
+      workspaceUiByThread: const {},
+      selectedThreadId: null,
+      recoveryState: RecoveryStateSnapshot(
+        values: const [
+          StudioRecoveryIssue(
+            id: 'fresh-start-archive',
+            scope: RecoveryIssueScope.application,
+            category: RecoveryIssueCategory.storage,
+            availableActions: [],
+            detail: archive,
+          ),
+        ],
+        revision: 1,
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(_FakeStudioApi(state))],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Previous data was archived'), findsOneWidget);
+    expect(find.text(archive), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.startPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('new session stays transient until its first message', (
     tester,
   ) async {

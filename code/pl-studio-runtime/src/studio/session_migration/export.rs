@@ -32,6 +32,7 @@ use crate::studio::storage::state::{InputIdentityEntry, StateStore};
 use crate::studio::store::attachment::write_attachment_catalog;
 
 use super::report::{SessionMigrationRecord, SessionMigrationStatus};
+use super::{PermanentMigrationError, PermanentMigrationReason};
 
 /// 每会话目录摘要在 staging 中的固定文件名；发布阶段按稳定身份合并为 `catalog.toml`。
 pub(super) const STAGED_CATALOG_ENTRY_FILE_NAME: &str = "catalog-entry.toml";
@@ -59,7 +60,11 @@ fn legacy_journal_with_settlement(
     thread_id: &str,
 ) -> Result<Vec<Arc<ThreadEffectBatch>>> {
     if effects.is_empty() {
-        anyhow::bail!("legacy session {thread_id} has no Thread commits");
+        return Err(PermanentMigrationError::new(
+            PermanentMigrationReason::InvalidLegacyFacts,
+            format!("legacy session {thread_id} has no Thread commits"),
+        )
+        .into());
     }
     if let Some(mut settlement) = legacy_migration::recovery_commit(&effects)? {
         let recorded_at = effects

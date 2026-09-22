@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::studio::paths::thread_storage_key;
 use crate::studio::storage::calls::CallsImportReport;
 
-use super::MigrationTrigger;
+use super::{MigrationTrigger, PermanentMigrationError, PermanentMigrationReason};
 
 pub(super) const MIGRATION_STATE_SCHEMA_VERSION: u32 = 7;
 pub(super) const MIN_SUPPORTED_MIGRATION_STATE_SCHEMA_VERSION: u32 = 1;
@@ -224,25 +224,47 @@ impl MigrationState {
 pub(super) async fn load(path: &Path) -> Result<Option<MigrationState>> {
     match tokio::fs::read_to_string(path).await {
         Ok(content) => {
-            let value: serde_json::Value = serde_json::from_str(&content)
-                .with_context(|| format!("invalid migration state {}", path.display()))?;
+            let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
+                PermanentMigrationError::new(
+                    PermanentMigrationReason::InvalidMigrationState,
+                    format!("invalid migration state {}: {error}", path.display()),
+                )
+            })?;
             let version = value
                 .get("schemaVersion")
                 .or_else(|| value.get("schema_version"))
                 .and_then(serde_json::Value::as_u64)
                 .and_then(|version| u32::try_from(version).ok())
-                .with_context(|| {
-                    format!("migration state has no schema version {}", path.display())
+                .ok_or_else(|| {
+                    PermanentMigrationError::new(
+                        PermanentMigrationReason::InvalidMigrationState,
+                        format!("migration state has no schema version {}", path.display()),
+                    )
                 })?;
-            ensure!(
-                (MIN_SUPPORTED_MIGRATION_STATE_SCHEMA_VERSION..=MIGRATION_STATE_SCHEMA_VERSION)
-                    .contains(&version),
-                "unsupported migration state schema {version}; existing data preserved"
-            );
-            let mut state: MigrationState = serde_json::from_value(value)
-                .with_context(|| format!("invalid migration state {}", path.display()))?;
+            if !(MIN_SUPPORTED_MIGRATION_STATE_SCHEMA_VERSION..=MIGRATION_STATE_SCHEMA_VERSION)
+                .contains(&version)
+            {
+                return Err(PermanentMigrationError::new(
+                    PermanentMigrationReason::UnsupportedSchema,
+                    format!(
+                        "unsupported migration state schema {version}; existing data preserved"
+                    ),
+                )
+                .into());
+            }
+            let mut state: MigrationState = serde_json::from_value(value).map_err(|error| {
+                PermanentMigrationError::new(
+                    PermanentMigrationReason::InvalidMigrationState,
+                    format!("invalid migration state {}: {error}", path.display()),
+                )
+            })?;
             state.loaded_schema_version = version;
-            normalize(&mut state)?;
+            normalize(&mut state).map_err(|error| {
+                PermanentMigrationError::new(
+                    PermanentMigrationReason::InvalidMigrationState,
+                    format!("invalid migration state {}: {error}", path.display()),
+                )
+            })?;
             Ok(Some(state))
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),

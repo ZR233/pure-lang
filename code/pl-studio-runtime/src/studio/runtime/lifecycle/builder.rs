@@ -83,7 +83,7 @@ impl StudioRuntime {
                 ConfigStore::for_studio_home(resolved.paths.home().to_path_buf())
             }
         };
-        let runtime = Self::with_runtime_state_and_lock(
+        let mut runtime = Self::with_runtime_state_and_lock(
             store,
             config_store,
             StudioRuntimeState::new(),
@@ -99,6 +99,23 @@ impl StudioRuntime {
             tracing::error!(error = %error, "failed to initialize SSH server registry");
             pl_protocol::studio::StudioError::storage()
         })?;
+        crate::studio::session_migration::finalize(&resolved.paths)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, "failed to commit Studio fresh-start recovery");
+                pl_protocol::studio::StudioError::storage()
+            })?;
+        runtime.startup_recovery_notice =
+            crate::studio::session_migration::read_notice(&resolved.paths)
+                .await
+                .map_err(|error| {
+                    tracing::error!(error = %error, "failed to read Studio recovery notice");
+                    pl_protocol::studio::StudioError::storage()
+                })?;
+        if let Some(notice) = &runtime.startup_recovery_notice {
+            tracing::warn!(archive = %notice.archive.display(), reason = ?notice.reason,
+                "Studio is using default state after an archived migration failure");
+        }
         Ok(runtime)
     }
 
@@ -176,6 +193,7 @@ impl StudioRuntime {
         thread_observations.install(thread_factory.clone())?;
         Ok(Self {
             startup_observer,
+            startup_recovery_notice: None,
             thread_observations,
             settings_updates,
             settings_refresh: Default::default(),

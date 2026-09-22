@@ -1,6 +1,6 @@
 enum RecoveryIssueScope { application, project, thread }
 
-enum RecoveryIssueCategory { processLease, agentState, repository }
+enum RecoveryIssueCategory { processLease, agentState, repository, storage }
 
 enum RecoveryIssueAction {
   retry,

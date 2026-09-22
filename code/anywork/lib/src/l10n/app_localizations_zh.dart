@@ -217,6 +217,9 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get recoveryArchiveNotice => '迁移无法继续，旧数据已归档。糊来帮现以初始配置运行；归档位置：';
+
+  @override
   String get sidebarNew => '新建';
 
   @override

@@ -226,6 +226,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get recoveryArchiveNotice =>
+      'Migration could not continue. Previous data was archived and anywork started with default settings. Archive:';
+
+  @override
   String get sidebarNew => 'New';
 
   @override

@@ -49,6 +49,10 @@ class _ApplicationRecoveryBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final archived = issues.where(
+      (issue) => issue.category == RecoveryIssueCategory.storage,
+    );
+    final otherIssues = issues.length - archived.length;
     return Tooltip(
       message: issues.map((issue) => issue.detail).join('\n'),
       child: ColoredBox(
@@ -60,7 +64,18 @@ class _ApplicationRecoveryBanner extends StatelessWidget {
               Icon(Icons.warning_amber_rounded, size: 18, color: colors.error),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(context.l10n.recoveryGlobalWarning(issues.length)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final issue in archived) ...[
+                      Text(context.l10n.recoveryArchiveNotice),
+                      SelectableText(issue.detail),
+                    ],
+                    if (otherIssues > 0)
+                      Text(context.l10n.recoveryGlobalWarning(otherIssues)),
+                  ],
+                ),
               ),
             ],
           ),

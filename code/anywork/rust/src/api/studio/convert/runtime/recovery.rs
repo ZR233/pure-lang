@@ -25,19 +25,25 @@ pub(crate) fn bridge_recovery_issue(issue: StudioRecoveryIssue) -> BridgeStudioR
             pl_studio_runtime::StudioRecoveryIssueCategory::Repository => {
                 BridgeRecoveryIssueCategory::Repository
             }
+            pl_studio_runtime::StudioRecoveryIssueCategory::Storage => {
+                BridgeRecoveryIssueCategory::Storage
+            }
         },
-        available_actions: vec![match issue.action {
-            pl_studio_runtime::StudioRecoveryIssueAction::Retry => BridgeRecoveryIssueAction::Retry,
+        available_actions: match issue.action {
+            pl_studio_runtime::StudioRecoveryIssueAction::None => Vec::new(),
+            pl_studio_runtime::StudioRecoveryIssueAction::Retry => {
+                vec![BridgeRecoveryIssueAction::Retry]
+            }
             pl_studio_runtime::StudioRecoveryIssueAction::CleanupThread => {
-                BridgeRecoveryIssueAction::CleanupThread
+                vec![BridgeRecoveryIssueAction::CleanupThread]
             }
             pl_studio_runtime::StudioRecoveryIssueAction::RemoveProject => {
-                BridgeRecoveryIssueAction::RemoveProject
+                vec![BridgeRecoveryIssueAction::RemoveProject]
             }
             pl_studio_runtime::StudioRecoveryIssueAction::CleanupWorktree => {
-                BridgeRecoveryIssueAction::CleanupWorktree
+                vec![BridgeRecoveryIssueAction::CleanupWorktree]
             }
-        }],
+        },
         project_id: issue.project_id,
         thread_id: issue.thread_id,
         detail: issue.message,

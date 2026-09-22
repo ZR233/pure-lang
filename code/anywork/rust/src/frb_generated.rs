@@ -6046,6 +6046,7 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeRecoveryIssueCatego
             0 => crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::ProcessLease,
             1 => crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::AgentState,
             2 => crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::Repository,
+            3 => crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::Storage,
             _ => unreachable!("Invalid variant for BridgeRecoveryIssueCategory: {}", inner),
         };
     }
@@ -13922,6 +13923,7 @@ impl flutter_rust_bridge::IntoDart
             Self::ProcessLease => 0.into_dart(),
             Self::AgentState => 1.into_dart(),
             Self::Repository => 2.into_dart(),
+            Self::Storage => 3.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -20222,6 +20224,7 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeRecoveryIssueCatego
                 crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::ProcessLease => 0,
                 crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::AgentState => 1,
                 crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::Repository => 2,
+                crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::Storage => 3,
                 _ => {
                     unimplemented!("");
                 }

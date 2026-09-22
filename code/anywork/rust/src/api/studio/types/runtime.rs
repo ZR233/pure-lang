@@ -147,6 +147,7 @@ pub enum BridgeRecoveryIssueCategory {
     ProcessLease,
     AgentState,
     Repository,
+    Storage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

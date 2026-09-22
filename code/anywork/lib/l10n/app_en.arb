@@ -125,6 +125,7 @@
   },
   "persistenceQueueRefresh": "Refresh diagnostics",
   "recoveryGlobalWarning": "{count} recovery issue(s) need attention",
+  "recoveryArchiveNotice": "Migration could not continue. Previous data was archived and anywork started with default settings. Archive:",
   "@recoveryGlobalWarning": {
     "placeholders": {
       "count": {

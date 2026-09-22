@@ -11,6 +11,7 @@
 //! verifies, and any failure keeps the original bytes and resumes from the last durable phase.
 
 mod export;
+mod recovery;
 mod report;
 
 use std::path::{Path, PathBuf};
@@ -52,6 +53,31 @@ const ARCHIVE_DIR_NAME: &str = "session-archive";
 const LEGACY_CALLS_BACKUP_DIR_NAME: &str = "calls";
 /// Migration workspace for the retired call store's format upgrade; never published.
 const LEGACY_CALLS_WORK_DIR_NAME: &str = "calls-import-work";
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum PermanentMigrationReason {
+    UnsupportedSchema,
+    InvalidMigrationState,
+    MissingMigrationFacts,
+    InvalidLegacyFacts,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{detail}")]
+pub(super) struct PermanentMigrationError {
+    pub(super) reason: PermanentMigrationReason,
+    detail: String,
+}
+
+impl PermanentMigrationError {
+    pub(super) fn new(reason: PermanentMigrationReason, detail: impl Into<String>) -> Self {
+        Self {
+            reason,
+            detail: detail.into(),
+        }
+    }
+}
 
 /// How a one-time legacy conversion was started.
 ///
@@ -182,8 +208,28 @@ pub async fn migrate_legacy_storage(
 /// every reference lifetime, and owning the paths keeps every derived `&Path` a borrow of a local the
 /// future holds rather than a reference parameter.
 pub(super) async fn prepare(paths: StudioPaths, owner: &RuntimeLock) -> Result<()> {
-    run_migration(paths, owner, MigrationTrigger::Startup).await
+    if recovery::resume(&paths).await? {
+        return Ok(());
+    }
+    match run_migration(paths.clone(), owner, MigrationTrigger::Startup).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let Some(reason) = error
+                .downcast_ref::<PermanentMigrationError>()
+                .map(|failure| failure.reason)
+            else {
+                return Err(error);
+            };
+            recovery::archive_failed_home(&paths, reason)
+                .await
+                .with_context(|| {
+                    format!("migration failed ({error:#}); fresh-start archive failed")
+                })
+        }
+    }
 }
+
+pub(crate) use recovery::{RecoveryNotice, finalize, read_notice};
 
 /// The one-time conversion phase machine shared by normal startup and the explicit command.
 async fn run_migration(
@@ -222,24 +268,46 @@ async fn run_migration(
             // The report already records `Published` (written after the archive), so only the commit
             // step was left: retire the announcement now instead of blocking a complete layout.
             Some(_) => commit_layout_publication(&paths).await?,
-            None => bail!(
-                "Studio layout publication was interrupted before its migration report was durable \
-                 ({}); refusing to start or convert a partially switched home. Restore the migration \
-                 report or the backup it references, then retry; every original byte is preserved.",
-                layout_publication_marker_path(&paths).display()
-            ),
+            None => return Err(PermanentMigrationError::new(
+                PermanentMigrationReason::MissingMigrationFacts,
+                format!(
+                    "Studio layout publication was interrupted before its migration report was durable \
+                     ({}); every original byte is preserved",
+                    layout_publication_marker_path(&paths).display()
+                ),
+            ).into()),
         }
     }
     let product_version = inspect(&product).await?;
     let session_version = inspect(&sessions).await?;
-    ensure!(
-        product_version.is_none_or(|v| matches!(v, 20..=22)),
-        "unsupported Studio migration path; existing data preserved"
-    );
-    ensure!(
-        session_version.is_none_or(|v| matches!(v, 6 | 7)),
-        "unsupported session migration path; existing data preserved"
-    );
+    if let Some(state) = &recorded
+        && state.phase != MigrationPhase::Published
+        && state
+            .sources
+            .iter()
+            .any(|source| source.path == product.to_string_lossy() && source.exists)
+        && product_version.is_none()
+    {
+        return Err(PermanentMigrationError::new(
+            PermanentMigrationReason::MissingMigrationFacts,
+            "legacy product database disappeared during migration; existing data preserved",
+        )
+        .into());
+    }
+    if !product_version.is_none_or(|v| matches!(v, 20..=22)) {
+        return Err(PermanentMigrationError::new(
+            PermanentMigrationReason::UnsupportedSchema,
+            "unsupported Studio migration path; existing data preserved",
+        )
+        .into());
+    }
+    if !session_version.is_none_or(|v| matches!(v, 6 | 7)) {
+        return Err(PermanentMigrationError::new(
+            PermanentMigrationReason::UnsupportedSchema,
+            "unsupported session migration path; existing data preserved",
+        )
+        .into());
+    }
 
     // Classify the home before touching anything. A normal startup never converts and never rebuilds:
     // the retired tables are read only by an explicit legacy conversion, and canonical documents are
@@ -1080,14 +1148,35 @@ async fn verify_exported_sessions(
         state.updated_at = unix_seconds();
         return report::store(state_path, state).await;
     }
+    if !state.sessions.is_empty() {
+        let root = published_or_staged_sessions_dir(paths, staging).await?;
+        for session in &state.sessions {
+            if !tokio::fs::try_exists(root.join(&session.storage_key)).await? {
+                return Err(PermanentMigrationError::new(
+                    PermanentMigrationReason::MissingMigrationFacts,
+                    "a recorded staged session is missing before verification; existing data preserved",
+                ).into());
+            }
+        }
+        if !tokio::fs::try_exists(sessions).await? {
+            return Err(PermanentMigrationError::new(
+                PermanentMigrationReason::MissingMigrationFacts,
+                "legacy session journal disappeared before verification; existing data preserved",
+            )
+            .into());
+        }
+    }
     // 每条会话的模型/工具调用事实都在 staged（或部分发布后已 rename 成 canonical 的）调用库里；
     // 没有这个发布目标就无法逐项核对调用身份、正文与水位，因此这里先解析它。
     let calls_destination = if state.sessions.is_empty() {
         None
     } else {
-        Some(call_store_destination(paths, calls_staging).await?.context(
-            "staged call store is missing before session verification; existing data preserved",
-        )?)
+        Some(call_store_destination(paths, calls_staging).await?.ok_or_else(|| {
+            PermanentMigrationError::new(
+                PermanentMigrationReason::MissingMigrationFacts,
+                "staged call store is missing before session verification; existing data preserved",
+            )
+        })?)
     };
     let legacy = open_legacy_sessions(sessions, sessions_lease).await?;
     // 会话级核对在 phase-4 重跑与导出完全一致的投影，`thread_identity` 的目录事实（标题/角色/
@@ -2417,11 +2506,13 @@ fn inspect(path: &Path) -> impl std::future::Future<Output = Result<Option<i64>>
                 .into_iter()
                 .map(|row| row.try_get::<String>("", "quick_check"))
                 .collect::<std::result::Result<Vec<_>, _>>()?;
-            ensure!(
-                results.as_slice() == ["ok"],
-                "corrupt database preserved: {}",
-                results.join("; ")
-            );
+            if results.as_slice() != ["ok"] {
+                return Err(PermanentMigrationError::new(
+                    PermanentMigrationReason::InvalidLegacyFacts,
+                    format!("corrupt database preserved: {}", results.join("; ")),
+                )
+                .into());
+            }
             let row = db
                 .query_one_raw(sql("PRAGMA user_version"))
                 .await?
@@ -2830,6 +2921,74 @@ mod tests {
         let result = run_migration(paths.clone(), &lock, MigrationTrigger::Startup).await;
         drop(lock);
         result
+    }
+
+    #[tokio::test]
+    async fn unrecoverable_startup_archives_home_and_initializes_fresh_state() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let paths = StudioPaths::resolve(Some(home.clone())).unwrap();
+        std::fs::create_dir_all(paths.data_dir()).unwrap();
+        std::fs::write(paths.database(), b"").unwrap();
+        std::fs::write(paths.config_file(), b"previous configuration").unwrap();
+        let backup = paths.migrations_dir().join("session-backup/product.sqlite");
+        write_file(&backup, b"original backup");
+
+        let runtime = crate::StudioRuntime::with_options(crate::StudioRuntimeOptions {
+            studio_home: Some(home.clone()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .expect("unrecoverable migration should start with a fresh home");
+        assert!(paths.catalog_file().is_file());
+        assert!(!paths.config_file().exists());
+        let archives = || {
+            std::fs::read_dir(root.path())
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("home.recovery-")
+                })
+                .collect::<Vec<_>>()
+        };
+        let archive = archives().pop().expect("recovery archive");
+        assert_eq!(
+            std::fs::read(archive.join("config.toml")).unwrap(),
+            b"previous configuration"
+        );
+        assert_eq!(
+            std::fs::read(archive.join("migrations/session-backup/product.sqlite")).unwrap(),
+            b"original backup"
+        );
+        drop(runtime);
+
+        let runtime = crate::StudioRuntime::with_options(crate::StudioRuntimeOptions {
+            studio_home: Some(home),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .expect("the fresh home should not be archived again");
+        assert_eq!(archives(), vec![archive]);
+        drop(runtime);
+    }
+
+    #[tokio::test]
+    async fn migration_lock_error_never_switches_to_default_state() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = StudioPaths::resolve(Some(root.path().join("home"))).unwrap();
+        std::fs::create_dir_all(paths.data_dir().join("sessions.sqlite.lock")).unwrap();
+        std::fs::write(paths.config_file(), b"original config").unwrap();
+        let lock = RuntimeLock::acquire(&paths.runtime_lock(), StudioHostKind::Test).unwrap();
+
+        assert!(super::prepare(paths.clone(), &lock).await.is_err());
+        assert_eq!(
+            std::fs::read(paths.config_file()).unwrap(),
+            b"original config"
+        );
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
     }
 
     async fn open_product_database(path: &Path) -> sea_orm::DatabaseConnection {

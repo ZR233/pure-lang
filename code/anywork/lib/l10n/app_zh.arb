@@ -73,6 +73,7 @@
   "persistenceQueueError": "最近错误：{message}",
   "persistenceQueueRefresh": "刷新诊断",
   "recoveryGlobalWarning": "有 {count} 个恢复问题需要处理",
+  "recoveryArchiveNotice": "迁移无法继续，旧数据已归档。糊来帮现以初始配置运行；归档位置：",
   "sidebarNew": "新建",
   "sidebarOpen": "打开",
   "shellNoSession": "新会话",

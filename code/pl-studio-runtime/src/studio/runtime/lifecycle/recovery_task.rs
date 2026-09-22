@@ -36,6 +36,18 @@ impl StudioRuntime {
             let _gate = runtime.recovery_gate.lock().await;
             let mut issues = Vec::new();
             let result = async {
+                if let Some(notice) = &runtime.startup_recovery_notice {
+                    issues.push(crate::StudioRecoveryIssue {
+                        id: "fresh-start-archive".into(),
+                        scope: crate::StudioRecoveryIssueScope::Application,
+                        category: crate::StudioRecoveryIssueCategory::Storage,
+                        action: crate::StudioRecoveryIssueAction::None,
+                        project_id: None,
+                        thread_id: None,
+                        message: notice.archive.display().to_string(),
+                        worktree: None,
+                    });
+                }
                 let stage = crate::startup_timing::Stage::new("recover_sessions");
                 runtime.append_session_recovery_issues(&mut issues).await?;
                 drop(stage);
@@ -160,6 +172,38 @@ mod tests {
             .await
             .unwrap();
         assert!(runtime.read_recovery_state().state.revision() > before);
+        runtime.shutdown_runtime().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn archived_migration_is_reported_as_application_recovery() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        std::fs::create_dir_all(home.join("studio")).unwrap();
+        std::fs::write(home.join("studio/studio.sqlite"), b"").unwrap();
+        let runtime = StudioRuntime::with_options(crate::StudioRuntimeOptions {
+            studio_home: Some(home),
+            host: crate::StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        runtime.start_runtime().await.unwrap();
+        background_task::finish(&runtime.recovery_task)
+            .await
+            .unwrap();
+
+        let issue = runtime
+            .recovery_issues()
+            .into_iter()
+            .find(|issue| issue.category == crate::StudioRecoveryIssueCategory::Storage)
+            .expect("archived migration is visible in the recovery API");
+        assert_eq!(issue.scope, crate::StudioRecoveryIssueScope::Application);
+        assert_eq!(issue.action, crate::StudioRecoveryIssueAction::None);
+        assert!(
+            std::path::Path::new(&issue.message)
+                .join("studio/studio.sqlite")
+                .is_file()
+        );
         runtime.shutdown_runtime().await.unwrap();
     }
 }

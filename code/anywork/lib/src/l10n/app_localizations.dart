@@ -464,6 +464,12 @@ abstract class AppLocalizations {
   /// **'{count} recovery issue(s) need attention'**
   String recoveryGlobalWarning(int count);
 
+  /// No description provided for @recoveryArchiveNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Migration could not continue. Previous data was archived and anywork started with default settings. Archive:'**
+  String get recoveryArchiveNotice;
+
   /// No description provided for @sidebarNew.
   ///
   /// In en, this message translates to:

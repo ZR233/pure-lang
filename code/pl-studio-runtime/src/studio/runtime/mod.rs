@@ -132,6 +132,7 @@ pub(in crate::studio::runtime) const ARCHIVE_TREE_SETTLE_TIMEOUT: std::time::Dur
 #[derive(Clone)]
 pub struct StudioRuntime {
     startup_observer: std::sync::Arc<dyn Fn(crate::StudioStartupStage) + Send + Sync>,
+    startup_recovery_notice: Option<super::session_migration::RecoveryNotice>,
     thread_observations: thread_observation::ThreadObservations,
     settings_updates: tokio::sync::watch::Sender<crate::config::ConfigRuntimeSnapshot>,
     settings_refresh: background_task::BackgroundTaskSlot,
