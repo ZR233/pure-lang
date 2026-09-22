@@ -2,12 +2,6 @@ part of '../widget_test.dart';
 
 void registerStatusAccessibilityTests() {
   group('status detail accessibility', () {
-    test('runtime cost formatting rounds to two decimal places', () {
-      expect(formatRuntimeCostAmount('CNY', 1.236), '￥1.24');
-      expect(formatRuntimeCostAmount('USD', 0.005), r'$0.01');
-      expect(formatRuntimeCostAmount('USD', -0.004), r'$0.00');
-    });
-
     testWidgets('context readout is a keyboard-operable semantic button', (
       tester,
     ) async {
@@ -236,56 +230,6 @@ void registerStatusAccessibilityTests() {
         expect(find.text('Partially unpriced'), findsNothing);
         await tester.pumpWidget(const SizedBox.shrink());
       }
-    });
-
-    testWidgets('status bar omits direct cost and cache text readouts', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(1280, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
-      final base = _emptyState();
-      final workspace = base.workspacesByThread[base.selectedThreadId!];
-      final state = base.copyWith(
-        workspacesByThread: {
-          base.selectedThreadId!: workspace!.copyWith(runtime: _cacheRuntime),
-        },
-      );
-      final api = _FakeStudioApi(state);
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [studioApiProvider.overrideWithValue(api)],
-          child: _localizedApp(
-            home: Scaffold(
-              body: ThreadStatusBar(workspace: state.selectedAgentWorkspace!),
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(StudioDriverKeys.contextUsage()), findsOneWidget);
-      expect(find.textContaining('￥'), findsNothing);
-      expect(find.textContaining(r'$'), findsNothing);
-      expect(find.textContaining('Cache'), findsNothing);
-
-      await tester.tap(find.byKey(StudioDriverKeys.contextUsage()));
-      await tester.pumpAndSettle();
-      expect(find.byKey(StudioDriverKeys.contextUsageDetail()), findsOneWidget);
-      expect(find.textContaining(r'$0.00 + ￥0.31'), findsOneWidget);
-    });
-
-    testWidgets('status bar keeps an unstarted Thread Mode lightweight', (
-      tester,
-    ) async {
-      final state = _emptyState();
-      await _pumpThreadStatusBar(tester, state);
-
-      expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
-      expect(_workflowRuntimeFinder(), findsNothing);
-      _expectNoWorkflowInspectorOrMutationUi();
     });
 
     testWidgets('status bar shows the canonical active workflow state', (

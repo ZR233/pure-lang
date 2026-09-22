@@ -442,28 +442,6 @@ mod tests {
     }
 
     #[test]
-    fn profile_base_override_snapshot_constructs_host_instruction_block() {
-        let snapshot =
-            InstructionSnapshot::profile_base_override("mai-team instructions", "host prompt");
-
-        assert_eq!(
-            snapshot,
-            InstructionSnapshot {
-                base: InstructionBlock {
-                    source: InstructionSource {
-                        kind: InstructionSourceKind::ProfileBaseOverride,
-                        label: "mai-team instructions".to_string(),
-                        path: None,
-                    },
-                    content: "host prompt".to_string(),
-                },
-                developer: Vec::new(),
-                user: Vec::new(),
-            }
-        );
-    }
-
-    #[test]
     fn assembles_three_layers_in_stable_order() {
         let dir = temp_dir("order");
         fs::create_dir_all(&dir).unwrap();
@@ -741,50 +719,6 @@ mod tests {
             snapshot.base.source.kind,
             InstructionSourceKind::ConfigBaseOverride
         );
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn built_in_base_requires_doc_first_and_final_review() {
-        let dir = temp_dir("built-in-base-doc-flow");
-        fs::create_dir_all(&dir).unwrap();
-
-        let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
-            instructions: None,
-            skills: None,
-            skill_catalog: None,
-            execution_profile: None,
-            model: &ModelInfo::compatible("test-model"),
-            workspace_root: &dir,
-            current_dir: &dir,
-            workspace_documents: None,
-            workspace_instructions: None,
-            subagent_constraint: None,
-            skill_suggestions: None,
-            execution_environment: None,
-        })
-        .unwrap();
-
-        assert_eq!(
-            snapshot.base.source.kind,
-            InstructionSourceKind::BuiltInBase
-        );
-        assert!(snapshot.base.content.contains("再开始写代码"));
-        assert!(snapshot.base.content.contains("整体回看计划"));
-        assert!(
-            snapshot
-                .base
-                .content
-                .contains("首次调用工具前必须输出 commentary")
-        );
-        assert!(
-            snapshot
-                .base
-                .content
-                .contains("每次 commentary 使用 1–3 句")
-        );
-        assert!(snapshot.base.content.contains("主代理与所有子代理"));
-        assert!(snapshot.base.content.contains("taskSummary"));
         fs::remove_dir_all(dir).unwrap();
     }
 

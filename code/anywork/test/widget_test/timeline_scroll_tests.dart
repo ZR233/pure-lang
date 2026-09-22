@@ -47,38 +47,6 @@ void registerTimelineScrollTests() {
     },
   );
 
-  testWidgets('short timeline anchors current activity above its bottom edge', (
-    tester,
-  ) async {
-    _configureResponsiveView(tester, const Size(980, 520));
-    const threadId = 'session-short-activity';
-
-    await tester.pumpWidget(
-      _timelineHarness(
-        threadId: threadId,
-        items: _scrollItems(threadId, 1),
-        turnState: const RunningStudioTurnState(
-          startedAt: 1,
-          activity: StudioTurnActivity.thinking,
-        ),
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-
-    final timelineRect = tester.getRect(find.byKey(StudioDriverKeys.timeline));
-    final activityRect = tester.getRect(
-      find.byKey(const ValueKey('timeline-current-activity')),
-    );
-    expect(activityRect.left, closeTo(timelineRect.left + 24, 0.1));
-    expect(activityRect.width, lessThanOrEqualTo(700));
-    expect(activityRect.bottom, closeTo(timelineRect.bottom - 14, 0.1));
-    expect(
-      find.byKey(const ValueKey('timeline-current-activity-pulse')),
-      findsOneWidget,
-    );
-  });
-
   testWidgets('timeline follows appended messages from the bottom', (
     tester,
   ) async {

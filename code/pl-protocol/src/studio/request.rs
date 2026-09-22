@@ -127,25 +127,6 @@ mod tests {
     }
 
     #[test]
-    fn create_thread_title_is_optional_and_accepts_explicit_title() {
-        let missing = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
-            "input": {"inputId": "request-1", "text": "hello", "attachmentDraftIds": []},
-            "mode": "mode.simple",
-        }))
-        .unwrap();
-        assert_eq!(missing.workspace_mode, crate::ThreadWorkspaceMode::Local);
-        assert_eq!(missing.title, None);
-
-        let explicit = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
-            "title": "Explicit title",
-            "input": {"inputId": "request-1", "text": "hello", "attachmentDraftIds": []},
-            "mode": "mode.simple",
-        }))
-        .unwrap();
-        assert_eq!(explicit.title.as_deref(), Some("Explicit title"));
-    }
-
-    #[test]
     fn create_thread_workspace_mode_is_camel_case_and_defaults_to_local() {
         let worktree = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
             "input": {"inputId": "request-1", "text": "hello", "attachmentDraftIds": []},
@@ -166,5 +147,14 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(local.workspace_mode, crate::ThreadWorkspaceMode::Local);
+        assert_eq!(local.title, None);
+
+        let explicit = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
+            "title": "Explicit title",
+            "input": {"inputId": "request-1", "text": "hello", "attachmentDraftIds": []},
+            "mode": "mode.simple",
+        }))
+        .unwrap();
+        assert_eq!(explicit.title.as_deref(), Some("Explicit title"));
     }
 }

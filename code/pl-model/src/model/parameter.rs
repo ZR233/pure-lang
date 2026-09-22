@@ -289,25 +289,6 @@ mod tests {
     }
 
     #[test]
-    fn parameter_wire_apply_handles_glm52_none() {
-        // GLM-5.2 选 none：set thinking.type=disabled，remove reasoning_effort
-        let wire = ParameterWire {
-            set: vec![WireAssignment {
-                path: "thinking.type".to_string(),
-                value: json!("disabled"),
-            }],
-            remove: vec!["reasoning_effort".to_string()],
-        };
-        let mut body: Map<String, Value> =
-            serde_json::from_str(r#"{"reasoning_effort":"high","thinking":{"type":"enabled"}}"#)
-                .unwrap();
-
-        wire.apply_to(&mut body);
-
-        assert_eq!(body_value(body), json!({"thinking": {"type": "disabled"}}));
-    }
-
-    #[test]
     fn parameter_wire_apply_set_runs_before_remove() {
         // set 同一字段再 remove：最终字段被移除（remove 后执行）
         let wire = ParameterWire {

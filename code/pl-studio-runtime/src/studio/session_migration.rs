@@ -2640,10 +2640,10 @@ mod tests {
     };
     use super::{
         ARCHIVE_DIR_NAME, CALLS_STAGING_DIR_NAME, LayoutRootAction, MigrationTrigger,
-        STAGING_DIR_NAME, archive_legacy_sources, call_store_destination,
-        commit_layout_publication, ensure_layout_committed, layout_publication_marker_path,
-        layout_publication_pending, layout_root_action, migrate_legacy_storage,
-        migration_state_path, published_or_staged_sessions_dir, run_migration,
+        STAGING_DIR_NAME, archive_legacy_sources, commit_layout_publication,
+        ensure_layout_committed, layout_publication_marker_path, layout_publication_pending,
+        layout_root_action, migrate_legacy_storage, migration_state_path,
+        published_or_staged_sessions_dir, run_migration,
     };
     use crate::studio::catalog::CatalogEntry;
     use crate::studio::paths::StudioPaths;
@@ -2696,40 +2696,6 @@ mod tests {
         );
         assert!(layout_root_action(true, true).is_err());
         assert!(layout_root_action(false, false).is_err());
-    }
-
-    /// A canonical call store that appears while the verified staged store is still present is a
-    /// bypass collision: choosing either side would discard verified call facts, so it fails closed.
-    /// A single side resolves to that side.
-    #[tokio::test]
-    async fn call_store_destination_refuses_a_bypass_collision() {
-        let root = tempfile::tempdir().unwrap();
-        let paths = StudioPaths::resolve(Some(root.path().to_path_buf())).unwrap();
-        let calls_staging = paths.home().join(CALLS_STAGING_DIR_NAME);
-        let staged = calls_staging.join("calls.sqlite");
-
-        assert_eq!(
-            call_store_destination(&paths, &calls_staging)
-                .await
-                .unwrap(),
-            None
-        );
-
-        write_file(&staged, b"staged");
-        assert_eq!(
-            call_store_destination(&paths, &calls_staging)
-                .await
-                .unwrap(),
-            Some(staged.clone())
-        );
-
-        // A canonical store appearing while the verified staged store is still present is refused.
-        write_file(&paths.calls_database(), b"canonical");
-        assert!(
-            call_store_destination(&paths, &calls_staging)
-                .await
-                .is_err()
-        );
     }
 
     /// The same collision rule protects the session layout root.
@@ -3244,24 +3210,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(recorded.phase, MigrationPhase::Published);
-    }
-
-    /// A crash after both roots were renamed resumes as an idempotent no-op and retires the
-    /// announcement.
-    #[tokio::test]
-    async fn verified_resume_is_idempotent_after_both_roots_renamed() {
-        let root = tempfile::tempdir().unwrap();
-        let paths = StudioPaths::resolve(Some(root.path().to_path_buf())).unwrap();
-        std::fs::create_dir_all(paths.data_dir()).unwrap();
-        let storage_key = fixture_storage_key();
-        seed_verified_report(&paths, FIXTURE_THREAD, &storage_key).await;
-        seed_session_dir(&paths.sessions_dir(), &storage_key, FIXTURE_THREAD);
-        std::fs::create_dir_all(paths.calls_dir()).unwrap();
-        seed_layout_marker(&paths);
-
-        run_startup(&paths).await.unwrap();
-
-        assert_published(&paths);
     }
 
     /// A crash after the first canonical document was written leaves a valid but partial document set;

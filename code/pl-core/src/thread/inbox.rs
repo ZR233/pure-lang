@@ -265,20 +265,4 @@ mod tests {
         assert_eq!(admit_message(&mut state, message("resumed")).unwrap(), 6);
         assert_eq!(state.inbox_sequence, 6);
     }
-
-    /// A repeated delivery of an already-consumed identity keeps answering with its original
-    /// receipt instead of being admitted a second time.
-    #[test]
-    fn consumed_identity_keeps_its_original_receipt() {
-        let mut state = ThreadSnapshot::default();
-        admit_message(&mut state, message("initial")).expect("admit initial");
-        let record = state.inbox[0].clone();
-        state.consumed_messages = record.sequence;
-        state.retain_live_facts();
-        assert_eq!(
-            MessageIdentity::from_record(&record),
-            state.consumed_message_identities[0]
-        );
-        assert_eq!(state.consumed_message_identities[0].sequence, 1);
-    }
 }

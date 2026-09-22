@@ -1,26 +1,5 @@
 part of '../widget_test.dart';
 
-Future<void> _expectMenuOpensAboveTrigger({
-  required WidgetTester tester,
-  required String triggerTooltip,
-  required String menuText,
-}) async {
-  final trigger = find.byTooltip(triggerTooltip);
-  expect(trigger, findsOneWidget);
-  final triggerRect = tester.getRect(trigger);
-
-  await tester.tap(trigger);
-  await tester.pumpAndSettle();
-
-  final menuItem = find.text(menuText).last;
-  expect(menuItem, findsOneWidget);
-  final menuItemRect = tester.getRect(menuItem);
-  expect(menuItemRect.bottom, lessThanOrEqualTo(triggerRect.top - 4));
-
-  await tester.tapAt(const Offset(4, 4));
-  await tester.pumpAndSettle();
-}
-
 List<ThreadItemView> _scrollItems(
   String threadId,
   int count, {

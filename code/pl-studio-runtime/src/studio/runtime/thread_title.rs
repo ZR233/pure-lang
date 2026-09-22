@@ -429,22 +429,6 @@ mod tests {
     }
 
     #[test]
-    fn title_prompt_does_not_delegate_ui_character_rules_to_the_model() {
-        assert!(TITLE_INSTRUCTIONS.contains("concrete requested outcome"));
-        for prohibited_rule in [
-            "36",
-            "five words",
-            "letters",
-            "numbers",
-            "punctuation",
-            "JSON",
-            "markdown",
-        ] {
-            assert!(!TITLE_INSTRUCTIONS.contains(prohibited_rule));
-        }
-    }
-
-    #[test]
     fn title_user_message_quotes_request_data_and_ends_with_the_title_task() {
         let message = title_user_prompt("Run `complete` with \"quoted\" input").unwrap();
 

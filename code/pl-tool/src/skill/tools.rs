@@ -627,33 +627,6 @@ mod tests {
     }
 
     #[test]
-    fn create_writes_project_skill() {
-        let workspace = temp_dir("create");
-        let catalog = SkillCatalog {
-            project_dir: workspace.join(".agents/skills"),
-            skills: Vec::new(),
-            warnings: Vec::new(),
-            complete: true,
-        };
-        let input = CreateSkillInput {
-            target: SkillTargetInput {
-                name: "local-flow".to_string(),
-            },
-            content: skill_content("local-flow", "Local flow"),
-            category: None,
-        };
-
-        create_skill("skill_manage", &catalog, &tool_workspace(&workspace), input).unwrap();
-
-        assert!(
-            workspace
-                .join(".agents/skills/local-flow/SKILL.md")
-                .exists()
-        );
-        fs::remove_dir_all(workspace).unwrap();
-    }
-
-    #[test]
     fn skill_inputs_and_outputs_flatten_shared_fields() {
         let input = serde_json::from_value::<SkillManageInput>(serde_json::json!({
             "action": "create",

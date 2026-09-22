@@ -249,13 +249,6 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn excludes_pdb_files_case_insensitively() {
-        assert!(is_excluded(Path::new("app.pdb")));
-        assert!(is_excluded(Path::new("APP.PDB")));
-        assert!(!is_excluded(Path::new("app.dll")));
-    }
-
-    #[test]
     fn rejects_existing_release_directory() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

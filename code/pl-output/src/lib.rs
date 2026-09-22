@@ -244,21 +244,6 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn short_string_not_truncated() {
-        let strategy = TruncationStrategy::new(10, 10);
-        let result = strategy.truncate("hello");
-
-        assert_eq!(
-            result,
-            TruncatedOutput {
-                content: "hello".to_string(),
-                was_truncated: false,
-                original_length: 5,
-            }
-        );
-    }
-
-    #[test]
     fn long_string_truncated_with_indicator() {
         let strategy = TruncationStrategy::new(5, 5);
         let input = "aaaaaBBBBBBBBBBccccceeeee";

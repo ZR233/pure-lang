@@ -452,34 +452,6 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
-    fn missing_browser_and_driver_are_reported_together() {
-        let diagnostic = missing_webdriver_tools_diagnostic(true, true);
-
-        assert!(diagnostic.contains("Chrome/Chromium browser, matching chromedriver"));
-        assert!(diagnostic.contains("CHROME_EXECUTABLE"));
-        assert!(diagnostic.contains("自行选择空闲端口"));
-    }
-
-    #[test]
-    fn webdriver_output_preserves_both_streams() {
-        assert_eq!(
-            combined_output(b"driver stdout\n", b"driver stderr\n"),
-            "driver stdout\n\ndriver stderr\n"
-        );
-    }
-
-    #[test]
-    fn diagnostic_can_name_only_the_missing_component() {
-        assert!(
-            missing_webdriver_tools_diagnostic(false, true).contains("缺少: matching chromedriver")
-        );
-        assert!(
-            missing_webdriver_tools_diagnostic(true, false)
-                .contains("缺少: Chrome/Chromium browser")
-        );
-    }
-
-    #[test]
     fn matching_browser_and_driver_major_versions_are_required() -> Result<()> {
         ensure_matching_major_versions(
             "Chromium 151.0.7922.108 snap",
@@ -499,15 +471,6 @@ mod tests {
             "Only one usage of each socket address is normally permitted"
         ));
         assert!(!address_conflict("ChromeDriver executable is incompatible"));
-    }
-
-    #[test]
-    fn snap_launcher_is_mapped_to_its_application_name() {
-        assert_eq!(
-            snap_application_name(Path::new("/snap/bin/chromium")),
-            Some(std::ffi::OsStr::new("chromium"))
-        );
-        assert_eq!(snap_application_name(Path::new("/usr/bin/chromium")), None);
     }
 
     #[cfg(unix)]

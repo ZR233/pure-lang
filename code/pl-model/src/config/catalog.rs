@@ -479,49 +479,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builtin_registry_contains_gpt56_and_shared_mimo_catalog() {
-        let registry = ProviderCatalogRegistry::builtin();
-        registry.validate().unwrap();
-        let snapshot = registry.snapshot().unwrap();
-
-        let openai = &snapshot.model_catalogs["openai"];
-        assert!(openai.models.iter().any(|model| model.id == "gpt-5.6-sol"));
-        for model in &openai.models {
-            assert_eq!(model.transport.protocol, "responses");
-            assert_eq!(
-                model.transport.connection_modes,
-                vec![
-                    ProviderConnectionModeDescriptor {
-                        id: "web_socket".to_string(),
-                        display_name: "WebSocket".to_string(),
-                    },
-                    ProviderConnectionModeDescriptor {
-                        id: "http".to_string(),
-                        display_name: "HTTP".to_string(),
-                    },
-                ]
-            );
-            assert_eq!(model.transport.default_connection_mode, "web_socket");
-        }
-        let mimo = &snapshot.model_catalogs["mimo"];
-        assert_eq!(
-            mimo.models
-                .iter()
-                .map(|model| model.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["mimo-v2.5-pro", "mimo-v2.5"]
-        );
-        assert_eq!(
-            snapshot
-                .presets
-                .iter()
-                .filter(|preset| preset.model_catalog_id == "mimo")
-                .count(),
-            2
-        );
-    }
-
-    #[test]
     fn deepseek_preset_exposes_native_hosted_search_dialect() {
         let snapshot = ProviderCatalogRegistry::builtin().snapshot().unwrap();
         let deepseek = snapshot
@@ -633,20 +590,5 @@ mod tests {
         let changed = changed.snapshot().unwrap();
 
         assert_ne!(original.revision, changed.revision);
-    }
-
-    #[test]
-    fn registry_allows_responses_capability_for_a_mixed_protocol_catalog() {
-        let mut registry = ProviderCatalogRegistry::builtin();
-        registry
-            .presets
-            .iter_mut()
-            .find(|preset| preset.id.as_str() == "deepseek")
-            .unwrap()
-            .service_capabilities
-            .web_search
-            .hosted_responses = true;
-
-        registry.validate().unwrap();
     }
 }

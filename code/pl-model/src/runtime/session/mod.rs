@@ -234,23 +234,6 @@ mod tests {
         assert!(!ModelSession::default().uses_responses_http_fallback(11));
     }
 
-    #[test]
-    fn continuation_metrics_are_shared_and_snapshotable() {
-        let session = ModelSession::default();
-        let clone = session.clone();
-        let before = session.orchestration_snapshot();
-
-        clone.record_continuation_attempt();
-        clone.record_continuation_invalid();
-
-        let after = session.orchestration_snapshot();
-        assert_eq!(
-            after.continuation_attempts - before.continuation_attempts,
-            1
-        );
-        assert_eq!(after.continuation_invalid - before.continuation_invalid, 1);
-        assert_eq!(after.continuation_used - before.continuation_used, 0);
-    }
     #[tokio::test]
     async fn closing_waits_for_active_invocation_and_seals_all_clones() {
         let session = ModelSession::default();

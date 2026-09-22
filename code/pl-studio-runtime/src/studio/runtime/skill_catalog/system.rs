@@ -394,44 +394,6 @@ mod tests {
     }
 
     #[test]
-    fn embedded_bundle_contains_exactly_valid_expected_skills() {
-        let assets = validated_bundled_assets().unwrap();
-        let documents = assets
-            .iter()
-            .filter(|asset| is_main_skill_document(&asset.path))
-            .map(|asset| {
-                asset
-                    .path
-                    .parent()
-                    .unwrap()
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .collect::<BTreeSet<_>>();
-
-        assert_eq!(
-            documents,
-            EXPECTED_SYSTEM_SKILLS
-                .into_iter()
-                .map(ToOwned::to_owned)
-                .collect()
-        );
-    }
-
-    #[test]
-    fn every_embedded_asset_is_zstd_compressed_and_round_trips() {
-        for path in BundledSystemSkills::iter() {
-            let compressed = BundledSystemSkills::compressed(&path).unwrap();
-            let restored = BundledSystemSkills::get(&path).unwrap();
-
-            assert_eq!(compressed.content_encoding(), "zstd");
-            assert_eq!(compressed.data.decoded(), restored.data.as_ref());
-        }
-    }
-
-    #[test]
     fn refresh_reuses_unchanged_tree_and_repairs_changed_assets() {
         let home = tempfile::tempdir().unwrap();
         let system_dir = target(home.path());

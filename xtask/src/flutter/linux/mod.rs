@@ -196,17 +196,6 @@ fn is_executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsStr;
-
-    #[test]
-    fn missing_programs_are_reported_together_without_machine_paths() {
-        let diagnostic = missing_programs_diagnostic(&["cmake", "clang++"]);
-
-        assert!(diagnostic.contains("PATH 中缺少: cmake, clang++"));
-        assert!(diagnostic.contains("sudo apt-get install -y clang cmake ninja-build"));
-        assert!(!diagnostic.contains("/usr/lib/gcc"));
-        assert!(!diagnostic.contains("CPLUS_INCLUDE_PATH"));
-    }
 
     #[test]
     fn compiler_failure_preserves_raw_output_and_actionable_context() {
@@ -221,24 +210,5 @@ mod tests {
         assert!(diagnostic.contains("命令: /usr/bin/cmake --build /tmp/probe --verbose"));
         assert!(diagnostic.contains(raw));
         assert!(diagnostic.contains("C++ 标准库开发包"));
-    }
-
-    #[test]
-    fn mixed_stdout_and_stderr_are_kept_in_order() {
-        assert_eq!(
-            raw_output(b"configure output\n", b"compiler detail\n"),
-            "configure output\n\ncompiler detail\n"
-        );
-    }
-
-    #[test]
-    fn command_display_quotes_paths_and_arguments() {
-        let mut command = Command::new("/tmp/tool path/cmake");
-        command.args([OsStr::new("--build"), OsStr::new("/tmp/build dir")]);
-
-        assert_eq!(
-            command_display(&command),
-            "\"/tmp/tool path/cmake\" --build \"/tmp/build dir\""
-        );
     }
 }

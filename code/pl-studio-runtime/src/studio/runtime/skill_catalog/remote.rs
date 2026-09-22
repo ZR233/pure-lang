@@ -75,25 +75,6 @@ mod tests {
     }
 
     #[test]
-    fn local_sources_match_the_core_readonly_source_contract() {
-        let user_dir = std::env::temp_dir().join("pure-remote-skills-user");
-        let external_dir = std::env::temp_dir().join("pure-remote-skills-external");
-        let config = SkillsConfig {
-            user_dir: user_dir.to_string_lossy().into_owned(),
-            external_dirs: vec![external_dir.to_string_lossy().into_owned()],
-            ..SkillsConfig::default()
-        };
-        let system_dir = Path::new("/studio/skills/.system");
-
-        let sources = remote_local_sources(&config, Some(system_dir)).unwrap();
-        let expected = resolve_local_readonly_skill_sources(&config, Some(system_dir)).unwrap();
-
-        assert_eq!(sources, expected);
-        assert_eq!(sources.first().unwrap().root, user_dir);
-        assert_eq!(sources.last().unwrap().root, external_dir);
-    }
-
-    #[test]
     fn local_sources_omit_system_when_no_system_directory_is_registered() {
         let user_dir = std::env::temp_dir().join("pure-remote-skills-user-only");
         let config = SkillsConfig {

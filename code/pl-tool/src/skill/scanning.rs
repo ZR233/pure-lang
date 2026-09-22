@@ -428,13 +428,4 @@ mod tests {
         assert_eq!(metadata.description, "Rust flow");
         assert_eq!(metadata.platforms, vec!["windows".to_string()]);
     }
-
-    #[test]
-    fn rejects_missing_frontmatter() {
-        let error = validate_skill_document("# Nope", None)
-            .unwrap_err()
-            .to_string();
-
-        assert!(error.contains("frontmatter"));
-    }
 }

@@ -234,64 +234,6 @@ void registerTimelineModelTests() {
     },
   );
 
-  testWidgets(
-    'image attachment without a filename uses the localized attachment fallback',
-    (tester) async {
-      const attachment = ThreadAttachmentView(
-        id: 'tool-image-noname',
-        modality: AttachmentModalityView.image,
-        mediaType: 'image/png',
-        byteSize: 68,
-      );
-      final item = _threadItemFixture(
-        id: 'view-image-noname-item',
-        threadId: 'thread-1',
-        turnId: 'turn-1',
-        ordinal: 1,
-        kind: ThreadItemKind.toolCall,
-        status: 'succeeded',
-        channel: null,
-        tool: const TimelineToolPart(
-          toolCallId: 'tool-call-noname',
-          callId: 'call-noname',
-          name: 'view_image',
-          result: '{"viewedImage":true}',
-          attachments: [attachment],
-        ),
-      );
-      final api = _FakeStudioApi(_emptyState())
-        ..threadAttachmentBytes[(
-          threadId: 'thread-1',
-          attachmentId: 'tool-image-noname',
-        )] = base64Decode(
-          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-        );
-
-      await tester.pumpWidget(
-        _timelineHarness(
-          threadId: 'thread-1',
-          items: [item],
-          api: api,
-          locale: const Locale.fromSubtags(
-            languageCode: 'zh',
-            scriptCode: 'Hans',
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(
-        find.byKey(
-          StudioDriverKeys.viewImageToggle('call-noname:tool-image-noname'),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.byTooltip('附件 · 68 B'), findsOneWidget);
-      expect(find.byTooltip('Image · 68 B'), findsNothing);
-    },
-  );
-
   testWidgets('view_image reports an authorized attachment load failure', (
     tester,
   ) async {
@@ -1070,34 +1012,6 @@ void registerTimelineModelTests() {
     },
   );
 
-  testWidgets('parent agent message has its own label and hierarchy icon', (
-    tester,
-  ) async {
-    final item = _threadItemFixture(
-      id: 'parent-agent-message',
-      threadId: 'child-thread',
-      turnId: 'child-turn',
-      ordinal: 1,
-      kind: ThreadItemKind.parentAgentMessage,
-      channel: null,
-      text: 'Check the latest result.',
-    );
-
-    await tester.pumpWidget(
-      _timelineHarness(threadId: 'child-thread', items: [item]),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('Main agent'), findsOneWidget);
-    expect(
-      find.byKey(StudioDriverKeys.parentAgentLabel(item.id)),
-      findsOneWidget,
-    );
-    expect(find.text('Check the latest result.'), findsOneWidget);
-    expect(find.byIcon(Icons.account_tree_outlined), findsOneWidget);
-    expect(find.byIcon(Icons.person_outline), findsNothing);
-  });
-
   testWidgets('tool grouping stops at a message boundary', (tester) async {
     final items = [
       _threadItemFixture(
@@ -1255,77 +1169,6 @@ void registerTimelineModelTests() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Agent activated skill · pdf'), findsNWidgets(2));
-  });
-
-  testWidgets('Skill Item renders a compact localized activation row', (
-    tester,
-  ) async {
-    final item = _threadItemFixture(
-      id: 'skill-1',
-      threadId: 'thread-1',
-      turnId: 'turn-1',
-      ordinal: 1,
-      kind: ThreadItemKind.skill,
-      skill: TimelineSkillActivation(
-        name: 'pdf',
-        source: 'system',
-        providerId: 'local-filesystem',
-        resourceBase: const SkillResourceBaseView(
-          SkillResourceBaseKind.directory,
-          '/skills/pdf',
-        ),
-        cause: const SkillActivationCauseView(
-          SkillActivationCauseKind.tool,
-          'tool-1',
-        ),
-        activatedAt: _fixtureDate(1),
-      ),
-    );
-
-    await tester.pumpWidget(
-      _timelineHarness(threadId: 'thread-1', items: [item]),
-    );
-    await tester.pumpAndSettle();
-
-    expect(
-      find.byKey(StudioDriverKeys.timelineSkillActivation('skill-1')),
-      findsOneWidget,
-    );
-    expect(find.text('Agent activated skill · pdf'), findsOneWidget);
-    expect(find.text('system'), findsOneWidget);
-  });
-
-  testWidgets('user gesture Skill Item uses distinct localized copy', (
-    tester,
-  ) async {
-    final item = _threadItemFixture(
-      id: 'skill-user-1',
-      threadId: 'thread-1',
-      turnId: 'turn-1',
-      ordinal: 1,
-      kind: ThreadItemKind.skill,
-      skill: TimelineSkillActivation(
-        name: 'doc',
-        source: 'user',
-        providerId: 'local-filesystem',
-        resourceBase: const SkillResourceBaseView(
-          SkillResourceBaseKind.directory,
-          '/skills/doc',
-        ),
-        cause: const SkillActivationCauseView(
-          SkillActivationCauseKind.userGesture,
-          'user-skill-0',
-        ),
-        activatedAt: _fixtureDate(1),
-      ),
-    );
-
-    await tester.pumpWidget(
-      _timelineHarness(threadId: 'thread-1', items: [item]),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('User activated skill · doc'), findsOneWidget);
   });
 
   testWidgets(

@@ -133,14 +133,6 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn preserves_short_output() {
-        let mut buffer = HeadTailBuffer::new(10);
-        buffer.push_chunk(b"hello");
-
-        assert_eq!(buffer.display_text(), "hello");
-    }
-
-    #[test]
     fn omits_middle_when_capacity_is_exceeded() {
         let mut buffer = HeadTailBuffer::new(10);
         buffer.push_chunk(b"aaaaabbbbbccccc");

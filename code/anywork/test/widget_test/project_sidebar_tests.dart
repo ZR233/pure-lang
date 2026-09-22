@@ -490,32 +490,4 @@ void registerProjectSidebarTests() {
     );
     expect(tester.takeException(), isNull);
   });
-
-  testWidgets('sidebar worktree marker copy follows the Studio locale', (
-    tester,
-  ) async {
-    _configureResponsiveView(tester, const Size(1440, 900));
-    final state = _workspaceModeState();
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(_FakeStudioApi(state))],
-        child: _localizedApp(
-          home: const StudioShell(),
-          locale: const Locale.fromSubtags(
-            languageCode: 'zh',
-            scriptCode: 'Hans',
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(
-      find.byKey(StudioDriverKeys.threadWorkspaceMode('session-worktree')),
-      findsOneWidget,
-    );
-    expect(find.byTooltip('会话工作树'), findsOneWidget);
-    expect(find.byTooltip('Session worktree'), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
 }

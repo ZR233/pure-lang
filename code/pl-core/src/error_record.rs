@@ -152,15 +152,8 @@ mod tests {
     }
 
     #[test]
-    fn recorded_chain_rebuilds_exactly_and_an_empty_chain_has_no_source() {
-        let chain = vec!["outer".to_owned(), "inner\0".to_owned()];
-        let source = chain_source(chain.clone()).expect("a non-empty chain rebuilds a source");
-        assert_eq!(chain_text(source.as_ref()), chain);
-        assert!(chain_source(Vec::new()).is_none());
-    }
-
-    #[test]
     fn diagnostic_chain_round_trips_without_instantiating_the_original_error_type() {
+        assert!(chain_source(Vec::new()).is_none());
         let error = crate::model::ModelError {
             details: Some(Box::new(
                 crate::context::OpaquePayload::new("unknown.failure", 73, "original\r\n诊断\0")

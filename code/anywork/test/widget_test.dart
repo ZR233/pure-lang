@@ -18,7 +18,6 @@ import 'package:anywork/src/data/repositories/studio_repository.dart';
 import 'package:anywork/src/domain/models/studio_models.dart';
 import 'package:anywork/src/features/settings/settings_page.dart';
 import 'package:anywork/src/features/settings/settings_ssh_tab.dart';
-import 'package:anywork/src/features/settings/settings_statistics_tab.dart';
 import 'package:anywork/src/features/interaction/composer_dock.dart';
 
 import 'dart:io' show File, Platform;
@@ -47,7 +46,6 @@ part 'widget_test/live_window_tests.dart';
 part 'widget_test/snapshot_settings_tests.dart';
 part 'widget_test/thread_stream_tests.dart';
 part 'widget_test/agent_workspace_tests.dart';
-part 'widget_test/demo_project_tests.dart';
 part 'widget_test/timeline_tool_tests.dart';
 part 'widget_test/timeline_scroll_tests.dart';
 part 'widget_test/timeline_selection_tests.dart';
@@ -76,7 +74,6 @@ void main() {
   registerSnapshotSettingsTests();
   registerThreadStreamTests();
   registerAgentWorkspaceTests();
-  registerDemoProjectTests();
   registerTimelineToolTests();
   registerTimelineScrollTests();
   registerTimelineSelectionTests();

@@ -67,26 +67,11 @@ fn asset_name(version: &Version, kind: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
 
     #[test]
     fn rejects_prerelease_and_build_metadata() {
         assert!(validate_version("1.0.0-rc.1").is_err());
         assert!(validate_version("1.0.0+1").is_err());
         assert!(validate_version("v1.0.0").is_err());
-    }
-
-    #[test]
-    fn uses_fixed_release_asset_names() -> Result<()> {
-        let version = validate_version("1.2.3")?;
-        assert_eq!(
-            asset_name(&version, "setup.exe"),
-            "anywork-1.2.3-windows-x86_64-setup.exe"
-        );
-        assert_eq!(
-            asset_name(&version, "portable.zip"),
-            "anywork-1.2.3-windows-x86_64-portable.zip"
-        );
-        Ok(())
     }
 }

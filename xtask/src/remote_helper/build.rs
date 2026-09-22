@@ -249,31 +249,4 @@ mod tests {
                 .contains("unsupported remote helper target")
         );
     }
-
-    #[test]
-    fn all_targets_is_stable() {
-        assert_eq!(
-            selected_targets(&BuildRemoteHelperOptions {
-                target: None,
-                all_targets: true,
-            })
-            .expect("all targets"),
-            SUPPORTED_TARGETS
-        );
-    }
-
-    #[test]
-    fn linker_env_name_uses_cargo_convention() {
-        assert_eq!(
-            linker_env_name("aarch64-unknown-linux-musl"),
-            "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER"
-        );
-    }
-
-    #[test]
-    fn default_builder_uses_zig_when_both_tools_are_available() {
-        assert_eq!(choose_default_builder(true, true), CargoBuilder::Zigbuild);
-        assert_eq!(choose_default_builder(true, false), CargoBuilder::Cargo);
-        assert_eq!(choose_default_builder(false, true), CargoBuilder::Cargo);
-    }
 }

@@ -904,18 +904,3 @@ StudioState _withSelectedTurn(StudioState state, StudioTurnView? turn) {
     },
   );
 }
-
-StudioState _withSelectedInteractions(
-  StudioState state,
-  List<PendingInteraction> interactions,
-) {
-  final threadId = state.selectedThreadId!;
-  return state.copyWith(
-    workspacesByThread: {
-      ...state.workspacesByThread,
-      threadId: state.workspacesByThread[threadId]!.copyWith(
-        interactions: interactions,
-      ),
-    },
-  );
-}

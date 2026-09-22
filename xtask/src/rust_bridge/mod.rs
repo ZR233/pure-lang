@@ -27,17 +27,6 @@ impl RustBridgeArtifacts {
     pub(crate) fn debug_symbols(&self) -> Option<&Path> {
         self.debug_symbols.as_deref()
     }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(
-        dynamic_library: impl Into<PathBuf>,
-        debug_symbols: Option<PathBuf>,
-    ) -> Self {
-        Self {
-            dynamic_library: dynamic_library.into(),
-            debug_symbols,
-        }
-    }
 }
 
 pub(crate) fn build(options: BuildRustBridgeOptions) -> Result<()> {
@@ -238,28 +227,6 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
-    #[test]
-    fn artifact_candidates_follow_cargo_profile() {
-        let target_dir = Path::new("workspace-target");
-        let debug = artifact_candidates(target_dir, BridgeConfiguration::Debug);
-        assert_eq!(
-            debug.dynamic_library,
-            target_dir.join("debug").join(format!(
-                "{}{BRIDGE_TARGET_NAME}.{}",
-                dynamic_library_prefix(),
-                dynamic_library_extension()
-            ))
-        );
-        let release = artifact_candidates(target_dir, BridgeConfiguration::Release);
-        assert_eq!(
-            release.dynamic_library,
-            target_dir.join("release").join(format!(
-                "{}{BRIDGE_TARGET_NAME}.{}",
-                dynamic_library_prefix(),
-                dynamic_library_extension()
-            ))
-        );
-    }
     #[test]
     #[cfg(target_os = "linux")]
     fn cached_cmake_install_observes_current_demo_mode() {

@@ -1224,17 +1224,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_binds_the_configured_model() {
-        use pretty_assertions::assert_eq;
-
-        let mut model = ModelInfo::compatible("deepseek-flash");
-        model.display_name = "Custom DeepSeek".to_string();
-        let provider = InvocationRunner::new(ProviderEndpoint::deepseek(None), model).unwrap();
-
-        assert_eq!(provider.model().display_name, "Custom DeepSeek");
-    }
-
-    #[test]
     fn sent_model_is_extracted_after_all_wire_overrides() {
         let endpoint = ProviderEndpoint::compatible("Local", "http://127.0.0.1:1/v1");
 

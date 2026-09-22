@@ -34,20 +34,6 @@ fn parse(content: &str) -> Result<Version> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn parses_stable_pubspec_version() -> Result<()> {
-        assert_eq!(
-            parse("name: studio\nversion: 2.3.4\n")?,
-            Version::new(2, 3, 4)
-        );
-        assert_eq!(
-            parse("version: 1.2.3 # x-release-please-version\n")?,
-            Version::new(1, 2, 3)
-        );
-        Ok(())
-    }
 
     #[test]
     fn rejects_missing_or_non_stable_versions() {

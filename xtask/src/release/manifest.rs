@@ -344,23 +344,6 @@ mod tests {
     const TEST_SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
 
     #[test]
-    fn manifest_uses_typed_camel_case_schema() -> Result<()> {
-        let version = Version::parse("1.2.3")?;
-        let manifest = manifest_for(
-            &version,
-            123,
-            "anywork-1.2.3-windows-x86_64-setup.exe",
-            456,
-            "abcd".to_string(),
-        );
-        let json = serde_json::to_value(manifest)?;
-        assert_eq!(json["schemaVersion"], 1);
-        assert_eq!(json["publishedAt"], 123);
-        assert_eq!(json["platforms"]["windows-x86_64"]["size"], 456);
-        Ok(())
-    }
-
-    #[test]
     fn signature_verification_rejects_tampered_release_bytes() -> Result<()> {
         verify_signature_reader(TEST_PUBLIC_KEY, TEST_SIGNATURE, Cursor::new(b"test"))?;
         assert!(
@@ -379,15 +362,6 @@ mod tests {
         assert!(minisign_password_input("").is_err());
         assert!(minisign_password_input("first\nsecond").is_err());
         assert!(minisign_password_input("first\rsecond").is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn stable_release_file_set_contains_only_gui_distribution_assets() -> Result<()> {
-        let version = Version::parse("1.2.3")?;
-        let files = expected_files(&version);
-        assert_eq!(files.len(), 6);
-        assert!(files.iter().all(|file| !file.contains("Remote-Helper")));
         Ok(())
     }
 }

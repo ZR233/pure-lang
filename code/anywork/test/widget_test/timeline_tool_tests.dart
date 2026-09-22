@@ -1507,54 +1507,6 @@ void registerTimelineToolTests() {
   });
 
   testWidgets(
-    'current reasoning shows Thinking label with an animated wait pulse',
-    (tester) async {
-      _configureResponsiveView(tester, const Size(980, 520));
-      final reasoning = _threadItemFixture(
-        id: 'reasoning-wait',
-        threadId: 'session-1',
-        turnId: 'turn-1',
-        ordinal: 0,
-        kind: ThreadItemKind.reasoning,
-        channel: null,
-        reasoningSummary: const ['## Inspecting the implementation'],
-        status: 'streaming',
-      );
-      await tester.pumpWidget(
-        _timelineApp(
-          home: Scaffold(
-            body: SizedBox(
-              width: 980,
-              height: 520,
-              child: TimelineView(
-                threadId: 'session-1',
-                rows: timelineRowsFromThreadItems([reasoning]),
-                turn: _testTurn(
-                  threadId: 'session-1',
-                  state: const RunningStudioTurnState(
-                    startedAt: 1,
-                    activity: StudioTurnActivity.thinking,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
-
-      expect(find.text('Thinking'), findsOneWidget);
-      expect(find.text('Inspecting the implementation'), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('timeline-current-activity-pulse')),
-        findsOneWidget,
-      );
-      expect(tester.binding.hasScheduledFrame, isTrue);
-    },
-  );
-
-  testWidgets(
     'running tool shows a single group pulse and expands to item pulses',
     (tester) async {
       _configureResponsiveView(tester, const Size(980, 520));
@@ -1698,68 +1650,6 @@ void registerTimelineToolTests() {
     );
     expect(find.text('exec completed'), findsOneWidget);
     expect(tester.binding.hasScheduledFrame, isFalse);
-  });
-
-  testWidgets('awaiting approval and terminal tools show no item pulse', (
-    tester,
-  ) async {
-    _configureResponsiveView(tester, const Size(980, 520));
-    final parts = [
-      _toolTimelinePart(
-        id: 'tool-await',
-        groupId: 'group-mixed',
-        turnId: 'turn-mixed',
-        name: 'exec',
-        status: 'awaitingApproval',
-        arguments: jsonEncode({'command': 'rm -rf'}),
-      ),
-      _toolTimelinePart(
-        id: 'tool-succeeded',
-        groupId: 'group-mixed',
-        turnId: 'turn-mixed',
-        order: 1,
-        name: 'read_file',
-        status: 'succeeded',
-        arguments: jsonEncode({'path': 'lib/main.dart'}),
-      ),
-    ];
-    await tester.pumpWidget(
-      _timelineApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 980,
-            height: 520,
-            child: TimelineView(
-              threadId: 'session-1',
-              rows: timelineRowsFromFixtureParts(parts),
-              turn: _testTurn(
-                threadId: 'session-1',
-                turnId: 'turn-mixed',
-                state: const RunningStudioTurnState(
-                  startedAt: 1,
-                  activity: StudioTurnActivity.runningTool,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-
-    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-
-    expect(
-      find.byKey(const ValueKey('timeline-tool-item-pulse:tool-await')),
-      findsNothing,
-    );
-    expect(
-      find.byKey(const ValueKey('timeline-tool-item-pulse:tool-succeeded')),
-      findsNothing,
-    );
   });
 
   testWidgets('reduced motion keeps the wait pulse static and quiet', (

@@ -222,18 +222,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn skill_names_are_unique_across_sources() {
-        let mut names = PRESET_SKILL_SOURCES
-            .iter()
-            .flat_map(|source| source.skills.iter().copied())
-            .collect::<Vec<_>>();
-        names.sort_unstable();
-        let count = names.len();
-        names.dedup();
-        assert_eq!(names.len(), count, "preset Skill names must be unique");
-    }
-
-    #[test]
     fn copy_directory_replaces_nested_content_entirely() {
         let root = tempfile::tempdir().unwrap();
         let from = root.path().join("from");

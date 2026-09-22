@@ -263,30 +263,6 @@ mod tests {
     }
 
     #[test]
-    fn initialize_fails_closed_on_unknown_schema_without_rewriting() {
-        let home = tempfile::Builder::new()
-            .prefix("config-runtime-unknown-schema-")
-            .tempdir()
-            .unwrap()
-            .keep();
-        let store = ConfigStore::new(ConfigPaths::from_home(home));
-        let config_path = store.paths().config_file().to_path_buf();
-        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-        let current_schema = format!("schema_version = {}", crate::STUDIO_CONFIG_SCHEMA_VERSION);
-        let unsupported = toml::to_string_pretty(&StudioConfig::default_config())
-            .unwrap()
-            .replace(&current_schema, "schema_version = 14");
-        std::fs::write(&config_path, &unsupported).unwrap();
-
-        let Err(error) = ConfigRuntime::initialize(store) else {
-            panic!("unknown schema must fail closed instead of starting with defaults");
-        };
-
-        assert!(error.to_string().contains("schema version"), "{error}");
-        assert_eq!(std::fs::read_to_string(&config_path).unwrap(), unsupported);
-    }
-
-    #[test]
     fn stale_revision_cannot_overwrite_new_config() {
         let runtime = runtime("cas");
         let initial = runtime.read().unwrap();

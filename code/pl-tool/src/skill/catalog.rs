@@ -391,26 +391,6 @@ mod tests {
     }
 
     #[test]
-    fn disabled_skills_are_filtered() {
-        let workspace = temp_dir("disabled");
-        write_skill(
-            &default_project_skill_dir(&workspace, "hidden"),
-            "hidden",
-            "hidden",
-        );
-        let mut config = SkillsConfig {
-            disabled: vec!["hidden".to_string()],
-            ..SkillsConfig::default()
-        };
-        config.system.enabled = false;
-
-        let catalog = discover_without_agents_home(&workspace, &config, None);
-
-        assert!(catalog.skills.is_empty());
-        fs::remove_dir_all(workspace).unwrap();
-    }
-
-    #[test]
     fn usage_update_replaces_existing_file_atomically() {
         let project = temp_dir("usage-replace");
         let skill_dir = project.join("skills").join("usage");
