@@ -46,6 +46,11 @@ fn studio_error_from_ref(error: &anyhow::Error) -> StudioError {
     if let Some(error) = error.downcast_ref::<StudioUpdateError>() {
         return update_error(error);
     }
+    if let Some(error) = error.downcast_ref::<pl_core::thread::ThreadError>()
+        && let Some(studio_error) = thread_error(error)
+    {
+        return studio_error;
+    }
     if let Some(error) = error.downcast_ref::<PureError>() {
         return pure_error(error);
     }
@@ -59,6 +64,33 @@ fn studio_error_from_ref(error: &anyhow::Error) -> StudioError {
         "unclassified Studio runtime failure"
     );
     studio_error
+}
+
+/// Maps the prompt-admission failures of a Thread to their public category.
+///
+/// Only variants with a distinct, actionable meaning are classified; every
+/// other variant returns `None` so the caller keeps the redacted internal
+/// fallback. Messages never embed the source error text or any caller context.
+fn thread_error(error: &pl_core::thread::ThreadError) -> Option<StudioError> {
+    match error {
+        pl_core::thread::ThreadError::PendingInteraction => Some(StudioError::new(
+            StudioErrorCode::Conflict,
+            "Resolve the pending Studio interaction before sending another prompt",
+            false,
+        )),
+        pl_core::thread::ThreadError::StoragePressure => Some(StudioError::new(
+            StudioErrorCode::Busy,
+            "Studio is still persisting earlier work; retry shortly",
+            true,
+        )),
+        pl_core::thread::ThreadError::Storage(_) => Some(StudioError::storage()),
+        pl_core::thread::ThreadError::Closed => Some(StudioError::new(
+            StudioErrorCode::RuntimeStopped,
+            "Studio runtime stopped; restart the runtime to continue",
+            false,
+        )),
+        _ => None,
+    }
 }
 
 fn pure_error(error: &PureError) -> StudioError {
@@ -195,5 +227,47 @@ mod tests {
             studio_error_from_anyhow(error).code,
             StudioErrorCode::Storage
         );
+    }
+
+    #[test]
+    fn pending_interaction_error_maps_to_conflict_without_leaking_context() {
+        let error = anyhow::Error::new(pl_core::thread::ThreadError::PendingInteraction)
+            .context("host interaction secret-token at /private/session.json");
+
+        let studio_error = studio_error_from_anyhow(error);
+
+        assert_eq!(studio_error.code, StudioErrorCode::Conflict);
+        assert!(!studio_error.retryable);
+        assert!(!studio_error.message.is_empty());
+        assert!(!studio_error.message.contains("secret-token"));
+        assert!(!studio_error.message.contains("session.json"));
+    }
+
+    #[test]
+    fn storage_pressure_error_maps_to_retryable_busy_without_leaking_context() {
+        let error = anyhow::Error::new(pl_core::thread::ThreadError::StoragePressure)
+            .context("cold-store pressure secret-token at /private/cold.sqlite");
+
+        let studio_error = studio_error_from_anyhow(error);
+
+        assert_eq!(studio_error.code, StudioErrorCode::Busy);
+        assert!(studio_error.retryable);
+        assert!(!studio_error.message.is_empty());
+        assert!(!studio_error.message.contains("secret-token"));
+        assert!(!studio_error.message.contains("cold.sqlite"));
+    }
+
+    #[test]
+    fn closed_thread_error_maps_to_runtime_stopped_without_leaking_context() {
+        let error = anyhow::Error::new(pl_core::thread::ThreadError::Closed)
+            .context("thread owner closed secret-token at /private/runtime.log");
+
+        let studio_error = studio_error_from_anyhow(error);
+
+        assert_eq!(studio_error.code, StudioErrorCode::RuntimeStopped);
+        assert!(!studio_error.retryable);
+        assert!(!studio_error.message.is_empty());
+        assert!(!studio_error.message.contains("secret-token"));
+        assert!(!studio_error.message.contains("runtime.log"));
     }
 }
