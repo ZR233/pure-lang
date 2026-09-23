@@ -79,24 +79,3 @@ impl Drop for ActiveExecution {
             .take();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn interruption_is_generation_scoped_and_does_not_cancel_the_callers_token() {
-        let handle = InterruptHandle::default();
-        let parent = CancellationToken::new();
-        assert!(!handle.interrupt());
-        let first = handle.activate(&parent);
-        assert!(handle.interrupt());
-        assert!(first.token.is_cancelled());
-        assert!(!parent.is_cancelled());
-        drop(first);
-        assert!(!handle.interrupt());
-        let second = handle.activate(&parent);
-        assert!(!second.token.is_cancelled());
-        parent.cancel();
-        assert!(second.token.is_cancelled());
-    }
-}

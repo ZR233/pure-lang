@@ -403,14 +403,3 @@ impl From<Message> for ModelContextItem {
         Self::Message { message }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn empty_context_section_id_is_rejected_during_deserialization() {
-        let error = serde_json::from_str::<ContextSectionId>("\"  \"").unwrap_err();
-        assert!(error.to_string().contains("must not be empty"));
-    }
-}

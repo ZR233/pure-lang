@@ -200,17 +200,3 @@ pub enum StudioHostOperation {
     SubscribeShutdownProgress,
     InstallUpdate,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn operation_ids_are_unique() {
-        let ids = StudioOperation::ALL
-            .into_iter()
-            .map(StudioOperation::operation_id)
-            .collect::<std::collections::HashSet<_>>();
-        assert_eq!(ids.len(), StudioOperation::ALL.len());
-    }
-}

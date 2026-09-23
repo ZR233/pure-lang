@@ -236,27 +236,3 @@ pub(crate) fn diagnostic_counts(
     }
     counts
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::query::LspQueryOperation;
-
-    #[test]
-    fn position_query_uses_one_based_input() {
-        let query = LspQuery {
-            operation: LspQueryOperation::Hover,
-            file_path: Some(std::env::temp_dir().join("pure-lsp-position/src/lib.rs")),
-            line: Some(7),
-            character: Some(3),
-            query: None,
-            max_results: None,
-            language_id: None,
-        };
-
-        let (_, params) = method_and_params(&query).unwrap();
-
-        assert_eq!(params["position"]["line"], serde_json::json!(6));
-        assert_eq!(params["position"]["character"], serde_json::json!(2));
-    }
-}

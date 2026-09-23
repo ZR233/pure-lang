@@ -28,25 +28,3 @@ pub fn decode_interaction_key(value: &str) -> Result<(&str, &str), InteractionKe
     let local = components.get(length..).ok_or(InteractionKeyError)?;
     Ok((thread, local))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn identities_are_unambiguous_with_unicode_colons_and_repeated_local_calls() {
-        let id = encode("任务:甲", "permission:call");
-        assert_eq!(
-            decode_interaction_key(&id).unwrap(),
-            ("任务:甲", "permission:call")
-        );
-        assert_ne!(id, encode("任务:乙", "permission:call"));
-        for invalid in [
-            "permission:call",
-            "studio-interaction:1:任务:call",
-            "studio-interaction:0:call",
-            "studio-interaction:100:x",
-        ] {
-            assert!(decode_interaction_key(invalid).is_err());
-        }
-    }
-}

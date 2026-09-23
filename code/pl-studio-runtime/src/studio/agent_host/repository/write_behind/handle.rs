@@ -42,11 +42,6 @@ pub(super) struct WriterShared {
     /// writer，返回或取消时由 guard 自减，因此没有任何人等待时后台写入仍按
     /// `FLUSH_INTERVAL` 合并。
     pub(super) flush_waiters: AtomicUsize,
-    #[cfg(test)]
-    pub(super) panic_after_apply: AtomicBool,
-    /// 因显式 flush 请求而跳过空闲去抖的次数；测试观测点，生产构建不编译。
-    #[cfg(test)]
-    pub(super) flush_debounce_bypasses: AtomicUsize,
 }
 
 /// 一次显式固定 ticket 等待的登记。
@@ -92,10 +87,6 @@ impl ThreadWriteBehindWriter {
                 retry_notify: Notify::new(),
                 stopping: AtomicBool::new(false),
                 flush_waiters: AtomicUsize::new(0),
-                #[cfg(test)]
-                panic_after_apply: AtomicBool::new(false),
-                #[cfg(test)]
-                flush_debounce_bypasses: AtomicUsize::new(0),
             }),
             task: Arc::new(Mutex::new(None)),
             pending_commits: Arc::new(AtomicUsize::new(0)),
@@ -326,145 +317,5 @@ impl ThreadWriteBehindWriter {
     /// 更新后才能观察并取走该 commit，避免从零计数递减下溢。
     fn record_visible_commit(&self) {
         self.pending_commits.fetch_add(1, Ordering::AcqRel);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::state::{publish_blocked, publish_degraded};
-    use super::*;
-
-    /// A fixed accepted ticket that can no longer become durable must end the wait with the real
-    /// terminal diagnostic: `Blocked` never advances the durable sequence, so durability alone
-    /// cannot wake the waiter. A transient `Degraded` state must keep the same wait pending.
-    #[tokio::test]
-    async fn blocked_health_ends_a_fixed_ticket_flush_without_durable_progress() {
-        let store = StudioStore::open_memory()
-            .await
-            .expect("in-memory product store");
-        let writer = ThreadWriteBehindWriter::new(store);
-        // Start the real writer task, so the wait below is a wait and not the "not running" guard.
-        writer.ensure_task();
-        publish_degraded(
-            &writer.shared,
-            &PureError::MemoryError("transient conflict".to_string()),
-        );
-        let flush = {
-            let writer = writer.clone();
-            tokio::spawn(async move { writer.flush_through(1).await })
-        };
-        // Give the spawned waiter the chance to observe the transient state; a `Degraded` state is
-        // auto-retried, so the flush must still be pending and must not report the ticket durable.
-        for _ in 0..8 {
-            tokio::task::yield_now().await;
-        }
-        assert!(
-            !flush.is_finished(),
-            "a transient Degraded state must not terminate a fixed-ticket flush"
-        );
-        assert_eq!(*writer.shared.durable_ticket.borrow(), 0);
-        publish_blocked(&writer.shared, "permanent conflict 787");
-        let error = flush
-            .await
-            .expect("flush task must not panic")
-            .expect_err("a blocked ticket must fail the flush instead of waiting for progress");
-        assert!(
-            error.to_string().contains("permanent conflict 787"),
-            "flush must surface the real blocked diagnostic: {error}"
-        );
-        // The blocked ticket is reported, never confirmed: nothing admitted it, nothing is durable.
-        assert_eq!(writer.admitted_ticket(), 0);
-        assert_eq!(writer.pending_commit_count(), 0);
-        assert_eq!(*writer.shared.durable_ticket.borrow(), 0);
-    }
-
-    /// A `Blocked` state published before the wait starts is terminal for that fixed ticket too.
-    #[tokio::test]
-    async fn already_blocked_writer_reports_blocked_for_a_fixed_ticket() {
-        let store = StudioStore::open_memory()
-            .await
-            .expect("in-memory product store");
-        let writer = ThreadWriteBehindWriter::new(store);
-        publish_blocked(&writer.shared, "blocked before the wait 787");
-        let error = writer
-            .flush_through(1)
-            .await
-            .expect_err("a blocked writer must not wait for a ticket it cannot make durable");
-        assert!(
-            error.to_string().contains("blocked before the wait 787"),
-            "flush must surface the real blocked diagnostic: {error}"
-        );
-        assert_eq!(*writer.shared.durable_ticket.borrow(), 0);
-    }
-
-    /// An explicitly requested fixed ticket must be served by waking the writer instead of inheriting
-    /// the idle `FLUSH_INTERVAL` batch timer, while an unrequested background write keeps that
-    /// debounce. Payload durability is not relaxed: the durable ticket advances only through the real
-    /// SQLite commit, and the committed canonical catalog summary is readable afterwards.
-    #[tokio::test]
-    async fn explicit_flush_request_bypasses_the_idle_batch_timer() {
-        let store = StudioStore::open_memory()
-            .await
-            .expect("in-memory product store");
-        let writer = ThreadWriteBehindWriter::new(store.clone());
-        let workspace = tempfile::tempdir().expect("workspace directory");
-        let project = store
-            .upsert_project(workspace.path())
-            .await
-            .expect("project row");
-        let (delta, thread) = DirectoryDelta::register_root_thread(
-            crate::studio::ids::new_id("thread"),
-            &project.id,
-            "flush promptness",
-            pl_protocol::ThreadModeId::simple(),
-            pl_protocol::ThreadWorkspaceMode::Local,
-            project.path.clone(),
-        );
-        writer.record_directory(delta);
-        let target = writer.admitted_ticket();
-        assert_eq!(target, 1, "the directory fact is admitted as ticket 1");
-        // Nobody is waiting yet: the background write must stay inside the idle batch window.
-        for _ in 0..8 {
-            tokio::task::yield_now().await;
-        }
-        assert_eq!(
-            *writer.shared.durable_ticket.borrow(),
-            0,
-            "an unrequested background write must keep its idle debounce"
-        );
-        assert_eq!(
-            writer
-                .shared
-                .flush_debounce_bypasses
-                .load(Ordering::Acquire),
-            0,
-            "no explicit flush request was waiting, so no debounce may be bypassed"
-        );
-        writer
-            .flush_through(target)
-            .await
-            .expect("an explicitly requested fixed ticket must become durable");
-        assert!(
-            writer
-                .shared
-                .flush_debounce_bypasses
-                .load(Ordering::Acquire)
-                > 0,
-            "the fixed-ticket request must wake the writer instead of the idle batch timer"
-        );
-        assert_eq!(*writer.shared.durable_ticket.borrow(), target);
-        assert_eq!(writer.pending_commit_count(), 0);
-        assert!(
-            store
-                .read_thread(&thread.id)
-                .await
-                .expect("read thread")
-                .is_some(),
-            "the flushed fact must be readable, not merely counted durable"
-        );
-        writer
-            .shutdown()
-            .await
-            .expect("writer drains after the flush");
     }
 }

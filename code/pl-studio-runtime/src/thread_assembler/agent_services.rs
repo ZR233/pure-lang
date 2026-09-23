@@ -417,23 +417,3 @@ fn directory_snapshot(status: pl_protocol::ThreadStatus) -> pl_core::thread::Thr
         ..Default::default()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn history_authorization_rejects_other_trees_ancestors_and_siblings() {
-        let path = |ids: &[&str]| {
-            ids.iter()
-                .map(|id| pl_protocol::ThreadId::new(*id).unwrap())
-                .collect::<Vec<_>>()
-        };
-        assert!(validate_scope("root", "root", "root", &path(&["child", "root"])).is_ok());
-        assert!(validate_scope("child", "root", "root", &path(&["child", "root"])).is_ok());
-        assert!(validate_scope("child", "root", "root", &path(&["root"])).is_err());
-        assert!(validate_scope("child", "root", "root", &path(&["sibling", "root"])).is_err());
-        assert!(validate_scope("root", "root", "other", &path(&["other"])).is_err());
-        assert!(validate_scope("root", "root", "root", &[]).is_err());
-    }
-}

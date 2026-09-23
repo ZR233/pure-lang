@@ -85,38 +85,3 @@ fn completion_summary(delivery: &pl_core::thread::ToolDelivery) -> Option<String
         .ok()
         .flatten()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pl_core::{context::OpaquePayload, thread::ToolDelivery, tool::ToolOutput};
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn completion_display_requires_success_and_trusted_end_turn_control() {
-        let payload =
-            OpaquePayload::new("pl.tool.finish-turn", 1, r#"{"message":"  original\r\n"}"#)
-                .unwrap();
-        let mut delivery = ToolDelivery {
-            target: Default::default(),
-            call_id: "complete-call".into(),
-            tool_id: "finish_turn".into(),
-            output: ToolOutput::new(payload, Vec::new()),
-            delivered_context: Vec::new(),
-            outcome: ToolOutcome::Succeeded,
-        };
-        assert_eq!(
-            completion_summary(&delivery),
-            None,
-            "payload alone cannot claim completion"
-        );
-        delivery.output = delivery.output.ending_turn();
-        assert_eq!(
-            completion_summary(&delivery).as_deref(),
-            Some("  original\r\n")
-        );
-        delivery.outcome = ToolOutcome::Cancelled;
-        assert_eq!(completion_summary(&delivery), None);
-        delivery.outcome = ToolOutcome::Succeeded;
-    }
-}

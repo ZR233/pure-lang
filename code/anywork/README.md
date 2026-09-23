@@ -13,7 +13,7 @@ Windows and Linux Flutter desktop client for anywork.
 ## Commands
 
 On Linux, install the GTK runner dependency before the first native build.
-Headless integration runs also require Xvfb:
+Headless native GUI observation also requires Xvfb:
 
 ```bash
 sudo apt-get install -y libgtk-3-dev xvfb
@@ -24,7 +24,6 @@ sudo apt-get install -y libgtk-3-dev xvfb
 # code/anywork as the working directory.
 cargo flutter pub get
 cargo flutter analyze
-cargo flutter test
 cargo dart format lib
 cargo xtask run-gui
 cargo xtask build-gui
@@ -37,14 +36,12 @@ cargo xtask build-gui --check-generated # CI/release: regenerate and reject unst
 # tree, keeps Flutter's control pipe open, and connects directly to the app VM
 # service without a DDS proxy. Release builds never use it.
 cargo xtask run-gui --driver
-cargo xtask run-gui --demo --driver # deterministic demo data
+cargo xtask manual-gui # isolated native app with local scripted provider and evidence
 
 # Windows/Linux GUI run/build must use xtask so the runner receives the
 # prebuilt Rust bridge artifact. cargo flutter/dart are passthrough commands.
 
-# Run the deterministic integration smoke on the current desktop OS. Linux
-# automatically uses xvfb-run when DISPLAY/WAYLAND_DISPLAY are unavailable.
-cargo xtask verify-gui --integration
+# Use cargo xtask run-gui --driver for live manual observations using installed config.
 ```
 
 Riverpod、Freezed、l10n 和 FRB 生成必须从仓库根目录使用
@@ -52,10 +49,11 @@ Riverpod、Freezed、l10n 和 FRB 生成必须从仓库根目录使用
 源码，不执行生成器或可写格式化；修改生成输入后必须先显式生成。`cargo xtask check-gui-generated`
 会快照当前输出并检查重新生成前后是否一致，不要求输出已提交；CI/发布构建使用
 `build-gui --check-generated`。
-完整检查仍使用 `cargo xtask verify-gui`。xtask 会校验 codegen
+生成、格式和静态检查使用 `cargo xtask verify-gui`。xtask 会校验 codegen
 版本，并统一 FRB 2.12 用于 Rust crate 和输出的路径表示。
 
 真实协作观察使用根 README 中的 `collaboration_observe` 或隔离 Studio server 的 HTTP/SSE；
-GUI 交互使用 `cargo xtask verify-gui --integration` 和 Flutter Driver。
+GUI 交互通过 `cargo xtask manual-gui` 的隔离模拟服务人工验收；真实供应商人工观察
+直接使用用户配置运行 `cargo xtask run-gui --driver`，不作为自动测试通过的证明。
 
 The default app path initializes the native FRB runtime and subscribes only to the selected session stream. `DemoStudioApi` is selected only by an explicit demo build flag or a test override; native runtime failures are surfaced instead of switching implementations.

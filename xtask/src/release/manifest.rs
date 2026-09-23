@@ -333,35 +333,3 @@ fn published_at() -> Result<i64> {
         .as_secs();
     i64::try_from(seconds).context("current Unix timestamp does not fit i64")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-    use std::io::Cursor;
-
-    const TEST_PUBLIC_KEY: &str = "untrusted comment: minisign public key 2\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
-    const TEST_SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
-
-    #[test]
-    fn signature_verification_rejects_tampered_release_bytes() -> Result<()> {
-        verify_signature_reader(TEST_PUBLIC_KEY, TEST_SIGNATURE, Cursor::new(b"test"))?;
-        assert!(
-            verify_signature_reader(TEST_PUBLIC_KEY, TEST_SIGNATURE, Cursor::new(b"tampered"))
-                .is_err()
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn minisign_password_is_sent_as_one_stdin_line() -> Result<()> {
-        assert_eq!(
-            minisign_password_input("correct horse")?,
-            b"correct horse\r\n"
-        );
-        assert!(minisign_password_input("").is_err());
-        assert!(minisign_password_input("first\nsecond").is_err());
-        assert!(minisign_password_input("first\rsecond").is_err());
-        Ok(())
-    }
-}

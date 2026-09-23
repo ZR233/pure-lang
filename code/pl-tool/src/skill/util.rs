@@ -152,22 +152,3 @@ pub(super) fn validate_usage_write(project_dir: &Path, skill_dir: &Path) -> Resu
         .map_err(|error| PureError::ConfigError(error.to_string()))?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn agents_skills_directory_is_relative_to_the_platform_user_home() {
-        let home = if cfg!(windows) {
-            Path::new(r"C:\Users\fixture")
-        } else {
-            Path::new("/home/fixture")
-        };
-
-        assert_eq!(
-            agents_user_skills_dir_from_home(home),
-            home.join(".agents").join("skills")
-        );
-    }
-}

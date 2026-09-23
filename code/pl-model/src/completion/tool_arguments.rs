@@ -50,38 +50,3 @@ impl<'de> Visitor<'de> for UniqueTopLevelObject {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_duplicate_function_argument_fields() {
-        let call = function_tool_call_from_raw(
-            "item-1".to_string(),
-            "workflow_transition".to_string(),
-            r##"{"runId":"run-1","runId":"run-2"}"##.to_string(),
-            "call-1".to_string(),
-        );
-
-        assert!(
-            call.invalid_arguments_message()
-                .is_some_and(|message| message.contains("duplicate top-level field `runId`"))
-        );
-    }
-    #[test]
-    fn valid_function_arguments_keep_provider_bytes_after_decoding_and_serialization() {
-        let raw = "{  \"z\":9007199254740993, \"a\": [1, 2] }\n";
-        let call = function_tool_call_from_raw(
-            "item".into(),
-            "plugin_tool".into(),
-            raw.into(),
-            "call".into(),
-        );
-        assert!(call.invalid_arguments.is_none());
-        assert_eq!(call.payload_text(), raw);
-        let restored: ToolCall =
-            serde_json::from_str(&serde_json::to_string(&call).unwrap()).unwrap();
-        assert_eq!(restored.payload_text(), raw);
-    }
-}

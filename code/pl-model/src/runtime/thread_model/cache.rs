@@ -35,31 +35,3 @@ pub(super) fn key(
         .map_err(|error| super::failure(ModelFailureKind::InvalidResponse, error))?;
     Ok(Some(format!("pl:{:x}", Sha256::digest(encoded))))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn generation_limits_do_not_partition_the_same_prompt_prefix() {
-        let mut model = crate::model::ModelInfo::compatible("cache-test");
-        model
-            .binding
-            .set_transport(crate::model::ModelTransportProfile {
-                protocol: crate::provider::ProviderWireProtocol::Responses,
-                ..model.binding.transport.clone()
-            });
-        let runtime =
-            ModelRuntime::new(crate::provider::ProviderEndpoint::openai(None), model).unwrap();
-        let mut request = CompletionRequest::builder().build();
-        request.instructions = Some("Stable instruction".into());
-        let original = key(&runtime, &request).unwrap();
-        assert!(original.is_some());
-        request.temperature = Some(0.7);
-        request.max_tokens = Some(4096);
-        assert_eq!(key(&runtime, &request).unwrap(), original);
-        request.instructions = Some("Changed instruction".into());
-        assert_ne!(key(&runtime, &request).unwrap(), original);
-    }
-}

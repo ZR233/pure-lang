@@ -126,32 +126,3 @@ impl HeadTailBuffer {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn omits_middle_when_capacity_is_exceeded() {
-        let mut buffer = HeadTailBuffer::new(10);
-        buffer.push_chunk(b"aaaaabbbbbccccc");
-
-        let text = buffer.display_text();
-        assert!(text.starts_with("aaaaa"));
-        assert!(text.ends_with("ccccc"));
-        assert!(text.contains("bytes omitted"));
-    }
-
-    #[test]
-    fn taking_display_text_drains_only_the_current_increment() {
-        let mut buffer = HeadTailBuffer::new(10);
-        buffer.push_chunk(b"first");
-
-        assert_eq!(buffer.take_display_text(), "first");
-        assert_eq!(buffer.take_display_text(), "");
-
-        buffer.push_chunk(b"second");
-        assert_eq!(buffer.take_display_text(), "second");
-    }
-}

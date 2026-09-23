@@ -30,5 +30,6 @@ review 默认 pending，由观察者阅读过程、结果和产物后另行记�
 可用真实任务观察 patch、LSP、跨轮历史、压缩与协作，不再维护固定通过标记。
 
 GUI 真实任务通过 `cargo xtask run-gui --driver` 启动，由观察者使用 Flutter Driver
-提交任务、查看流、截图和产物。确定性 demo/widget、本地 HTTP/WS fixture、
-配置迁移和恢复测试继续自动断言；`verify-gui --integration` 的 demo 回归不改为人工判断。
+提交任务、查看流、截图和产物，并人工记录结论。自动 Rust 测试仅保留在
+`pl-core` 和 `pl-model` 两库；此处不再承诺配置迁移、恢复或
+GUI 场景的自动断言；隔离模拟入口使用 `cargo xtask manual-gui`。

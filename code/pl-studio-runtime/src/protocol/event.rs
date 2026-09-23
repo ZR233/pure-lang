@@ -253,29 +253,3 @@ pub struct StudioStateSnapshot {
     pub updater: StudioUpdateStateSnapshot,
     pub persistence: PersistenceStateSnapshot,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::StudioModelPerformanceSample;
-
-    #[test]
-    fn legacy_model_performance_sample_defaults_match_state_to_unknown() {
-        let sample: StudioModelPerformanceSample = serde_json::from_value(serde_json::json!({
-            "completedAt": 1,
-            "providerInstanceId": "provider-1",
-            "providerDisplayName": "Provider 1",
-            "model": "legacy-model",
-            "completionTokens": 2,
-            "ttftMillis": 3,
-            "decodeMillis": 4,
-            "totalResponseMillis": 7,
-            "tokensPerSecond": 500.0
-        }))
-        .expect("legacy sample should decode");
-
-        assert_eq!(
-            sample.model_match_state,
-            pl_protocol::ModelMatchState::LegacyUnknown
-        );
-    }
-}

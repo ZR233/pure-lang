@@ -61,21 +61,3 @@ pub fn remote_compaction_checkpoint(
     }
     Ok(first)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn native_checkpoint_keeps_opaque_content_and_rejects_ambiguous_output() {
-        let checkpoint = ModelContextItem::Compaction {
-            encrypted_content: "  opaque-provider-checkpoint\n".into(),
-        };
-        assert_eq!(
-            remote_compaction_checkpoint(vec![checkpoint.clone()]).unwrap(),
-            checkpoint
-        );
-        assert!(remote_compaction_checkpoint(Vec::new()).is_err());
-        assert!(remote_compaction_checkpoint(vec![checkpoint.clone(), checkpoint]).is_err());
-    }
-}

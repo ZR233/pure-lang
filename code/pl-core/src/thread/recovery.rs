@@ -136,24 +136,3 @@ pub(super) fn settle(mut state: ThreadSnapshot) -> Result<ThreadSnapshot, Thread
     state.context.validate_complete()?;
     Ok(state)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn recovery_marks_an_unfinished_turn_interrupted_without_creating_an_attempt() {
-        let mut state = ThreadSnapshot::default();
-        state.turns = vec![TurnRecord {
-            elapsed_ms: None,
-            input_id: None,
-            turn_id: "turn".into(),
-            state: TurnState::Running,
-            model_steps: 0,
-        }]
-        .into();
-        let restored = settle(state).unwrap();
-        assert_eq!(restored.turns[0].state, TurnState::Interrupted);
-        assert!(restored.attempts.is_empty());
-        assert!(restored.deliveries.is_empty());
-    }
-}

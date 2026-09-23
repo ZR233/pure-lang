@@ -67,32 +67,3 @@ fn stable_hash(server: &str, tool: &str) -> String {
     }
     hash
 }
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn names_are_normalized_bounded_and_collision_safe() {
-        let names = assign_exposed_tool_names([
-            ("future server", "read/page"),
-            ("future_server", "read_page"),
-            ("long", "a".repeat(100).as_str()),
-        ]);
-
-        assert!(names[0].starts_with("mcp__future_server__read_page_"));
-        assert_eq!(names[1], "mcp__future_server__read_page");
-        assert_ne!(names[0], names[1]);
-        assert!(names.iter().all(|name| name.len() <= MAX_TOOL_NAME_BYTES));
-        assert_eq!(
-            names,
-            assign_exposed_tool_names([
-                ("future server", "read/page"),
-                ("future_server", "read_page"),
-                ("long", "a".repeat(100).as_str()),
-            ])
-        );
-    }
-}

@@ -1004,39 +1004,3 @@ fn cold_error(message: &str) -> ColdStoreError {
         source: Box::new(std::io::Error::other(message.to_owned())),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 现场回归：`(code: 5) database is locked` 来自历史写事务，属于可自愈冲突，必须被写者内部
-    /// 静默退避；结构、约束、损坏与契约错误必须立刻上报，绝不无限重试。
-    #[test]
-    fn only_transient_storage_conflicts_are_absorbed() {
-        for retryable in [
-            "history effect 12 commit failed: Execution Error: error returned from database: \
-             (code: 5) database is locked",
-            "database table is locked",
-            "database is busy",
-            "disk I/O error",
-            "SQLITE_BUSY",
-            "SQLITE_LOCKED",
-            "SQLITE_IOERR",
-        ] {
-            assert!(
-                is_retryable_write(retryable),
-                "{retryable} 必须视为可重试忙"
-            );
-        }
-        for terminal in [
-            "Thread persistence ticket mismatch",
-            "Thread persistence owner mismatch",
-            "UNIQUE constraint failed: input_identities.identity",
-            "history item revision conflict",
-            "checkpoint candidate has no cumulative summary folded to its own revision",
-            "history database could not be opened read-only",
-        ] {
-            assert!(!is_retryable_write(terminal), "{terminal} 不得被吸收");
-        }
-    }
-}

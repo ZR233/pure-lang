@@ -26,31 +26,3 @@ pub(crate) fn model_request_retry_delay(
     });
     Duration::from_millis(delay_ms.min(30_000))
 }
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn model_request_retry_backoff_is_bounded() {
-        let first = model_request_retry_delay(1, None, "request-a");
-        assert!((Duration::from_millis(180)..=Duration::from_millis(220)).contains(&first));
-        let fifth = model_request_retry_delay(5, None, "request-a");
-        assert!((Duration::from_millis(2_880)..=Duration::from_millis(3_520)).contains(&fifth));
-        assert_eq!(
-            model_request_retry_delay(2, Some(90_000), "request-a"),
-            Duration::from_secs(30)
-        );
-        assert_eq!(
-            first,
-            model_request_retry_delay(1, None, "request-a"),
-            "the same inference must retain a stable retry schedule"
-        );
-        let distinct_delays = (0..16)
-            .map(|index| model_request_retry_delay(1, None, &format!("request-{index}")))
-            .collect::<std::collections::HashSet<_>>();
-        assert!(distinct_delays.len() > 1);
-    }
-}

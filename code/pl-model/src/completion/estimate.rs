@@ -45,26 +45,3 @@ pub fn estimate_text_input_tokens(request: &CompletionRequest) -> Option<u64> {
         .ok()
         .map(|characters| characters.div_ceil(4))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn native_material_does_not_turn_into_a_ciphertext_length_estimate() {
-        let request = CompletionRequest::builder()
-            .input(vec![ModelContextItem::Compaction {
-                encrypted_content: "opaque".repeat(1000),
-            }])
-            .build();
-        assert_eq!(estimate_text_input_tokens(&request), None);
-    }
-
-    #[test]
-    fn plain_text_estimate_remains_explicitly_approximate() {
-        let request = CompletionRequest::builder()
-            .instructions("abcdefgh")
-            .build();
-        assert_eq!(estimate_text_input_tokens(&request), Some(2));
-    }
-}

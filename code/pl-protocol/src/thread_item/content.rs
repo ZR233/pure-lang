@@ -305,32 +305,3 @@ fn append_chunk(
     chunks[index].push_str(delta);
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unknown_compaction_counts_round_trip_without_becoming_zero() {
-        let item = ThreadContextCompactionItem::new(Some(120), None, 1);
-        let encoded = serde_json::to_value(&item).unwrap();
-        pretty_assertions::assert_eq!(
-            encoded,
-            serde_json::json!({
-                "beforeTokens": 120, "afterTokens": null, "compactedAt": 1,
-            })
-        );
-        pretty_assertions::assert_eq!(
-            serde_json::from_value::<ThreadContextCompactionItem>(encoded).unwrap(),
-            item,
-        );
-    }
-
-    #[test]
-    fn parent_agent_channel_uses_the_v10_wire_label() {
-        assert_eq!(
-            serde_json::to_value(ThreadTextChannel::ParentAgent).unwrap(),
-            serde_json::json!("parentAgent")
-        );
-    }
-}

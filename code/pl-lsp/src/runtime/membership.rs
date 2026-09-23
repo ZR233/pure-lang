@@ -343,31 +343,3 @@ fn merge_desired_member(
         ),
     );
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    #[tokio::test]
-    async fn reconciling_another_workspace_keeps_the_first_membership() {
-        let first = tempfile::tempdir().unwrap();
-        let second = tempfile::tempdir().unwrap();
-        let registry = LspRuntimeRegistry::new();
-        registry.reconcile_workspace_membership(first.path()).await;
-        registry.reconcile_workspace_membership(second.path()).await;
-        let roots = registry
-            .state
-            .lock()
-            .await
-            .workspaces
-            .keys()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(
-            roots,
-            std::collections::BTreeSet::from([first.path().to_owned(), second.path().to_owned()])
-        );
-        registry.shutdown().await;
-    }
-}

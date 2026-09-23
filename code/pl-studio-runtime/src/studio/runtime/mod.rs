@@ -151,11 +151,6 @@ pub struct StudioRuntime {
     runtime_state: StudioRuntimeState,
     recovery: crate::studio::StudioRecoveryRegistry,
     recovery_task: background_task::BackgroundTaskSlot,
-    #[cfg(test)]
-    recovery_gate: std::sync::Arc<tokio::sync::Mutex<()>>,
-    /// 测试可注入的归档收束窗口；生产固定使用 `ARCHIVE_TREE_SETTLE_TIMEOUT`。
-    #[cfg(test)]
-    archive_settle_timeout: std::time::Duration,
     skills: SkillCatalogRuntime,
     thread_modes: crate::mode::ThreadModeManager,
     provider_usage: ProviderUsageRuntime,
@@ -202,16 +197,9 @@ struct ProjectActivation {
 }
 
 impl StudioRuntime {
-    /// 归档前结束会话树活动工作的有界等待上界；测试可注入更短的窗口。
+    /// 归档前结束会话树活动工作的有界等待上界。
     fn archive_settle_timeout(&self) -> std::time::Duration {
-        #[cfg(test)]
-        {
-            self.archive_settle_timeout
-        }
-        #[cfg(not(test))]
-        {
-            ARCHIVE_TREE_SETTLE_TIMEOUT
-        }
+        ARCHIVE_TREE_SETTLE_TIMEOUT
     }
 
     /// 返回当前配置目录中可用的 Agent Profile 快照。

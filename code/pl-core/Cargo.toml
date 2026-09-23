@@ -23,10 +23,9 @@ sha2 = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-pretty_assertions = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true }
 
 [[test]]
-name = "entry_storage"
-path = "tests/entry_storage.rs"
+name = "sqlite_persistence"
+path = "tests/sqlite_persistence.rs"
 required-features = ["sqlite"]

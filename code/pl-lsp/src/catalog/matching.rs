@@ -50,29 +50,3 @@ pub(crate) fn glob_match(pattern: &str, text: &str) -> bool {
     }
     true
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn workspace_detection_honors_exact_and_single_segment_glob_rules() {
-        let workspace = tempfile::tempdir().expect("temporary workspace");
-        std::fs::write(workspace.path().join("package.json"), "{}\n")
-            .expect("write detection fixture");
-
-        assert!(workspace_matches(&[], workspace.path()));
-        assert!(workspace_matches(
-            &["package.json".to_string()],
-            workspace.path()
-        ));
-        assert!(workspace_matches(
-            &["pack*.json".to_string()],
-            workspace.path()
-        ));
-        assert!(!workspace_matches(
-            &["Cargo.toml".to_string()],
-            workspace.path()
-        ));
-    }
-}

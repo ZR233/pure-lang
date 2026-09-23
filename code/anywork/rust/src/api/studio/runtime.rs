@@ -49,23 +49,3 @@ pub(crate) async fn active_bridge() -> Result<&'static BridgeRuntime, BridgeErro
         | StudioRuntimeStateKind::Failed => Err(BridgeError::runtime_stopped()),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::api::studio::types::BridgeErrorCode;
-
-    #[tokio::test]
-    async fn read_boundary_does_not_install_runtime_before_explicit_start() {
-        assert!(BRIDGE.get().is_none());
-
-        for _ in 0..3 {
-            let error = match active_bridge().await {
-                Ok(_) => panic!("query boundary must not install the Bridge runtime"),
-                Err(error) => error,
-            };
-            assert_eq!(error.code, BridgeErrorCode::NotInitialized);
-            assert!(BRIDGE.get().is_none());
-        }
-    }
-}

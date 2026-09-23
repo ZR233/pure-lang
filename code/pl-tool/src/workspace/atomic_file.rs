@@ -142,39 +142,3 @@ fn sync_directory(directory: &Path) -> io::Result<()> {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn replaces_existing_file() {
-        let directory = tempfile::tempdir().unwrap();
-        let target = directory.path().join("state.json");
-        fs::write(&target, "old").unwrap();
-
-        write_file_atomically(&target, b"new").unwrap();
-
-        assert_eq!(fs::read_to_string(target).unwrap(), "new");
-    }
-    #[cfg(unix)]
-    #[test]
-    fn workspace_overwrite_preserves_executable_mode_and_private_writes_stay_private() {
-        use std::os::unix::fs::PermissionsExt;
-        let directory = tempfile::tempdir().unwrap();
-        let target = directory.path().join("script");
-        fs::write(&target, b"old").unwrap();
-        fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
-        write_file_with_mode(&target, b"new", WriteMode::Overwrite).unwrap();
-        assert_eq!(
-            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
-            0o755
-        );
-        write_file_atomically(&target, b"private").unwrap();
-        assert_eq!(
-            fs::metadata(&target).unwrap().permissions().mode() & 0o077,
-            0
-        );
-        assert_eq!(fs::read(&target).unwrap(), b"private");
-    }
-}

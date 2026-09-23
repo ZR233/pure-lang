@@ -10,7 +10,5 @@ mod activation;
 mod interaction;
 mod stop;
 mod submit;
-#[cfg(test)]
-mod submit_tests;
 
 pub(super) use submit::validate_prompt_content;

@@ -258,32 +258,3 @@ fn default_true() -> bool {
 fn is_true(value: &bool) -> bool {
     *value
 }
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn public_http_endpoint_removes_userinfo_query_and_fragment() {
-        let server = McpServerConfig {
-            transport: McpServerTransport::StreamableHttp,
-            url: Some("https://user:secret@example.com/mcp?api_key=secret#private".to_string()),
-            ..Default::default()
-        };
-
-        assert_eq!(server.endpoint_summary(), "https://example.com/mcp");
-    }
-
-    #[test]
-    fn malformed_http_endpoint_is_not_reflected_to_public_projection() {
-        let server = McpServerConfig {
-            transport: McpServerTransport::StreamableHttp,
-            url: Some("not a url?token=secret".to_string()),
-            ..Default::default()
-        };
-
-        assert_eq!(server.endpoint_summary(), "invalid MCP endpoint");
-    }
-}

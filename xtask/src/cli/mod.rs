@@ -28,8 +28,10 @@ pub(crate) enum Command {
     GenerateGui,
     /// Regenerate GUI sources and fail when generated files are not committed.
     CheckGuiGenerated,
-    /// Generate, analyze, and test the anywork desktop app.
-    VerifyGui(VerifyGuiOptions),
+    /// Check generated sources, formatting, and Flutter analysis.
+    VerifyGui,
+    /// Start an isolated native GUI with a local provider fixture for manual review.
+    ManualGui(ManualGuiOptions),
     /// Run the anywork desktop app.
     RunGui(RunGuiOptions),
     /// Build release artifacts for the current desktop OS.
@@ -61,14 +63,11 @@ pub(crate) struct ToolOptions {
     pub(crate) args: Vec<OsString>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
-pub(crate) struct VerifyGuiOptions {
-    /// Run the current Windows/Linux Flutter integration test through flutter drive.
-    #[arg(long)]
-    pub(crate) integration: bool,
-    /// Run the demo integration test on Flutter's headless web-server device.
-    #[arg(long)]
-    pub(crate) web_integration: bool,
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub(crate) struct ManualGuiOptions {
+    /// Directory for sanitized evidence (defaults to target/manual-gui/<timestamp>-<pid>).
+    #[arg(long, value_name = "DIR")]
+    pub(crate) output: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]

@@ -378,6 +378,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
 dependencies = [
  "axum-core",
+ "base64 0.22.1",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -397,8 +398,10 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
+ "sha1 0.10.7",
  "sync_wrapper",
  "tokio",
+ "tokio-tungstenite 0.29.0",
  "tower",
  "tower-layer",
  "tower-service",
@@ -1158,16 +1161,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "filetime"
-version = "0.2.29"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
-dependencies = [
- "cfg-if",
- "libc",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1426,6 +1419,18 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "r-efi 5.3.0",
+ "wasip2",
+]
+
+[[package]]
+name = "getrandom"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
@@ -1433,7 +1438,7 @@ dependencies = [
  "cfg-if",
  "js-sys",
  "libc",
- "r-efi",
+ "r-efi 6.0.0",
  "rand_core 0.10.1",
  "wasm-bindgen",
 ]
@@ -2572,12 +2577,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
-name = "pastey"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
-
-[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2612,7 +2611,6 @@ version = "0.1.0"
 dependencies = [
  "fs4",
  "futures",
- "pretty_assertions",
  "sea-orm",
  "serde",
  "serde_json",
@@ -2632,12 +2630,10 @@ dependencies = [
  "futures",
  "lsp-server",
  "lsp-types",
- "pretty_assertions",
  "process-wrap",
  "schemars",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
@@ -2656,6 +2652,7 @@ dependencies = [
  "image",
  "pl-core",
  "pl-protocol",
+ "pl-provider-fixture",
  "pretty_assertions",
  "reqwest",
  "schemars",
@@ -2664,7 +2661,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.18",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.30.0",
  "tokio-util",
  "tracing",
 ]
@@ -2673,7 +2670,6 @@ dependencies = [
 name = "pl-output"
 version = "0.1.0"
 dependencies = [
- "pretty_assertions",
  "serde",
 ]
 
@@ -2681,16 +2677,13 @@ dependencies = [
 name = "pl-patch"
 version = "0.1.0"
 dependencies = [
- "pretty_assertions",
  "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
 name = "pl-protocol"
 version = "0.1.0"
 dependencies = [
- "pretty_assertions",
  "schemars",
  "serde",
  "serde_json",
@@ -2700,12 +2693,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "pl-provider-fixture"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "futures",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "pl-remote-helper"
 version = "0.1.0"
 dependencies = [
  "libc",
  "pl-protocol",
- "pretty_assertions",
  "process-wrap",
  "serde_json",
  "tempfile",
@@ -2719,7 +2727,6 @@ name = "pl-skill-core"
 version = "0.1.0"
 dependencies = [
  "gray_matter",
- "pretty_assertions",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -2729,12 +2736,9 @@ name = "pl-studio-bridge"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "filetime",
  "flutter_rust_bridge",
- "pl-model",
  "pl-protocol",
  "pl-studio-runtime",
- "pretty_assertions",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2766,7 +2770,6 @@ dependencies = [
  "pl-remote-helper",
  "pl-tool",
  "pl-trace",
- "pretty_assertions",
  "reqwest",
  "rust-embed 8.12.0",
  "schemars",
@@ -2781,7 +2784,6 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
- "tracing-subscriber",
  "url",
 ]
 
@@ -2795,15 +2797,12 @@ dependencies = [
  "futures",
  "pl-protocol",
  "pl-studio-runtime",
- "reqwest",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml",
- "tower",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -2817,7 +2816,6 @@ name = "pl-tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
  "base64 0.22.1",
  "dunce",
  "futures",
@@ -2833,7 +2831,6 @@ dependencies = [
  "pl-protocol",
  "pl-remote-helper",
  "pl-skill-core",
- "pretty_assertions",
  "process-wrap",
  "reqwest",
  "rmcp",
@@ -2866,14 +2863,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "libc",
  "minisign-verify",
  "pl-model",
  "pl-protocol",
  "pl-remote-helper",
  "pl-skill-core",
  "pl-studio-runtime",
- "pretty_assertions",
  "sea-orm",
  "semver",
  "serde",
@@ -3098,6 +3093,12 @@ dependencies = [
 
 [[package]]
 name = "r-efi"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
@@ -3109,8 +3110,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22f6172bdec972074665ed81ed53b71da00bfc44b65a753cfde883ec4c702a1a"
 dependencies = [
  "libc",
- "rand_chacha",
+ "rand_chacha 0.3.1",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
+dependencies = [
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -3135,12 +3146,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_chacha"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.9.5",
+]
+
+[[package]]
 name = "rand_core"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.17",
+]
+
+[[package]]
+name = "rand_core"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
+dependencies = [
+ "getrandom 0.3.4",
 ]
 
 [[package]]
@@ -3292,15 +3322,10 @@ dependencies = [
  "chrono",
  "futures",
  "http",
- "http-body",
- "http-body-util",
  "oauth2",
- "pastey",
  "pin-project-lite",
  "process-wrap",
- "rand 0.10.2",
  "reqwest",
- "schemars",
  "serde",
  "serde_json",
  "sse-stream",
@@ -3308,10 +3333,8 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "tower-service",
  "tracing",
  "url",
- "uuid",
 ]
 
 [[package]]
@@ -3517,7 +3540,6 @@ version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a"
 dependencies = [
- "chrono",
  "dyn-clone",
  "ref-cast",
  "schemars_derive",
@@ -3821,6 +3843,17 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest 0.10.7",
 ]
 
 [[package]]
@@ -4323,6 +4356,18 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.29.0",
+]
+
+[[package]]
+name = "tokio-tungstenite"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
@@ -4333,7 +4378,7 @@ dependencies = [
  "rustls-pki-types",
  "tokio",
  "tokio-rustls",
- "tungstenite",
+ "tungstenite 0.30.0",
  "webpki-roots 0.26.11",
 ]
 
@@ -4531,6 +4576,22 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tungstenite"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.9.5",
+ "sha1 0.10.7",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tungstenite"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e48ac77174b19c110a50ab2128b24215ac9cb40e0e12e093fb602d175c569d22"
@@ -4543,7 +4604,7 @@ dependencies = [
  "rand 0.10.2",
  "rustls",
  "rustls-pki-types",
- "sha1",
+ "sha1 0.11.0",
  "thiserror 2.0.18",
 ]
 
@@ -4686,7 +4747,6 @@ version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
 dependencies = [
- "getrandom 0.4.3",
  "js-sys",
  "serde_core",
  "wasm-bindgen",
@@ -4734,6 +4794,15 @@ name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
+
+[[package]]
+name = "wasip2"
+version = "1.0.4+wasi-0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b67efb37e106e55ce722a510d6b5f9c17f083e5fc79afc2badeb12cc313d9487"
+dependencies = [
+ "wit-bindgen",
+]
 
 [[package]]
 name = "wasm-bindgen"
@@ -5098,6 +5167,12 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "wit-bindgen"
+version = "0.57.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "writeable"

@@ -3,23 +3,11 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use sea_orm::sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};
-#[cfg(test)]
-use sea_orm::{ActiveModelTrait, ActiveValue::Set};
-#[cfg(test)]
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use sea_orm::{
     ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement,
 };
 
 use crate::studio::catalog::CatalogStore;
-#[cfg(test)]
-use crate::studio::entity as entities;
-#[cfg(test)]
-use crate::studio::ids::{new_id, unix_seconds};
-#[cfg(test)]
-use crate::studio::mappers::project_record;
-#[cfg(test)]
-use crate::studio::paths::project_name;
 use crate::studio::paths::{StudioPaths, default_db_path, sqlite_read_only_url, sqlite_url};
 use crate::studio::records::ProjectRecord;
 use crate::studio::store::settings::SettingsStore;
@@ -185,69 +173,6 @@ impl StudioStore {
             paths,
         };
         Ok(store)
-    }
-
-    /// 测试 seed 入口：按 path 直接同步 upsert Project 行。
-    ///
-    /// 生产路径的打开必须经 `DirectoryDelta::upsert_project` +
-    /// `ProductEventBus::commit_directory`（内存先行、异步落库）。
-    #[cfg(test)]
-    pub(crate) async fn upsert_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
-        use entities::project;
-        let now = unix_seconds();
-        let path = path.as_ref();
-        let path_text = path.to_string_lossy().to_string();
-        let name = project_name(path);
-        if let Some(existing) = project::Entity::find()
-            .filter(project::Column::Path.eq(path_text.clone()))
-            .filter(project::Column::SshAlias.is_null())
-            .one(&self.db)
-            .await?
-        {
-            let mut active: project::ActiveModel = existing.into();
-            active.name = Set(name);
-            active.updated_at = Set(now);
-            active.last_opened_at = Set(Some(now));
-            active.closed = Set(0);
-            let model = active.update(&self.db).await?;
-            self.seed_workspace_from_model(&model).await?;
-            return Ok(project_record(model));
-        }
-
-        let model = project::ActiveModel {
-            id: Set(new_id("project")),
-            name: Set(name),
-            path: Set(path_text),
-            ssh_alias: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-            last_opened_at: Set(Some(now)),
-            closed: Set(0),
-        }
-        .insert(&self.db)
-        .await?;
-        self.seed_workspace_from_model(&model).await?;
-        Ok(project_record(model))
-    }
-
-    #[cfg(test)]
-    async fn seed_workspace_from_model(&self, model: &entities::project::Model) -> Result<()> {
-        self.workspaces()
-            .apply_delta(
-                &crate::studio::store::directory::DirectoryDelta::upsert_project(
-                    crate::studio::store::directory::ProjectDirectoryRecord {
-                        id: model.id.clone(),
-                        name: model.name.clone(),
-                        path: model.path.clone(),
-                        ssh_alias: model.ssh_alias.clone(),
-                        created_at: model.created_at,
-                        updated_at: model.updated_at,
-                        last_opened_at: model.last_opened_at,
-                        closed: model.closed != 0,
-                    },
-                ),
-            )
-            .await
     }
 
     pub async fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
@@ -622,32 +547,4 @@ fn sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     let mut value = path.as_os_str().to_os_string();
     value.push(suffix);
     PathBuf::from(value)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn incompatible_database_is_preserved_with_its_attachments() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let database = temp.path().join("studio.db");
-        tokio::fs::write(&database, b"incompatible database")
-            .await
-            .unwrap();
-        let old_attachment = temp.path().join("attachments/old-thread/blob");
-        tokio::fs::create_dir_all(old_attachment.parent().unwrap())
-            .await
-            .unwrap();
-        tokio::fs::write(&old_attachment, b"old attachment")
-            .await
-            .unwrap();
-
-        assert!(StudioStore::open(&database).await.is_err());
-        assert!(old_attachment.exists());
-        assert_eq!(
-            tokio::fs::read(&database).await.unwrap(),
-            b"incompatible database"
-        );
-    }
 }

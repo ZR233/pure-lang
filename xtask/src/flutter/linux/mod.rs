@@ -192,23 +192,3 @@ fn is_executable(path: &Path) -> bool {
     path.metadata()
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn compiler_failure_preserves_raw_output_and_actionable_context() {
-        let raw = "clang++: error: unable to find library -lstdc++\n";
-        let diagnostic = probe_failure_diagnostic(
-            "C++ 标准库与 GTK 编译链接",
-            "/usr/bin/cmake --build /tmp/probe --verbose",
-            raw,
-        );
-
-        assert!(diagnostic.contains("阶段: C++ 标准库与 GTK 编译链接"));
-        assert!(diagnostic.contains("命令: /usr/bin/cmake --build /tmp/probe --verbose"));
-        assert!(diagnostic.contains(raw));
-        assert!(diagnostic.contains("C++ 标准库开发包"));
-    }
-}

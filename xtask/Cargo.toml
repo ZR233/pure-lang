@@ -26,10 +26,4 @@ which = { workspace = true }
 pl-skill-core = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true }
-
-[target.'cfg(unix)'.dependencies]
-libc = { workspace = true }
-
-[dev-dependencies]
-pretty_assertions = { workspace = true }
+windows-sys = { workspace = true, features = ["Win32_System_Console"] }

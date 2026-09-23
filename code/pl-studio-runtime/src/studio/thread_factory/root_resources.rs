@@ -104,8 +104,6 @@ impl StudioThreadFactory {
             thread_id: id.to_owned(),
             reason: error.to_string(),
         })?;
-        #[cfg(test)]
-        self.record_session_workspace_root_for_test(id, root.clone());
         let workspace = ToolWorkspace::new(match workspace_mode {
             pl_protocol::ThreadWorkspaceMode::Local => AgentWorkspace::local(&root),
             pl_protocol::ThreadWorkspaceMode::Worktree => {

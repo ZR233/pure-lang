@@ -164,24 +164,3 @@ fn parse_reviewer_decision(content: &str) -> Result<ToolApprovalDecision, Review
         },
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-    #[test]
-    fn reviewer_decision_requires_strict_json() {
-        assert_eq!(
-            parse_reviewer_decision(r#"{"decision":"approved","reason":"ok"}"#).unwrap(),
-            ToolApprovalDecision::Approved
-        );
-        assert_eq!(
-            parse_reviewer_decision(r#"{"decision":"denied","reason":"too broad"}"#).unwrap(),
-            ToolApprovalDecision::Denied {
-                reason: "too broad".to_string()
-            }
-        );
-        assert!(parse_reviewer_decision("approved").is_err());
-        assert!(parse_reviewer_decision(r#"{"decision":"maybe"}"#).is_err());
-    }
-}

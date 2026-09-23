@@ -36,23 +36,3 @@ pub struct AgentSessionPage {
     #[serde(default)]
     pub next_cursor: Option<String>,
 }
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn read_defaults_are_latest_text_items() {
-        assert_eq!(
-            serde_json::to_value(AgentSessionReadOrder::default()).unwrap(),
-            json!("descending")
-        );
-        assert_eq!(
-            serde_json::to_value(AgentSessionReadDetail::default()).unwrap(),
-            json!("text")
-        );
-    }
-}

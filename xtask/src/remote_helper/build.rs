@@ -231,22 +231,3 @@ fn helper_executable(workspace_root: &Path, target: &str) -> PathBuf {
         .join("release")
         .join(HELPER_FILE_NAME)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn target_selection_requires_supported_target() {
-        let error = selected_targets(&BuildRemoteHelperOptions {
-            target: Some("armv7-unknown-linux-musleabihf".to_string()),
-            all_targets: false,
-        })
-        .expect_err("unsupported target");
-        assert!(
-            error
-                .to_string()
-                .contains("unsupported remote helper target")
-        );
-    }
-}

@@ -27,5 +27,6 @@ reqwest = { workspace = true, features = ["multipart"] }
 eventsource-stream = { workspace = true }
 
 [dev-dependencies]
+pl-provider-fixture = { workspace = true }
 pretty_assertions = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

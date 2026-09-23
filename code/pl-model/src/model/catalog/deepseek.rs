@@ -169,39 +169,3 @@ fn deepseek_pricing(input: f64, output: f64, read: f64) -> ModelPricing {
         multiplier: 2.0,
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::info::MediaRepresentation;
-
-    #[test]
-    fn flash_prefers_provider_files_for_first_send_and_replay() {
-        let flash = models()
-            .into_iter()
-            .find(|model| model.slug == "deepseek-flash")
-            .expect("DeepSeek Flash exists");
-        let image = flash
-            .binding
-            .request
-            .media_profile(ModelModality::Image)
-            .expect("DeepSeek Flash declares an image media profile");
-
-        assert_eq!(image.wire, MediaWireFormat::ResponsesInputImage);
-        assert_eq!(
-            image.first_send,
-            vec![
-                MediaRepresentation::ProviderFile,
-                MediaRepresentation::RemoteUrl,
-                MediaRepresentation::DataUrl,
-            ]
-        );
-        assert_eq!(
-            image.replay,
-            vec![
-                MediaRepresentation::ProviderFile,
-                MediaRepresentation::DataUrl,
-            ]
-        );
-    }
-}

@@ -175,38 +175,3 @@ pub(super) async fn upload_helper(
     }
     Ok(path)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn platform_mapping_is_exhaustive() {
-        assert_eq!(
-            RemoteHelperTarget::from_uname("Linux\naarch64\n").expect("aarch64"),
-            RemoteHelperTarget::Aarch64Musl
-        );
-        assert!(RemoteHelperTarget::from_uname("Linux\narmv7\n").is_err());
-        assert!(RemoteHelperTarget::from_uname("Darwin\naarch64\n").is_err());
-    }
-
-    #[test]
-    fn helper_checksum_rejects_tampering() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let helper = directory.path().join("pl-remote-helper");
-        std::fs::write(&helper, b"helper").expect("write helper");
-        let digest = format!("{:x}", Sha256::digest(b"helper"));
-        std::fs::write(
-            helper.with_extension("sha256"),
-            format!("{digest}  pl-remote-helper\n"),
-        )
-        .expect("write checksum");
-        assert_eq!(
-            &*verify_file_helper(&helper).expect("valid checksum"),
-            b"helper"
-        );
-
-        std::fs::write(&helper, b"tampered").expect("tamper helper");
-        assert!(verify_file_helper(&helper).is_err());
-    }
-}

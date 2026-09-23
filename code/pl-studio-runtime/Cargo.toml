@@ -41,22 +41,13 @@ fs4 = { workspace = true }
 rust-embed = { workspace = true }
 dunce = { workspace = true }
 
-[dev-dependencies]
-pretty_assertions = { workspace = true }
-tracing-subscriber = { workspace = true }
-
 [[example]]
 name = "collaboration_observe"
 required-features = ["live-tests"]
 
-
 [[example]]
 name = "model_observe"
 required-features = ["live-tests"]
-
-
-
-
 
 [build-dependencies]
 sha2 = { workspace = true }

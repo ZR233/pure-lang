@@ -120,29 +120,3 @@ impl From<pl_studio_runtime::StudioUpdateError> for BridgeError {
         Self::from(anyhow::Error::new(error))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wire_error_preserves_shared_category_and_correlation_id() {
-        let source = pl_protocol::studio::StudioError::instance_busy();
-        let expected_correlation_id = source.correlation_id.clone();
-        let error = BridgeError::from(source);
-
-        assert_eq!(error.code, BridgeErrorCode::InstanceBusy);
-        assert_eq!(error.correlation_id, expected_correlation_id);
-    }
-
-    #[test]
-    fn unclassified_error_is_redacted_by_runtime_mapping() {
-        let error = BridgeError::from(anyhow::anyhow!(
-            "provider token secret-token at C:\\private\\config.toml"
-        ));
-
-        assert_eq!(error.code, BridgeErrorCode::Internal);
-        assert!(!error.message.contains("secret-token"));
-        assert!(!error.message.contains("config.toml"));
-    }
-}

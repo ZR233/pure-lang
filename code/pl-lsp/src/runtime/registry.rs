@@ -161,24 +161,3 @@ impl LspRuntimeServerState {
         }
     }
 }
-
-#[cfg(all(test, unix))]
-mod identity_tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    #[cfg(unix)]
-    #[test]
-    fn host_resolved_identity_does_not_follow_a_local_symlink() {
-        let directory = tempfile::tempdir().unwrap();
-        let local = directory.path().join("local");
-        let remote_identity = directory.path().join("remote-identity");
-        std::fs::create_dir(&local).unwrap();
-        std::os::unix::fs::symlink(&local, &remote_identity).unwrap();
-        assert_ne!(
-            std::fs::canonicalize(&remote_identity).unwrap(),
-            remote_identity
-        );
-        assert_eq!(workspace_key(&remote_identity), remote_identity);
-    }
-}

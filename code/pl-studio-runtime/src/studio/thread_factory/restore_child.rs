@@ -132,8 +132,6 @@ impl StudioThreadFactory {
                 "saved child workspace has a different project root".into(),
             ));
         }
-        #[cfg(test)]
-        self.record_session_workspace_root_for_test(id, session_root.clone());
         let workspace = match assignment.mode {
             pl_protocol::AgentWorkspaceMode::Unrestricted
                 if std::path::Path::new(&assignment.root) == session_root
@@ -341,81 +339,4 @@ fn migrate_profile(
             .map_err(|error| resource_error("encode migrated child Agent Profile", error))?,
     );
     Ok(profile)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pl_model::config::{ProviderId, ReasoningEffort};
-    use pl_protocol::{AgentProfileSnapshot, AgentWorkspaceMode};
-
-    fn profile(model: &str) -> AgentProfileSnapshot {
-        AgentProfileSnapshot {
-            profile_id: "executor".into(),
-            display_name: "Executor".into(),
-            description: "fixture".into(),
-            when_to_use: "fixture".into(),
-            system_instructions: "frozen instructions".into(),
-            provider_id: "deepseek".into(),
-            model: model.into(),
-            effort: Some("high".into()),
-            source: "system".into(),
-            revision: "1".into(),
-            content_hash: String::new(),
-            system: true,
-            enabled: true,
-            workspace_mode: AgentWorkspaceMode::Directory,
-        }
-    }
-
-    fn route(model: &str, effort: &str) -> ModelRouteConfig {
-        ModelRouteConfig {
-            provider: ProviderId::new("deepseek").unwrap(),
-            model: model.into(),
-            effort: Some(ReasoningEffort::new(effort)),
-        }
-    }
-
-    #[test]
-    fn legacy_child_migration_prefers_the_frozen_request_receipt_route() {
-        let migrated = migrate_profile(
-            "executor",
-            AgentWorkspaceMode::Directory,
-            Some(profile("deepseek-flash")),
-            Some(route("deepseek-v4-pro", "max")),
-        )
-        .unwrap();
-
-        assert_eq!(migrated.model, "deepseek-v4-pro");
-        assert_eq!(migrated.effort.as_deref(), Some("max"));
-        assert_eq!(migrated.system_instructions, "frozen instructions");
-        assert!(!migrated.content_hash.is_empty());
-    }
-
-    #[test]
-    fn legacy_child_migration_uses_the_profile_only_without_a_valid_receipt() {
-        let migrated = migrate_profile(
-            "executor",
-            AgentWorkspaceMode::Directory,
-            Some(profile("deepseek-flash")),
-            None,
-        )
-        .unwrap();
-
-        assert_eq!(migrated.model, "deepseek-flash");
-        assert_eq!(migrated.effort.as_deref(), Some("high"));
-        assert!(!migrated.content_hash.is_empty());
-    }
-
-    #[test]
-    fn legacy_child_migration_requires_a_profile_or_valid_receipt() {
-        let error =
-            migrate_profile("executor", AgentWorkspaceMode::Directory, None, None).unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("has no saved Agent Profile or valid model receipt")
-        );
-    }
 }

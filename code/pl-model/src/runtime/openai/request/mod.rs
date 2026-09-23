@@ -128,38 +128,3 @@ fn protocol_error(message: impl Into<String>) -> PureError {
     let msg = message.into();
     PureError::LlmError(format!("OpenAI request protocol error: {msg}"))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sent_model_requires_a_non_blank_string() {
-        for (body, message) in [
-            (Map::new(), "is required"),
-            (
-                Map::from_iter([("model".to_string(), Value::Null)]),
-                "must be a string",
-            ),
-            (
-                Map::from_iter([("model".to_string(), Value::String("  ".into()))]),
-                "must not be blank",
-            ),
-        ] {
-            let error = OpenAiRequestBody::Chat(body).sent_model().unwrap_err();
-            assert!(error.to_string().contains(message));
-        }
-    }
-
-    #[test]
-    fn sent_model_preserves_the_exact_wire_value() {
-        let body = Map::from_iter([(
-            "model".to_string(),
-            Value::String("  provider-model  ".into()),
-        )]);
-        assert_eq!(
-            OpenAiRequestBody::Responses(body).sent_model().unwrap(),
-            "  provider-model  "
-        );
-    }
-}

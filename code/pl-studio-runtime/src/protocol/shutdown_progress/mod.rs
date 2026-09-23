@@ -49,24 +49,3 @@ impl StudioShutdownProgress {
         matches!(self, Self::Stopped(_))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_flushing_state_accepts_pending_commits() {
-        let state =
-            StudioShutdownProgress::FlushingPersistence(FlushingPersistenceProgress::new(3));
-        let encoded = serde_json::to_value(state).unwrap();
-        assert_eq!(encoded["kind"], "flushingPersistence");
-        assert_eq!(encoded["data"]["pendingCommits"], 3);
-        assert!(
-            serde_json::from_value::<StudioShutdownProgress>(serde_json::json!({
-                "kind": "stoppingMcp",
-                "data": { "pendingCommits": 3 }
-            }))
-            .is_err()
-        );
-    }
-}

@@ -1888,7 +1888,7 @@ class DemoStudioApi
           itemId: toolId,
           revision: 1,
           state: const ThreadToolArgumentsDeltaView(
-            '{"command":"flutter test ',
+            '{"command":"cargo test -p pl-model ',
           ),
         ),
       ),
@@ -1901,7 +1901,7 @@ class DemoStudioApi
         ThreadItemDeltaView(
           itemId: toolId,
           revision: 2,
-          state: const ThreadToolArgumentsDeltaView('test/widget_test.dart"}'),
+          state: const ThreadToolArgumentsDeltaView('--test provider_wire"}'),
         ),
       ),
     );

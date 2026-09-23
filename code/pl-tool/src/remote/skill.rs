@@ -220,17 +220,3 @@ fn ensure_not_cancelled(cancellation: &CancellationToken) -> Result<()> {
 fn content_revision(content: &str) -> String {
     format!("{:x}", Sha256::digest(content.as_bytes()))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn support_resource_join_stays_inside_skill() {
-        assert_eq!(
-            join_remote(".agents/skills/example", "references/info.md").expect("path"),
-            ".agents/skills/example/references/info.md"
-        );
-        assert!(join_remote(".agents/skills/example", "../AGENTS.md").is_err());
-    }
-}

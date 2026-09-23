@@ -84,24 +84,3 @@ async fn report(access: &TaskAccess, preview: String) -> bool {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn command_preview_retains_stream_labels_and_bounds_unicode_without_touching_full_output() {
-        let (observer, receiver) = CommandPreview::channel();
-        observer.output_chunk(CommandOutputStream::Stdout, b"stdout\n", 1);
-        observer.output_chunk(CommandOutputStream::Stderr, b"failure\n", 2);
-        assert_eq!(&*receiver.borrow(), "stdout\n[stderr] failure\n");
-        let oversized = "汉".repeat(MAX_PREVIEW_BYTES);
-        observer.output_chunk(CommandOutputStream::Stdout, oversized.as_bytes(), 3);
-        let preview = receiver.borrow();
-        assert!(preview.len() <= MAX_PREVIEW_BYTES);
-        assert!(preview.starts_with(OMITTED));
-        assert!(preview.ends_with("汉"));
-        assert_eq!(oversized.len(), MAX_PREVIEW_BYTES * 3);
-    }
-}

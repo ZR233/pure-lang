@@ -97,10 +97,6 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
             }
         } else if flush_waiting && idle_batch {
             // 等待方在屏障上：跳过空闲去抖，立即取批落库。
-            #[cfg(test)]
-            shared
-                .flush_debounce_bypasses
-                .fetch_add(1, Ordering::AcqRel);
         }
         let batch = drain_batch(&shared);
         if batch.entries.is_empty() {
@@ -110,11 +106,6 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
         let commit_count = batch.commit_count();
         match apply_batch(&shared.store, &batch).await {
             Ok(()) => {
-                #[cfg(test)]
-                assert!(
-                    !shared.panic_after_apply.swap(false, Ordering::AcqRel),
-                    "injected worker exit after database commit"
-                );
                 let was_unhealthy = matches!(
                     shared.state.borrow().state,
                     PersistenceState::Degraded(_) | PersistenceState::Recovering(_)

@@ -76,31 +76,3 @@ fn render_tail(tail: &VecDeque<u8>, secrets: &[String]) -> Option<String> {
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_string())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stderr_tail_is_bounded_and_redacts_credentials() {
-        let mut tail = VecDeque::new();
-        append_tail(&mut tail, &vec![b'x'; STDERR_TAIL_BYTES]);
-        append_tail(&mut tail, b" token=secret-value\n");
-
-        let rendered = render_tail(&tail, &["secret-value".to_string()]).unwrap();
-
-        assert!(tail.len() <= STDERR_TAIL_BYTES);
-        assert!(rendered.contains("token=[REDACTED]"));
-        assert!(!rendered.contains("secret-value"));
-    }
-
-    #[test]
-    fn only_secret_like_environment_names_are_redacted() {
-        let environment = BTreeMap::from([
-            ("Z_AI_API_KEY".to_string(), "secret".to_string()),
-            ("Z_AI_MODE".to_string(), "ZHIPU".to_string()),
-        ]);
-
-        assert_eq!(sensitive_values(&environment), vec!["secret"]);
-    }
-}

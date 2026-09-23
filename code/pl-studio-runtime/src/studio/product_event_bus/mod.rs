@@ -132,30 +132,3 @@ impl ProductEventBus {
         )
     }
 }
-
-#[cfg(test)]
-pub(super) mod tests {
-    use crate::studio::StudioStore;
-    use crate::studio::agent_host::ThreadWriteBehindWriter;
-
-    use super::ProductEventBus;
-
-    pub(in crate::studio::product_event_bus) async fn memory_bus() -> (StudioStore, ProductEventBus)
-    {
-        let store = StudioStore::open_memory().await.expect("memory store");
-        let bus = ProductEventBus::new(store.clone(), ThreadWriteBehindWriter::new(store.clone()));
-        bus.initialize_directories().await.expect("directories");
-        (store, bus)
-    }
-
-    pub(in crate::studio::product_event_bus) async fn seed_project(
-        store: &StudioStore,
-    ) -> crate::ProjectRecord {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let workspace = std::env::temp_dir().join(format!("pure-directory-{unique}"));
-        store.upsert_project(&workspace).await.expect("project")
-    }
-}

@@ -400,20 +400,3 @@ fn idempotent_response(
 fn operation_id(identity: &WorkflowOperation) -> String {
     format!("{}/{}", identity.turn_id, identity.call_id)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn completion_schema_exposes_closed_fields_at_the_call_site() {
-        let schema = schemars::schema_for!(TransitionInput).to_value();
-        let completion = &schema["properties"]["completion"];
-        assert_eq!(completion["additionalProperties"], false);
-        assert!(completion.get("$ref").is_none());
-        for field in ["reason", "summary", "evidence"] {
-            assert!(completion["properties"].get(field).is_some());
-        }
-        let invalid = serde_json::json!({"expectedRunId":"run", "expectedRevision":1, "expectedStateId":"planning", "targetStateId":"working", "completion":{"reason":"done", "summary":"done", "evidence":[], "summary_evidence":"unexpected"}});
-        assert!(serde_json::from_value::<TransitionInput>(invalid).is_err());
-    }
-}

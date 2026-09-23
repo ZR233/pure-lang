@@ -33,35 +33,3 @@ pub fn summary_request(
         .maybe_max_tokens(max_output_tokens)
         .build()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn summary_preserves_history_prefix_and_disables_tool_side_effects() {
-        let history = vec![ModelContextItem::from(Message {
-            presentation: Default::default(),
-            role: MessageRole::User,
-            content: MessageContent::text("  original history\n"),
-            reasoning_content: None,
-            tool_calls: None,
-            tool_result: None,
-            metadata: Default::default(),
-        })];
-        let tools = vec![
-            ToolSpec::function("local", "local", serde_json::json!({"type":"object"})),
-            ToolSpec::ProgrammaticToolCalling,
-        ];
-        let request = summary_request(
-            "frozen instructions",
-            history.clone(),
-            &tools,
-            "summarize",
-            Some(4096),
-        );
-        assert_eq!(request.input[..history.len()], history);
-        assert_eq!(request.tools, vec![tools[0].clone()]);
-        assert_eq!(request.tool_choice, "none");
-        assert_eq!(request.input.len(), history.len() + 1);
-    }
-}

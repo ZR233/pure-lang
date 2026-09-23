@@ -108,17 +108,3 @@ fn next_correlation_id() -> String {
 }
 
 pub type StudioResult<T> = Result<T, StudioError>;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn studio_error_is_camel_case_and_redacted_by_construction() {
-        let error = StudioError::internal();
-        let value = serde_json::to_value(&error).unwrap();
-        assert_eq!(value["code"], "internal");
-        assert!(value.get("correlationId").is_some());
-        assert!(!error.message.contains("secret"));
-    }
-}

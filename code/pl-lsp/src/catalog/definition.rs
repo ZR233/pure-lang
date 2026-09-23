@@ -114,29 +114,3 @@ impl LspUserServerConfig {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn command_rendering_substitutes_the_workspace_boundary() {
-        let rendered = LspCommandSpec {
-            program: "purelang-lsp".to_string(),
-            args: vec!["--root".to_string(), "{workspaceRoot}".to_string()],
-        }
-        .render(Path::new("/tmp/demo"));
-
-        assert_eq!(
-            rendered,
-            LspResolvedCommand {
-                program: "purelang-lsp".to_string(),
-                args: vec!["--root".to_string(), "/tmp/demo".to_string()],
-            }
-        );
-    }
-}

@@ -22,8 +22,6 @@ pub use client::{ModelRuntime, NativeCompactionCheckpoint, RemoteCompaction};
 pub use clock::InferenceClock;
 pub(crate) use invocation::InvocationRunner;
 pub use invocation::ModelInvocationContext;
-#[cfg(test)]
-pub(crate) use invocation::test_support;
 pub(crate) use provider_error::provider_stream_failure;
 pub use session::ModelSession;
 

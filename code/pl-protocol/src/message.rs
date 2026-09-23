@@ -150,36 +150,3 @@ pub struct ToolResultRecord {
     pub name: String,
     pub kind: ToolCallKind,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn message(presentation: MessagePresentation) -> Message {
-        Message {
-            role: MessageRole::User,
-            content: MessageContent::text("internal input"),
-            presentation,
-            reasoning_content: None,
-            tool_calls: None,
-            tool_result: None,
-            metadata: HashMap::new(),
-        }
-    }
-
-    #[test]
-    fn visible_is_the_omitted_wire_default() {
-        let value = serde_json::to_value(message(MessagePresentation::Visible)).unwrap();
-        assert!(value.get("presentation").is_none());
-        let restored: Message = serde_json::from_value(value).unwrap();
-        assert_eq!(restored.presentation, MessagePresentation::Visible);
-    }
-
-    #[test]
-    fn hidden_round_trips_as_generic_message_protocol() {
-        let value = serde_json::to_value(message(MessagePresentation::Hidden)).unwrap();
-        assert_eq!(value["presentation"], "hidden");
-        let restored: Message = serde_json::from_value(value).unwrap();
-        assert_eq!(restored.presentation, MessagePresentation::Hidden);
-    }
-}

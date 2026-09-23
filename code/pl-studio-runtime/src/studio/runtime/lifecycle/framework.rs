@@ -1,8 +1,5 @@
 use anyhow::{Context, Result};
 
-#[cfg(test)]
-use crate::studio::agent_host::ThreadWriteBehindWriter;
-
 use super::super::StudioRuntime;
 use super::super::background_task::{self, BackgroundTask};
 use super::super::lsp_state::health;
@@ -17,14 +14,6 @@ impl StudioRuntime {
             runtime: self.clone(),
             thread_id: thread_id.to_string(),
         }
-    }
-
-    /// 查询路径使用的只读 repository 句柄（共享进程级 writer 的实例）。
-    #[cfg(test)]
-    pub(in crate::studio) async fn persistence_repository(
-        &self,
-    ) -> Option<ThreadWriteBehindWriter> {
-        self.agent_facility.persistence.lock().await.clone()
     }
 
     pub(in crate::studio::runtime) async fn read_protocol_thread(

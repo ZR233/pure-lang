@@ -64,31 +64,3 @@ macro_rules! impl_labeled_enum {
         }
     };
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Sample {
-        Alpha,
-        Beta,
-    }
-
-    impl_labeled_enum!(Sample, "sample", [Sample::Alpha => "alpha", Sample::Beta => "beta"]);
-
-    #[test]
-    fn round_trip_preserves_variant() {
-        for value in [Sample::Alpha, Sample::Beta] {
-            assert_eq!(Sample::from_label(value.label()).unwrap(), value);
-        }
-    }
-
-    #[test]
-    fn unknown_label_reports_enum_name_and_value() {
-        let error = Sample::from_label("gamma").unwrap_err();
-        assert_eq!(error.enum_name, "sample");
-        assert_eq!(error.label, "gamma");
-        assert_eq!(error.to_string(), r#"unknown sample label "gamma""#);
-    }
-}

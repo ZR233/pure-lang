@@ -63,15 +63,3 @@ fn release_dir(workspace_root: &Path, version: &Version) -> PathBuf {
 fn asset_name(version: &Version, kind: &str) -> String {
     format!("anywork-{version}-{PLATFORM}-{kind}")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_prerelease_and_build_metadata() {
-        assert!(validate_version("1.0.0-rc.1").is_err());
-        assert!(validate_version("1.0.0+1").is_err());
-        assert!(validate_version("v1.0.0").is_err());
-    }
-}

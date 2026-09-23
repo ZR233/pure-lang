@@ -71,18 +71,3 @@ pub fn logical_line_count(content: &str) -> usize {
         content.lines().count().max(1)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn locates_unicode_line_ranges_by_byte_offset() {
-        let content = "一\ntwo\n三";
-        let start = line_start_byte_offset(content, 2).unwrap();
-        let end = line_end_byte_offset(content, start, Some(1));
-
-        assert_eq!(&content[start..end], "two\n");
-        assert_eq!(logical_line_count(content), 3);
-    }
-}

@@ -3,6 +3,7 @@ use std::ffi::OsString;
 
 mod cli;
 mod flutter;
+mod manual_gui;
 mod paths;
 mod process;
 mod pubspec_lock;
@@ -28,7 +29,8 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
             }
             cli::Command::GenerateGui => flutter::generate_gui(),
             cli::Command::CheckGuiGenerated => flutter::check_gui_generated(),
-            cli::Command::VerifyGui(options) => flutter::verify_gui(options),
+            cli::Command::VerifyGui => flutter::verify_gui(),
+            cli::Command::ManualGui(options) => manual_gui::run(options),
             cli::Command::RunGui(options) => flutter::run_gui(options),
             cli::Command::BuildGui(options) => flutter::build_gui(options),
             cli::Command::ReleaseGui { action } => release::run(action),

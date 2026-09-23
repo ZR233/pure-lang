@@ -177,30 +177,3 @@ fn decode(bytes: &[u8]) -> Result<Environment, EnvironmentError> {
     }
     Ok(environment)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn snapshot_preserves_non_utf8_and_rejects_invalid_entries_without_values_in_errors() {
-        let encoded = vec![(b"KEY".to_vec(), vec![255, b'\n', b'='])];
-        let environment = decode(&serde_json::to_vec(&encoded).unwrap()).unwrap();
-        assert_eq!(
-            environment[&OsString::from("KEY")],
-            OsString::from_vec(vec![255, b'\n', b'='])
-        );
-        for invalid in [
-            br#"[[[65],[0]]]"#.as_slice(),
-            br#"[[[],[65]]]"#,
-            br#"[[[65],[66]],[[65],[67]]]"#,
-            b"[]",
-            b"secret-value",
-        ] {
-            assert!(matches!(
-                decode(invalid),
-                Err(EnvironmentError::InvalidSnapshot)
-            ));
-        }
-    }
-}

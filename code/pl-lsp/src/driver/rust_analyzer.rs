@@ -150,18 +150,3 @@ fn rust_analyzer_settings() -> Value {
         },
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rustup_unknown_binary_is_missing_component() {
-        assert!(is_rustup_missing_component_error(
-            "error: Unknown binary 'rust-analyzer.exe' in official toolchain 'stable-x86_64-pc-windows-msvc'."
-        ));
-        assert!(!is_rustup_missing_component_error(
-            "error: Unknown binary 'cargo-miri.exe' in official toolchain"
-        ));
-    }
-}

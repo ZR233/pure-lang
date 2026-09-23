@@ -48,8 +48,8 @@
 
   ```powershell
   cargo flutter analyze
-  cargo flutter test
-  cargo dart format lib test
+  cargo flutter analyze
+  cargo dart format lib test_driver
   ```
 
 ### 桌面 GUI
@@ -64,16 +64,11 @@
 - 不支持直接执行 `flutter build windows|linux` 或 `flutter run -d windows|linux`，也不新增 PowerShell GUI wrapper。
 - Linux 原生 GUI 需要 Clang/C++ 标准库、CMake、Ninja、pkg-config 与 GTK 3 开发文件；Debian/Ubuntu 示例为 `sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev`。xtask 必须用当前 PATH 和真实最小 GTK/C++ 工程预检，缺失时透传实际命令与原始错误；不得写死编译器版本、系统库路径或注入机器专用 include/library 环境。Rust 桥以 `libpl_studio_bridge.so` 预构建并经 `ANYWORK_BRIDGE_LIBRARY` 环境变量注入 CMake，与 Windows 的 DLL 契约一致。
 - `cargo xtask run-gui --driver` 使用 `test_driver/driver_main.dart` 启用 Flutter Driver extension，供 Dart MCP 的 `flutter_driver_command` 操作 GUI；xtask 不负责启动实验性的 `dart mcp-server`。
+- `cargo xtask manual-gui` 启动隔离的原生 Studio 和本地模拟供应商，记录截图、快照、请求与日志供人工判定；真实供应商人工验收仍用 `cargo xtask run-gui --driver` 直接读取用户已有配置，不修改其凭据。
 - 本地原生验收默认使用当前受支持宿主平台，报告中明确平台与覆盖范围，不把单平台结果外推为跨平台通过；跨平台任务按实际影响说明其他平台的验证结果或缺口。
-- GUI smoke 使用 `cargo xtask run-gui --demo`；需要确定性数据和交互验收时使用 `cargo xtask run-gui --demo --driver`。
+- GUI 人工验收使用 `cargo xtask manual-gui`；`cargo xtask run-gui --demo` 仍可供独立的界面预览，不能证明真实 bridge、持久化或 provider 行为。
 - Driver 命令在正常完成、失败或取消后都必须等待并回收所属 Flutter、DTD、GUI 及其子进程，不得残留；Windows 使用 Job Object 管理进程树，Linux 使用项目的进程树生命周期机制。
 - 调试和验收 Flutter GUI 时，Flutter Driver 能覆盖的交互必须使用 Flutter Driver，不使用 Computer Use。只有 Driver 无法覆盖且确有必要时，才可使用 Computer Use，以减少对用户鼠标、键盘、窗口焦点和桌面状态的影响。
-
-### Web GUI 远程验收
-
-- `cargo xtask verify-gui --web-integration` 使用纯 Dart demo 和同一套 Flutter integration test 在无头 Chrome/Chromium 中验收布局与交互；它不替代原生 bridge、文件系统、进程、MCP/LSP 或真实 provider 验收。
-- 首次使用先运行 `cargo flutter config --enable-web`，并安装主版本匹配的 Chrome/Chromium 与 ChromeDriver；浏览器不在 PATH 时设置 `CHROME_EXECUTABLE`。xtask 负责发现版本、解析可执行 wrapper/sandbox 载荷、分配临时端口、启动及回收 driver 进程树，失败日志写入 `code/anywork/build/web-integration-artifacts`。
-- canonical Web 交互使用 Flutter integration test 与稳定 `ValueKey`；Playwright 等工具只能补充截图、console 或可访问性观察，不能维护第二套 DOM/坐标状态机。
 
 ### GUI 生成文件
 
@@ -139,7 +134,7 @@ crate 职责、依赖方向与禁止依赖的唯一权威源是 [Crate 边界](d
 
 - 验证按实际影响选择。纯文档、技能或协作规则修改（包括提交前）只检查内容、引用、规则一致性及适用格式，不运行 Rust、Flutter、GUI 或 live 全量验收；若同时改变构建／生成输入、运行配置或测试执行语义，则按这些实际影响验证。代码修改先运行定向检查，跨 crate、协议、构建或依赖变更扩展到相关消费者；提交前执行下述代码门禁，生成输入、GUI 行为与 live 验收另遵守对应要求。
 - 适用检查通过且需求已满足后直接交付；只有新修改、失败或尚未解决的具体风险才扩展或重复验证。只读分析以结论与出处为完成条件；修改任务以范围内修改完成、适用验证通过和差异可审查为完成条件；提 PR 任务还须交付 PR 链接及实际 CI 状态，排队或运行中不算通过。环境或权限阻塞时报告已完成项、原始失败和剩余工作，不声称全部完成。
-- 测试设计、布局、必要性与确定性回归统一遵循 [test-quality](.agents/skills/test-quality/SKILL.md)。核心行为必须有充分证明；修复优先复用或增强已有功能测试，同一回归在错误实现失败、修复后通过，不要求每个 bug 新增用例。
+- 项目自有的自动化用例仅位于 `pl-model/tests/` 与 `pl-core/tests/`，只通过被测 crate 的公开 API 验证完整能力；不新增源码内单元测试、其他 crate 测试、Flutter widget/integration 测试或发布脚本测试。两库测试通过本地模拟供应商或脚本化模型运行；`pl-core` 不依赖 `pl-model`。上游预置技能自带的测试源码保持原样，但不进入本项目门禁。测试设计与失败传播遵循 [test-quality](.agents/skills/test-quality/SKILL.md)，具体边界见 [测试设计](design/24-testing.md)。
 - `code/anywork/pubspec.lock` 是必须纳入 Git 的 canonical 应用依赖快照，不得加入 ignore；
   Flutter 直接依赖升级后必须同步提交重新解析的 lockfile。
 - 代码、构建、依赖或生成输入变更提交前，在本地执行与 CI 一致的检查清单（纯说明性变更按本节首条豁免；只需保证当前环境通过；
@@ -149,23 +144,20 @@ crate 职责、依赖方向与禁止依赖的唯一权威源是 [Crate 边界](d
   ```powershell
   cargo fmt --all --check
   cargo clippy --workspace --all-targets -- -D warnings
-  cargo test --workspace
+  cargo test -p pl-model
+  cargo test -p pl-core --features sqlite
   cargo xtask verify-gui
   ```
 
-- Linux 上运行未启用 `embedded-remote-helpers` 的 Studio/Server 或工作区测试前，先执行
+- Linux 上运行未启用 `embedded-remote-helpers` 的 Studio/Server 人工验收前，先执行
   `cargo install --path code/pl-remote-helper --locked`，确保同一生产进程 worker 位于 PATH。
   桌面 xtask 构建会嵌入 worker；两种宿主均不使用裸 shell 后备路径。
 
 - 不默认启用 `--all-features`：`live-tests` 等 feature 依赖外部服务与有效
   API key，需要时以 `cargo run -p pl-studio-runtime --features live-tests --example model_observe -- <provider> <model> <task-file> <artifact-dir>` 等显式
   opt-in 执行，CI 与本地默认检查都不包含。
-- 真实模型和真实 GUI 任务使用人工观察入口，不断言回答、工具次数、缓存命中或业务终态；执行状态与人工结论分开记录，默认待评审。单元、本地协议 fixture、恢复迁移及确定性 demo/widget 测试保留断言。
-- CI（PR Quality Gate）只运行上述确定性检查，外加 Conventional PR 标题与发布
-  配置校验；Flutter Driver smoke、任务流 harness 与 live 模型验收不在 CI 中
-  运行——涉及 GUI 行为改动时，交付前本地执行 `cargo xtask verify-gui
-  --integration`，交互验收使用 `cargo xtask run-gui --demo --driver` 与对应
-  harness。
+- 真实模型和 GUI 任务使用人工观察入口；本地模拟验收记录执行结果和证据，不把模拟通过等同于真实供应商兼容。人工结论独立记录，默认为待评审。
+- CI（PR Quality Gate）只运行两库的确定性公开 API 集成测试、格式、静态分析、编译和 GUI 生成一致性检查，另执行 Conventional PR 标题、工作流静态检查及发布配置检查；GUI 人工验收与 live 模型观察不在 CI 中运行。GUI 行为改动交付前运行 `cargo xtask manual-gui`，核对截图、快照、日志和进程回收。
 - `cargo doc --workspace --all-features --no-deps` 为按需检查项，CI 不执行。
 
 - Flutter、Dart、GUI 和生成文件检查统一使用前文定义的项目命令入口；验收时结合 widget tree、窗口截图和日志判断结果。

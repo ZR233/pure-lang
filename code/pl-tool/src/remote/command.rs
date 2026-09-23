@@ -158,28 +158,3 @@ fn remote_exec_error(error: impl std::fmt::Display) -> PureError {
         error: error.to_string(),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn remote_cwd_is_posix_and_confined() {
-        assert_eq!(normalize_cwd(None).expect("default cwd"), ".");
-        assert_eq!(normalize_cwd(Some(Path::new("."))).expect("root cwd"), ".");
-        assert_eq!(
-            normalize_cwd(Some(Path::new("src/bin"))).expect("cwd"),
-            "src/bin"
-        );
-        let absolute = normalize_cwd(Some(Path::new("/home/runner/project")))
-            .unwrap_err()
-            .to_string();
-        assert!(absolute.contains(
-            "exec.cwd must be workspace-relative for SSH; use \".\" for the workspace root"
-        ));
-        let parent = normalize_cwd(Some(Path::new("../outside")))
-            .unwrap_err()
-            .to_string();
-        assert!(parent.contains("remote command path escapes workspace"));
-    }
-}

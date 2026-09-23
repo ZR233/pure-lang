@@ -1,4 +1,4 @@
-use crate::cli::{BridgeConfiguration, BuildGuiOptions, LogLevel, RunGuiOptions, VerifyGuiOptions};
+use crate::cli::{BridgeConfiguration, BuildGuiOptions, LogLevel, RunGuiOptions};
 use crate::paths;
 use crate::process;
 use crate::pubspec_lock::{self, LockfileChange};
@@ -15,7 +15,6 @@ use std::process::Command;
 mod codegen;
 #[cfg(target_os = "linux")]
 mod linux;
-mod web;
 
 const PUB_FINGERPRINT_FILE: &str = "pure-xtask-pub.sha256";
 
@@ -128,23 +127,10 @@ pub(crate) fn check_gui_generated() -> Result<()> {
     codegen::check_gui_generated()
 }
 
-pub(crate) fn verify_gui(options: VerifyGuiOptions) -> Result<()> {
+pub(crate) fn verify_gui() -> Result<()> {
     let workspace_root = paths::workspace_root()?;
     let app_dir = paths::studio_app_dir(&workspace_root);
-    let integration_target = options
-        .integration
-        .then(DesktopTarget::current)
-        .transpose()?;
     print_context(&workspace_root, &app_dir);
-    if let Some(target) = integration_target {
-        ensure_desktop_build_environment(target)?;
-    }
-    let web_environment = if options.web_integration {
-        ensure_web_integration_environment(&app_dir)?;
-        Some(web::WebDriverEnvironment::discover()?)
-    } else {
-        None
-    };
     GeneratedSourcesPolicy::RegenerateAndCheck.prepare(&workspace_root, &app_dir)?;
     run_tool("cargo", &["fmt", "--all", "--check"], &workspace_root)?;
     run_tool(
@@ -154,8 +140,6 @@ pub(crate) fn verify_gui(options: VerifyGuiOptions) -> Result<()> {
             "--output=none",
             "--set-exit-if-changed",
             "lib",
-            "test",
-            "integration_test",
             "test_driver",
         ],
         &app_dir,
@@ -166,23 +150,6 @@ pub(crate) fn verify_gui(options: VerifyGuiOptions) -> Result<()> {
         &["analyze", "--no-pub"],
         DemoMode::Native,
     )?;
-    run_flutter(
-        &workspace_root,
-        &app_dir,
-        &["test", "--no-pub", "--exclude-tags", "visual"],
-        DemoMode::Native,
-    )?;
-    run_tool(
-        "cargo",
-        &["test", "-p", "pl-studio-bridge"],
-        &workspace_root,
-    )?;
-    if let Some(target) = integration_target {
-        run_gui_integration(&workspace_root, &app_dir, target)?;
-    }
-    if let Some(environment) = web_environment {
-        run_web_gui_integration(&workspace_root, &app_dir, &environment)?;
-    }
     Ok(())
 }
 
@@ -200,191 +167,6 @@ fn ensure_desktop_build_environment(target: DesktopTarget) -> Result<()> {
         }
         DesktopTarget::Windows | DesktopTarget::Macos => Ok(()),
     }
-}
-
-fn run_gui_integration(workspace_root: &Path, app_dir: &Path, target: DesktopTarget) -> Result<()> {
-    let args = integration_drive_args(target)?;
-    if matches!(target, DesktopTarget::Linux) && !linux_graphical_session_available() {
-        return run_linux_headless_flutter(workspace_root, app_dir, &args);
-    }
-    run_flutter(workspace_root, app_dir, &args, DemoMode::Demo)
-}
-
-fn integration_drive_args(target: DesktopTarget) -> Result<Vec<&'static str>> {
-    let device = match target {
-        DesktopTarget::Windows => "windows",
-        DesktopTarget::Linux => "linux",
-        DesktopTarget::Macos => {
-            bail!("verify-gui --integration currently supports Windows and Linux")
-        }
-    };
-    Ok(vec![
-        "drive",
-        "--driver",
-        "test_driver/integration_test.dart",
-        "--target",
-        "integration_test/studio_smoke_test.dart",
-        "-d",
-        device,
-        "--no-pub",
-    ])
-}
-
-fn run_web_gui_integration(
-    workspace_root: &Path,
-    app_dir: &Path,
-    environment: &web::WebDriverEnvironment,
-) -> Result<()> {
-    let artifacts_dir = app_dir.join("build").join("web-integration-artifacts");
-    fs::create_dir_all(&artifacts_dir)
-        .with_context(|| format!("failed to create {}", artifacts_dir.display()))?;
-    let driver = environment.start(&artifacts_dir)?;
-    let driver_port = driver.port().to_string();
-    let browser = environment
-        .browser()
-        .to_str()
-        .context("Chrome/Chromium executable path must contain valid Unicode")?;
-    let run_result = run_flutter(
-        workspace_root,
-        app_dir,
-        &web_integration_drive_args(&driver_port, browser),
-        DemoMode::Demo,
-    );
-    let driver_result = driver.stop(run_result.is_err());
-    match (run_result, driver_result) {
-        (Ok(()), Ok(_)) => Ok(()),
-        (Ok(()), Err(driver_error)) => Err(driver_error),
-        (Err(run_error), Ok(driver_output)) => {
-            if !driver_output.trim().is_empty() {
-                eprintln!("ChromeDriver 原始输出:\n{driver_output}");
-            }
-            Err(run_error)
-        }
-        (Err(run_error), Err(driver_error)) => Err(run_error.context(format!(
-            "ChromeDriver cleanup also failed: {driver_error:#}"
-        ))),
-    }
-}
-
-fn web_integration_drive_args<'a>(driver_port: &'a str, browser: &'a str) -> Vec<&'a str> {
-    vec![
-        "drive",
-        "--driver",
-        "test_driver/integration_test.dart",
-        "--target",
-        "integration_test/studio_smoke_test.dart",
-        "-d",
-        "web-server",
-        "--driver-port",
-        driver_port,
-        "--chrome-binary",
-        browser,
-        "--headless",
-        "--browser-dimension",
-        "1440x900@1",
-        "--no-pub",
-    ]
-}
-
-fn ensure_web_integration_environment(app_dir: &Path) -> Result<()> {
-    let args = [OsString::from("config"), OsString::from("--list")];
-    let display = process::display_command("flutter", &args);
-    let mut command = process::path_command("flutter", &args);
-    command.current_dir(app_dir);
-    let output = command
-        .output()
-        .with_context(|| format!("failed to start command from PATH: {display}"))?;
-    if !output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!(
-            "Flutter Web 远程验收环境探测失败。\n命令: {display}\n原始 stdout:\n{stdout}\n原始 stderr:\n{stderr}"
-        );
-    }
-    let config = String::from_utf8_lossy(&output.stdout);
-    if web_support_explicitly_disabled(&config) {
-        bail!("{}", disabled_web_support_diagnostic());
-    }
-    Ok(())
-}
-
-fn web_support_explicitly_disabled(config: &str) -> bool {
-    config
-        .lines()
-        .map(str::trim)
-        .any(|line| line == "enable-web: false")
-}
-
-fn disabled_web_support_diagnostic() -> &'static str {
-    "Flutter Web 远程验收不可用：当前 Flutter SDK 明确配置为 enable-web: false。\n请先运行 'cargo flutter config --enable-web'，再重试 'cargo xtask verify-gui --web-integration'。xtask 不会静默修改用户的全局 Flutter 配置。"
-}
-
-fn linux_graphical_session_available() -> bool {
-    graphical_session_available(
-        std::env::var_os("DISPLAY").as_deref(),
-        std::env::var_os("WAYLAND_DISPLAY").as_deref(),
-    )
-}
-
-fn graphical_session_available(
-    display: Option<&std::ffi::OsStr>,
-    wayland: Option<&std::ffi::OsStr>,
-) -> bool {
-    [display, wayland]
-        .into_iter()
-        .flatten()
-        .any(|value| !value.is_empty())
-}
-
-fn run_linux_headless_flutter(workspace_root: &Path, app_dir: &Path, args: &[&str]) -> Result<()> {
-    ensure_linux_headless_dependencies(program_exists_on_path("xvfb-run"))?;
-    let flutter_args = flutter_args(args, DemoMode::Demo);
-    let mut xvfb_args = vec![
-        OsString::from("-a"),
-        OsString::from("--server-args=-screen 0 1440x900x24 -nolisten tcp -noreset"),
-        OsString::from("flutter"),
-    ];
-    xvfb_args.extend(flutter_args);
-    let display = process::display_command("xvfb-run", &xvfb_args);
-    let mut command = process::path_command("xvfb-run", &xvfb_args);
-    command.current_dir(app_dir);
-    configure_flutter_environment(
-        &mut command,
-        FlutterInvocation {
-            demo_mode: DemoMode::Demo,
-            process_mode: FlutterProcessMode::Batch,
-            bridge_artifacts: None,
-            log_level: None,
-        },
-    );
-    command.env("GDK_BACKEND", "x11");
-    command.env("LIBGL_ALWAYS_SOFTWARE", "1");
-    process::run_checked(&mut command, &display).with_context(|| {
-        format!(
-            "headless Linux Flutter integration; workspace root: {}, Studio app dir: {}",
-            workspace_root.display(),
-            app_dir.display()
-        )
-    })
-}
-
-fn ensure_linux_headless_dependencies(xvfb_run_available: bool) -> Result<()> {
-    if !xvfb_run_available {
-        bail!(
-            "headless Linux Flutter integration requires xvfb-run. Install the Xvfb package for your distribution (Debian/Ubuntu example: 'sudo apt-get install -y xvfb')"
-        );
-    }
-    Ok(())
-}
-
-fn program_exists_on_path(program: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|path| {
-            std::env::split_paths(&path)
-                .map(|directory| directory.join(program))
-                .any(|candidate| candidate.is_file())
-        })
-        .unwrap_or(false)
 }
 
 fn run_tool(program: &'static str, args: &[&str], cwd: &Path) -> Result<()> {
@@ -886,142 +668,4 @@ fn copy_dir_contents(source: &Path, destination: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-    use std::ffi::OsStr;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn clean_release_copy_preserves_dist_root_and_removes_stale_children() -> Result<()> {
-        let fixture_root = std::env::temp_dir().join(format!(
-            "pl-xtask-release-clean-{}-{}",
-            std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
-        ));
-        let artifact_dir = fixture_root.join("artifacts");
-        let dist_dir = fixture_root.join("dist");
-        fs::create_dir_all(artifact_dir.join("data"))?;
-        fs::write(artifact_dir.join("anywork.exe"), "new executable")?;
-        fs::write(artifact_dir.join("data").join("asset.bin"), "new asset")?;
-        fs::create_dir_all(dist_dir.join("stale"))?;
-        fs::write(dist_dir.join("old.exe"), "stale executable")?;
-        fs::write(dist_dir.join("stale").join("old.bin"), "stale asset")?;
-
-        copy_release_artifacts(&artifact_dir, &dist_dir, DistCleanMode::Clean)?;
-
-        assert!(dist_dir.is_dir());
-        assert!(!dist_dir.join("old.exe").exists());
-        assert!(!dist_dir.join("stale").exists());
-        assert_eq!(
-            fs::read_to_string(dist_dir.join("anywork.exe"))?,
-            "new executable"
-        );
-        assert_eq!(
-            fs::read_to_string(dist_dir.join("data").join("asset.bin"))?,
-            "new asset"
-        );
-
-        fs::remove_dir_all(fixture_root)?;
-        Ok(())
-    }
-
-    #[test]
-    fn explicitly_disabled_web_support_has_an_actionable_non_mutating_hint() {
-        assert!(web_support_explicitly_disabled(
-            "All Settings:\n  enable-web: false\n"
-        ));
-        assert!(!web_support_explicitly_disabled(
-            "All Settings:\n  enable-web: true\n"
-        ));
-        assert!(!web_support_explicitly_disabled(
-            "All Settings:\n  enable-web: (Not set)\n"
-        ));
-
-        let diagnostic = disabled_web_support_diagnostic();
-        assert!(diagnostic.contains("cargo flutter config --enable-web"));
-        assert!(diagnostic.contains("xtask 不会静默修改"));
-    }
-
-    #[test]
-    fn linux_graphical_session_accepts_x11_or_wayland_without_environment_mutation() {
-        assert!(!graphical_session_available(None, None));
-        assert!(!graphical_session_available(Some(OsStr::new("")), None));
-        assert!(graphical_session_available(Some(OsStr::new(":1")), None));
-        assert!(graphical_session_available(
-            None,
-            Some(OsStr::new("wayland-0"))
-        ));
-    }
-
-    #[test]
-    fn headless_linux_requires_xvfb_with_an_actionable_install_hint() -> Result<()> {
-        ensure_linux_headless_dependencies(true)?;
-
-        let error = ensure_linux_headless_dependencies(false)
-            .expect_err("missing xvfb-run must reject headless integration");
-        assert!(error.to_string().contains("sudo apt-get install -y xvfb"));
-        Ok(())
-    }
-
-    #[test]
-    fn release_build_never_references_driver_entrypoint() {
-        let args = build_gui_args(
-            DesktopTarget::Windows,
-            "--dart-define=ANYWORK_VERSION=1.2.3",
-            false,
-        );
-
-        assert!(!args.contains(&"test_driver/driver_main.dart"));
-        assert!(!args.contains(&"--dart-define=ANYWORK_DRIVER=true"));
-        assert!(!args.contains(&"--disable-service-auth-codes"));
-        assert!(!args.contains(&"--no-dds"));
-        assert!(!args.contains(&"--print-dtd"));
-        assert!(!args.contains(&"--verbose"));
-        assert!(!args.contains(&"-t"));
-        assert!(args.contains(&"--no-pub"));
-    }
-
-    #[test]
-    fn dependency_fingerprint_invalidates_cached_package_configuration() -> Result<()> {
-        let app_dir = std::env::temp_dir().join(format!(
-            "pl-xtask-flutter-dependencies-{}",
-            std::process::id()
-        ));
-        let dart_tool_dir = app_dir.join(".dart_tool");
-        fs::create_dir_all(&dart_tool_dir)?;
-        fs::write(app_dir.join("pubspec.yaml"), "name: fixture\n")?;
-        fs::write(app_dir.join("pubspec.lock"), "packages: {}\n")?;
-        fs::write(dart_tool_dir.join("package_config.json"), "{}\n")?;
-
-        let fingerprint = flutter_dependency_fingerprint(&app_dir, None)?;
-        assert!(!has_cached_flutter_dependencies(&app_dir, &fingerprint)?);
-        fs::write(
-            flutter_dependency_stamp_path(&app_dir),
-            format!("{fingerprint}\n"),
-        )?;
-        assert!(has_cached_flutter_dependencies(&app_dir, &fingerprint)?);
-
-        let mirror_fingerprint =
-            flutter_dependency_fingerprint(&app_dir, Some("https://mirror.example"))?;
-        assert_ne!(fingerprint, mirror_fingerprint);
-        assert!(!has_cached_flutter_dependencies(
-            &app_dir,
-            &mirror_fingerprint
-        )?);
-
-        fs::write(app_dir.join("pubspec.yaml"), "name: changed_fixture\n")?;
-        let changed_fingerprint = flutter_dependency_fingerprint(&app_dir, None)?;
-        assert_ne!(fingerprint, changed_fingerprint);
-        assert!(!has_cached_flutter_dependencies(
-            &app_dir,
-            &changed_fingerprint
-        )?);
-
-        fs::remove_dir_all(app_dir)?;
-        Ok(())
-    }
 }

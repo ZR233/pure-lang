@@ -16,6 +16,3 @@ tempfile = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }
-
-[dev-dependencies]
-pretty_assertions = { workspace = true }

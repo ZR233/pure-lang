@@ -172,13 +172,13 @@ cargo xtask build-gui
 ```
 
 如果只需要验证 Rust 工作区，不构建桌面端，可跳过 Flutter、桌面编译器和远程助手准备，直接
-运行 `cargo test --workspace`。如果 `build-gui` 报告缺少 musl 链接器，优先检查 `zig version`
+运行 `cargo test -p pl-model` 与 `cargo test -p pl-core --features sqlite`。如果 `build-gui` 报告缺少 musl 链接器，优先检查 `zig version`
 与 `cargo zigbuild --version` 是否都能执行；两者都在 PATH 后，xtask 会自动切换到 Zig 构建器。
 
 #### Linux
 
 Flutter 的 Linux 桌面构建需要 Clang、CMake、Ninja、pkg-config、GTK 3 开发文件和 C++ 标准
-库；无图形会话运行桌面集成测试还需要 Xvfb。Debian/Ubuntu 可一次安装：
+库；无图形会话进行原生 GUI 人工验收还需要 Xvfb。Debian/Ubuntu 可一次安装：
 
 ```bash
 sudo apt-get update
@@ -190,7 +190,7 @@ cargo flutter doctor -v
 xtask 会在构建前使用 PATH 中发现的真实工具链编译并链接最小 GTK/C++ 探针；不会写死编译器版本、
 系统库路径，也不会注入 `LIBRARY_PATH` 或 `CPLUS_INCLUDE_PATH`。
 
-未构建桌面内嵌资源、只运行 Rust 工作区测试或独立 Studio server 时，Linux 仍需要安装同一生产 worker：
+未构建桌面内嵌资源、单独运行 Studio server 时，Linux 仍需要安装同一生产 worker：
 
 ```bash
 cargo install --path code/pl-remote-helper --locked
@@ -330,16 +330,19 @@ Studio 用同一装配入口创建 root、child 和恢复 Thread，显式组合 
 ```bash
 # 与 CI 一致的 Rust 门禁
 cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p pl-model
+cargo test -p pl-core --features sqlite
+
+# 按需检查 core 的可选特性边界
 cargo check -p pl-core --no-default-features --all-targets
 cargo check -p pl-core --no-default-features --features sqlite --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
 ```
 
 ### Flutter 开发
 
 Linux 原生构建需要可用的 C/C++ 工具链、CMake、Ninja、pkg-config 与 GTK 3 开发文件；无图形
-会话的 desktop integration smoke 还需要 Xvfb。Debian/Ubuntu 可安装：
+会话的原生 GUI 人工验收还需要 Xvfb。Debian/Ubuntu 可安装：
 
 ```bash
 sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev xvfb
@@ -349,29 +352,19 @@ xtask 会在 Flutter 构建前用当前 PATH 中的真实工具链编译、链�
 C++ 标准库头文件或 GTK 链接库时会报告实际命令和原始输出，不依赖固定 Clang/GCC 版本，也不
 注入机器专用的 include/library 路径。
 
-远程无头 Web 交互验收还需要主版本匹配的 Chrome/Chromium 与 ChromeDriver，并需要显式启用
-Flutter Web。Ubuntu 可使用 `chromium-browser chromium-chromedriver`，Debian 常用
-`chromium chromium-driver`；其他发行版安装等价软件包即可：
-
-```bash
-cargo flutter config --enable-web
-# 浏览器不在 PATH 时，在运行验证前设置 CHROME_EXECUTABLE=/absolute/path/to/chrome
-```
-
 ```powershell
 # 从仓库根目录执行一般 Flutter/Dart 命令，参数原样透传
 cargo flutter analyze
-cargo flutter test
 cargo dart format lib
 
-# 从仓库根目录解析依赖、静态分析并运行非视觉测试
+# 从仓库根目录检查生成产物、格式与静态分析
 cargo xtask verify-gui
 
-# 在当前 Windows/Linux 桌面目标运行 integration smoke；Linux headless 自动使用 Xvfb
-cargo xtask verify-gui --integration
+# 隔离 Studio home 与本地模拟供应商，启动原生 GUI 并收集人工验收证据
+cargo xtask manual-gui
 
-# 在临时本地端口启动 ChromeDriver，以 Flutter Web demo 跑同一套无头交互 smoke
-cargo xtask verify-gui --web-integration
+# 使用用户已有配置，人工观察真实供应商（不修改用户配置）
+cargo xtask run-gui --driver
 
 # 显式使用已安装配置、真实 provider/model 与 API credential 验收统一工作流
 cargo run -p pl-studio-runtime --features live-tests --example collaboration_observe
@@ -389,11 +382,11 @@ Markdown/timeline 视觉检查可以使用本地 demo 数据启动，不连接 r
 cargo xtask run-gui --demo
 ```
 
-`--web-integration` 只验证纯 Dart demo 的布局、路由、交互与状态投影，不替代桌面 Rust bridge
-或真实 server/model 验收。xtask 自动发现浏览器和 driver、校验主版本、处理 wrapper/sandbox
-封装、选择空闲端口并回收进程树；失败时原始驱动日志保存在
-`code/anywork/build/web-integration-artifacts`。Playwright 可作为额外截图或可访问性观察层，
-但 canonical 交互断言仍使用 Flutter integration test 的稳定 `ValueKey`。
+项目自有自动化行为测试仅在 `pl-model` 和 `pl-core` 的公开 API 边界。模拟供应商服务严格按
+固定提示词返回固定 HTTP/SSE 或 WebSocket 消息流，未知请求明确失败。`manual-gui` 运行
+非 demo 原生桥：在 GUI 中发送 `Reply with exactly: fixture ready`，在终端逐行记录
+动作代码，输入 `done` 后采集脱敏请求、截图、快照和日志；运行完成不构成人工通过结论。
+本地模拟不能证明真实供应商接口兼容，也不再自动覆盖 Studio、工具、远端进程或发布流程行为。
 
 `collaboration_observe` 使用现有 provider、model、effort 和凭据解析，在隔离 Studio home
 及临时项目中采集完整事件和快照，会产生真实模型调用费用，不进入默认 CI。
@@ -401,7 +394,7 @@ cargo xtask run-gui --demo
 `ANYWORK_WORKFLOW_ARTIFACT_DIR` 设置保存目录；另可设置 `ANYWORK_WIRE_CAPTURE_DIR` 保存请求记录。
 采集结束不代表任务通过：阅读实际报告、终态与产物作出验收结论，不使用交付口令或固定工具顺序。
 HTTP/SSE 观察可使用 `pl-studio-server` 的隔离 `--studio-home` 与空闲 loopback 端口。
-原 submission/marker 验收命令已删除；GUI 布局与交互仍由 `verify-gui --integration` 验证。
+GUI 布局与交互由原生人工验收核对；`verify-gui` 仅负责静态与生成一致性检查。
 
 本仓库要求 Flutter 端使用 `flutter_rust_bridge` v2.12.x；本机 codegen 版本应与 Dart/Rust 依赖保持同一小版本。
 
@@ -435,6 +428,7 @@ HTTP/SSE 观察可使用 `pl-studio-server` 的隔离 `--studio-home` 与空闲 
 | [21-lsp.md](./design/21-lsp.md) | LSP 运行时 |
 | [22-ssh-remote.md](./design/22-ssh-remote.md) | SSH 远程开发与宿主能力 |
 | [23-release-update.md](./design/23-release-update.md) | 发布与应用内升级 |
+| [24-testing.md](./design/24-testing.md) | 两库公开 API 集成测试与 GUI 人工验收 |
 
 ## 项目规范
 

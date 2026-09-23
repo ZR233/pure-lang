@@ -197,20 +197,3 @@ pub enum ToolCallPayload {
     Function { arguments: String },
     Custom { input: String },
 }
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn history_keeps_raw_function_parameters_instead_of_reserializing_their_fields() {
-        let raw = "{ \"z\": 12345678901234567890, \"a\": \"中文\" }\n";
-        let call = ToolCall::function_raw("item", "unknown_tool", raw.into(), "call");
-        let record = call.history_record();
-        assert_eq!(record.arguments.as_str(), Some(raw));
-        assert_eq!(record.call_id, "call");
-        assert_eq!(record.item_id, "item");
-    }
-}

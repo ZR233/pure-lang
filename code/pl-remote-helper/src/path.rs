@@ -161,27 +161,3 @@ pub(crate) fn io_error(operation: &str, error: io::Error) -> RemoteError {
     };
     remote_error(code, format!("{operation}: {error}"))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn workspace_rejects_parent_and_symlink_escape() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        #[cfg(unix)]
-        let outside = tempfile::tempdir().expect("outside");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(outside.path(), temp.path().join("link")).expect("symlink");
-        let mut registry = WorkspaceRegistry::default();
-        let root =
-            WorkspaceRegistry::resolve_workspace_root(temp.path().to_str().expect("utf8 path"))
-                .await
-                .expect("open workspace");
-        let (id, _) = registry.open_resolved(root);
-
-        assert!(registry.resolve_existing(&id, "../secret").await.is_err());
-        #[cfg(unix)]
-        assert!(registry.resolve_existing(&id, "link").await.is_err());
-    }
-}

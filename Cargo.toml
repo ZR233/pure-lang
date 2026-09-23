@@ -3,6 +3,7 @@ members = [
     "code/pl-protocol",
     "code/pl-trace",
     "code/pl-model",
+    "code/pl-provider-fixture",
     "code/pl-lsp",
     "code/pl-output",
     "code/pl-patch",
@@ -110,3 +111,4 @@ pl-remote-helper = { path = "code/pl-remote-helper" }
 pl-studio-runtime = { path = "code/pl-studio-runtime" }
 pl-studio-server = { path = "code/pl-studio-server" }
 pl-model = { path = "code/pl-model" }
+pl-provider-fixture = { path = "code/pl-provider-fixture" }

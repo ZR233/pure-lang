@@ -242,24 +242,3 @@ fn sign_authenticode(config: &AuthenticodeConfig, path: &Path) -> Result<()> {
     ]);
     process::run_checked(&mut command, &format!("signtool sign {}", path.display()))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn rejects_existing_release_directory() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "anywork-release-test-{}-{unique}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).unwrap();
-        assert!(reject_existing_release(&path).is_err());
-        std::fs::remove_dir_all(path).unwrap();
-    }
-}

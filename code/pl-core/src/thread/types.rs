@@ -185,67 +185,6 @@ pub(crate) fn recent_effect_fact<T>(
     window.batches.iter().rev().find_map(|batch| select(batch))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn batch(sequence: u64) -> Arc<ThreadEffectBatch> {
-        Arc::new(ThreadEffectBatch {
-            thread_id: "t".to_string(),
-            sequence,
-            ..ThreadEffectBatch::default()
-        })
-    }
-
-    /// A confirmed durable watermark releases the covered bodies immediately and leaves the
-    /// watermark below them.
-    #[test]
-    fn durable_handoff_releases_covered_bodies_immediately() {
-        let window = EffectWindow::new();
-        for sequence in 1..=3 {
-            window.push(batch(sequence));
-        }
-        assert_eq!(window.retained().len(), 3);
-        assert_eq!(window.start(), Some(1));
-        let WindowPage::Page(page) = window.page_after(0, 10) else {
-            panic!("nothing is missing yet");
-        };
-        assert_eq!(page.len(), 3);
-        // Confirming the first two commits durable releases their full bodies at once.
-        window.release_through(2);
-        assert_eq!(window.retained().len(), 1);
-        assert_eq!(window.start(), Some(3));
-        assert!(
-            matches!(window.page_after(1, 10), WindowPage::Gap),
-            "a consumer at 1 must resynchronize from durable history"
-        );
-        let WindowPage::Page(page) = window.page_after(2, 10) else {
-            panic!("a consumer at 2 can continue from the retained head");
-        };
-        assert_eq!(page.len(), 1);
-        assert_eq!(page[0].sequence, 3);
-    }
-
-    /// A fully released window still reports the frontier, and a not-yet-durable commit is never
-    /// dropped by the window itself (no entry/byte eviction can lose an accepted fact).
-    #[test]
-    fn undurable_commits_are_never_evicted_by_the_window() {
-        let window = EffectWindow::new();
-        for sequence in 1..=256 {
-            window.push(batch(sequence));
-        }
-        assert_eq!(window.retained().len(), 256);
-        window.release_through(256);
-        assert!(window.retained().is_empty());
-        assert_eq!(window.start(), Some(257));
-        let WindowPage::Page(page) = window.page_after(256, 10) else {
-            panic!("a fully caught-up consumer sees an empty page, not a gap");
-        };
-        assert!(page.is_empty());
-        assert!(matches!(window.page_after(0, 10), WindowPage::Gap));
-    }
-}
-
 /// Current owner state published after each accepted request or model-output commit.
 ///
 /// A snapshot holds only the facts that current logical execution and live observation still

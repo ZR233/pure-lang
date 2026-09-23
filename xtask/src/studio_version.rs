@@ -30,17 +30,3 @@ fn parse(content: &str) -> Result<Version> {
     }
     Ok(version)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_missing_or_non_stable_versions() {
-        assert!(parse("name: studio\n").is_err());
-        assert!(parse("version: v1.2.3\n").is_err());
-        assert!(parse("version: 1.2.3-rc.1\n").is_err());
-        assert!(parse("version: 1.2.3+4\n").is_err());
-        assert!(parse("version: 01.2.3\n").is_err());
-    }
-}

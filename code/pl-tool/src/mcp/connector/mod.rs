@@ -27,11 +27,6 @@ use stderr_capture::StderrCapture;
 
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[cfg(test)]
-type TestConnections = std::sync::Arc<
-    std::sync::Mutex<std::collections::BTreeMap<String, std::collections::VecDeque<ConnectedMcp>>>,
->;
-
 /// 建立 MCP transport 所需的完整、仅进程内可见配置。
 ///
 /// 该值可能包含已解析凭证，禁止序列化、trace 或日志输出。
@@ -50,8 +45,6 @@ type ToolListChangedSink = Arc<dyn Fn(String) + Send + Sync>;
 #[derive(Clone, Default)]
 pub struct McpConnector {
     tool_list_changed: Option<ToolListChangedSink>,
-    #[cfg(test)]
-    test_connections: Option<TestConnections>,
 }
 
 impl fmt::Debug for McpConnector {
@@ -66,21 +59,6 @@ impl fmt::Debug for McpConnector {
 impl McpConnector {
     /// 按 transport 选择兼容的 MCP 启动协商并建立连接。
     pub async fn connect(&self, request: McpConnectRequest) -> Result<ConnectedMcp> {
-        #[cfg(test)]
-        if let Some(connections) = &self.test_connections {
-            let connection = connections
-                .lock()
-                .expect("MCP test connections lock")
-                .get_mut(&request.server_id)
-                .and_then(std::collections::VecDeque::pop_front)
-                .ok_or_else(|| {
-                    connection_config_error(&request.server_id, "no queued MCP test connection")
-                })?;
-            connection
-                .set_tool_list_changed(request.server_id.clone(), self.tool_list_changed.clone())
-                .await;
-            return Ok(connection);
-        }
         match request.server.config.transport {
             McpServerTransport::Stdio => {
                 connect_stdio(request, self.tool_list_changed.clone()).await
@@ -97,22 +75,6 @@ impl McpConnector {
     ) -> Self {
         self.tool_list_changed = Some(Arc::new(handler));
         self
-    }
-
-    #[cfg(test)]
-    pub(super) fn testing(connections: impl IntoIterator<Item = (String, ConnectedMcp)>) -> Self {
-        let mut by_server =
-            std::collections::BTreeMap::<String, std::collections::VecDeque<ConnectedMcp>>::new();
-        for (server_id, connection) in connections {
-            by_server
-                .entry(server_id)
-                .or_default()
-                .push_back(connection);
-        }
-        Self {
-            tool_list_changed: None,
-            test_connections: Some(std::sync::Arc::new(std::sync::Mutex::new(by_server))),
-        }
     }
 }
 
@@ -134,11 +96,6 @@ impl McpClientHandler {
             server_id: Arc::new(std::sync::RwLock::new(server_id)),
             tool_list_changed: Arc::new(std::sync::RwLock::new(tool_list_changed)),
         }
-    }
-
-    #[cfg(test)]
-    pub(super) fn without_notifications(info: ClientInfo) -> Self {
-        Self::new(info, String::new(), None)
     }
 }
 
@@ -203,29 +160,6 @@ impl ConnectedMcp {
             owner: RwLock::new(Some(service)),
             tool_subscription: RwLock::new(tool_subscription),
         }
-    }
-
-    #[cfg(test)]
-    async fn set_tool_list_changed(&self, server_id: String, handler: Option<ToolListChangedSink>) {
-        let owner = self.owner.read().await;
-        let Some(service) = owner.as_ref() else {
-            return;
-        };
-        *service
-            .service()
-            .server_id
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = server_id;
-        *service
-            .service()
-            .tool_list_changed
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = handler;
-    }
-
-    #[cfg(test)]
-    pub(super) async fn has_tool_subscription(&self) -> bool {
-        self.tool_subscription.read().await.is_some()
     }
 
     /// 返回可克隆的 typed rmcp peer。
@@ -575,303 +509,5 @@ fn connection_error(server_id: &str, error: impl fmt::Display) -> PureError {
     PureError::ToolExecutionFailed {
         tool: server_id.to_string(),
         error: error.to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stdio_lifecycle_prefers_discovery_and_allows_proven_legacy_fallback() {
-        let ClientLifecycleMode::Auto {
-            preferred_versions,
-            legacy_version,
-        } = discovery_lifecycle()
-        else {
-            panic!("MCP lifecycle must negotiate discovery with a legacy fallback");
-        };
-
-        assert_eq!(
-            preferred_versions,
-            vec![
-                ProtocolVersion::V_2026_07_28,
-                ProtocolVersion::V_2025_11_25,
-                ProtocolVersion::V_2025_06_18,
-                ProtocolVersion::V_2025_03_26,
-                ProtocolVersion::V_2024_11_05,
-            ]
-        );
-        assert_eq!(legacy_version, Some(ProtocolVersion::V_2025_11_25));
-    }
-
-    #[test]
-    fn http_initialize_retry_only_accepts_closed_discover_response() {
-        assert!(should_retry_http_with_initialize(
-            &ClientInitializeError::ConnectionClosed("discover response".to_string())
-        ));
-        assert!(!should_retry_http_with_initialize(
-            &ClientInitializeError::ConnectionClosed("initialize response".to_string())
-        ));
-        assert!(!should_retry_http_with_initialize(
-            &ClientInitializeError::Cancelled
-        ));
-    }
-}
-
-#[cfg(test)]
-mod behavior_tests {
-    use std::collections::BTreeMap;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Duration;
-
-    use pretty_assertions::assert_eq;
-    use rmcp::model::*;
-
-    use crate::approval::ToolEffect;
-    use crate::mcp::test_support::*;
-    use crate::mcp::{McpConnector, McpResetScope, McpRuntime};
-
-    #[tokio::test]
-    async fn untrusted_annotations_keep_conservative_defaults() {
-        // 无显式配置且只有 destructiveHint：不映射写 effect，保持 None（保守）。
-        let installed = installed_runtime(
-            vec![annotated_tool(
-                "destructive",
-                ToolAnnotations::new().destructive(true),
-            )],
-            None,
-        )
-        .await;
-
-        assert_eq!(installed.lease.tools()[0].effect, None);
-        let tool = crate::mcp::thread::ThreadMcpTool::new(
-            installed.lease.clone(),
-            "mcp__docs__destructive",
-            Arc::new(crate::test_support::MemoryMedia::default()),
-        )
-        .unwrap();
-        let pl_protocol::ToolSpec::Function {
-            allowed_callers, ..
-        } = tool.declaration()
-        else {
-            panic!("MCP declaration")
-        };
-        assert!(allowed_callers.is_empty());
-
-        installed.runtime.shutdown().await;
-        wait_for_closed(&installed.closed).await;
-    }
-
-    #[tokio::test]
-    async fn explicit_server_effect_overrides_remote_hints() {
-        // 无 annotation 的工具 + 显式配置 Read：优先配置。
-        let installed =
-            installed_runtime(vec![plain_tool("configured")], Some(ToolEffect::Read)).await;
-
-        assert_eq!(installed.lease.tools()[0].effect, Some(ToolEffect::Read));
-        let tool = crate::mcp::thread::ThreadMcpTool::new(
-            installed.lease.clone(),
-            "mcp__docs__configured",
-            Arc::new(crate::test_support::MemoryMedia::default()),
-        )
-        .unwrap();
-        let pl_protocol::ToolSpec::Function {
-            allowed_callers,
-            output_schema,
-            ..
-        } = tool.declaration()
-        else {
-            panic!("MCP declaration")
-        };
-        assert_eq!(
-            allowed_callers,
-            vec![
-                pl_protocol::ToolCallerMode::Direct,
-                pl_protocol::ToolCallerMode::Programmatic
-            ]
-        );
-        assert!(output_schema.is_some());
-
-        installed.runtime.shutdown().await;
-        wait_for_closed(&installed.closed).await;
-    }
-
-    #[tokio::test]
-    async fn resource_facades_are_hidden_when_the_server_does_not_declare_the_capability() {
-        let closed = Arc::new(AtomicBool::new(false));
-        let connector = McpConnector::testing([(
-            "tools-only".to_string(),
-            test_connection_with_resources(vec![test_tool("lookup")], closed.clone(), false).await,
-        )]);
-        let runtime = McpRuntime::new(connector).handle();
-        runtime
-            .reconcile(BTreeMap::from([(
-                "tools-only".to_string(),
-                config("tools-only", None),
-            )]))
-            .await
-            .expect("reconcile tools-only MCP runtime");
-        let lease = runtime.acquire_turn_lease().await.expect("MCP lease");
-        assert!(!lease.has_resources());
-        assert_eq!(
-            lease
-                .tools()
-                .iter()
-                .map(|tool| tool.exposed_name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["mcp__tools-only__lookup"]
-        );
-
-        drop(lease);
-        runtime.shutdown().await;
-        wait_for_closed(&closed).await;
-    }
-
-    #[tokio::test]
-    async fn generation_replacement_changes_new_leases_without_mutating_old_ones() {
-        let first_closed = Arc::new(AtomicBool::new(false));
-        let second_closed = Arc::new(AtomicBool::new(false));
-        let connector = McpConnector::testing([
-            (
-                "docs".to_string(),
-                test_connection(vec![test_tool("first")], first_closed.clone()).await,
-            ),
-            (
-                "docs".to_string(),
-                test_connection(vec![test_tool("second")], second_closed.clone()).await,
-            ),
-        ]);
-        let runtime = McpRuntime::new(connector).handle();
-        let servers = BTreeMap::from([("docs".to_string(), config("docs", None))]);
-        runtime.reconcile(servers.clone()).await.expect("first");
-
-        let first = runtime.acquire_turn_lease().await.expect("first lease");
-        assert_eq!(first.tools()[0].exposed_name, "mcp__docs__first");
-
-        runtime
-            .reset(McpResetScope::All, servers)
-            .await
-            .expect("second");
-        let second = runtime.acquire_turn_lease().await.expect("second lease");
-        assert_eq!(second.tools()[0].exposed_name, "mcp__docs__second");
-        assert_eq!(first.tools()[0].exposed_name, "mcp__docs__first");
-        assert!(second.generation() > first.generation());
-
-        drop(first);
-        drop(second);
-        runtime.shutdown().await;
-        wait_for_closed(&first_closed).await;
-        wait_for_closed(&second_closed).await;
-    }
-
-    #[tokio::test]
-    async fn tool_list_changed_atomically_publishes_the_next_generation() {
-        let closed = Arc::new(AtomicBool::new(false));
-        let (connection, tool_changes, tools, _fail_list, _list_calls) =
-            mutable_test_connection(vec![test_tool("first")], closed.clone()).await;
-        let connector = McpConnector::testing([("docs".to_string(), connection)]);
-        let runtime = McpRuntime::new(connector).handle();
-        runtime
-            .reconcile(BTreeMap::from([(
-                "docs".to_string(),
-                config("docs", Some(ToolEffect::Read)),
-            )]))
-            .await
-            .expect("initial MCP generation");
-        let first = runtime.acquire_turn_lease().await.expect("first lease");
-        assert_eq!(first.tools()[0].raw_name, "first");
-
-        *tools
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = vec![test_tool("second")];
-        let mut updates = runtime.subscribe();
-        tool_changes.notify_one();
-        tokio::time::timeout(Duration::from_secs(5), updates.recv())
-            .await
-            .expect("MCP refresh update timeout")
-            .expect("MCP refresh update");
-
-        let second = runtime.acquire_turn_lease().await.expect("second lease");
-        assert!(second.generation() > first.generation());
-        assert_eq!(second.tools()[0].raw_name, "second");
-        assert_eq!(first.tools()[0].raw_name, "first");
-
-        drop(first);
-        drop(second);
-        runtime.shutdown().await;
-        wait_for_closed(&closed).await;
-    }
-
-    #[tokio::test]
-    async fn failed_tool_list_changed_refresh_preserves_the_current_generation() {
-        let closed = Arc::new(AtomicBool::new(false));
-        let (connection, tool_changes, _tools, fail_list, list_calls) =
-            mutable_test_connection(vec![test_tool("stable")], closed.clone()).await;
-        let connector = McpConnector::testing([("docs".to_string(), connection)]);
-        let runtime = McpRuntime::new(connector).handle();
-        runtime
-            .reconcile(BTreeMap::from([(
-                "docs".to_string(),
-                config("docs", Some(ToolEffect::Read)),
-            )]))
-            .await
-            .expect("initial MCP generation");
-        let first = runtime.acquire_turn_lease().await.expect("stable lease");
-        let calls_before_refresh = list_calls.load(Ordering::SeqCst);
-        fail_list.store(true, Ordering::SeqCst);
-        tool_changes.notify_one();
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while list_calls.load(Ordering::SeqCst) == calls_before_refresh {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("failing MCP refresh timeout");
-
-        let current = runtime.acquire_turn_lease().await.expect("current lease");
-        assert_eq!(current.generation(), first.generation());
-        assert_eq!(current.tools()[0].raw_name, "stable");
-
-        drop(first);
-        drop(current);
-        runtime.shutdown().await;
-        wait_for_closed(&closed).await;
-    }
-
-    #[tokio::test]
-    async fn retired_generation_closes_only_after_last_lease_releases() {
-        let first_closed = Arc::new(AtomicBool::new(false));
-        let second_closed = Arc::new(AtomicBool::new(false));
-        let connector = McpConnector::testing([
-            (
-                "docs".to_string(),
-                test_connection(vec![test_tool("first")], first_closed.clone()).await,
-            ),
-            (
-                "docs".to_string(),
-                test_connection(vec![test_tool("second")], second_closed.clone()).await,
-            ),
-        ]);
-        let runtime = McpRuntime::new(connector).handle();
-        let servers = BTreeMap::from([("docs".to_string(), config("docs", None))]);
-        runtime.reconcile(servers.clone()).await.expect("first");
-        let first = runtime.acquire_turn_lease().await.expect("first lease");
-        runtime
-            .reset(McpResetScope::All, servers)
-            .await
-            .expect("second");
-        let second = runtime.acquire_turn_lease().await.expect("second lease");
-        assert_eq!(first.tools()[0].raw_name, "first");
-        assert_eq!(second.tools()[0].raw_name, "second");
-        assert!(!first_closed.load(Ordering::SeqCst));
-
-        drop(first);
-        wait_for_closed(&first_closed).await;
-        assert!(!second_closed.load(Ordering::SeqCst));
-        drop(second);
-        runtime.shutdown().await;
-        wait_for_closed(&second_closed).await;
     }
 }

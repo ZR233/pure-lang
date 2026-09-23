@@ -27,9 +27,6 @@ fn tool_error(tool: &str, error: impl std::fmt::Display) -> pl_protocol::PureErr
     }
 }
 
-#[cfg(test)]
-mod test_support;
-
 pub mod git;
 pub mod lsp;
 

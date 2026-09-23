@@ -36,6 +36,7 @@
 | 21 | [LSP Runtime](./21-lsp.md) | catalog 与 driver、registry CQS、状态模型、工具能力 |
 | 22 | [SSH 远程开发](./22-ssh-remote.md) | helper 能力代理、最小协议、连接管理、凭据与路径、helper 嵌入 |
 | 23 | [发布与更新](./23-release-update.md) | 发布渠道与信任根、Windows 包边界、更新清单与状态机、诊断 |
+| 24 | [测试与人工验收](./24-testing.md) | 两库公开 API 测试、本地模拟供应商、GUI 人工证据 |
 
 配套资产：`concepts/` 保存产品概念设计（如项目侧栏），`prototypes/` 保存视觉原型
 （HTML 稿，不含架构约定），`assets/` 保存文档引用的图片。

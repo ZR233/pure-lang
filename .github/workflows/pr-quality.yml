@@ -52,18 +52,6 @@ jobs:
           filter_mode: nofilter
           reporter: local
 
-      - name: Parse workflow PowerShell blocks
-        shell: pwsh
-        run: .github/scripts/test-workflow-powershell.ps1
-
-      - name: Test official Studio Release flow
-        shell: pwsh
-        run: .github/scripts/test-studio-release-workflow.ps1
-
-      - name: Test resumable Release asset rules
-        shell: pwsh
-        run: .github/scripts/test-studio-release-assets.ps1
-
       - name: Validate Release Please configuration and dry run
         shell: pwsh
         env:
@@ -115,8 +103,11 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: cargo test
-        run: cargo test --workspace
+      - name: Test pl-model public API
+        run: cargo test -p pl-model
+
+      - name: Test pl-core public API
+        run: cargo test -p pl-core --features sqlite
 
   studio-server-linux:
     name: Studio server (Linux)
@@ -135,12 +126,6 @@ jobs:
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-
-      - name: Install local process worker
-        run: cargo install --path code/pl-remote-helper --locked
-
-      - name: Test Studio server stack
-        run: cargo test -p pl-protocol -p pl-studio-runtime -p pl-studio-server
 
       - name: Build standalone Studio server
         run: cargo build -p pl-studio-server

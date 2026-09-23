@@ -33,9 +33,6 @@ pub(in crate::studio) struct StudioThreadServices {
 pub(crate) struct StudioThreadFactory {
     services: StudioThreadServices,
     bindings: Arc<std::sync::Mutex<std::collections::BTreeMap<String, tool_bindings::ToolBinding>>>,
-    /// 测试探针：activation 实际解析出的会话工作区根。
-    #[cfg(test)]
-    session_roots: Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::path::PathBuf>>>,
 }
 impl StudioThreadFactory {
     /// Fresh allowance for each child Turn, including explicit continuation after a step limit.
@@ -48,8 +45,6 @@ impl StudioThreadFactory {
         Self {
             services,
             bindings: Default::default(),
-            #[cfg(test)]
-            session_roots: Default::default(),
         }
     }
 }

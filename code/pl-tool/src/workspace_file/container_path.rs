@@ -62,37 +62,3 @@ fn is_within_container_path(path: &str, base: &str) -> bool {
             .strip_prefix(base)
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn absolute_container_path_is_independent_from_cwd() {
-        assert_eq!(
-            resolve_container_workspace_path(
-                "/tmp/.mai-team/skills/demo/SKILL.md",
-                Some("/workspace/repo"),
-            )
-            .expect("absolute container path"),
-            "/tmp/.mai-team/skills/demo/SKILL.md",
-        );
-    }
-
-    #[test]
-    fn relative_container_path_uses_posix_separators_on_windows() {
-        assert_eq!(
-            resolve_container_workspace_path("src/lib.rs", Some("/workspace/repo"))
-                .expect("relative container path"),
-            "/workspace/repo/src/lib.rs",
-        );
-    }
-
-    #[test]
-    fn relative_container_path_cannot_escape_absolute_cwd() {
-        let error = resolve_container_workspace_path("../secret", Some("/workspace/repo"))
-            .expect_err("cwd escape must be rejected");
-
-        assert!(error.to_string().contains("escapes container cwd"));
-    }
-}

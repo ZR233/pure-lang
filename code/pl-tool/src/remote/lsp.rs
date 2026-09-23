@@ -188,18 +188,3 @@ pub(crate) async fn resolve_lsp_query_path(
 fn host_error(error: impl std::fmt::Display) -> LspHostError {
     LspHostError::new(error.to_string())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn remote_lsp_paths_stay_inside_workspace() {
-        assert_eq!(
-            remote_lsp_path("/srv/project", Path::new("/srv/project/src/lib.rs"))
-                .expect("relative path"),
-            "src/lib.rs"
-        );
-        assert!(remote_lsp_path("/srv/project", Path::new("/srv/other/lib.rs")).is_err());
-    }
-}

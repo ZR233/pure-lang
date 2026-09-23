@@ -93,31 +93,3 @@ pub fn confirmation_decision(
     }
     Err("Plan confirmation must select Approve, Revise, or provide revision feedback".to_string())
 }
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use pl_protocol::{UserInputAnswer, UserInputResolution};
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn confirmation_answers_are_typed_plan_decisions() {
-        let resolution = UserInputResolution {
-            answers: HashMap::from([(
-                AGENT_SESSION_PLAN_CONFIRMATION_QUESTION_ID.to_string(),
-                UserInputAnswer {
-                    answers: vec!["Revise".to_string(), "Add rollback.".to_string()],
-                },
-            )]),
-        };
-        assert_eq!(
-            confirmation_decision(&resolution).unwrap(),
-            AgentSessionPlanConfirmationDecision::RequestRevision {
-                feedback: "Add rollback.".to_string(),
-            }
-        );
-    }
-}

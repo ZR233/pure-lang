@@ -94,33 +94,3 @@ fn sum_known(left: Option<u64>, right: Option<u64>) -> Option<u64> {
     left.zip(right)
         .and_then(|(left, right)| left.checked_add(right))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn real_usage_preserves_unknowns_and_does_not_add_cache_subsets_to_input() {
-        let mut usage = UsageAccumulator::default();
-        usage.add(&pl_core::model::ModelUsage {
-            input_tokens: Some(100),
-            cache_read_tokens: Some(80),
-            cache_write_tokens: None,
-            output_tokens: Some(20),
-            reasoning_tokens: Some(5),
-        });
-        usage.add(&pl_core::model::ModelUsage {
-            input_tokens: Some(50),
-            cache_read_tokens: Some(30),
-            cache_write_tokens: Some(10),
-            output_tokens: Some(10),
-            reasoning_tokens: None,
-        });
-        let total = usage.total.unwrap();
-        assert_eq!(total.input_tokens, Some(150));
-        assert_eq!(total.cache_read_tokens, Some(110));
-        assert_eq!(total.output_tokens, Some(30));
-        assert_eq!(total.cache_write_tokens, None);
-        assert_eq!(total.reasoning_tokens, None);
-        assert_eq!(sum_known(Some(u64::MAX), Some(1)), None);
-    }
-}

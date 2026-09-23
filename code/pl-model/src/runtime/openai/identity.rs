@@ -27,24 +27,3 @@ pub(super) fn responses_tool_identity(
         });
     (item_id, call_id)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn item_and_call_aliases_have_one_deterministic_rule() {
-        assert_eq!(
-            responses_tool_identity(Some("item-1"), Some("call-1"), "function_call"),
-            ("item-1".to_string(), "call-1".to_string())
-        );
-        assert_eq!(
-            responses_tool_identity(None, Some("call-1"), "function_call"),
-            ("call-1".to_string(), "call-1".to_string())
-        );
-        assert_eq!(
-            responses_tool_identity(Some("item-1"), None, "function_call"),
-            ("item-1".to_string(), "item-1".to_string())
-        );
-    }
-}

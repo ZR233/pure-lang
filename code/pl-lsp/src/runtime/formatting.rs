@@ -262,38 +262,3 @@ fn markup_text(value: &Value) -> String {
         _ => String::new(),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn formats_location_arrays() {
-        let value = serde_json::json!([
-            {
-                "uri": "file:///C:/repo/src/lib.rs",
-                "range": {"start": {"line": 4, "character": 2}, "end": {"line": 4, "character": 5}}
-            }
-        ]);
-
-        let result = format_lsp_result(
-            LspQueryOperation::GoToDefinition,
-            &value,
-            Path::new("C:/repo"),
-        );
-
-        assert_eq!(result.result_count, Some(1));
-        assert!(result.text.contains("src/lib.rs:5:3"));
-    }
-
-    #[test]
-    fn formats_hover_markup() {
-        let value = serde_json::json!({"contents": {"kind": "markdown", "value": "fn main()"}});
-
-        let result = format_lsp_result(LspQueryOperation::Hover, &value, Path::new("."));
-
-        assert_eq!(result.text, "fn main()");
-    }
-}

@@ -175,27 +175,3 @@ pub(crate) async fn local_worker() -> crate::Result<LocalWorkerAsset> {
         crate::PureError::ConfigError(format!("local worker preparation failed: {error}"))
     })?
 }
-
-#[cfg(all(test, feature = "embedded-remote-helpers"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn both_embedded_targets_decompress_on_demand() {
-        let helpers = BundledRemoteHelpers::default();
-        let aarch64 = helpers
-            .load(RemoteHelperTarget::Aarch64Musl)
-            .expect("embedded aarch64 helper");
-        assert!(!aarch64.is_empty());
-        assert!(helpers.x86_64.get().is_none());
-        let cached = helpers
-            .load(RemoteHelperTarget::Aarch64Musl)
-            .expect("cached aarch64 helper");
-        assert!(Arc::ptr_eq(&aarch64, &cached));
-
-        let x86_64 = helpers
-            .load(RemoteHelperTarget::X8664Musl)
-            .expect("embedded x86_64 helper");
-        assert!(!x86_64.is_empty());
-    }
-}

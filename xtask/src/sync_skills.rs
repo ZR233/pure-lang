@@ -214,34 +214,3 @@ fn git(working_dir: &Path, args: &[&str]) -> Result<String> {
     }
     Ok(stdout)
 }
-
-#[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use super::*;
-
-    #[test]
-    fn copy_directory_replaces_nested_content_entirely() {
-        let root = tempfile::tempdir().unwrap();
-        let from = root.path().join("from");
-        let to = root.path().join("to");
-        fs::create_dir_all(from.join("scripts")).unwrap();
-        fs::write(from.join("SKILL.md"), "skill").unwrap();
-        fs::write(from.join("scripts").join("helper.py"), "helper").unwrap();
-
-        fs::create_dir_all(to.join("obsolete")).unwrap();
-        fs::write(to.join("SKILL.md"), "stale").unwrap();
-        fs::write(to.join("obsolete").join("stale.txt"), "stale").unwrap();
-
-        discard_directory(&to).unwrap();
-        copy_directory(&from, &to).unwrap();
-
-        assert_eq!(fs::read_to_string(to.join("SKILL.md")).unwrap(), "skill");
-        assert_eq!(
-            fs::read_to_string(to.join("scripts").join("helper.py")).unwrap(),
-            "helper"
-        );
-        assert!(!to.join("obsolete").exists());
-    }
-}

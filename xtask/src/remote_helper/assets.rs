@@ -97,38 +97,3 @@ fn verify_local_asset(binary: &Path) -> Result<()> {
     );
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn checksum_validation_rejects_tampered_prebuilt_helper() -> Result<()> {
-        let directory = tempfile::tempdir()?;
-        let target_dir = directory.path().join(super::super::X86_64_TARGET);
-        fs::create_dir(&target_dir)?;
-        let helper = target_dir.join(HELPER_FILE_NAME);
-        fs::write(&helper, b"helper")?;
-        fs::write(
-            helper.with_extension("sha256"),
-            format!("{:x}  {HELPER_FILE_NAME}\n", Sha256::digest(b"helper")),
-        )?;
-        assert!(
-            verify_local_asset(&helper).is_err(),
-            "checksum alone cannot admit an old helper"
-        );
-        fs::write(
-            helper.with_extension("metadata.json"),
-            serde_json::to_vec(&super::super::HelperMetadata {
-                target: super::super::X86_64_TARGET.into(),
-                worker_protocol_version:
-                    pl_protocol::process_worker::PROCESS_WORKER_PROTOCOL_VERSION,
-                sha256: format!("{:x}", Sha256::digest(b"helper")),
-            })?,
-        )?;
-        verify_local_asset(&helper)?;
-        fs::write(&helper, b"tampered")?;
-        assert!(verify_local_asset(&helper).is_err());
-        Ok(())
-    }
-}

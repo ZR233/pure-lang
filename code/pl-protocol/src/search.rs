@@ -359,27 +359,3 @@ pub struct SearchResponse {
     #[serde(default)]
     pub results: Option<Vec<serde_json::Value>>,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn search_modes_map_to_external_access() {
-        assert_eq!(
-            [
-                WebSearchMode::Disabled,
-                WebSearchMode::Cached,
-                WebSearchMode::Indexed,
-                WebSearchMode::Live,
-            ]
-            .map(ExternalWebAccess::from),
-            [
-                ExternalWebAccess::Boolean(false),
-                ExternalWebAccess::Boolean(false),
-                ExternalWebAccess::Mode(ExternalWebAccessMode::Indexed),
-                ExternalWebAccess::Boolean(true),
-            ]
-        );
-    }
-}

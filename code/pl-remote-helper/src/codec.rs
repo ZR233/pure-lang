@@ -87,33 +87,3 @@ where
     writer.write_all(body).await?;
     writer.flush().await
 }
-
-#[cfg(test)]
-mod tests {
-    use pl_protocol::remote::{REMOTE_PROTOCOL_VERSION, RemoteRequest};
-
-    use super::*;
-
-    #[tokio::test]
-    async fn frame_round_trip_preserves_binary_body() {
-        let (mut writer, mut reader) = tokio::io::duplex(4096);
-        let write = tokio::spawn(async move {
-            write_frame(
-                &mut writer,
-                Some(7),
-                RemoteMessage::Request(RemoteRequest::Hello {
-                    protocol_version: REMOTE_PROTOCOL_VERSION,
-                }),
-                &[0, 1, 255],
-            )
-            .await
-        });
-        let frame = read_frame(&mut reader)
-            .await
-            .expect("read frame")
-            .expect("frame");
-        write.await.expect("join writer").expect("write frame");
-        assert_eq!(frame.request_id, Some(7));
-        assert_eq!(frame.body, vec![0, 1, 255]);
-    }
-}

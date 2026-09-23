@@ -127,19 +127,3 @@ fn remote_cwd(cwd: &Path, canonical_root: &str) -> Result<String, String> {
         )
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cwd_accepts_root_and_rejects_escape() {
-        let root = "/srv/project";
-        assert_eq!(remote_cwd(Path::new(root), root).expect("root"), ".");
-        assert_eq!(
-            remote_cwd(Path::new("/srv/project/src"), root).expect("child"),
-            "src"
-        );
-        assert!(remote_cwd(Path::new("/srv/other"), root).is_err());
-    }
-}

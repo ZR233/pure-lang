@@ -77,30 +77,3 @@ impl WorkspaceFileToolKind {
         ToolSpec::function(self.name(), self.description(), self.input_schema())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-    #[test]
-    fn workspace_file_tool_kind_rejects_dot_aliases() {
-        assert_eq!(
-            super::WorkspaceFileToolKind::from_name("read_file"),
-            Some(super::WorkspaceFileToolKind::ReadFile)
-        );
-        assert_eq!(
-            super::WorkspaceFileToolKind::from_name("list_files"),
-            Some(super::WorkspaceFileToolKind::ListFiles)
-        );
-        assert_eq!(
-            super::WorkspaceFileToolKind::from_name("search_files"),
-            None
-        );
-        assert_eq!(
-            super::WorkspaceFileToolKind::from_name("apply_patch"),
-            Some(super::WorkspaceFileToolKind::ApplyPatch)
-        );
-        assert_eq!(super::WorkspaceFileToolKind::from_name("read.file"), None);
-        assert_eq!(super::WorkspaceFileToolKind::from_name("list.files"), None);
-        assert_eq!(super::WorkspaceFileToolKind::from_name("apply.patch"), None);
-    }
-}

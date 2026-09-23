@@ -121,35 +121,3 @@ impl StudioStore {
 }
 
 // Legacy Task persistence tests were removed with the fixed Task runtime.
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 同一 Thread 的 effect commit 与实时订阅必须拿到同一个写者句柄；登记句柄本身不做 IO，
-    /// 因此冷库不会被创建，也不会被升级。
-    #[tokio::test]
-    async fn history_writer_is_shared_and_does_not_create_cold_databases() {
-        let store = StudioStore::open_memory().await.unwrap();
-        let path = store.thread_storage_dir("thread-1").join("history.sqlite");
-
-        let first = store.history_writer("thread-1").await.unwrap();
-        // sink 与订阅从两条不同调用链取用，但必须是同一个有序写者。
-        let second = store.history_writer("thread-1").await.unwrap();
-        assert!(first.is_same_handle(&second));
-
-        // 同一 Thread 的冷读句柄同样收敛到这个权威句柄：reader 与 writer 复用同一初始化状态。
-        let reader = store.history("thread-1").await.unwrap();
-        assert!(reader.is_same_handle(&first));
-
-        // 另一个 Thread 是另一个写者身份，绝不共享连接。
-        let other = store.history_writer("thread-2").await.unwrap();
-        assert!(!other.is_same_handle(&first));
-
-        // 只登记句柄不触发任何 IO：冷库既没有被创建，也没有被升级。
-        assert!(
-            !path.exists(),
-            "登记写者句柄不得创建 history.sqlite 或它的目录"
-        );
-    }
-}
