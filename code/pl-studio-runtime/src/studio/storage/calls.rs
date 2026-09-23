@@ -239,6 +239,8 @@ struct CallsWriter {
     stopping: AtomicBool,
     last_error: Mutex<Option<String>>,
     statistics_gap: AtomicBool,
+    #[cfg(test)]
+    panic_next_mutation: AtomicBool,
 }
 
 /// 全局调用库句柄；clone 共享同一条队列、水位与后台 writer。
@@ -270,6 +272,13 @@ impl CallsStore {
 
     pub(crate) fn mark_statistics_gap(&self) {
         self.writer.statistics_gap.store(true, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn panic_on_next_mutation(&self) {
+        self.writer
+            .panic_next_mutation
+            .store(true, Ordering::Release);
     }
     pub(crate) async fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
@@ -309,6 +318,8 @@ impl CallsStore {
             stopping: AtomicBool::new(false),
             last_error: Mutex::new(None),
             statistics_gap: AtomicBool::new(false),
+            #[cfg(test)]
+            panic_next_mutation: AtomicBool::new(false),
         });
         tokio::spawn(supervise_writer(writer.clone()));
         Ok(Self { writer })
@@ -1106,6 +1117,10 @@ async fn run_writer(shared: Arc<CallsWriter>) {
         shared.in_flight_bytes.store(batch_bytes, Ordering::Release);
         let mut deferred: Option<(QueuedCallMutation, BatchFailure)> = None;
         while let Some(entry) = pending.pop_front() {
+            #[cfg(test)]
+            if shared.panic_next_mutation.swap(false, Ordering::AcqRel) {
+                panic!("injected call statistics consumer exit");
+            }
             let ticket = entry.ticket;
             match apply_mutation(&shared, &entry.mutation).await {
                 Ok(()) => {

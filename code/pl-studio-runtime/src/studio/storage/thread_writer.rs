@@ -814,6 +814,7 @@ async fn persist_effect(inner: &Inner, sequence: u64) -> Result<()> {
     // state. Nothing is re-projected from that identity, but its durable item is what proves the
     // referenced body is committed, so the identity is part of this effect's lookup phase.
     ids.extend(provisional.unresolved_inputs.iter().cloned());
+    ids.extend(provisional.unresolved_calls.iter().cloned());
     // Only a channel with an earlier preview or durable row may be finalized here.
     if let Some(attempt) = &write.effect.attempt {
         for channel in ["reasoning", "text"] {
@@ -1337,13 +1338,89 @@ fn cold_error(message: &str) -> ColdStoreError {
 mod storage_fault_tests {
     use super::*;
     use pl_core::{
-        context::OpaquePayload,
+        context::{ContextContent, OpaquePayload},
+        model::{
+            DynModelSession, ModelError, ModelRequest, ModelSession, ModelStepOutput,
+            ModelToolCall, PreparedModelCall,
+        },
         thread::{
-            ThreadEffectBatch, ThreadSnapshot,
+            ModelStepLimit, ThreadEffectBatch, ThreadHandle, ThreadSnapshot, TurnInput,
+            TurnOutcome,
+            cold::ColdStoreHandle,
             input::{InputChange, InputRecord, InputState, ThreadInput},
+            task::TaskStatus,
+        },
+        tool::{
+            ToolOutput,
+            opaque::{CallContext, Registration, Tool, ToolError},
         },
     };
     use sea_orm::{ConnectionTrait, Database};
+    use tokio::sync::{Notify, mpsc};
+    use tokio_util::sync::CancellationToken;
+
+    #[derive(Debug)]
+    struct ConcurrentModel(Arc<AtomicUsize>);
+
+    impl ModelSession for ConcurrentModel {
+        async fn prepare(
+            &mut self,
+            request: ModelRequest,
+        ) -> Result<PreparedModelCall, ModelError> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(PreparedModelCall::new(async move {
+                Ok(ModelStepOutput {
+                    attempt_id: request.attempt_id,
+                    base_context_revision: request.context.revision,
+                    content: vec![ContextContent::Text {
+                        text: Arc::from("running both tools"),
+                    }],
+                    tool_calls: ["first", "second"]
+                        .into_iter()
+                        .map(|id| ModelToolCall {
+                            call_id: id.to_owned(),
+                            tool_id: id.to_owned(),
+                            arguments: OpaquePayload::text(id),
+                        })
+                        .collect(),
+                    private_context: None,
+                    usage: Default::default(),
+                })
+            }))
+        }
+
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct ConcurrentTool {
+        started: mpsc::UnboundedSender<String>,
+        release: Arc<Notify>,
+        executions: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Tool for ConcurrentTool {
+        async fn execute(
+            &self,
+            input: OpaquePayload,
+            context: CallContext,
+        ) -> Result<ToolOutput, ToolError> {
+            self.executions
+                .lock()
+                .unwrap()
+                .push(context.call_id.clone());
+            self.started.send(context.call_id).unwrap();
+            self.release.notified().await;
+            Ok(ToolOutput::new(
+                input.clone(),
+                vec![ContextContent::Text {
+                    text: Arc::from(input.content()),
+                }],
+            ))
+        }
+    }
 
     fn ticket(thread_id: &str, sequence: u64) -> ThreadWrite {
         let state = ThreadSnapshot {
@@ -1483,6 +1560,150 @@ mod storage_fault_tests {
         let recovered = sink.0.channel.subscribe().borrow().clone();
         assert_eq!(recovered.queued_records, 0);
         assert_eq!(recovered.fault, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn concurrent_tool_results_survive_a_real_writer_failure_without_reexecution()
+    -> Result<()> {
+        let (_temp, store, sink) = sink("concurrent-results").await?;
+        let requests = Arc::new(AtomicUsize::new(0));
+        let thread = ThreadHandle::start(
+            "concurrent-results".into(),
+            DynModelSession::new(ConcurrentModel(requests.clone())),
+        )?;
+        let (started, mut starts) = mpsc::unbounded_channel();
+        let executions = Arc::new(Mutex::new(Vec::new()));
+        let releases: Vec<_> = (0..2).map(|_| Arc::new(Notify::new())).collect();
+        thread
+            .register_tools(
+                ["first", "second"]
+                    .into_iter()
+                    .zip(releases.iter())
+                    .map(|(id, release)| {
+                        Registration::new(
+                            id.into(),
+                            OpaquePayload::text(format!("Tool {id}")),
+                            ConcurrentTool {
+                                started: started.clone(),
+                                release: release.clone(),
+                                executions: executions.clone(),
+                            },
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+            .await?;
+        thread
+            .attach_storage(ColdStoreHandle::new(sink.clone()))
+            .await?;
+        let turn = TurnInput {
+            turn_id: "both-running".into(),
+            attempt_prefix: "both-running".into(),
+            content: vec![ContextContent::Text {
+                text: Arc::from("start"),
+            }],
+            max_model_steps: ModelStepLimit::Limited(1.try_into()?),
+            cancellation: CancellationToken::new(),
+        };
+        let runner = tokio::spawn({
+            let thread = thread.clone();
+            async move { thread.run_turn(turn).await }
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            assert_eq!(starts.recv().await.as_deref(), Some("first"));
+            assert_eq!(starts.recv().await.as_deref(), Some("second"));
+        })
+        .await?;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), runner)
+                .await???
+                .outcome,
+            TurnOutcome::StepLimit
+        );
+        thread.flush().await?;
+        let baseline = store
+            .history("concurrent-results")
+            .await?
+            .watermark()
+            .await?;
+        let path = store
+            .thread_storage_dir("concurrent-results")
+            .join("history.sqlite");
+        let db = Database::connect(crate::studio::paths::sqlite_url(&path)).await?;
+        db.execute_unprepared(
+            "CREATE TRIGGER reject_history BEFORE UPDATE OF applied_write_seq ON history_meta \
+             BEGIN SELECT RAISE(ABORT, 'controlled concurrent rejection'); END",
+        )
+        .await?;
+
+        for release in &releases {
+            release.notify_one();
+        }
+        let mut snapshots = thread.subscribe();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let snapshot = snapshots.next().await.unwrap();
+                if snapshot.terminal_tasks.len()
+                    + snapshot
+                        .tasks
+                        .values()
+                        .filter(|task| task.status != TaskStatus::Running)
+                        .count()
+                    == 2
+                {
+                    break;
+                }
+            }
+        })
+        .await?;
+        let mut status = sink.0.channel.subscribe();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while status.borrow_and_update().fault.is_none() {
+                status.changed().await?;
+            }
+            Ok::<_, tokio::sync::watch::error::RecvError>(())
+        })
+        .await??;
+        let failed = status.borrow().clone();
+        assert_eq!(
+            failed.fault,
+            Some(pl_protocol::studio::HistoryFault::WriteFailed)
+        );
+        assert!(failed.queued_records >= 2);
+        assert_eq!(
+            store
+                .history("concurrent-results")
+                .await?
+                .watermark()
+                .await?,
+            baseline
+        );
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        assert_eq!(*executions.lock().unwrap(), ["first", "second"]);
+
+        db.execute_unprepared("DROP TRIGGER reject_history").await?;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            store
+                .thread_persistence()
+                .retry_history("concurrent-results", failed.fault_generation),
+        )
+        .await??;
+        thread.flush().await?;
+        let history = store.history("concurrent-results").await?;
+        assert_eq!(
+            history.watermark().await?,
+            thread.snapshot().commit_sequence
+        );
+        for id in ["first", "second"] {
+            let fact = history.tool_task(&format!("task:{id}")).await?.unwrap();
+            assert_eq!(fact.task.call_id, id);
+            assert_eq!(fact.delivery.unwrap().call_id, id);
+        }
+        assert_eq!(requests.load(Ordering::Relaxed), 1);
+        assert_eq!(executions.lock().unwrap().len(), 2);
+        thread.close().await?;
         Ok(())
     }
 
@@ -1672,9 +1893,14 @@ mod storage_fault_tests {
     }
 
     #[tokio::test]
-    async fn statistics_gap_never_blocks_history_or_checkpoint() -> Result<()> {
+    async fn stopped_statistics_consumer_never_blocks_history_or_checkpoint() -> Result<()> {
         let (_temp, store, sink) = sink("statistics-gap").await?;
-        store.calls().mark_statistics_gap();
+        store.calls().stop_best_effort();
+        assert!(
+            !store
+                .calls()
+                .try_admit_effect(&ticket("statistics-gap", 1).effect)
+        );
         store
             .thread_persistence()
             .report_calls(store.calls().metrics());
@@ -1684,6 +1910,50 @@ mod storage_fault_tests {
         assert_eq!(store.history("statistics-gap").await?.watermark().await?, 1);
         assert_eq!(sink.0.channel.subscribe().borrow().fault, None);
         assert!(store.thread_persistence().queue_snapshot().statistics_gap);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn crashed_statistics_consumer_does_not_block_history_and_restarts() -> Result<()> {
+        let (_temp, store, sink) = sink("statistics-crash").await?;
+        let calls = store.calls();
+        calls.panic_on_next_mutation();
+        assert!(calls.try_admit_effect(&ticket("statistics-crash", 1).effect));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if calls
+                    .last_error()
+                    .is_some_and(|message| message.contains("terminated unexpectedly"))
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        assert!(calls.statistics_gap());
+        let dropped_ticket = calls.admitted_ticket();
+        assert!(calls.try_admit_effect(&ticket("statistics-crash", 2).effect));
+        let resumed_ticket = calls.admitted_ticket();
+        assert!(resumed_ticket > dropped_ticket);
+
+        sink.admit("statistics-crash", ticket("statistics-crash", 1))?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush("statistics-crash", 1)).await??;
+        assert_eq!(
+            store.history("statistics-crash").await?.watermark().await?,
+            1
+        );
+        assert_eq!(sink.0.channel.subscribe().borrow().fault, None);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if calls.durable_ticket() >= resumed_ticket {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        assert!(calls.statistics_gap());
         Ok(())
     }
 

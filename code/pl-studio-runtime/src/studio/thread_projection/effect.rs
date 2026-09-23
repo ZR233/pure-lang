@@ -57,6 +57,8 @@ pub(in crate::studio) struct EffectProjection {
     pub(in crate::studio) items: Vec<ThreadItem>,
     /// Pruned input identities this effect references whose durable item the caller did not supply.
     pub(in crate::studio) unresolved_inputs: BTreeSet<String>,
+    /// Calls whose producing attempt was pruned; the original invocation belongs to history.
+    pub(in crate::studio) unresolved_calls: BTreeSet<String>,
 }
 
 impl EffectProjection {
@@ -66,16 +68,25 @@ impl EffectProjection {
     /// so it can never be materialized later. The durable writer reports this as a real persistence
     /// error instead of committing a timeline with a hole and leaving a stale running Turn behind.
     pub(in crate::studio) fn ensure_complete(&self) -> Result<(), ProjectionError> {
-        if self.unresolved_inputs.is_empty() {
-            return Ok(());
+        if !self.unresolved_inputs.is_empty() {
+            return Err(ProjectionError::MissingDurableInput(
+                self.unresolved_inputs
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ));
         }
-        Err(ProjectionError::MissingDurableInput(
-            self.unresolved_inputs
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(","),
-        ))
+        if !self.unresolved_calls.is_empty() {
+            return Err(ProjectionError::MissingDurableToolCall(
+                self.unresolved_calls
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -91,6 +102,7 @@ pub(in crate::studio) fn project_effect_items(
     let mut changed_inputs = BTreeSet::new();
     let mut call_ids = BTreeSet::new();
     let mut turn_ids = BTreeSet::new();
+    let mut unresolved_calls = BTreeSet::new();
 
     for change in effect.inputs.iter() {
         let id = match change {
@@ -250,7 +262,7 @@ pub(in crate::studio) fn project_effect_items(
     }
 
     for call_id in call_ids {
-        let (turn_id, call) = state
+        let saved_call = state
             .attempts
             .iter()
             .find_map(|attempt| match &attempt.outcome {
@@ -260,21 +272,39 @@ pub(in crate::studio) fn project_effect_items(
                     .find(|call| call.call_id == call_id)
                     .map(|call| (attempt.turn_id.as_str(), call)),
                 _ => None,
-            })
-            .ok_or_else(|| ProjectionError::DuplicateCall(call_id.into()))?;
-        turn_ids.insert(turn_id);
+            });
         let tool_id = order::tool_id(call_id);
-        let (ordinal, created_at) = stamp(existing, reserved, &tool_id, effect.committed_at);
-        let mut projected = super::tools::project_tool_call(
-            &thread.id,
-            state,
-            turn_id,
-            call,
-            ordinal,
-            created_at,
-            effect.sequence,
-            effect.committed_at,
-        )?;
+        let (turn_id, mut projected) = if let Some((turn_id, call)) = saved_call {
+            let (ordinal, created_at) = stamp(existing, reserved, &tool_id, effect.committed_at);
+            (
+                turn_id,
+                super::tools::project_tool_call(
+                    &thread.id,
+                    state,
+                    turn_id,
+                    call,
+                    ordinal,
+                    created_at,
+                    effect.sequence,
+                    effect.committed_at,
+                )?,
+            )
+        } else if let Some(saved) = existing.get(&tool_id) {
+            (
+                saved.turn_id.as_str(),
+                super::tools::project_saved_tool_call(
+                    &thread.id,
+                    state,
+                    saved,
+                    effect.sequence,
+                    effect.committed_at,
+                )?,
+            )
+        } else {
+            unresolved_calls.insert(tool_id);
+            continue;
+        };
+        turn_ids.insert(turn_id);
         canonicalize(&mut projected, existing, reserved, effect.committed_at);
         items.extend(projected);
         if let Some(delivery) = effect
@@ -368,6 +398,7 @@ pub(in crate::studio) fn project_effect_items(
     Ok(EffectProjection {
         items,
         unresolved_inputs,
+        unresolved_calls,
     })
 }
 

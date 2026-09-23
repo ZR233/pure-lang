@@ -62,6 +62,8 @@ pub(crate) enum ProjectionError {
     MissingInput(String),
     #[error("durable history is missing the committed input item(s) {0}")]
     MissingDurableInput(String),
+    #[error("durable history is missing the accepted tool call item(s) {0}")]
+    MissingDurableToolCall(String),
     #[error("timeline count exceeds the product representation")]
     Count,
     #[error("Turn {0} has no measured final duration")]

@@ -113,12 +113,15 @@ impl LiveProjection {
                 provisional.items.iter().map(|item| item.id.clone()),
             )
             .await?;
-        // A Turn can reference the input id its consuming commit pruned from the folded live state.
-        // Only its already durable item can complete that reference, and reading it must not reserve
-        // an ordinal for an identity this effect does not project.
-        if !provisional.unresolved_inputs.is_empty() {
+        // Pruned inputs and late tool results both refer to an already admitted item. Resolve
+        // it from the session or history without allocating another display identity.
+        if !provisional.unresolved_inputs.is_empty() || !provisional.unresolved_calls.is_empty() {
             let mut missing = Vec::new();
-            for id in &provisional.unresolved_inputs {
+            for id in provisional
+                .unresolved_inputs
+                .iter()
+                .chain(provisional.unresolved_calls.iter())
+            {
                 match chat
                     .read_item(id)
                     .await

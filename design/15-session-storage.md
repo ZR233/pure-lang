@@ -296,6 +296,13 @@ CREATE TABLE history_message_identities ( -- 已受理消息最小身份；diges
 - item 的 Thread、Turn、ordinal 和 kind 不可改变；
 - terminal item 拒绝迟到的草稿或 delta。
 
+后台工具可以在 Turn 结束、owner 已裁剪该轮模型 attempt 后才交付结果。此时结果 effect
+仍携带工具任务与交付事实；投影必须从已提交的同一 `tool` item 回读原始调用身份、参数和
+Turn，再更新其状态，不能要求 checkpoint 留住已结束 attempt，也不能推测或重新生成调用。
+实时视图先从会话窗口读取此身份，必要时回读历史库；历史 writer 按 `write_seq` 先保存
+调用后保存结果。若两处都找不到已受理调用，保存失败并保留结果以供恢复，不能丢失或
+将其当成新的工具调用。
+
 payload 是条目自身的 JSON 正文，不含独立 `payload_format`/`payload_version` 列：需要一个无法解释
 的原始载荷时以 `kind = 'raw'` 的条目保存，格式与版本随 `ThreadRawPayload` 存在 payload JSON 内
 （见 [16](./16-core-contracts.md)）。`history_meta.thread_id`、`database_id` 与

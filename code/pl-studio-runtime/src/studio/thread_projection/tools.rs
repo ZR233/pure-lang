@@ -19,21 +19,71 @@ pub(super) fn project_tool_call(
     revision: u64,
     updated_at: i64,
 ) -> Result<Vec<ThreadItem>, ProjectionError> {
-    let mut items = Vec::new();
     let id = call.call_id.as_str();
+    let invocation = ThreadToolInvocation::new(
+        id.into(),
+        call.tool_id.clone(),
+        call.arguments.content().into(),
+    )
+    .with_provider_identity(Some(id.into()), None);
+    project_invocation(
+        thread_id, snapshot, turn_id, invocation, ordinal, created_at, revision, updated_at,
+    )
+}
+
+pub(super) fn project_saved_tool_call(
+    thread_id: &str,
+    snapshot: &ThreadSnapshot,
+    saved: &ThreadItem,
+    revision: u64,
+    updated_at: i64,
+) -> Result<Vec<ThreadItem>, ProjectionError> {
+    let ThreadItemState::Tool(tool) = saved.state() else {
+        return Err(ProjectionError::DuplicateCall(saved.id.clone()));
+    };
+    let invocation = tool.invocation().clone();
+    let id = invocation.tool_call_id();
+    if saved.id != super::order::tool_id(id) || saved.thread_id != thread_id {
+        return Err(ProjectionError::DuplicateCall(id.into()));
+    }
+    project_invocation(
+        thread_id,
+        snapshot,
+        &saved.turn_id,
+        invocation,
+        saved.ordinal,
+        saved.created_at,
+        revision,
+        updated_at,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn project_invocation(
+    thread_id: &str,
+    snapshot: &ThreadSnapshot,
+    turn_id: &str,
+    mut invocation: ThreadToolInvocation,
+    ordinal: u64,
+    created_at: i64,
+    revision: u64,
+    updated_at: i64,
+) -> Result<Vec<ThreadItem>, ProjectionError> {
+    let mut items = Vec::new();
+    let id = invocation.tool_call_id().to_owned();
     let task = snapshot.tasks.values().find(|task| task.call_id == id);
     let delivery = snapshot
         .deliveries
         .iter()
         .find(|delivery| delivery.call_id == id);
     let state = if let Some(delivery) = delivery {
-        if delivery.tool_id != call.tool_id {
-            return Err(ProjectionError::DuplicateCall(id.into()));
+        if delivery.tool_id != invocation.name() {
+            return Err(ProjectionError::DuplicateCall(id));
         }
         terminal(delivery, updated_at)?
     } else if let Some(task) = task {
         if task.status != TaskStatus::Running {
-            return Err(ProjectionError::MissingToolResult(id.into()));
+            return Err(ProjectionError::MissingToolResult(id));
         }
         let progress = snapshot
             .tool_progress
@@ -58,13 +108,13 @@ pub(super) fn project_tool_call(
             delivery.output.payload(),
             turn_id.into(),
             pl_protocol::SkillActivationCause::Tool {
-                tool_call_id: id.into(),
+                tool_call_id: id.clone(),
             },
         )
     {
         activation.activated_at = updated_at;
         items.push(ThreadItem::new(
-            super::order::skill_id(id),
+            super::order::skill_id(&id),
             thread_id.into(),
             turn_id.into(),
             revision,
@@ -74,17 +124,11 @@ pub(super) fn project_tool_call(
             ThreadItemState::Skill(pl_protocol::ThreadSkillItem::new(activation)),
         ));
     }
-    let mut invocation = ThreadToolInvocation::new(
-        id.into(),
-        call.tool_id.clone(),
-        call.arguments.content().into(),
-    )
-    .with_provider_identity(Some(id.into()), None);
     if let Some(task) = task {
         invocation = invocation.with_task_id(task.id.clone());
     }
     items.push(ThreadItem::new(
-        super::order::tool_id(id),
+        super::order::tool_id(&id),
         thread_id.into(),
         turn_id.into(),
         ordinal,
