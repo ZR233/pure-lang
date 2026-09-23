@@ -130,6 +130,9 @@ jobs:
       - name: Build standalone Studio server
         run: cargo build -p pl-studio-server
 
+      - name: Test Studio history persistence
+        run: cargo test -p pl-studio-runtime
+
   flutter-quality:
     name: Flutter
     runs-on: windows-latest

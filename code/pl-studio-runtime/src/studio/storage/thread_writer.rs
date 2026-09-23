@@ -1336,7 +1336,13 @@ fn cold_error(message: &str) -> ColdStoreError {
 #[cfg(test)]
 mod storage_fault_tests {
     use super::*;
-    use pl_core::thread::{ThreadEffectBatch, ThreadSnapshot};
+    use pl_core::{
+        context::OpaquePayload,
+        thread::{
+            ThreadEffectBatch, ThreadSnapshot,
+            input::{InputChange, InputRecord, InputState, ThreadInput},
+        },
+    };
     use sea_orm::{ConnectionTrait, Database};
 
     fn ticket(thread_id: &str, sequence: u64) -> ThreadWrite {
@@ -1353,6 +1359,37 @@ mod storage_fault_tests {
             }),
             checkpoint: ThreadCheckpoint::capture_transfer(thread_id.to_owned(), sequence, state),
         }
+    }
+
+    fn ticket_referencing_attachment(
+        thread_id: &str,
+        attachment: &crate::studio::AttachmentRecord,
+    ) -> Result<ThreadWrite> {
+        let mut write = ticket(thread_id, 1);
+        let input = InputRecord {
+            accepted_sequence: 1,
+            delivery: Default::default(),
+            input: ThreadInput {
+                id: "attached-input".to_owned(),
+                payload: OpaquePayload::new(
+                    "pl.studio.prompt",
+                    1,
+                    serde_json::json!({
+                        "text": "attached",
+                        "presentation": "visible",
+                        "attachments": [attachment],
+                    })
+                    .to_string(),
+                )?,
+                context: Vec::new(),
+            },
+            ordinal: 1,
+            revision: 1,
+            state: InputState::Pending,
+        };
+        write.checkpoint.state.inputs = Arc::from([input.clone()]);
+        Arc::make_mut(&mut write.effect).inputs = Arc::from([InputChange::Accepted(input)]);
+        Ok(write)
     }
 
     async fn sink(thread_id: &str) -> Result<(tempfile::TempDir, StudioStore, ThreadStorageSink)> {
@@ -1532,6 +1569,154 @@ mod storage_fault_tests {
             1
         );
         assert_eq!(sink.0.channel.subscribe().borrow().fault, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn missing_blob_blocks_checkpoint_until_the_same_attachment_is_durable() -> Result<()> {
+        let (_temp, store, sink) = sink("blob-fence").await?;
+        let blob = store.thread_blobs_dir("blob-fence").join("restored-blob");
+        let attachment = crate::studio::AttachmentRecord {
+            id: "blob-1".to_owned(),
+            thread_id: "blob-fence".to_owned(),
+            modality: pl_protocol::studio::StudioAttachmentModality::File,
+            media_type: "text/plain".to_owned(),
+            filename: None,
+            storage_path: blob.to_string_lossy().into_owned(),
+            byte_size: 8,
+            content_sha256: "0123456789abcdef".to_owned(),
+            width: None,
+            height: None,
+            created_at: 1,
+        };
+        store.record_attachments(vec![attachment.clone()]).await?;
+        let mut status = sink.0.channel.subscribe();
+        sink.admit(
+            "blob-fence",
+            ticket_referencing_attachment("blob-fence", &attachment)?,
+        )?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while status.borrow_and_update().fault.is_none() {
+                status.changed().await?;
+            }
+            Ok::<_, tokio::sync::watch::error::RecvError>(())
+        })
+        .await??;
+        let failed = status.borrow().clone();
+        assert_eq!(
+            failed.fault,
+            Some(pl_protocol::studio::HistoryFault::BlobFailed)
+        );
+        assert_eq!(failed.committed_sequence, 1);
+        assert!(sink.flush("blob-fence", 1).await.is_err());
+        tokio::fs::create_dir_all(blob.parent().expect("blob has a parent")).await?;
+        tokio::fs::write(&blob, b"restored").await?;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            store
+                .thread_persistence()
+                .retry_history("blob-fence", failed.fault_generation),
+        )
+        .await??;
+        assert_eq!(store.history("blob-fence").await?.watermark().await?, 1);
+        assert!(
+            tokio::fs::try_exists(store.thread_storage_dir("blob-fence").join("state.toml"))
+                .await?
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn closing_the_chat_and_sink_does_not_release_pending_history() -> Result<()> {
+        let (_temp, store, sink) = sink("closed-view").await?;
+        sink.admit("closed-view", ticket("closed-view", 1))?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush("closed-view", 1)).await??;
+        let chat = store.chat_session("closed-view").await?;
+        let view = chat.open_chat(pl_core::chat::ChatFocus::Latest).await?;
+        let path = store
+            .thread_storage_dir("closed-view")
+            .join("history.sqlite");
+        let db = Database::connect(crate::studio::paths::sqlite_url(&path)).await?;
+        db.execute_unprepared(
+            "CREATE TRIGGER reject_history BEFORE UPDATE OF applied_write_seq ON history_meta \
+             BEGIN SELECT RAISE(ABORT, 'controlled closed-view rejection'); END",
+        )
+        .await?;
+        let channel = store.thread_persistence().history_channel("closed-view");
+        let mut updates = channel.subscribe();
+        sink.admit("closed-view", ticket("closed-view", 2))?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while updates.borrow_and_update().fault.is_none() {
+                updates.changed().await?;
+            }
+            Ok::<_, tokio::sync::watch::error::RecvError>(())
+        })
+        .await??;
+        let generation = updates.borrow().fault_generation;
+        drop(view);
+        drop(chat);
+        drop(sink);
+        assert_eq!(channel.subscribe().borrow().queued_records, 1);
+        assert_eq!(store.history("closed-view").await?.watermark().await?, 1);
+        db.execute_unprepared("DROP TRIGGER reject_history").await?;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            store
+                .thread_persistence()
+                .retry_history("closed-view", generation),
+        )
+        .await??;
+        assert_eq!(store.history("closed-view").await?.watermark().await?, 2);
+        assert_eq!(channel.subscribe().borrow().queued_records, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn statistics_gap_never_blocks_history_or_checkpoint() -> Result<()> {
+        let (_temp, store, sink) = sink("statistics-gap").await?;
+        store.calls().mark_statistics_gap();
+        store
+            .thread_persistence()
+            .report_calls(store.calls().metrics());
+        assert!(store.thread_persistence().queue_snapshot().statistics_gap);
+        sink.admit("statistics-gap", ticket("statistics-gap", 1))?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush("statistics-gap", 1)).await??;
+        assert_eq!(store.history("statistics-gap").await?.watermark().await?, 1);
+        assert_eq!(sink.0.channel.subscribe().borrow().fault, None);
+        assert!(store.thread_persistence().queue_snapshot().statistics_gap);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stale_fault_generation_cannot_resume_a_new_queue_failure() -> Result<()> {
+        let (_temp, store, sink) = sink("fault-generation").await?;
+        for sequence in [1, 2] {
+            sink.0
+                .channel
+                .process_bytes
+                .store(MAX_HISTORY_PROCESS_BYTES, Ordering::Release);
+            let write = ticket("fault-generation", sequence);
+            assert!(sink.admit("fault-generation", write.clone()).is_err());
+            let failed = sink.0.channel.subscribe().borrow().clone();
+            assert_eq!(failed.fault_generation, sequence);
+            if sequence == 2 {
+                assert!(sink.0.channel.retry(1).is_err());
+                assert_eq!(sink.0.channel.subscribe().borrow().fault_generation, 2);
+            }
+            sink.0.channel.process_bytes.store(0, Ordering::Release);
+            sink.admit("fault-generation", write)?;
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                store
+                    .thread_persistence()
+                    .retry_history("fault-generation", sequence),
+            )
+            .await??;
+        }
+        assert_eq!(
+            store.history("fault-generation").await?.watermark().await?,
+            2
+        );
         Ok(())
     }
 }
