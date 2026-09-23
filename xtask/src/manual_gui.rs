@@ -7,6 +7,7 @@ use pl_model::model::{ModelInfo, ModelTransportProfile};
 use pl_model::provider::ProviderEndpoint;
 use pl_studio_runtime::config::StudioConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
@@ -20,6 +21,26 @@ struct FixtureReady {
     base_url: String,
     ws_url: String,
     scenario: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StressSessionsReport {
+    original_thread_id: String,
+    original_reopened: bool,
+    original_window_items: usize,
+    session_count: usize,
+    directory_count: usize,
+    sessions: Vec<StressSessionReport>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StressSessionReport {
+    ordinal: usize,
+    thread_id: String,
+    window_items: usize,
+    previewed_bodies: usize,
 }
 
 #[derive(Serialize)]
@@ -191,6 +212,8 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     let probe_report = working.path().join("probe-report.json");
     let probe_frames = working.path().join("probe-frames.json");
     let stress_stage = working.path().join("stress-stage");
+    let stress_sessions_stage = working.path().join("stress-sessions-stage");
+    let stress_sessions_report = working.path().join("stress-sessions.json");
     let probe_ready = working.path().join("probe-ready");
     let probe_finished = working.path().join("probe-finished");
     let fixture_log_path = working.path().join("fixture.log");
@@ -382,6 +405,13 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
                             );
                             thread::sleep(Duration::from_millis(100));
                         }
+                        run_stress_sessions(
+                            &app_dir,
+                            &vm_url,
+                            &stress_sessions_report,
+                            &stress_sessions_stage,
+                            &interrupt_rx,
+                        )?;
                         thread::sleep(Duration::from_secs(1));
                         fs::write(&probe_stop, "stop")?;
                         let deadline = Instant::now() + Duration::from_secs(25);
@@ -412,6 +442,19 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     let gui_log_result = write_sanitized_log(&gui_log_path, &output.join("gui.log"));
     if stress_stage.exists() {
         fs::copy(&stress_stage, output.join("stress-stage.txt"))?;
+    }
+    if stress_sessions_stage.exists() {
+        fs::copy(
+            &stress_sessions_stage,
+            output.join("stress-sessions-stage.txt"),
+        )?;
+    }
+    let sessions_log = stress_sessions_stage.with_extension("log");
+    if sessions_log.exists() {
+        fs::copy(sessions_log, output.join("stress-sessions.log"))?;
+    }
+    if stress_sessions_report.exists() {
+        fs::copy(&stress_sessions_report, output.join("stress-sessions.json"))?;
     }
     let stress_screenshot = stress_stage.with_extension("png");
     if stress_screenshot.exists() {
@@ -486,12 +529,39 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         println!("Fixture main step was not exercised; review remains pending.");
         return Ok(());
     }
+    session?;
     ensure!(
         fixture_state == "completed",
         "fixture {fixture_state}; verdict remains pending"
     );
-    session?;
     if options.scenario == "stress" {
+        let sessions: StressSessionsReport = serde_json::from_slice(
+            &fs::read(&stress_sessions_report)
+                .context("Flutter Driver did not complete the multi-session journey")?,
+        )?;
+        ensure!(
+            sessions.original_reopened
+                && !sessions.original_thread_id.is_empty()
+                && sessions.original_window_items <= 96
+                && sessions.session_count == pl_provider_fixture::GUI_STRESS_SESSION_COUNT
+                && sessions.sessions.len() == sessions.session_count
+                && sessions.directory_count > sessions.session_count,
+            "multi-session stress journey incomplete"
+        );
+        let mut ids = HashSet::from([sessions.original_thread_id]);
+        for (index, session) in sessions.sessions.iter().enumerate() {
+            ensure!(
+                session.ordinal == index + 1
+                    && session.window_items <= 96
+                    && ids.insert(session.thread_id.clone()),
+                "multi-session stress item {} invalid",
+                index + 1
+            );
+        }
+        ensure!(
+            sessions.sessions[0].previewed_bodies > 0,
+            "long response was not previewed in the GUI"
+        );
         let report = stress_report.context("stress fixture did not emit a report")?;
         let gui_errors = count_gui_errors(&gui_log_path)?;
         let debug_log = output.join("gui-debug.log");
@@ -570,6 +640,18 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         let frames: serde_json::Value = serde_json::from_slice(
             &fs::read(&probe_frames).context("GUI stress probe did not write frame timings")?,
         )?;
+        let all_frames = frames
+            .get("frames")
+            .and_then(serde_json::Value::as_u64)
+            .context("GUI total frame count is unavailable")?;
+        let all_slow_frames = frames
+            .get("over33Millis")
+            .and_then(serde_json::Value::as_u64)
+            .context("GUI total slow frame count is unavailable")?;
+        let all_slowest_frame = frames
+            .get("maxFrameMillis")
+            .and_then(serde_json::Value::as_f64)
+            .context("GUI longest frame is unavailable")?;
         let frame_samples = frames
             .get("samples")
             .and_then(serde_json::Value::as_array)
@@ -614,6 +696,10 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         ensure!(
             stream_frames.len() >= 5,
             "GUI did not report enough frames during the stress stream"
+        );
+        ensure!(
+            all_frames >= 20 && all_slowest_frame <= 100.0 && all_slow_frames <= all_frames / 20,
+            "GUI full stress journey stalled: max {all_slowest_frame:.1}ms, {all_slow_frames}/{all_frames} over 33ms"
         );
         ensure!(
             slowest_frame <= 100.0 && slow_frames * 20 <= stream_frames.len(),
@@ -850,6 +936,45 @@ fn start_stress_turn(
         ensure!(
             Instant::now() < deadline,
             "stress GUI actions timed out (last stage: {})",
+            fs::read_to_string(stage).unwrap_or_else(|_| "connect".to_owned())
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn run_stress_sessions(
+    app_dir: &Path,
+    vm_url: &str,
+    report: &Path,
+    stage: &Path,
+    interrupt: &mpsc::Receiver<()>,
+) -> Result<()> {
+    let mut command = Command::new("dart");
+    command
+        .current_dir(app_dir)
+        .args(["run", "test_driver/stress_sessions.dart", vm_url])
+        .arg(pl_provider_fixture::GUI_STRESS_SESSION_COUNT.to_string())
+        .arg(pl_provider_fixture::GUI_STRESS_FOLLOWUP_PROMPT_PREFIX)
+        .arg(report)
+        .arg(stage)
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(File::create(stage.with_extension("log"))?));
+    let mut drive = OwnedProcess::start(&mut command, false)?;
+    let deadline = Instant::now() + Duration::from_secs(600);
+    loop {
+        if let Some(status) = drive.child.try_wait()? {
+            ensure!(
+                status.success(),
+                "Flutter Driver multi-session journey failed (last stage: {})",
+                fs::read_to_string(stage).unwrap_or_else(|_| "connect".to_owned())
+            );
+            drive.stopped = true;
+            return Ok(());
+        }
+        ensure!(interrupt.try_recv().is_err(), "stress sessions cancelled");
+        ensure!(
+            Instant::now() < deadline,
+            "stress GUI sessions timed out (last stage: {})",
             fs::read_to_string(stage).unwrap_or_else(|_| "connect".to_owned())
         );
         thread::sleep(Duration::from_millis(100));
