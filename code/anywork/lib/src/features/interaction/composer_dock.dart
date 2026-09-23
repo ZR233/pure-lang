@@ -551,6 +551,8 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
               IconButton.filled(
                 key: showStop
                     ? StudioDriverKeys.composerStop
+                    : !_canSubmit
+                    ? const ValueKey('composer-submit-disabled')
                     : StudioDriverKeys.composerSubmit,
                 tooltip: showStop
                     ? context.l10n.composerStop

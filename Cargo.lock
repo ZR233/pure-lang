@@ -2866,6 +2866,7 @@ dependencies = [
  "minisign-verify",
  "pl-model",
  "pl-protocol",
+ "pl-provider-fixture",
  "pl-remote-helper",
  "pl-skill-core",
  "pl-studio-runtime",

@@ -1249,6 +1249,12 @@ class DemoStudioApi
   Future<PersistenceStateSnapshot> retryPersistence() async =>
       const PersistenceStateSnapshot.ready();
 
+  @override
+  Future<PersistenceQueueSnapshot> retryThreadHistory(
+    String threadId,
+    int faultGeneration,
+  ) async => const PersistenceQueueSnapshot.empty();
+
   /// demo 是纯内存实现，没有异步持久化队列，因此队列压力恒为空的 canonical 观测。
   @override
   Future<PersistenceQueueSnapshot> readPersistenceQueue() async =>

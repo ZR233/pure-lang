@@ -105,6 +105,7 @@ final class BlockedPersistenceState extends PersistenceState {
 /// 都直接来自后端持久化协调器的观测值，缺失即未知（`null`），而不是本地推算的零。
 class PersistenceQueueSnapshot {
   const PersistenceQueueSnapshot({
+    this.statisticsGap = false,
     required this.pendingOperations,
     required this.pendingBytes,
     required this.inFlightBytes,
@@ -115,7 +116,8 @@ class PersistenceQueueSnapshot {
   });
 
   const PersistenceQueueSnapshot.empty()
-    : pendingOperations = 0,
+    : statisticsGap = false,
+      pendingOperations = 0,
       pendingBytes = 0,
       inFlightBytes = 0,
       oldestPendingAgeMillis = null,
@@ -124,6 +126,8 @@ class PersistenceQueueSnapshot {
       threads = const [];
 
   /// 跨全部 Thread 的排队操作数（含一次保留的 checkpoint 发布）。
+  final bool statisticsGap;
+
   final int pendingOperations;
 
   /// 排队事实的编码字节数。
@@ -154,6 +158,8 @@ class PersistenceQueueSnapshot {
 class ThreadPersistenceSnapshot {
   const ThreadPersistenceSnapshot({
     required this.threadId,
+    this.faultGeneration = 0,
+    this.fault,
     this.stateDirtyRevision,
     this.stateSavingRevision,
     this.stateDurableRevision,
@@ -170,6 +176,8 @@ class ThreadPersistenceSnapshot {
   });
 
   final String threadId;
+  final int faultGeneration;
+  final String? fault;
 
   /// 已受理待发布的 checkpoint 修订；未知为 null。
   final int? stateDirtyRevision;

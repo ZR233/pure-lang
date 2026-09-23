@@ -370,7 +370,10 @@ async fn rebuild_skipped_facts(
         .map(pl_protocol::Thread::from)
         .context("observed Thread has no product association")?;
     // 计费/调用事实对每个 Thread 都从 durable calls 有界恢复，不只处理子 Thread。
-    recover_skipped_billing(projector, id, &product, skipped).await?;
+    if let Err(error) = recover_skipped_billing(projector, id, &product, skipped).await {
+        projector.store.calls().mark_statistics_gap();
+        tracing::warn!(thread_id = id, %error, "skipped billing statistics could not be recovered");
+    }
     // 有界恢复：按 ordinal 游标逐页读取 durable 的终态 Turn，既不全表扫描，也不因为丢失 effect
     // 而静默跳过 continuation。历史只保存协议形态，这里映射回 runtime 的 core 形态再发出报告。
     let history = projector.store.history(id).await?;
@@ -468,10 +471,11 @@ async fn recover_skipped_billing(
     skipped: std::ops::RangeInclusive<u64>,
 ) -> Result<()> {
     const BILLING_PAGE: usize = 256;
-    // Earlier effects may have admitted billing asynchronously. Wait for the fixed admission
-    // watermark before deciding which durable calls still need recovery.
+    // Statistics may lag or be lost; never wait for their queue on the history recovery path.
     let calls = projector.store.calls();
-    calls.flush_through(calls.admitted_ticket()).await?;
+    if calls.admitted_ticket() > calls.durable_ticket() {
+        calls.mark_statistics_gap();
+    }
     let root = product.root_thread_id.clone();
     let mut after = skipped.start().saturating_sub(1);
     loop {

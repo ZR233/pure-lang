@@ -61,16 +61,6 @@ pub fn openapi_json() -> anyhow::Result<String> {
     serde_json::to_string_pretty(&openapi_document()).context("failed to serialize OpenAPI")
 }
 
-/// Runs the explicit one-time conversion of a pre-`catalog.toml` Studio home and returns its
-/// auditable outcome. It shares the coordinator's phase machine with normal startup and never
-/// starts the runtime; `confirmed_home` must match the resolved Studio home.
-pub async fn migrate_legacy_storage(
-    studio_home: Option<PathBuf>,
-    confirmed_home: PathBuf,
-) -> anyhow::Result<pl_studio_runtime::LegacyMigrationOutcome> {
-    pl_studio_runtime::migrate_legacy_storage(studio_home, confirmed_home).await
-}
-
 pub async fn serve(options: ServerOptions) -> anyhow::Result<()> {
     security::ensure_loopback_bind(options.listen)?;
     let listener = TcpListener::bind(options.listen)

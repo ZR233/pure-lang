@@ -16,6 +16,7 @@ class TimelineRow {
     this.reasoningGroup,
     this.agentEvent,
     this.isRolledBack = false,
+    this.saved = true,
   });
 
   factory TimelineRow.item({
@@ -30,7 +31,7 @@ class TimelineRow {
       createdAt: item.createdAt,
       order: item.ordinal,
       sequence: item.ordinal,
-      renderVersion: _timelineRowRenderVersion(part),
+      renderVersion: Object.hash(_timelineRowRenderVersion(part), item.saved),
       turnId: item.turnId,
       part: part,
       raw: item.state is ThreadRawItemStateView
@@ -38,6 +39,7 @@ class TimelineRow {
           : null,
       isRolledBack:
           part.contextDisposition == ThreadContextDisposition.rolledBack,
+      saved: item.saved,
     );
   }
 
@@ -50,9 +52,10 @@ class TimelineRow {
       createdAt: item.updatedAt,
       order: lastOrdinal + 1,
       sequence: lastOrdinal,
-      renderVersion: _timelineRowRenderVersion(part),
+      renderVersion: Object.hash(_timelineRowRenderVersion(part), item.saved),
       turnId: item.turnId,
       part: part,
+      saved: item.saved,
     );
   }
 
@@ -113,6 +116,7 @@ class TimelineRow {
   final TimelineReasoningGroup? reasoningGroup;
   final TimelineAgentEvent? agentEvent;
   final bool isRolledBack;
+  final bool saved;
 }
 
 List<TimelineRow> timelineRowsFromThreadItems(

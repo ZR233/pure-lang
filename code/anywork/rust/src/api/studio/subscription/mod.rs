@@ -214,7 +214,10 @@ impl BridgeTaskRegistry {
     }
 }
 
-pub async fn subscribe_thread(thread_id: String) -> Result<BridgeEventSubscription, BridgeError> {
+pub async fn subscribe_thread(
+    thread_id: String,
+    state_only: bool,
+) -> Result<BridgeEventSubscription, BridgeError> {
     let bridge = active_bridge().await?;
     let mut events = bridge
         .studio
@@ -230,11 +233,13 @@ pub async fn subscribe_thread(thread_id: String) -> Result<BridgeEventSubscripti
     let residency_pin = bridge.studio.pin_thread(&thread_id);
     let producer_task = tokio::spawn(async move {
         let _residency_pin = residency_pin;
+        let mut last_revision = None;
+        let mut last_epoch = None;
         loop {
             tokio::select! {
                 _ = producer_cancel.cancelled() => break,
                 frame = events.recv() => {
-                    let frame = match frame {
+                    let mut frame = match frame {
                         Ok(Some(frame)) => frame,
                         Ok(None) => break,
                         Err(error) => {
@@ -244,6 +249,34 @@ pub async fn subscribe_thread(thread_id: String) -> Result<BridgeEventSubscripti
                             break;
                         }
                     };
+                    if state_only {
+                        match &mut frame {
+                            pl_protocol::ThreadSubscriptionUpdate::Snapshot { snapshot } => {
+                                last_revision = Some(snapshot.revision);
+                                last_epoch = None;
+                            }
+                            pl_protocol::ThreadSubscriptionUpdate::Notification { notification } => {
+                                let discontinuity = last_revision.is_some_and(|last| last != notification.base_revision)
+                                    || last_epoch.is_some_and(|epoch| epoch != notification.epoch);
+                                if discontinuity && !matches!(notification.notification, pl_protocol::ThreadNotification::Lagged { .. }) {
+                                    let dropped = last_revision
+                                        .map(|last| notification.base_revision.saturating_sub(last))
+                                        .unwrap_or_default();
+                                    notification.notification = pl_protocol::ThreadNotification::Lagged { dropped };
+                                }
+                                last_revision = Some(notification.revision);
+                                last_epoch = Some(notification.epoch);
+                                if matches!(
+                                    notification.notification,
+                                    pl_protocol::ThreadNotification::ItemStarted { .. }
+                                        | pl_protocol::ThreadNotification::ItemDelta { .. }
+                                        | pl_protocol::ThreadNotification::ItemCompleted { .. }
+                                ) {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
                     match bridge_thread_update(frame) {
                         Ok(Some(update)) => {
                             if sender

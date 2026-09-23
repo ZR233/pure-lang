@@ -261,8 +261,14 @@ pub(crate) fn bridge_thread_item(value: ThreadItem) -> Result<Option<BridgeThrea
     if matches!(value.state(), ThreadItemState::ContextCompaction(_)) {
         return Ok(None);
     }
+    Ok(Some(bridge_chat_thread_item(value)?))
+}
+
+/// ChatView splice indexes include hidden metadata items; preserve their positions
+/// across the FFI boundary and let the widget projection choose what to render.
+pub(crate) fn bridge_chat_thread_item(value: ThreadItem) -> Result<BridgeThreadItem> {
     let state = item_state(value.state())?;
-    Ok(Some(BridgeThreadItem {
+    Ok(BridgeThreadItem {
         id: value.id,
         thread_id: value.thread_id,
         turn_id: value.turn_id,
@@ -271,7 +277,7 @@ pub(crate) fn bridge_thread_item(value: ThreadItem) -> Result<Option<BridgeThrea
         created_at: value.created_at,
         updated_at: value.updated_at,
         state,
-    }))
+    })
 }
 
 fn item_state(value: &ThreadItemState) -> Result<BridgeThreadItemState> {

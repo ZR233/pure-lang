@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart'
 
 import '../../domain/models/studio_models.dart';
 import '../../rust/api/studio.dart' as frb;
+import '../../rust/api/studio/handlers/chat.dart' as frb_chat;
+import '../../rust/api/studio/types/chat.dart' as frb_chat_types;
 import '../../rust/api/studio/handlers/attachment.dart' as frb_attachment;
 import '../../rust/api/studio/handlers/ssh.dart' as frb_ssh;
 import '../../rust/api/studio/types/attachment.dart' as frb_attachment_types;
@@ -17,6 +19,7 @@ import '../../shared/studio_driver_state.dart';
 
 part 'studio_bridge_event.dart';
 part 'studio_thread_stream.dart';
+part 'studio_chat_window.dart';
 part 'studio_api_contract.dart';
 part 'studio_frb_converters.dart';
 part 'studio_state_converters.dart';

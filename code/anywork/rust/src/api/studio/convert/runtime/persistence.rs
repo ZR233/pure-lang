@@ -50,6 +50,7 @@ pub(crate) fn bridge_persistence_queue(
     snapshot: pl_protocol::PersistenceQueueSnapshot,
 ) -> BridgePersistenceQueueSnapshot {
     BridgePersistenceQueueSnapshot {
+        statistics_gap: snapshot.statistics_gap,
         pending_operations: snapshot.pending_operations,
         pending_bytes: snapshot.pending_bytes,
         in_flight_bytes: snapshot.in_flight_bytes,
@@ -61,6 +62,18 @@ pub(crate) fn bridge_persistence_queue(
             .into_iter()
             .map(|thread| BridgeThreadPersistenceSnapshot {
                 thread_id: thread.thread_id,
+                fault_generation: thread.fault_generation,
+                fault: thread.fault.map(|fault| {
+                    match fault {
+                        pl_protocol::studio::HistoryFault::QueueFull => "queueFull",
+                        pl_protocol::studio::HistoryFault::WriteFailed => "writeFailed",
+                        pl_protocol::studio::HistoryFault::WriterUnavailable => "writerUnavailable",
+                        pl_protocol::studio::HistoryFault::NoProgress => "noProgress",
+                        pl_protocol::studio::HistoryFault::CheckpointFailed => "checkpointFailed",
+                        pl_protocol::studio::HistoryFault::BlobFailed => "blobFailed",
+                    }
+                    .to_owned()
+                }),
                 state_dirty_revision: thread.state_dirty_revision,
                 state_saving_revision: thread.state_saving_revision,
                 state_durable_revision: thread.state_durable_revision,

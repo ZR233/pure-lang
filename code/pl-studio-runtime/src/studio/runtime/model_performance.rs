@@ -276,7 +276,11 @@ impl ModelPerformanceOwner {
                 billing,
                 call_retention(retention),
             )
-            .map_err(|error| PureError::MemoryError(error.to_string()))?;
+            .map_err(|error| {
+                tracing::warn!(%error, inference_id = billing.inference_id, "billing statistics dropped");
+                error
+            })
+            .ok();
         {
             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             state
@@ -285,7 +289,9 @@ impl ModelPerformanceOwner {
             state.revision = state.revision.saturating_add(1);
             state.updated_at = unix_seconds();
         }
-        self.billing_ticket.fetch_max(ticket, Ordering::AcqRel);
+        if let Some(ticket) = ticket {
+            self.billing_ticket.fetch_max(ticket, Ordering::AcqRel);
+        }
         self.emit_snapshot_after_flush();
         Ok(())
     }
@@ -308,11 +314,7 @@ impl ModelPerformanceOwner {
 
     async fn read_snapshot(&self) -> Result<StudioModelPerformanceSnapshot, PureError> {
         let calls = self.store.calls();
-        // 统计只读取稳定的调用库投影：先等待受理时固定的 ticket 变为 durable，再查询。
-        calls
-            .flush_through(self.billing_ticket.load(Ordering::Acquire))
-            .await
-            .map_err(memory_error)?;
+        // Statistics are an eventual, lossy projection: reads never wait for its writer.
         // 产品对象只保留有界 revision/更新时间缓存；写盘失败不影响本次统计读取。
         if let Err(error) = self.persist_state().await {
             tracing::warn!(error = %error, "model performance cache persist failed");

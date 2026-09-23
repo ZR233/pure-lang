@@ -221,7 +221,9 @@ impl StudioThreadFactory {
         let persistence = crate::studio::storage::thread_writer::ThreadStorageSink::new(
             self.services.store.clone(),
             protocol_thread,
-        );
+        )
+        .await
+        .map_err(|error| resource_error("open Thread chat session", error))?;
         let spec = StudioThreadSpec {
             context_preparation: crate::compaction::preparer(
                 &route,

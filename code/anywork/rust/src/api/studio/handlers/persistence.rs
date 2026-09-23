@@ -12,6 +12,20 @@ pub async fn retry_persistence() -> Result<BridgePersistenceStateSnapshot, Bridg
     ))
 }
 
+/// Retry exactly one latched Thread fault; returns only after its fixed save fence is confirmed.
+pub async fn retry_thread_history(
+    thread_id: String,
+    fault_generation: u64,
+) -> Result<BridgePersistenceQueueSnapshot, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge_persistence_queue(
+        bridge
+            .studio
+            .retry_thread_history(&thread_id, fault_generation)
+            .await?,
+    ))
+}
+
 /// 读取进程级持久化队列压力与逐 Thread 水位。
 ///
 /// 返回协调器已观测到的真实值：队列操作数、字节、在途字节、最老待保存年龄与最近错误，

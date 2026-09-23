@@ -62,6 +62,9 @@ pub struct ModelFailureReceipt {
     pub accounting: crate::completion::InferenceAccounting,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_observation: Option<crate::completion::InferenceModelObservation>,
+    /// Full provider output retained independently of the bounded live preview.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presentation_items: Vec<crate::completion::CompletionPresentationItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub partial_progress: Option<ModelProgress>,
 }
@@ -103,12 +106,14 @@ pub(super) fn failure_error(
     };
     let usage = super::usage(&failure.accounting.usage);
     let model_observation = failure.model_observation().cloned();
+    let mut failure = failure;
     let receipt = ModelFailureReceipt {
         provider_failure: failure.source.provider_failure_ref().cloned(),
         message: failure.source.to_string(),
         binding,
         accounting: (*failure.accounting).clone(),
         model_observation,
+        presentation_items: std::mem::take(&mut failure.presentation_items),
         partial_progress,
     };
     let details = failure_details(&receipt);
@@ -133,6 +138,7 @@ pub(super) fn postprocess_failure_error(
         binding,
         accounting,
         model_observation,
+        presentation_items: Vec::new(),
         partial_progress,
     };
     let details = failure_details(&receipt);

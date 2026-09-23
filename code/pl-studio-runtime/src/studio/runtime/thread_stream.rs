@@ -7,9 +7,13 @@
 //! the database window instead of splicing a hole.
 use super::StudioRuntime;
 use anyhow::{Context, Result};
-use pl_core::thread::{ThreadHandle, ThreadSnapshot, ThreadSubscription};
+use pl_core::{
+    chat::Session,
+    thread::{ThreadHandle, ThreadSnapshot, ThreadSubscription},
+};
 use pl_protocol::{ThreadNotification, ThreadNotificationEnvelope, ThreadSubscriptionUpdate};
 use std::{collections::VecDeque, num::NonZeroUsize};
+use tokio::time::{Duration, Instant};
 
 use crate::studio::thread_projection::{LiveEvent, LiveProjection, TurnEvent};
 
@@ -19,6 +23,7 @@ use crate::studio::thread_projection::{LiveEvent, LiveProjection, TurnEvent};
 /// draining, the queued frames are dropped and one `lagged` frame (with a new epoch) tells it to
 /// resynchronize from the database window instead of letting this queue grow with history.
 const LIVE_PENDING_FRAMES: usize = 512;
+const PREVIEW_DELIVERY_INTERVAL: Duration = Duration::from_millis(16);
 
 /// Snapshot stream backed by the canonical owner or immutable retired-child history.
 /// Dropping it stops only observation.
@@ -43,18 +48,15 @@ struct LiveSubscription {
     /// read-only handle, so a streaming subscription never opens a new database connection per frame
     /// and a long write transaction can never queue these reads behind it.
     history: Option<crate::studio::storage::history::HistoryStore>,
-    /// The Thread's single ordered history writer, captured when the subscription opened.
-    ///
-    /// Ordinal *reservation* goes through this handle — the same one the Thread's effect commit
-    /// uses — so a live frame and the effect that finalizes it are never two independent SQLite
-    /// writers racing for `history.sqlite`'s write lock.
-    history_writer: Option<crate::studio::storage::history::HistoryStore>,
+    /// The same session-local order allocator used by the history writer.
+    chat: Option<Session>,
     /// Owner state captured right after receiver registration and before the persistence barrier;
     /// the first frame reports it so effects committed past it are still delivered as notifications.
     baseline: Option<ThreadSnapshot>,
     /// Canonical effect projection; seeded by the first frame from the durable ordinal phase.
     projection: Option<LiveProjection>,
     pending: VecDeque<ThreadSubscriptionUpdate>,
+    preview_due: Option<Instant>,
     /// Highest committed effect sequence already projected into notifications.
     applied: u64,
     /// Notification watermark: the strict `revision` counter seeded from the first snapshot.
@@ -74,19 +76,17 @@ impl LiveSubscription {
             .baseline
             .take()
             .unwrap_or_else(|| self.handle.snapshot());
-        // 历史数据库是 item ordinal 的唯一分配者：订阅只消费它已分配的相位，使实时条目与数据库
-        // 分页条目落在同一条 ordinal 序列上。这里不提供任何猜测回退——读不到分配相位就让订阅
-        // 失败（客户端会重新订阅），而不是编造数据库之后会分配给别的条目的 ordinal。
-        let history = runtime.ensure_timeline_history(&self.thread_id).await?;
-        let history_writer = runtime
-            .ensure_timeline_history_writer(&self.thread_id)
-            .await?;
+        // An existing identity keeps its durable order; new identities share the session allocator.
+        let history = runtime.store.history(&self.thread_id).await?;
+        let chat = runtime.chat_session(&self.thread_id).await?;
         self.projection = Some(LiveProjection::seed(state.clone()));
         self.history = Some(history);
-        self.history_writer = Some(history_writer);
+        self.chat = Some(chat);
         self.applied = state.commit_sequence;
         self.revision = state.commit_sequence;
-        let usage = runtime.usage_summary(&self.thread_id, &state);
+        let usage = runtime
+            .usage_through_owner(&self.thread_id, &state, &self.handle)
+            .await?;
         let mut snapshot = crate::studio::thread_projection::project_snapshot(
             self.thread.clone(),
             &state,
@@ -102,17 +102,15 @@ impl LiveSubscription {
     /// A hole in the effect window becomes `lagged` so the client resynchronizes from SQL.
     async fn advance(&mut self, runtime: &StudioRuntime, state: &ThreadSnapshot) -> Result<()> {
         let target = state.commit_sequence;
-        // 实时投影按 durable history 已分配的 ordinal 相位对齐 item identity，与 history writer
-        // 走同一张表，所以重连重放或窗口淘汰都不会重新编号。
+        // Read old identities from history and allocate new orders through the shared session.
         let history = self
             .history
             .clone()
             .context("Thread live subscription has no opened history reader")?;
-        // 预留走的句柄与该 Thread 的 effect commit 是同一个写者；读走上面的只读句柄。
-        let history_writer = self
-            .history_writer
+        let chat = self
+            .chat
             .clone()
-            .context("Thread live subscription has no shared history writer")?;
+            .context("Thread live subscription has no shared chat session")?;
         // 累计摘要从写者报告的权威值出发；每个 effect 在本地再折叠一次（幂等），因此实时
         // runtime 帧与落库后的 checkpoint 摘要同值。
         let mut usage = runtime.usage_summary(&self.thread_id, state);
@@ -144,7 +142,7 @@ impl LiveSubscription {
                             .as_mut()
                             .context("Thread live projection was never seeded")?;
                         projection
-                            .advance(&history, &history_writer, &usage, &self.thread, &effect)
+                            .advance(&history, &chat, &usage, &self.thread, &effect)
                             .await
                     };
                     match projected {
@@ -182,7 +180,7 @@ impl LiveSubscription {
                 .as_mut()
                 .context("Thread live projection was never seeded")?;
             projection
-                .stream(&history, &history_writer, &self.thread, state, applied)
+                .stream(&history, &chat, &self.thread, state, applied)
                 .await
         };
         for event in streamed? {
@@ -195,15 +193,12 @@ impl LiveSubscription {
     async fn lagged(&mut self, runtime: &StudioRuntime, state: &ThreadSnapshot) -> Result<()> {
         let dropped = state.commit_sequence.saturating_sub(self.applied);
         self.applied = state.commit_sequence;
-        // 重新对齐必须继续消费 history 的分配相位；读不到就向上报告失败，绝不猜 ordinal。
-        let history = runtime.ensure_timeline_history(&self.thread_id).await?;
-        // 重同步后仍复用该 Thread 的唯一有序写者，绝不在预览路径上另开一条 SQLite writer。
-        let history_writer = runtime
-            .ensure_timeline_history_writer(&self.thread_id)
-            .await?;
+        // Rebase the projection without replacing this session's identity allocator.
+        let history = runtime.store.history(&self.thread_id).await?;
+        let chat = runtime.chat_session(&self.thread_id).await?;
         self.projection = Some(LiveProjection::seed(state.clone()));
         self.history = Some(history);
-        self.history_writer = Some(history_writer);
+        self.chat = Some(chat);
         self.epoch = self.epoch.saturating_add(1);
         self.enqueue(ThreadNotification::Lagged { dropped });
         Ok(())
@@ -235,11 +230,33 @@ impl LiveSubscription {
     /// Wraps one typed change into a continuous envelope: `base_revision` is the previous
     /// watermark and `revision` advances it by exactly one.
     fn enqueue(&mut self, notification: ThreadNotification) {
+        // An undelivered run of previews may contain interleaved items. Coalesce per identity
+        // without crossing a terminal event, fact, or lagged boundary; its envelope revision
+        // remains in place, so the subscriber still observes a continuous ordered sequence.
+        if let ThreadNotification::ItemStarted { item: incoming } = &notification {
+            for frame in self.pending.iter_mut().rev() {
+                let ThreadSubscriptionUpdate::Notification { notification: last } = frame else {
+                    break;
+                };
+                let ThreadNotification::ItemStarted { item: old } = &last.notification else {
+                    break;
+                };
+                if old.id == incoming.id
+                    && old.ordinal == incoming.ordinal
+                    && old.turn_id == incoming.turn_id
+                {
+                    last.notification = notification;
+                    last.emitted_at = crate::studio::unix_seconds();
+                    return;
+                }
+            }
+        }
         // 有界观察通道：慢消费者不能把订阅内存拉成无界队列。超过固定上限时丢弃已排队帧、
         // 提升 epoch，并用一条 lagged 让客户端从数据库窗口重同步。
         if self.pending.len() >= LIVE_PENDING_FRAMES {
             let dropped = self.pending.len() as u64;
             self.pending.clear();
+            self.preview_due = None;
             self.epoch = self.epoch.saturating_add(1);
             self.push_frame(ThreadNotification::Lagged { dropped });
         }
@@ -260,6 +277,13 @@ impl LiveSubscription {
                     notification,
                 )),
             });
+    }
+
+    fn has_only_previews(&self) -> bool {
+        self.pending.iter().all(|frame| {
+            matches!(frame, ThreadSubscriptionUpdate::Notification { notification }
+                if matches!(notification.notification, ThreadNotification::ItemStarted { .. }))
+        })
     }
 }
 
@@ -282,9 +306,25 @@ impl StudioThreadSubscription {
             }
         };
         loop {
-            if let Some(update) = live.pending.pop_front() {
-                return Ok(Some(update));
+            if !live.pending.is_empty() {
+                if live.has_only_previews() {
+                    let due = *live
+                        .preview_due
+                        .get_or_insert_with(|| Instant::now() + PREVIEW_DELIVERY_INTERVAL);
+                    tokio::select! {
+                        state = live.observations.next(), if Instant::now() < due => {
+                            if let Some(state) = state {
+                                live.advance(&runtime, &state).await?;
+                                continue;
+                            }
+                        }
+                        () = tokio::time::sleep_until(due) => {}
+                    }
+                }
+                live.preview_due = None;
+                return Ok(live.pending.pop_front());
             }
+            live.preview_due = None;
             if !live.started {
                 return Ok(Some(live.open(&runtime).await?));
             }
@@ -322,11 +362,13 @@ impl StudioRuntime {
                 handle,
                 thread,
                 baseline: Some(baseline.clone()),
-                // 首个帧在持久化屏障之后才按 history 的分配相位播种投影，这里不预先猜相位。
+                // The session-local allocator owns new orders; the durable reader only
+                // resolves earlier identities and never gates the first state frame.
                 projection: None,
                 history: None,
-                history_writer: None,
+                chat: None,
                 pending: VecDeque::new(),
+                preview_due: None,
                 applied: baseline.commit_sequence,
                 revision: baseline.commit_sequence,
                 epoch: 1,
@@ -334,9 +376,6 @@ impl StudioRuntime {
                 thread_id: request.thread_id.clone(),
             }))
         };
-        // 先订阅（receiver 已注册），再让活跃草稿通过固定持久化屏障；此后 GUI 读取的
-        // `listTimelineItems(Latest)` 才是权威窗口，期间到达的实时事件按身份与 revision 合并。
-        self.await_timeline_barrier(&request.thread_id).await?;
         Ok(StudioThreadSubscription {
             source,
             runtime: self.clone(),
@@ -348,7 +387,16 @@ impl StudioRuntime {
     pub async fn thread_snapshot(&self, thread_id: &str) -> Result<pl_protocol::ThreadSnapshot> {
         let thread = self.read_protocol_thread(thread_id).await?;
         let state = self.read_thread_state(thread_id).await?;
-        let usage = self.usage_summary(thread_id, &state);
+        let handle = self
+            .threads
+            .observed_threads()
+            .into_iter()
+            .find(|(id, _)| id == thread_id)
+            .map(|(_, handle)| handle);
+        let usage = match handle {
+            Some(handle) => self.usage_through_owner(thread_id, &state, &handle).await?,
+            None => self.usage_summary(thread_id, &state),
+        };
         let mut snapshot =
             crate::studio::thread_projection::project_snapshot(thread, &state, &usage)?;
         self.annotate_model_route(&mut snapshot)?;
@@ -371,6 +419,37 @@ impl StudioRuntime {
         }
         coordinator.seed_usage(thread_id, state.usage_summary.clone());
         state.usage_summary.clone()
+    }
+
+    /// Include committed owner facts that the asynchronous history writer has not folded yet.
+    /// This is only a presentation snapshot; it never advances the writer's durable watermark.
+    async fn usage_through_owner(
+        &self,
+        thread_id: &str,
+        state: &ThreadSnapshot,
+        handle: &ThreadHandle,
+    ) -> Result<pl_core::thread::UsageSummary> {
+        let mut summary = self.usage_summary(thread_id, state);
+        while summary.applied_sequence < state.commit_sequence {
+            let page = handle
+                .effect_page(summary.applied_sequence, NonZeroUsize::new(128).unwrap())
+                .await
+                .context("committed usage effect is no longer available")?;
+            let mut progressed = false;
+            for effect in page {
+                if effect.sequence > state.commit_sequence {
+                    break;
+                }
+                anyhow::ensure!(
+                    effect.sequence == summary.applied_sequence + 1,
+                    "committed usage effect has a gap"
+                );
+                crate::studio::thread_projection::fold_effect_accounting(&mut summary, &effect)?;
+                progressed = true;
+            }
+            anyhow::ensure!(progressed, "committed usage effect has no progress");
+        }
+        Ok(summary)
     }
 
     pub(in crate::studio) async fn read_thread_state(

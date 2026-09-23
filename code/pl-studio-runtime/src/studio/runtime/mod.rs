@@ -132,7 +132,6 @@ pub(in crate::studio::runtime) const ARCHIVE_TREE_SETTLE_TIMEOUT: std::time::Dur
 #[derive(Clone)]
 pub struct StudioRuntime {
     startup_observer: std::sync::Arc<dyn Fn(crate::StudioStartupStage) + Send + Sync>,
-    startup_recovery_notice: Option<super::session_migration::RecoveryNotice>,
     thread_observations: thread_observation::ThreadObservations,
     settings_updates: tokio::sync::watch::Sender<crate::config::ConfigRuntimeSnapshot>,
     settings_refresh: background_task::BackgroundTaskSlot,
@@ -260,12 +259,28 @@ impl StudioRuntime {
         Ok(self.agent_facility.product_events.persistence_state())
     }
 
+    /// Does not alter the independent product-directory write-behind retry.
+    pub async fn retry_thread_history(
+        &self,
+        thread_id: &str,
+        fault_generation: u64,
+    ) -> Result<pl_protocol::PersistenceQueueSnapshot> {
+        self.store
+            .thread_persistence()
+            .retry_history(thread_id, fault_generation)
+            .await?;
+        Ok(self.persistence_queue_snapshot())
+    }
+
     /// 进程级持久化队列压力与逐 Thread 水位。
     ///
     /// 唯一事实源是持有全部 per-Thread writer 的持久化协调器；本入口只是把它已观测到的
     /// 真实值投影为协议形态，不读取、不聚合、也不编造任何 GUI 本地计数。队列字节、最老
     /// 待保存年龄、在途字节与最近错误都直接来自协调器，缺失即为未知而非零。
     pub fn persistence_queue_snapshot(&self) -> pl_protocol::PersistenceQueueSnapshot {
+        self.store
+            .thread_persistence()
+            .report_calls(self.store.calls().metrics());
         self.store.thread_persistence().queue_snapshot()
     }
 

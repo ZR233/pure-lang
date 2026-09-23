@@ -10,6 +10,7 @@ pl-protocol = { workspace = true }
 pl-remote-helper = { workspace = true }
 pl-studio-runtime = { workspace = true }
 pl-model = { workspace = true }
+pl-provider-fixture = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }

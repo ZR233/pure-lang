@@ -219,6 +219,7 @@ abstract final class StudioDriverState {
         'oldestPendingRevision': _persistenceState.state.oldestPendingRevision,
         'firstFailedAt': _persistenceState.state.firstFailedAt,
         'needsAttention': _persistenceState.needsAttention,
+        'errorCode': _persistenceState.state.error?.code,
       },
       'project': _project == null
           ? null
@@ -228,6 +229,7 @@ abstract final class StudioDriverState {
           : {
               'threadId': workspace.thread.id,
               'syncState': workspace.syncState.name,
+              'loadError': workspace.loadError,
               'title': workspace.rootThread.title,
               'projectId': workspace.thread.projectId,
               'rootThreadId': workspace.rootThread.id,

@@ -65,6 +65,7 @@ impl ModelRuntime {
                     source: Box::new(source),
                     accounting: Box::new(response.accounting),
                     model_observation: response.model_observation.map(Box::new),
+                    presentation_items: response.presentation_items,
                     cancelled: false,
                 });
             }
@@ -81,6 +82,7 @@ impl ModelRuntime {
                     ))),
                     accounting: failure.accounting,
                     model_observation: failure.model_observation,
+                    presentation_items: failure.presentation_items,
                     cancelled,
                 });
             }
@@ -91,6 +93,7 @@ impl ModelRuntime {
                 source: Box::new(PureError::LlmError(request.empty_summary_error.to_owned())),
                 accounting: Box::new(response.accounting),
                 model_observation: model_observation.clone().map(Box::new),
+                presentation_items: response.presentation_items,
                 cancelled: false,
             });
         };

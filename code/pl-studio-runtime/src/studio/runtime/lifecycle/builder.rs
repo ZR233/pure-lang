@@ -49,25 +49,7 @@ impl StudioRuntime {
                     pl_protocol::studio::StudioError::internal()
                 })??;
         drop(lock_timing);
-        let migration_paths = resolved.paths.clone();
-        // Once migration starts, its task retains the exclusive owner through every backup/marker
-        // IO. Dropping the startup waiter must not release the lock while blocking filesystem work
-        // runs.
-        let reset_timing = crate::startup_timing::Stage::new("inspect_storage_versions");
-        let instance_lock = tokio::spawn(async move {
-            crate::studio::session_migration::prepare(migration_paths, &instance_lock).await?;
-            Ok::<_, anyhow::Error>(instance_lock)
-        })
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "session recovery owner task failed");
-            pl_protocol::studio::StudioError::internal()
-        })?
-        .map_err(|error| {
-            tracing::error!(error = %error, "failed to coordinate session storage recovery");
-            pl_protocol::studio::StudioError::storage()
-        })?;
-        drop(reset_timing);
+        // Old session data and its migration markers stay untouched in the previous layout.
         let database_timing = crate::startup_timing::Stage::new("open_database");
         let store = StudioStore::open(resolved.paths.database())
             .await
@@ -83,7 +65,7 @@ impl StudioRuntime {
                 ConfigStore::for_studio_home(resolved.paths.home().to_path_buf())
             }
         };
-        let mut runtime = Self::with_runtime_state_and_lock(
+        let runtime = Self::with_runtime_state_and_lock(
             store,
             config_store,
             StudioRuntimeState::new(),
@@ -99,17 +81,6 @@ impl StudioRuntime {
             tracing::error!(error = %error, "failed to initialize SSH server registry");
             pl_protocol::studio::StudioError::storage()
         })?;
-        runtime.startup_recovery_notice =
-            crate::studio::session_migration::finalize(&resolved.paths)
-                .await
-                .map_err(|error| {
-                    tracing::error!(error = %error, "failed to commit Studio fresh-start recovery");
-                    pl_protocol::studio::StudioError::storage()
-                })?;
-        if let Some(notice) = &runtime.startup_recovery_notice {
-            tracing::warn!(archive = %notice.archive.display(), reason = ?notice.reason,
-                "Studio is using default state after an archived migration failure");
-        }
         Ok(runtime)
     }
 
@@ -187,7 +158,6 @@ impl StudioRuntime {
         thread_observations.install(thread_factory.clone())?;
         Ok(Self {
             startup_observer,
-            startup_recovery_notice: None,
             thread_observations,
             settings_updates,
             settings_refresh: Default::default(),

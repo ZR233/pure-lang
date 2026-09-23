@@ -40,9 +40,25 @@ pub struct DurableToolTask {
 
 /// Injected asynchronous sink. `admit` only queues immutable effect data and must not block.
 pub trait ColdStore: Send + Sync + fmt::Debug + 'static {
+    /// Reserves an observed presentation identity synchronously, before a coalescing preview
+    /// can discard it. Backends without ordered presentation storage need not reserve anything.
+    fn reserve_observed_item(
+        &self,
+        _thread_id: &str,
+        _item_id: &str,
+    ) -> Result<(), ColdStoreError> {
+        Ok(())
+    }
     /// Reports current queue pressure without blocking on IO.
     fn pressure(&self, _thread_id: &str) -> StoragePressure {
         StoragePressure::default()
+    }
+    /// Optional notification for a change in durable progress or fault state.
+    ///
+    /// A Thread waits for this signal at a storage safety point while still servicing its
+    /// mailbox. Backends without a notification are polled at a bounded interval.
+    fn subscribe_pressure(&self, _thread_id: &str) -> Option<tokio::sync::watch::Receiver<()>> {
+        None
     }
     /// Accepts exactly this encoded effect batch; repeated admission is idempotent.
     fn admit(&self, thread_id: &str, write: ThreadWrite) -> Result<(), ColdStoreError>;
@@ -65,7 +81,9 @@ pub trait ColdStore: Send + Sync + fmt::Debug + 'static {
     }
 }
 trait ErasedColdStore: Send + Sync + fmt::Debug {
+    fn reserve_observed_item(&self, thread_id: &str, item_id: &str) -> Result<(), ColdStoreError>;
     fn pressure(&self, thread_id: &str) -> StoragePressure;
+    fn subscribe_pressure(&self, thread_id: &str) -> Option<tokio::sync::watch::Receiver<()>>;
     fn admit(&self, thread_id: &str, write: ThreadWrite) -> Result<(), ColdStoreError>;
     fn flush<'a>(
         &'a self,
@@ -79,8 +97,14 @@ trait ErasedColdStore: Send + Sync + fmt::Debug {
     ) -> BoxFuture<'a, Result<Option<DurableToolTask>, ColdStoreError>>;
 }
 impl<T: ColdStore> ErasedColdStore for T {
+    fn reserve_observed_item(&self, thread_id: &str, item_id: &str) -> Result<(), ColdStoreError> {
+        ColdStore::reserve_observed_item(self, thread_id, item_id)
+    }
     fn pressure(&self, thread_id: &str) -> StoragePressure {
         ColdStore::pressure(self, thread_id)
+    }
+    fn subscribe_pressure(&self, thread_id: &str) -> Option<tokio::sync::watch::Receiver<()>> {
+        ColdStore::subscribe_pressure(self, thread_id)
     }
     fn admit(&self, thread_id: &str, write: ThreadWrite) -> Result<(), ColdStoreError> {
         ColdStore::admit(self, thread_id, write)
@@ -110,6 +134,25 @@ impl ColdStoreHandle {
         Self(Arc::new(store))
     }
 
+    pub(crate) fn reserve_observed_item(
+        &self,
+        thread_id: &str,
+        item_id: &str,
+    ) -> Result<(), ColdStoreError> {
+        self.0.reserve_observed_item(thread_id, item_id)
+    }
+
+    pub(crate) fn subscribe_pressure(
+        &self,
+        thread_id: &str,
+    ) -> Option<tokio::sync::watch::Receiver<()>> {
+        self.0.subscribe_pressure(thread_id)
+    }
+
+    pub(crate) fn pressure(&self, thread_id: &str) -> StoragePressure {
+        self.0.pressure(thread_id)
+    }
+
     /// Reads one finished tool task from the durable store, if the backend keeps task facts.
     pub(crate) async fn read_tool_task(
         &self,
@@ -132,9 +175,66 @@ pub struct PersistenceState {
     pub admitted_sequence: u64,
     pub durable_sequence: u64,
     pub error: Option<String>,
+    #[serde(default)]
+    pub execution_phase: StorageExecutionPhase,
+}
+
+/// A storage pause is not a failed or cancelled Turn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StorageExecutionPhase {
+    #[default]
+    Running,
+    PausingForStorage,
+    PausedForStorage,
 }
 
 impl Owner {
+    /// Wait at an execution safety point without failing the active Turn or starving control.
+    pub(super) async fn await_storage_admission(
+        &mut self,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<(), ThreadError> {
+        let mut updates = self
+            .cold
+            .as_ref()
+            .and_then(|cold| cold.subscribe_pressure(&self.id));
+        loop {
+            self.admit_cold();
+            self.refresh_storage_pressure();
+            if !self.state.persistence.pressure_paused && self.cold_error.is_none() {
+                if self.state.persistence.execution_phase != StorageExecutionPhase::Running {
+                    self.state.persistence.execution_phase = StorageExecutionPhase::Running;
+                    self.publish_snapshot();
+                }
+                return Ok(());
+            }
+            if self.state.persistence.execution_phase != StorageExecutionPhase::PausedForStorage {
+                self.state.persistence.execution_phase = StorageExecutionPhase::PausingForStorage;
+                self.publish_snapshot();
+                self.state.persistence.execution_phase = StorageExecutionPhase::PausedForStorage;
+                self.publish_snapshot();
+            }
+            let cancelled = self
+                .await_with_mailbox(async {
+                    tokio::select! {
+                        () = cancellation.cancelled() => true,
+                        available = async {
+                            match updates.as_mut() {
+                                Some(update) => update.changed().await.is_ok(),
+                                None => std::future::pending::<bool>().await,
+                            }
+                        } => { if !available { updates = None; } false },
+                        () = tokio::time::sleep(std::time::Duration::from_secs(1)) => false,
+                    }
+                })
+                .await;
+            if cancelled || self.interrupt.is_closing() {
+                return Err(ThreadError::Cancelled);
+            }
+        }
+    }
+
     pub(super) fn refresh_storage_pressure(&mut self) {
         let pressure = match &self.cold {
             Some(store) => store.0.pressure(&self.id),

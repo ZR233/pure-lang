@@ -316,7 +316,9 @@ class _AddProjectDialogState extends ConsumerState<_AddProjectDialog> {
             ),
           ),
           FilledButton(
-            key: const ValueKey('add-project-continue'),
+            key: !_busy && (location ? _remote != null : _selected != null)
+                ? const ValueKey('add-project-continue-ready')
+                : const ValueKey('add-project-continue'),
             onPressed: _busy || (location ? _remote == null : _selected == null)
                 ? null
                 : location

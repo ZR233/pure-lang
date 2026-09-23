@@ -6,11 +6,11 @@ use sha2::{Digest, Sha256};
 use crate::config::STUDIO_CONFIG_DIR_NAME;
 
 const STUDIO_DIR_NAME: &str = "studio";
+const SESSION_LAYOUT_VERSION: &str = "v2";
 const DATABASE_FILE_NAME: &str = "studio.sqlite";
 const SKILLS_DIR_NAME: &str = "skills";
 const SYSTEM_SKILLS_DIR_NAME: &str = ".system";
 const STUDIO_HOME_ENV: &str = "ANYWORK_HOME";
-const LEGACY_SESSIONS_FILE_NAME: &str = "sessions.sqlite";
 const CALLS_FILE_NAME: &str = "calls.sqlite";
 const CONFIG_FILE_NAME: &str = "config.toml";
 const SETTINGS_FILE_NAME: &str = "settings.toml";
@@ -21,7 +21,6 @@ const SESSIONS_DIR_NAME: &str = "sessions";
 const CALLS_DIR_NAME: &str = "calls";
 const MIGRATIONS_DIR_NAME: &str = "migrations";
 const ATTACHMENT_DRAFTS_DIR_NAME: &str = "attachment-drafts";
-const LEGACY_ATTACHMENTS_DIR_NAME: &str = "attachments";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StudioPaths {
@@ -39,7 +38,7 @@ impl StudioPaths {
             },
         };
         Ok(Self {
-            data_dir: home.join(STUDIO_DIR_NAME),
+            data_dir: home.join(STUDIO_DIR_NAME).join(SESSION_LAYOUT_VERSION),
             home,
         })
     }
@@ -53,12 +52,13 @@ impl StudioPaths {
     }
 
     pub fn runtime_lock(&self) -> PathBuf {
-        self.data_dir.join("runtime.lock")
+        self.home.join(STUDIO_DIR_NAME).join("runtime.lock")
     }
 
     /// Returns the product-owned directory materialized from bundled system Skills.
     pub fn system_skills_dir(&self) -> PathBuf {
-        self.data_dir
+        self.home
+            .join(STUDIO_DIR_NAME)
             .join(SKILLS_DIR_NAME)
             .join(SYSTEM_SKILLS_DIR_NAME)
     }
@@ -66,12 +66,12 @@ impl StudioPaths {
 
 /// Layout entry points fixed by `design/17` §17.1.
 ///
-/// Every slice (store, migration, config, catalog) resolves its location here instead of
+/// Every slice (store, config, catalog) resolves its location here instead of
 /// re-deriving names. Entries that no slice consumes yet are marked `dead_code` so a mid-refactor
 /// tree still builds under `-D warnings`.
 #[allow(dead_code)]
 impl StudioPaths {
-    /// Data root holding the versioned product database and legacy sidecar state.
+    /// Data root holding the versioned session and call databases.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
     }
@@ -83,17 +83,17 @@ impl StudioPaths {
 
     /// Product and UI settings store.
     pub fn settings_file(&self) -> PathBuf {
-        self.home.join(SETTINGS_FILE_NAME)
+        self.versioned_home().join(SETTINGS_FILE_NAME)
     }
 
     /// Project/Workspace definitions and stable references.
     pub fn workspaces_file(&self) -> PathBuf {
-        self.home.join(WORKSPACES_FILE_NAME)
+        self.versioned_home().join(WORKSPACES_FILE_NAME)
     }
 
     /// Lightweight Thread directory summaries consumed by the first screen.
     pub fn catalog_file(&self) -> PathBuf {
-        self.home.join(CATALOG_FILE_NAME)
+        self.versioned_home().join(CATALOG_FILE_NAME)
     }
 
     /// Config runtime path view for the same product home.
@@ -112,23 +112,22 @@ impl StudioPaths {
     /// Root of per-Thread session directories; one child owns `state.toml`, `history.sqlite` and
     /// `blobs`. Startup loads the directory listing only; individual Threads activate lazily.
     pub fn sessions_dir(&self) -> PathBuf {
-        self.home.join(SESSIONS_DIR_NAME)
+        self.versioned_home().join(SESSIONS_DIR_NAME)
     }
 
     /// Global per-call record directory (`calls.sqlite` plus blob references).
     pub fn calls_dir(&self) -> PathBuf {
-        self.home.join(CALLS_DIR_NAME)
+        self.versioned_home().join(CALLS_DIR_NAME)
     }
 
-    /// Global call fact database; the migration coordinator seeds it and the normal runtime
-    /// appends to it.
+    /// Global, disposable call statistics database.
     pub fn calls_database(&self) -> PathBuf {
         self.calls_dir().join(CALLS_FILE_NAME)
     }
 
-    /// One-time migration state, source fingerprints and consistent backups.
+    /// Version-local migration state and consistent backups.
     pub fn migrations_dir(&self) -> PathBuf {
-        self.home.join(MIGRATIONS_DIR_NAME)
+        self.versioned_home().join(MIGRATIONS_DIR_NAME)
     }
 
     /// Temporary attachment-draft root. Persistent attachments live under the owning Thread's
@@ -137,32 +136,24 @@ impl StudioPaths {
         self.data_dir.join(ATTACHMENT_DRAFTS_DIR_NAME)
     }
 
-    /// Pre-refactor global attachment root. Only the one-time migration coordinator may read it;
-    /// it is archived after every referenced blob has moved into its per-session `blobs` directory.
-    pub fn legacy_attachments_dir(&self) -> PathBuf {
-        self.data_dir.join(LEGACY_ATTACHMENTS_DIR_NAME)
-    }
-
-    /// Legacy shared session database. Only the one-time migration coordinator may open it.
-    pub fn legacy_sessions_database(&self) -> PathBuf {
-        self.data_dir.join(LEGACY_SESSIONS_FILE_NAME)
-    }
-
     /// Stable on-disk directory for one Thread session.
     ///
-    /// The layout, the one-time migration coordinator and the normal store must agree on this
-    /// mapping, so it lives here instead of being re-derived by each consumer.
+    /// The layout and normal store must agree on this mapping.
     pub fn thread_storage_dir(&self, thread_id: &str) -> PathBuf {
         self.sessions_dir().join(thread_storage_key(thread_id))
     }
 
     /// Content-addressed blob root for one Thread session.
     ///
-    /// Unifies new and migrated attachments under the same per-session root
+    /// Keeps attachments under the owning session root
     /// (`sessions/<storage-key>/blobs`, `design/17` §17.1); every consumer resolves it here so the
     /// attachment catalog path and the blob path can never diverge.
     pub fn thread_blobs_dir(&self, thread_id: &str) -> PathBuf {
         self.thread_storage_dir(thread_id).join("blobs")
+    }
+
+    fn versioned_home(&self) -> PathBuf {
+        self.home.join(SESSION_LAYOUT_VERSION)
     }
 }
 

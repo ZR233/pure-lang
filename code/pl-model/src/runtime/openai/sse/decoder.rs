@@ -3,7 +3,7 @@
 //! Responses 的 output text delta 不携带 assistant message phase，解码器记录
 //! `response.output_item.added` 元数据，为后续 delta 补出块开/块关生命周期。
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use pl_protocol::trace::TraceTextChannel;
 
@@ -11,8 +11,8 @@ use crate::completion::stream::event::{ModelBlockKind, ModelStreamEvent};
 use crate::runtime::openai::VisibleOutputProtocol;
 
 use super::item::{
-    assistant_message_identity, assistant_message_text, output_item_native_context,
-    reasoning_item_id, reasoning_summary_texts,
+    assistant_message_identity, assistant_message_parts, output_item_native_context,
+    presentation_item, reasoning_item_id, reasoning_summary_texts,
 };
 use super::{DEFAULT_TEXT_ID, SseStreamEvent, process_sse_events, response_model_observation};
 
@@ -26,9 +26,9 @@ pub(crate) struct OpenAiStreamDecoder {
     chat_response_id: Option<String>,
     terminal_received: bool,
     text_channels: HashMap<String, TraceTextChannel>,
-    open_text_blocks: HashMap<String, OpenTextBlock>,
+    open_text_blocks: HashMap<(String, u32), OpenTextBlock>,
     open_reasoning_blocks: HashMap<String, String>,
-    next_text_block_ordinal: HashMap<String, u64>,
+    next_text_block_ordinal: HashMap<(String, u32), u64>,
     next_reasoning_block_ordinal: HashMap<String, u64>,
 }
 
@@ -71,16 +71,17 @@ impl OpenAiStreamDecoder {
         }
 
         if matches!(self.visible_output, VisibleOutputProtocol::TaggedText) {
-            return self.normalize_fallback_events(process_sse_events(event));
+            return self.normalize_fallback_events(with_presentation_item(
+                event,
+                process_sse_events(event),
+            ));
         }
 
         match event.kind.as_str() {
             "response.output_item.added" => {
                 if let Some((item_id, channel)) = assistant_message_identity(event.item.as_ref()) {
-                    self.text_channels.insert(item_id.clone(), channel);
-                    let (block_id, events) = self.ensure_text_block_open(&item_id, channel);
-                    let _ = block_id;
-                    return with_response_model_observation(event, events);
+                    self.text_channels.insert(item_id, channel);
+                    return with_response_model_observation(event, Vec::new());
                 }
                 if let Some(item) = event.item.as_ref()
                     && let Some(item_id) = reasoning_item_id(item)
@@ -107,7 +108,11 @@ impl OpenAiStreamDecoder {
                     .copied()
                     .unwrap_or(TraceTextChannel::Final);
                 if let Some(delta) = event.delta.clone() {
-                    let (block_id, mut events) = self.ensure_text_block_open(&item_id, channel);
+                    let (block_id, mut events) = self.ensure_text_block_open(
+                        &item_id,
+                        event.content_index.unwrap_or(0).max(0) as u32,
+                        channel,
+                    );
                     events.push(ModelStreamEvent::text_delta(block_id, channel, delta));
                     return with_response_model_observation(event, events);
                 }
@@ -118,27 +123,39 @@ impl OpenAiStreamDecoder {
                     && let Some((item_id, item_channel)) = assistant_message_identity(Some(item))
                 {
                     let channel = self.text_channels.remove(&item_id).unwrap_or(item_channel);
-                    let authoritative_text = assistant_message_text(item);
-                    let was_open = self.open_text_blocks.contains_key(&item_id);
-                    let (block_id, mut events) = if authoritative_text.is_some() {
-                        self.ensure_text_block_open(&item_id, channel)
-                    } else {
-                        (item_id.clone(), Vec::new())
-                    };
-                    if authoritative_text.is_none() && !was_open {
-                        return with_response_model_observation(event, Vec::new());
+                    let parts = assistant_message_parts(item);
+                    let mut indexes = parts
+                        .iter()
+                        .map(|(index, _)| *index)
+                        .collect::<BTreeSet<_>>();
+                    indexes.extend(
+                        self.open_text_blocks
+                            .keys()
+                            .filter(|(id, _)| id == &item_id)
+                            .map(|(_, index)| *index),
+                    );
+                    let mut events = Vec::new();
+                    for index in indexes {
+                        let authoritative_text = parts
+                            .iter()
+                            .find(|(part_index, _)| *part_index == index)
+                            .map(|(_, text)| text.clone());
+                        if authoritative_text.is_some() {
+                            events.extend(self.ensure_text_block_open(&item_id, index, channel).1);
+                        }
+                        if let Some(block) = self.open_text_blocks.remove(&(item_id.clone(), index))
+                        {
+                            events.push(ModelStreamEvent::text_completed(
+                                block.id,
+                                channel,
+                                authoritative_text,
+                            ));
+                        }
                     }
-                    let block_id = self
-                        .open_text_blocks
-                        .remove(&item_id)
-                        .map(|block| block.id)
-                        .unwrap_or(block_id);
-                    events.push(ModelStreamEvent::text_completed(
-                        block_id,
-                        channel,
-                        authoritative_text,
-                    ));
-                    return with_response_model_observation(event, events);
+                    return with_response_model_observation(
+                        event,
+                        with_presentation_item(event, events),
+                    );
                 }
                 if let Some(item) = event.item.as_ref()
                     && let Some(item_id) = reasoning_item_id(item)
@@ -151,7 +168,10 @@ impl OpenAiStreamDecoder {
                         (item_id.clone(), Vec::new())
                     };
                     if authoritative_summary.is_none() && !was_open {
-                        return with_response_model_observation(event, Vec::new());
+                        return with_response_model_observation(
+                            event,
+                            with_presentation_item(event, Vec::new()),
+                        );
                     }
                     let block_id = self
                         .open_reasoning_blocks
@@ -165,7 +185,10 @@ impl OpenAiStreamDecoder {
                     if let Some(native) = output_item_native_context(item) {
                         events.push(native);
                     }
-                    return with_response_model_observation(event, events);
+                    return with_response_model_observation(
+                        event,
+                        with_presentation_item(event, events),
+                    );
                 }
             }
             _ => {
@@ -173,7 +196,7 @@ impl OpenAiStreamDecoder {
             }
         }
 
-        self.normalize_fallback_events(process_sse_events(event))
+        self.normalize_fallback_events(with_presentation_item(event, process_sse_events(event)))
     }
 
     /// Chat finish_reason closes content, while trailing chunks can still carry final usage.
@@ -199,7 +222,7 @@ impl OpenAiStreamDecoder {
                     kind: ModelBlockKind::Text { channel },
                     provider_metadata,
                 } => {
-                    let (block_id, mut events) = self.ensure_text_block_open(&id, channel);
+                    let (block_id, mut events) = self.ensure_text_block_open(&id, 0, channel);
                     if let Some(ModelStreamEvent::BlockOpened {
                         provider_metadata: metadata,
                         ..
@@ -233,7 +256,7 @@ impl OpenAiStreamDecoder {
                     delta,
                     section_index,
                 } => {
-                    let (block_id, events) = self.ensure_text_block_open(&id, channel);
+                    let (block_id, events) = self.ensure_text_block_open(&id, 0, channel);
                     normalized.extend(events);
                     normalized.push(ModelStreamEvent::BlockDelta {
                         id: block_id,
@@ -266,9 +289,10 @@ impl OpenAiStreamDecoder {
                     authoritative_content,
                     provider_metadata,
                 } => {
-                    let was_open = self.open_text_blocks.contains_key(&id);
+                    let key = (id.clone(), 0);
+                    let was_open = self.open_text_blocks.contains_key(&key);
                     let (block_id, events) = if authoritative_content.is_some() {
-                        self.ensure_text_block_open(&id, channel)
+                        self.ensure_text_block_open(&id, 0, channel)
                     } else {
                         (id.clone(), Vec::new())
                     };
@@ -278,7 +302,7 @@ impl OpenAiStreamDecoder {
                     }
                     let block_id = self
                         .open_text_blocks
-                        .remove(&id)
+                        .remove(&key)
                         .map(|block| block.id)
                         .unwrap_or(block_id);
                     normalized.push(ModelStreamEvent::BlockClosed {
@@ -332,24 +356,26 @@ impl OpenAiStreamDecoder {
     fn ensure_text_block_open(
         &mut self,
         item_id: &str,
+        content_index: u32,
         channel: TraceTextChannel,
     ) -> (String, Vec<ModelStreamEvent>) {
-        if let Some(block) = self.open_text_blocks.get(item_id)
+        let key = (item_id.to_owned(), content_index);
+        if let Some(block) = self.open_text_blocks.get(&key)
             && block.channel == channel
         {
             return (block.id.clone(), Vec::new());
         }
         let mut events = Vec::new();
-        if let Some(block) = self.open_text_blocks.remove(item_id) {
+        if let Some(block) = self.open_text_blocks.remove(&key) {
             events.push(ModelStreamEvent::text_completed(
                 block.id,
                 block.channel,
                 None,
             ));
         }
-        let block_id = self.next_text_block_id(item_id);
+        let block_id = self.next_text_block_id(item_id, content_index);
         self.open_text_blocks.insert(
-            item_id.to_string(),
+            key,
             OpenTextBlock {
                 id: block_id.clone(),
                 channel,
@@ -389,15 +415,19 @@ impl OpenAiStreamDecoder {
         events
     }
 
-    fn next_text_block_id(&mut self, item_id: &str) -> String {
-        let key = text_block_counter_key(item_id);
+    fn next_text_block_id(&mut self, item_id: &str, content_index: u32) -> String {
+        let key = (item_id.to_owned(), content_index);
         let ordinal = self.next_text_block_ordinal.entry(key).or_insert(0);
         *ordinal += 1;
-        if *ordinal == 1 {
-            item_id.to_string()
+        let part_id = if content_index == 0 {
+            item_id.to_owned()
         } else {
-            let ord = *ordinal;
-            format!("{item_id}#{ord}")
+            format!("{}:{item_id}:part:{content_index}", item_id.len())
+        };
+        if *ordinal == 1 {
+            part_id
+        } else {
+            format!("{part_id}#{}", *ordinal)
         }
     }
 
@@ -426,6 +456,17 @@ fn with_response_model_observation(
     events
 }
 
-fn text_block_counter_key(item_id: &str) -> String {
-    item_id.to_string()
+fn with_presentation_item(
+    event: &SseStreamEvent,
+    mut events: Vec<ModelStreamEvent>,
+) -> Vec<ModelStreamEvent> {
+    if event.kind == "response.output_item.done"
+        && let Some(item) = event
+            .item
+            .as_ref()
+            .and_then(|item| presentation_item(item, event.output_index))
+    {
+        events.push(ModelStreamEvent::PresentationItem { item });
+    }
+    events
 }

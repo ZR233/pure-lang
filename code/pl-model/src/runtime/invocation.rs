@@ -556,10 +556,14 @@ impl InvocationRunner {
                     let model_observation = error.model_observation().cloned();
                     tokio::select! {
                         biased;
-                        _ = token.cancelled() => return Err(CompletionFailure::cancelled(
-                            PureError::LlmError("attachment refresh cancelled".into()),
-                            error.accounting,
-                        ).with_optional_model_observation(model_observation)),
+                        _ = token.cancelled() => {
+                            let mut cancelled = CompletionFailure::cancelled(
+                                PureError::LlmError("attachment refresh cancelled".into()),
+                                error.accounting,
+                            ).with_optional_model_observation(model_observation);
+                            cancelled.presentation_items = error.presentation_items;
+                            return Err(cancelled);
+                        },
                         result = prepare => result?,
                     }
                 } else {
@@ -613,10 +617,14 @@ impl InvocationRunner {
                 let model_observation = error.model_observation().cloned();
                 tokio::select! {
                     _ = tokio::time::sleep(delay) => {},
-                    _ = token.cancelled() => return Err(CompletionFailure::cancelled(
-                        PureError::LlmError("model invocation cancelled".into()),
-                        error.accounting,
-                    ).with_optional_model_observation(model_observation)),
+                    _ = token.cancelled() => {
+                        let mut cancelled = CompletionFailure::cancelled(
+                            PureError::LlmError("model invocation cancelled".into()),
+                            error.accounting,
+                        ).with_optional_model_observation(model_observation);
+                        cancelled.presentation_items = error.presentation_items;
+                        return Err(cancelled);
+                    },
                 }
             } else {
                 tokio::time::sleep(delay).await;
@@ -666,22 +674,24 @@ impl InvocationRunner {
                 let replay_unsafe = Arc::new(AtomicBool::new(false));
                 let tracked_stream: CompletionEventStream = opened
                     .events
-                    .inspect({
+                    .map({
                         let replay_unsafe = Arc::clone(&replay_unsafe);
                         let inference_timer = inference_timer.clone();
                         let mut progress = super::thread_model::progress::ProgressProjection::new(context.progress.clone());
                         move |event| {
-                            if let Ok(event) = event
+                            if let Ok(event) = &event
                                 && (has_hosted_tools || matches!(event,
                                     crate::completion::stream::event::ModelStreamEvent::Usage(_)
-                                    | crate::completion::stream::event::ModelStreamEvent::Completed { .. }))
+                                    | crate::completion::stream::event::ModelStreamEvent::Completed { .. }
+                                    | crate::completion::stream::event::ModelStreamEvent::PresentationItem { .. }))
                             {
                                 replay_unsafe.store(true, Ordering::Release);
                             }
-                            if let Ok(event) = event {
+                            if let Ok(event) = &event {
                                 inference_timer.observe(event);
-                                progress.observe(event);
+                                progress.observe(event)?;
                             }
+                            event
                         }
                     })
                     .boxed();

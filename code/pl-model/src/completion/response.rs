@@ -1,5 +1,6 @@
 //! Canonical completion 响应与 trace 上下文。
 
+use pl_protocol::trace::TraceTextChannel;
 use serde::{Deserialize, Serialize};
 
 use crate::completion::tool_call::ToolCall;
@@ -18,6 +19,10 @@ pub struct CompletionResponse {
     pub tool_calls: Vec<ToolCall>,
     #[serde(default)]
     pub responses_context_items: Vec<ResponsesContextItem>,
+    /// Ordered provider output items with their original item and content-part identities.
+    /// Absent for protocols that do not report distinct output items.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presentation_items: Vec<CompletionPresentationItem>,
     #[serde(default)]
     pub orchestration: pl_protocol::InferenceOrchestrationMetrics,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -26,6 +31,39 @@ pub struct CompletionResponse {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_observation: Option<InferenceModelObservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionPresentationItem {
+    pub provider_item_id: String,
+    pub output_index: Option<u32>,
+    pub kind: CompletionPresentationItemKind,
+    pub parts: Vec<CompletionPresentationPart>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "channel", rename_all = "camelCase")]
+pub enum CompletionPresentationItemKind {
+    Text(TraceTextChannel),
+    Reasoning,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionPresentationPart {
+    pub content_index: u32,
+    pub provider_part_id: Option<String>,
+    pub kind: CompletionPresentationPartKind,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CompletionPresentationPartKind {
+    OutputText,
+    ReasoningText,
+    SummaryText,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +86,8 @@ pub struct CompletionFailure {
     pub source: Box<PureError>,
     pub accounting: Box<InferenceAccounting>,
     pub model_observation: Option<Box<InferenceModelObservation>>,
+    /// All provider output items received before this invocation failed.
+    pub presentation_items: Vec<CompletionPresentationItem>,
     pub(crate) cancelled: bool,
 }
 
@@ -63,6 +103,7 @@ impl CompletionFailure {
             source: Box::new(source),
             accounting,
             model_observation: None,
+            presentation_items: Vec::new(),
             cancelled: false,
         }
     }
@@ -104,6 +145,7 @@ impl CompletionFailure {
             source: Box::new(source),
             accounting,
             model_observation: None,
+            presentation_items: Vec::new(),
             cancelled: true,
         }
     }
@@ -115,6 +157,7 @@ impl From<PureError> for CompletionFailure {
             source: Box::new(source),
             accounting: Box::default(),
             model_observation: None,
+            presentation_items: Vec::new(),
             cancelled: false,
         }
     }

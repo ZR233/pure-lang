@@ -17,6 +17,13 @@ pl-remote-helper；bridge 经 Studio 的 SSH 接口类型映射，不直接组�
 独占工具管理器、工具实例及模型会话；物理服务按身份与隔离边界通过租约共享，关闭一个
 Thread 不撤销其他 Thread 的租约。
 
+Session 的聊天能力见 [15](./15-session-storage.md)：Thread owner 只推进执行和生成不可变 effect；
+产品无关的 core Session 共享有界 TimelineState，按需创建多个独立 ChatView。Session/ChatView
+不依赖 Studio 协议、SQLite 或物理模型连接；宿主只注入按顺序键和 item 身份读取的历史能力。
+打开冷会话的阅读窗口无需构造模型、工具或执行 owner。宿主把同一提交投影为稳定 ChatItem
+并发布到 TimelineState 与可靠 writer，最终由按版本保存确认更新同一身份；它不能从 GUI
+是否订阅决定是否保留未保存事实。发布/订阅的同步边界在 core，历史事务与具体载荷投影在宿主。
+
 ## 16.2 不透明载荷与通用上下文
 
 载荷由格式标识、版本和原始 UTF-8 字符串组成。core 不要求 JSON、不解释字段、不格式化、

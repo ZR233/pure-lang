@@ -13,7 +13,10 @@ use pl_protocol::{
     ResponsesContextItemKind, Result, ToolCallCaller, UsageReport,
 };
 
-use crate::completion::{CompletionResponse, CompletionTraceContext, ToolCall};
+use crate::completion::{
+    CompletionPresentationItem, CompletionPresentationPart, CompletionResponse,
+    CompletionTraceContext, ToolCall,
+};
 
 use super::event::{ModelBlockContent, ModelBlockField, ModelBlockKind, ModelStreamEvent};
 use super::lifecycle::{self, StreamLifecycle};
@@ -21,14 +24,22 @@ use super::state::{CompletedStream, FailedStream, StreamAccumulatorState};
 use super::tool_stream::{self, ToolStream};
 use super::trace_projection::TraceProjection;
 
+const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+
 pub(crate) struct StreamCompletionAccumulator {
     content_parts: Vec<ContentPart>,
     content_indexes: HashMap<String, usize>,
+    other_text_lengths: HashMap<(String, &'static str), usize>,
     reasoning_summary_parts: Vec<String>,
     raw_reasoning_parts: Vec<String>,
     tool_calls: Vec<ToolCall>,
     tool_call_callers: HashMap<String, ToolCallCaller>,
     responses_context_items: Vec<ResponsesContextItem>,
+    presentation_items: Vec<CompletionPresentationItem>,
+    presentation_indexes: HashMap<String, usize>,
+    presentation_sizes: Vec<usize>,
+    presentation_bytes: usize,
+    text_output_bytes: usize,
     tool_stream: ToolStream,
     lifecycle: StreamLifecycle,
     final_usage: Option<UsageReport>,
@@ -48,11 +59,17 @@ impl StreamCompletionAccumulator {
         Self {
             content_parts: Vec::new(),
             content_indexes: HashMap::new(),
+            other_text_lengths: HashMap::new(),
             reasoning_summary_parts: Vec::new(),
             raw_reasoning_parts: Vec::new(),
             tool_calls: Vec::new(),
             tool_call_callers: HashMap::new(),
             responses_context_items: Vec::new(),
+            presentation_items: Vec::new(),
+            presentation_indexes: HashMap::new(),
+            presentation_sizes: Vec::new(),
+            presentation_bytes: 0,
+            text_output_bytes: 0,
             tool_stream: ToolStream::new(),
             lifecycle: StreamLifecycle::new(),
             final_usage: None,
@@ -119,7 +136,13 @@ impl StreamCompletionAccumulator {
                 ..
             } => {
                 if channel == TraceTextChannel::Final {
-                    self.append_content_part(&id, &delta);
+                    self.append_content_part(&id, &delta)?;
+                } else {
+                    self.charge_text_output(0, delta.len())?;
+                    *self
+                        .other_text_lengths
+                        .entry((id.clone(), channel.as_str()))
+                        .or_default() += delta.len();
                 }
                 self.record_text_delta(&id, delta, event_tx, channel);
             }
@@ -130,6 +153,7 @@ impl StreamCompletionAccumulator {
                 delta,
                 section_index,
             } => {
+                self.charge_text_output(0, delta.len())?;
                 self.reasoning_summary_parts.push(delta.clone());
                 self.record_thinking_delta(&id, section_index.unwrap_or_default(), delta, event_tx);
             }
@@ -154,7 +178,16 @@ impl StreamCompletionAccumulator {
                 if channel == TraceTextChannel::Final
                     && let Some(text) = authoritative_text.as_deref()
                 {
-                    self.complete_content_part(&id, text);
+                    self.complete_content_part(&id, text)?;
+                } else if let Some(text) = authoritative_text.as_deref() {
+                    let key = (id.clone(), channel.as_str());
+                    let old = self
+                        .other_text_lengths
+                        .get(&key)
+                        .copied()
+                        .unwrap_or_default();
+                    self.charge_text_output(old, text.len())?;
+                    self.other_text_lengths.insert(key, text.len());
                 }
                 self.record_text_completed(&id, channel, authoritative_text, event_tx);
             }
@@ -168,6 +201,9 @@ impl StreamCompletionAccumulator {
                     if let Some(ModelBlockContent::ReasoningSummary(summary)) =
                         authoritative_content
                     {
+                        let old = self.reasoning_summary_parts.iter().map(String::len).sum();
+                        let new = summary.iter().map(String::len).sum();
+                        self.charge_text_output(old, new)?;
                         self.reasoning_summary_parts = summary.clone();
                         Some(summary)
                     } else {
@@ -180,6 +216,7 @@ impl StreamCompletionAccumulator {
                 content_index,
                 delta,
             } => {
+                self.charge_text_output(0, delta.len())?;
                 self.raw_reasoning_parts.push(delta.clone());
                 self.record_reasoning_content_delta(&id, content_index, delta, event_tx);
             }
@@ -263,6 +300,9 @@ impl StreamCompletionAccumulator {
             ModelStreamEvent::ResponsesContextItem { item } => {
                 self.responses_context_items.push(item);
             }
+            ModelStreamEvent::PresentationItem { item } => {
+                self.record_presentation_item(item)?;
+            }
             ModelStreamEvent::WebSearchStarted { item_id, action } => {
                 self.record_web_search_started(&item_id, action, event_tx);
             }
@@ -315,11 +355,55 @@ impl StreamCompletionAccumulator {
         Ok(())
     }
 
-    pub(crate) fn finish(self, event_tx: &AgentEventSender) -> Result<CompletionResponse> {
+    pub(crate) fn take_presentation_items(&mut self) -> Vec<CompletionPresentationItem> {
+        std::mem::take(&mut self.presentation_items)
+    }
+
+    fn charge_text_output(&mut self, old: usize, new: usize) -> Result<()> {
+        let next = self.text_output_bytes - old;
+        let next = next
+            .checked_add(new)
+            .filter(|&bytes| bytes <= MAX_OUTPUT_BYTES)
+            .ok_or_else(|| PureError::MemoryError("provider text output exceeds 16 MiB".into()))?;
+        self.text_output_bytes = next;
+        Ok(())
+    }
+
+    fn record_presentation_item(&mut self, item: CompletionPresentationItem) -> Result<()> {
+        let key = item.provider_item_id.clone();
+        let previous = self
+            .presentation_indexes
+            .get(&key)
+            .map(|&index| self.presentation_sizes[index])
+            .unwrap_or(0);
+        let retained = self.presentation_bytes - previous;
+        let size = presentation_item_bytes(&item).ok_or_else(|| {
+            PureError::MemoryError("provider presentation output exceeds 16 MiB".into())
+        })?;
+        let next = retained
+            .checked_add(size)
+            .filter(|&bytes| bytes <= MAX_OUTPUT_BYTES)
+            .ok_or_else(|| {
+                PureError::MemoryError("provider presentation output exceeds 16 MiB".into())
+            })?;
+        if let Some(&index) = self.presentation_indexes.get(&key) {
+            self.presentation_items[index] = item;
+            self.presentation_sizes[index] = size;
+        } else {
+            self.presentation_indexes
+                .insert(key, self.presentation_items.len());
+            self.presentation_items.push(item);
+            self.presentation_sizes.push(size);
+        }
+        self.presentation_bytes = next;
+        Ok(())
+    }
+
+    pub(crate) fn finish(&mut self, event_tx: &AgentEventSender) -> Result<CompletionResponse> {
         self.finish_inner(event_tx)
     }
 
-    fn finish_inner(mut self, event_tx: &AgentEventSender) -> Result<CompletionResponse> {
+    fn finish_inner(&mut self, event_tx: &AgentEventSender) -> Result<CompletionResponse> {
         let terminal_error = match &self.state {
             StreamAccumulatorState::Open(_) => Some(PureError::transient_model_transport(
                 "provider stream ended before completion",
@@ -369,19 +453,20 @@ impl StreamCompletionAccumulator {
             .and_then(|observation| observation.reported_model.clone())
             .unwrap_or_default();
         Ok(CompletionResponse {
-            response_id: self.response_id,
+            response_id: self.response_id.take(),
             content,
             reasoning_content,
-            tool_calls: self.tool_calls,
-            responses_context_items: self.responses_context_items,
+            tool_calls: std::mem::take(&mut self.tool_calls),
+            responses_context_items: std::mem::take(&mut self.responses_context_items),
+            presentation_items: self.take_presentation_items(),
             orchestration,
             timing: None,
             accounting: pl_protocol::InferenceAccounting {
-                usage: self.final_usage.unwrap_or_default(),
+                usage: self.final_usage.take().unwrap_or_default(),
                 ..Default::default()
             },
             model,
-            model_observation: self.model_observation,
+            model_observation: self.model_observation.take(),
         })
     }
 
@@ -496,14 +581,19 @@ impl StreamCompletionAccumulator {
         });
     }
 
-    fn append_content_part(&mut self, item_id: &str, delta: &str) {
+    fn append_content_part(&mut self, item_id: &str, delta: &str) -> Result<()> {
         let index = self.content_part_slot(item_id);
+        self.charge_text_output(0, delta.len())?;
         self.content_parts[index].text.push_str(delta);
+        Ok(())
     }
 
-    fn complete_content_part(&mut self, item_id: &str, text: &str) {
+    fn complete_content_part(&mut self, item_id: &str, text: &str) -> Result<()> {
         let index = self.content_part_slot(item_id);
+        let old = self.content_parts[index].text.len();
+        self.charge_text_output(old, text.len())?;
         self.content_parts[index].text = text.to_string();
+        Ok(())
     }
 
     /// 返回 item 对应的 content part 下标，缺失时追加空 part。
@@ -590,6 +680,20 @@ impl StreamCompletionAccumulator {
             let _ = event_tx.send(event);
         }
     }
+}
+
+fn presentation_item_bytes(item: &CompletionPresentationItem) -> Option<usize> {
+    // Include fixed record and index costs so zero-length items cannot grow without a bound.
+    let base = std::mem::size_of::<CompletionPresentationItem>()
+        .checked_add(std::mem::size_of::<(String, Option<u32>)>())?
+        .checked_add(std::mem::size_of::<usize>())?
+        .checked_add(item.provider_item_id.len().checked_mul(2)?)?;
+    item.parts.iter().try_fold(base, |bytes, part| {
+        bytes
+            .checked_add(std::mem::size_of::<CompletionPresentationPart>())?
+            .checked_add(part.provider_part_id.as_ref().map_or(0, String::len))?
+            .checked_add(part.text.len())
+    })
 }
 
 fn valid_reported_model(model: &str) -> Option<String> {

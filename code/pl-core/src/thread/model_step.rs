@@ -155,18 +155,15 @@ impl Owner {
             .then_some(ModelOutputViolation::SoloBatch { tool_ids: solo })
     }
 
-    fn ensure_model_admission(&mut self) -> Result<(), ThreadError> {
+    async fn ensure_model_admission(
+        &mut self,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<(), ThreadError> {
         if !self.uncommitted_tools.is_empty() {
             return Err(ThreadError::PendingToolCommit);
         }
-        self.refresh_storage_pressure();
+        self.await_storage_admission(cancellation).await?;
         self.publish_snapshot();
-        if self.state.persistence.pressure_paused {
-            return Err(ThreadError::StoragePressure);
-        }
-        if let Some(error) = &self.cold_error {
-            return Err(ThreadError::Storage(error.clone()));
-        }
         if self.state.lifecycle != ThreadLifecycle::Open || self.interrupt.is_closing() {
             return Err(ThreadError::Closed);
         }
@@ -197,7 +194,7 @@ impl Owner {
         plan: crate::tool::opaque::ToolPlan,
         retry_of: Option<String>,
     ) -> Result<ModelStepOutput, ThreadError> {
-        self.ensure_model_admission()?;
+        self.ensure_model_admission(&input.cancellation).await?;
         let tools = plan.declarations();
         if input.turn_id.is_empty()
             || input.attempt_id.is_empty()
@@ -231,7 +228,7 @@ impl Owner {
         if retry_of.is_none() || correcting {
             self.apply_pending_runtime_facts()?;
             self.prepare_context(&input, tools.clone()).await?;
-            self.ensure_model_admission()?;
+            self.ensure_model_admission(&input.cancellation).await?;
         }
         let mut records = self.state.context.records.to_vec();
         let (messages, consumed_messages) = if retry_of.is_none() || correcting {
@@ -280,7 +277,11 @@ impl Owner {
         };
         context.validate_complete()?;
         let tool_context = context.clone();
-        let (progress, observations) = crate::model::ModelProgressSender::channel();
+        let (progress, observations) = crate::model::ModelProgressSender::channel(
+            self.cold.clone(),
+            &self.id,
+            &input.attempt_id,
+        );
         self.model_progress = Some((input.attempt_id.clone(), observations));
         let request = ModelRequest {
             tool_call_mode: plan.call_mode(),
@@ -315,7 +316,7 @@ impl Owner {
         let request_metadata = prepared.request_metadata().cloned();
         let tool_projection = prepared.tool_projection().cloned();
         self.capacity.admit(input_estimate)?;
-        self.ensure_model_admission()?;
+        self.ensure_model_admission(&input.cancellation).await?;
         if !plan.remains_authorized(&self.tools) {
             return Err(ThreadError::ToolPermissionRevoked);
         }

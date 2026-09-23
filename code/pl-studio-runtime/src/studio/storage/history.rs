@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, ensure};
+use pl_core::chat::{ChatError, ChatHistory, ChatItem, ChatQuery, HistoryPage};
 use pl_protocol::thread::TimelineCursor;
 use pl_protocol::thread::{TIMELINE_ITEM_PREVIEW_BYTES, preview_timeline_item};
 use pl_protocol::{
@@ -17,7 +18,7 @@ use sea_orm::{
     SqliteTransactionMode, Statement, TransactionOptions, TransactionTrait, Value,
 };
 
-const HISTORY_SCHEMA_VERSION: i64 = 1;
+const HISTORY_SCHEMA_VERSION: i64 = 2;
 /// 单页返回的总 payload 字节预算；达到预算即停止装入更多条目。
 const PAGE_BYTE_BUDGET: usize = 2 * 1024 * 1024;
 /// 单条预览预算必须小于整页预算，否则一条预览都无法落入一页。
@@ -67,8 +68,8 @@ struct HistoryStoreState {
     thread_id: String,
     /// The single writer connection, opened on the first write.
     ///
-    /// The history database is the single ordinal/identity allocator, so one connection keeps every
-    /// batch a short single-writer transaction that cannot interleave its allocations.
+    /// Effect batches use one connection for short single-writer transactions. The Session owns
+    /// ordinal allocation; this connection only persists the ordinals it supplies.
     writer: tokio::sync::OnceCell<HistoryConnection>,
     /// A read-only connection to an *existing* database, opened on the first cold read.
     reader: tokio::sync::OnceCell<HistoryConnection>,
@@ -153,6 +154,10 @@ pub(crate) struct EffectCommit<'a> {
     pub messages: &'a [MessageIdentityWrite],
     /// Terminal fact receipts produced by this effect.
     pub receipts: &'a [FactReceiptWrite],
+    /// Task lifecycle and full delivery are authority, not lossy call statistics.
+    pub tasks: &'a [pl_core::thread::task::TaskRecord],
+    pub deliveries: &'a [pl_core::thread::ToolDelivery],
+    pub attempt: Option<&'a pl_core::thread::journal::AttemptUpdate>,
 }
 
 impl std::fmt::Debug for HistoryStore {
@@ -263,6 +268,7 @@ impl HistoryStore {
     }
 
     /// Atomically applies one immutable writer batch and advances its fixed waterline.
+    #[cfg(test)]
     pub(crate) async fn commit(
         &self,
         write_seq: u64,
@@ -273,10 +279,10 @@ impl HistoryStore {
         let write_seq = integer(write_seq)?;
         let tx = begin_write(&self.writer().await?.db).await?;
         let current = applied_write_seq(&tx).await?;
-        ensure!(
-            write_seq >= current,
-            "history write sequence moved backwards"
-        );
+        if write_seq <= current {
+            tx.rollback().await?;
+            return Ok(());
+        }
         for item in items {
             self.upsert_item(&tx, write_seq, item.clone()).await?;
         }
@@ -310,15 +316,18 @@ impl HistoryStore {
             identities,
             messages,
             receipts,
+            tasks,
+            deliveries,
+            attempt,
         } = commit;
         ensure!(write_seq > 0, "history write sequence must be positive");
         let write_seq = integer(write_seq)?;
         let tx = begin_write(&self.writer().await?.db).await?;
         let current = applied_write_seq(&tx).await?;
-        ensure!(
-            write_seq >= current,
-            "history write sequence moved backwards"
-        );
+        if write_seq <= current {
+            tx.rollback().await?;
+            return Ok(());
+        }
         let mut turn_ids = std::collections::BTreeSet::new();
         for item in items {
             if !item.turn_id.is_empty() {
@@ -382,6 +391,33 @@ impl HistoryStore {
         for receipt in receipts {
             write_fact_receipt(&tx, write_seq, receipt).await?;
         }
+        if let Some(attempt) = attempt
+            && let pl_core::thread::AttemptOutcome::Committed(output) = &attempt.outcome
+        {
+            for call in output.tool_calls.iter() {
+                write_tool_task(
+                    &tx,
+                    write_seq,
+                    &pl_core::thread::task::TaskRecord {
+                        id: format!("task:{}", call.call_id),
+                        call_id: call.call_id.clone(),
+                        tool_id: call.tool_id.clone(),
+                        turn_id: attempt.turn_id.clone(),
+                        revision: 0,
+                        status: pl_core::thread::task::TaskStatus::Running,
+                        cancel_requested: false,
+                        acknowledgement: None,
+                    },
+                )
+                .await?;
+            }
+        }
+        for task in tasks {
+            write_tool_task(&tx, write_seq, task).await?;
+        }
+        for delivery in deliveries {
+            write_tool_delivery(&tx, write_seq, delivery).await?;
+        }
         if write_seq > current {
             tx.execute_raw(statement(
                 "UPDATE history_meta SET applied_write_seq=? WHERE id=1",
@@ -391,6 +427,35 @@ impl HistoryStore {
         }
         tx.commit().await?;
         Ok(())
+    }
+
+    /// Reads the committed task identity and exact delivery, never a call-statistics projection.
+    pub(crate) async fn tool_task(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<pl_core::thread::cold::DurableToolTask>> {
+        let Some(connection) = self.reader().await? else {
+            return Ok(None);
+        };
+        let call_id = task_id.strip_prefix("task:").unwrap_or(task_id);
+        let Some(row) = connection
+            .db
+            .query_one_raw(statement(
+                "SELECT task_payload,delivery_payload FROM history_tool_tasks WHERE call_id=?",
+                vec![call_id.to_owned().into()],
+            ))
+            .await?
+        else {
+            return Ok(None);
+        };
+        let task: String = row.try_get("", "task_payload")?;
+        let delivery: Option<String> = row.try_get("", "delivery_payload")?;
+        Ok(Some(pl_core::thread::cold::DurableToolTask {
+            task: serde_json::from_str(&task)?,
+            delivery: delivery
+                .map(|body| serde_json::from_str(&body))
+                .transpose()?,
+        }))
     }
 
     /// Reads the minimal identity of a previously admitted input, if the durable index knows it.
@@ -502,20 +567,42 @@ impl HistoryStore {
             return Ok(std::collections::BTreeMap::new());
         };
         let mut items = std::collections::BTreeMap::new();
-        for id in ids {
-            let row = connection
+        let ids = ids
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        for batch in ids.chunks(400) {
+            let placeholders = vec!["?"; batch.len()].join(",");
+            let sql = format!(
+                "SELECT item_id,payload FROM history_items WHERE item_id IN ({placeholders})"
+            );
+            let rows = connection
                 .db
-                .query_one_raw(statement(
-                    "SELECT payload FROM history_items WHERE item_id=?",
-                    vec![id.clone().into()],
+                .query_all_raw(statement(
+                    &sql,
+                    batch.iter().cloned().map(Into::into).collect(),
                 ))
                 .await?;
-            if let Some(row) = row {
+            for row in rows {
+                let id: String = row.try_get("", "item_id")?;
                 let payload: String = row.try_get("", "payload")?;
                 items.insert(id, serde_json::from_str(&payload)?);
             }
         }
         Ok(items)
+    }
+
+    /// Resolves the exact rows an effect committed before releasing their in-memory owner.
+    pub(crate) async fn committed_chat_items(
+        &self,
+        ids: impl IntoIterator<Item = String>,
+    ) -> Result<Vec<ChatItem>> {
+        self.existing_items(ids)
+            .await?
+            .into_values()
+            .map(|item| chat_item(item, true))
+            .collect()
     }
 
     pub(crate) async fn items_for_turn(&self, turn_id: &str) -> Result<Vec<ThreadItem>> {
@@ -554,31 +641,6 @@ impl HistoryStore {
             )?)),
             None => Ok(None),
         }
-    }
-
-    /// Read-only: which of `ids` already hold a durable ordinal reservation.
-    ///
-    /// This is the shared "this item identity started" fact. The live projection reserves an
-    /// ordinal the first time it previews a streaming channel, and the durable writer consults the
-    /// same table before it finalizes a failed or cancelled attempt, so neither side fabricates a
-    /// terminal item for a channel that never streamed.
-    pub(crate) async fn reserved_ordinals(
-        &self,
-        ids: impl IntoIterator<Item = String>,
-    ) -> Result<std::collections::BTreeMap<String, u64>> {
-        let Some(connection) = self.reader().await? else {
-            return Ok(std::collections::BTreeMap::new());
-        };
-        let mut reserved = std::collections::BTreeMap::new();
-        for id in ids {
-            if id.is_empty() {
-                continue;
-            }
-            if let Some(ordinal) = reserved_ordinal(&connection.db, &id).await? {
-                reserved.insert(id, ordinal);
-            }
-        }
-        Ok(reserved)
     }
 
     /// Reads at most `limit` durable terminal Turn items after `after_ordinal`, in ordinal order.
@@ -622,6 +684,10 @@ impl HistoryStore {
             item.thread_id == self.state.thread_id && !item.id.is_empty(),
             "history item identity does not belong to this Thread"
         );
+        ensure!(
+            item.ordinal > 0,
+            "history item ordinal must be assigned by the Session"
+        );
         ensure!(item.revision > 0, "history item revision must be positive");
         let revision = integer(item.revision)?;
         let existing = db
@@ -649,7 +715,11 @@ impl HistoryStore {
                 (old_turn == item.turn_id || old_turn.is_empty()) && old_kind == kind,
                 "history item identity fields changed"
             );
-            item.ordinal = u64::try_from(old_ordinal)?;
+            ensure!(
+                item.ordinal == u64::try_from(old_ordinal)?,
+                "history item ordinal changed for {}",
+                item.id
+            );
             item.created_at = old_created_at;
             let payload = serde_json::to_string(&item)?;
             if old_revision > revision {
@@ -693,18 +763,6 @@ impl HistoryStore {
                 .await?;
             }
             return Ok(());
-        }
-        if item.ordinal == 0 {
-            // 分配事实与实时订阅共用 `history_ordinals`：实时先预留、writer 后写入时复用同一
-            // ordinal；writer 先写入时同时留下预留行，后续实时读取得到同一 ordinal。
-            item.ordinal = match reserved_ordinal(db, &item.id).await? {
-                Some(ordinal) => ordinal,
-                None => {
-                    let ordinal = next_free_ordinal(db).await?;
-                    reserve_ordinal(db, &item.id, ordinal).await?;
-                    ordinal
-                }
-            };
         }
         let ordinal = integer(item.ordinal)?;
         let payload = serde_json::to_string(&item)?;
@@ -1014,75 +1072,141 @@ impl HistoryStore {
         })
     }
 
-    /// Reserves the durable ordinal of every item identity that does not have one yet.
-    ///
-    /// Live streaming and the history writer allocate through this one table, so a live item and
-    /// the durable item it becomes share a single ordinal even though the live frame is emitted
-    /// before the effect is written. Repeated reservation of the same identity (multiple
-    /// subscribers, window eviction, lagged replay) returns the same ordinal instead of
-    /// renumbering it, and the whole batch is one transaction so two subscribers cannot interleave.
-    ///
-    /// The common steady state is that the writer already finalized the identities, so the durable
-    /// table already answers every one of them. That case is served by a pure read: a live frame
-    /// never opens a write transaction — and so never contends with the effect commit for the
-    /// database write lock — unless it really is the first to allocate one of these identities.
-    ///
-    /// This whole-read-and-write form is for a caller that owns one handle exclusively (the offline
-    /// migration export). A live subscriber instead reads the durable phase on its own read-only
-    /// connection and calls [`Self::reserve_missing_ordinals`] on the Thread's single shared writer
-    /// handle, so a streaming frame never opens a second SQLite writer.
-    pub(crate) async fn reserve_ordinals(
-        &self,
-        item_ids: impl IntoIterator<Item = String>,
-    ) -> Result<std::collections::BTreeMap<String, u64>> {
-        let item_ids = item_ids
-            .into_iter()
-            .filter(|item_id| !item_id.is_empty())
-            .collect::<Vec<_>>();
-        let mut reserved = self.reserved_ordinals(item_ids.clone()).await?;
-        let missing = item_ids
-            .into_iter()
-            .filter(|item_id| !reserved.contains_key(item_id))
-            .collect::<Vec<_>>();
-        reserved.extend(self.reserve_missing_ordinals(missing).await?);
-        Ok(reserved)
+    async fn read_chat_item(&self, item_id: &str) -> Result<Option<ChatItem>> {
+        let Some(connection) = self.reader().await? else {
+            return Ok(None);
+        };
+        // `read_item` treats a missing identity as an error; only that case is optional here.
+        let exists = connection
+            .db
+            .query_one_raw(statement(
+                "SELECT 1 AS present FROM history_items WHERE item_id=? LIMIT 1",
+                vec![item_id.into()],
+            ))
+            .await?
+            .is_some();
+        if !exists {
+            return Ok(None);
+        }
+        let read = self.read_item(item_id).await?;
+        let mut item = read.item;
+        item.ordinal = read.ordinal;
+        Ok(Some(chat_item(item, true)?))
     }
 
-    /// Allocates the durable ordinal of every listed identity that still needs one.
-    ///
-    /// This is the write half shared by every producer of one Thread: the effect commit and a live
-    /// ordinal reservation both call it on the *same* handle, so their allocations are serialized
-    /// by one ordered writer (its pool holds a single connection) instead of two independent SQLite
-    /// writers racing for `history.sqlite`'s write lock. An identity that was allocated meanwhile
-    /// keeps the ordinal it already got, so re-reservation never renumbers it.
-    pub(crate) async fn reserve_missing_ordinals(
-        &self,
-        item_ids: impl IntoIterator<Item = String>,
-    ) -> Result<std::collections::BTreeMap<String, u64>> {
-        let item_ids = item_ids
-            .into_iter()
-            .filter(|item_id| !item_id.is_empty())
-            .collect::<Vec<_>>();
-        if item_ids.is_empty() {
-            return Ok(std::collections::BTreeMap::new());
+    async fn latest_allocated_order(&self) -> Result<u64> {
+        let Some(connection) = self.reader().await? else {
+            return Ok(0);
+        };
+        let row = connection
+            .db
+            .query_one_raw(statement(
+                "SELECT MAX(ordinal) AS ordinal FROM history_items",
+                vec![],
+            ))
+            .await?
+            .context("history ordinal query returned no row")?;
+        let maximum: Option<i64> = row.try_get("", "ordinal")?;
+        Ok(u64::try_from(maximum.unwrap_or(0))?)
+    }
+
+    async fn chat_page(&self, query: ChatQuery, limit: usize) -> Result<HistoryPage> {
+        let Some(connection) = self.reader().await? else {
+            return Ok(HistoryPage {
+                items: Vec::new(),
+                has_older: false,
+                has_newer: false,
+            });
+        };
+        let limit = limit.clamp(1, 100);
+        let rows = match query {
+            ChatQuery::Latest => {
+                let mut rows = query_chat_ids(
+                    &connection.db,
+                    "SELECT ordinal,item_id FROM history_items ORDER BY ordinal DESC LIMIT ?",
+                    vec![integer(limit)?.into()],
+                )
+                .await?;
+                rows.reverse();
+                rows
+            }
+            ChatQuery::Before(anchor) => {
+                let mut rows = query_chat_ids(
+                    &connection.db,
+                    "SELECT ordinal,item_id FROM history_items WHERE ordinal < ? ORDER BY ordinal DESC LIMIT ?",
+                    vec![integer(anchor)?.into(), integer(limit)?.into()],
+                )
+                .await?;
+                rows.reverse();
+                rows
+            }
+            ChatQuery::After(anchor) => query_chat_ids(
+                &connection.db,
+                "SELECT ordinal,item_id FROM history_items WHERE ordinal > ? ORDER BY ordinal ASC LIMIT ?",
+                vec![integer(anchor)?.into(), integer(limit)?.into()],
+            )
+            .await?,
+            ChatQuery::Around(anchor) => {
+                let anchor = integer(anchor)?;
+                let mut rows = query_chat_ids(
+                    &connection.db,
+                    "SELECT ordinal,item_id FROM history_items WHERE ordinal < ? ORDER BY ordinal DESC LIMIT ?",
+                    vec![anchor.into(), integer(limit / 2)?.into()],
+                )
+                .await?;
+                rows.reverse();
+                let remaining = limit - rows.len();
+                rows.extend(
+                    query_chat_ids(
+                        &connection.db,
+                        "SELECT ordinal,item_id FROM history_items WHERE ordinal >= ? ORDER BY ordinal ASC LIMIT ?",
+                        vec![anchor.into(), integer(remaining)?.into()],
+                    )
+                    .await?,
+                );
+                rows
+            }
+        };
+        let (has_older, has_newer) = match (rows.first(), rows.last()) {
+            (Some(first), Some(last)) => (
+                exists_before(connection, first.0).await?,
+                exists_after(connection, last.0).await?,
+            ),
+            _ => match query {
+                ChatQuery::Latest => (false, false),
+                ChatQuery::Before(anchor) | ChatQuery::Around(anchor) => (
+                    exists_before(connection, anchor).await?,
+                    exists(connection, "ordinal >= ?", anchor).await?,
+                ),
+                ChatQuery::After(anchor) => (
+                    exists(connection, "ordinal <= ?", anchor).await?,
+                    exists_after(connection, anchor).await?,
+                ),
+            },
+        };
+        let mut items = Vec::with_capacity(rows.len());
+        for (ordinal, item_id) in rows {
+            let row = connection
+                .db
+                .query_one_raw(statement(
+                    "SELECT payload FROM history_items WHERE ordinal=? AND item_id=?",
+                    vec![integer(ordinal)?.into(), item_id.clone().into()],
+                ))
+                .await?
+                .with_context(|| format!("chat page item {item_id} disappeared during read"))?;
+            let payload: String = row.try_get("", "payload")?;
+            let item: ThreadItem = serde_json::from_str(&payload)?;
+            ensure!(
+                item.id == item_id && item.ordinal == ordinal,
+                "chat page item {item_id} differs from its indexed identity or order"
+            );
+            items.push(chat_preview_item(item, true)?);
         }
-        let tx = begin_write(&self.writer().await?.db).await?;
-        let mut reserved = std::collections::BTreeMap::new();
-        for item_id in item_ids {
-            // Re-read under the write lock: another producer (or the effect writer) may have
-            // allocated this identity since the caller's read.
-            let ordinal = match reserved_ordinal(&tx, &item_id).await? {
-                Some(ordinal) => ordinal,
-                None => {
-                    let ordinal = next_free_ordinal(&tx).await?;
-                    reserve_ordinal(&tx, &item_id, ordinal).await?;
-                    ordinal
-                }
-            };
-            reserved.insert(item_id, ordinal);
-        }
-        tx.commit().await?;
-        Ok(reserved)
+        Ok(HistoryPage {
+            items,
+            has_older,
+            has_newer,
+        })
     }
 
     /// 把 wire 锚点解析为 canonical ordinal。
@@ -1340,6 +1464,83 @@ impl HistoryStore {
     }
 }
 
+impl ChatHistory for HistoryStore {
+    fn preview(&self, item: &ChatItem) -> std::result::Result<ChatItem, ChatError> {
+        if item.body.len() <= TIMELINE_ITEM_PREVIEW_BYTES {
+            return Ok(item.clone());
+        }
+        let decoded: ThreadItem = serde_json::from_str(&item.body)
+            .map_err(anyhow::Error::from)
+            .map_err(chat_history_error)?;
+        let mut visible = chat_preview_item(decoded, item.saved).map_err(chat_history_error)?;
+        visible.omitted_bytes = visible.omitted_bytes.saturating_add(item.omitted_bytes);
+        Ok(visible)
+    }
+
+    async fn latest_allocated_order(&self) -> std::result::Result<u64, ChatError> {
+        HistoryStore::latest_allocated_order(self)
+            .await
+            .map_err(chat_history_error)
+    }
+
+    async fn page(
+        &self,
+        query: ChatQuery,
+        limit: usize,
+    ) -> std::result::Result<HistoryPage, ChatError> {
+        self.chat_page(query, limit)
+            .await
+            .map_err(chat_history_error)
+    }
+
+    async fn item(&self, item_id: &str) -> std::result::Result<Option<ChatItem>, ChatError> {
+        self.read_chat_item(item_id)
+            .await
+            .map_err(chat_history_error)
+    }
+
+    async fn read_body(
+        &self,
+        item_id: &str,
+    ) -> std::result::Result<Option<std::sync::Arc<str>>, ChatError> {
+        let item = self
+            .read_chat_item(item_id)
+            .await
+            .map_err(chat_history_error)?;
+        Ok(item.map(|item| item.body))
+    }
+}
+
+pub(crate) fn chat_item(item: ThreadItem, saved: bool) -> Result<ChatItem> {
+    let body = serde_json::to_string(&item)?;
+    Ok(ChatItem {
+        item_id: item.id,
+        turn_id: item.turn_id,
+        order: item.ordinal,
+        revision: item.revision,
+        part_id: None,
+        body: body.into(),
+        omitted_bytes: 0,
+        saved,
+    })
+}
+
+fn chat_preview_item(item: ThreadItem, saved: bool) -> Result<ChatItem> {
+    let (preview, reference) = preview_timeline_item(&item, TIMELINE_ITEM_PREVIEW_BYTES);
+    let mut visible = chat_item(preview, saved)?;
+    ensure!(
+        visible.body.len() <= TIMELINE_ITEM_PREVIEW_BYTES,
+        "chat item {} cannot be previewed within the byte budget",
+        item.id
+    );
+    visible.omitted_bytes = reference.map_or(0, |reference| reference.omitted_bytes);
+    Ok(visible)
+}
+
+fn chat_history_error(error: anyhow::Error) -> ChatError {
+    ChatError::History(error.into_boxed_dyn_error())
+}
+
 async fn connect(url: String) -> Result<DatabaseConnection> {
     let mut options = ConnectOptions::new(url);
     options
@@ -1366,7 +1567,7 @@ const HISTORY_WRITE_RETRIES: u32 = 2;
 /// `BEGIN DEFERRED` only upgrades its read lock when the first write statement runs, and SQLite
 /// reports `SQLITE_BUSY` for a failed upgrade *without* invoking the busy handler — so the
 /// configured `busy_timeout` cannot serialize two writers that both read before they write. Every
-/// history write reads a row (the applied waterline, an ordinal reservation) and then writes it in
+/// history write reads the applied waterline and then writes it in
 /// the same transaction, so it must start as a writer: `BEGIN IMMEDIATE` makes the busy handler do
 /// the waiting, and a transaction that still finds the lock held past the timeout is retried a
 /// bounded number of times before it is reported. A structural failure (constraint, corruption)
@@ -1467,6 +1668,91 @@ async fn validate_existing(db: &DatabaseConnection, thread_id: &str) -> Result<S
         "history database identity is empty"
     );
     Ok(database_id)
+}
+
+async fn write_tool_task(
+    tx: &impl ConnectionTrait,
+    write_seq: i64,
+    task: &pl_core::thread::task::TaskRecord,
+) -> Result<()> {
+    let payload = serde_json::to_string(task)?;
+    let existing = tx
+        .query_one_raw(statement(
+            "SELECT revision,task_payload FROM history_tool_tasks WHERE call_id=?",
+            vec![task.call_id.clone().into()],
+        ))
+        .await?;
+    if let Some(existing) = existing {
+        let revision: i64 = existing.try_get("", "revision")?;
+        if revision >= integer(task.revision)? {
+            if revision == integer(task.revision)? {
+                let stored: String = existing.try_get("", "task_payload")?;
+                ensure!(
+                    stored == payload,
+                    "tool task {} conflicts with committed revision",
+                    task.id
+                );
+            }
+            return Ok(());
+        }
+    }
+    tx.execute_raw(statement(
+        "INSERT INTO history_tool_tasks(call_id,revision,task_payload,delivery_payload,last_write_seq)
+         VALUES(?,?,?,NULL,?) ON CONFLICT(call_id) DO UPDATE SET
+         revision=excluded.revision,task_payload=excluded.task_payload,
+         last_write_seq=excluded.last_write_seq",
+        vec![task.call_id.clone().into(), integer(task.revision)?.into(), payload.into(), write_seq.into()],
+    ))
+    .await?;
+    Ok(())
+}
+
+async fn write_tool_delivery(
+    tx: &impl ConnectionTrait,
+    write_seq: i64,
+    delivery: &pl_core::thread::ToolDelivery,
+) -> Result<()> {
+    let payload = serde_json::to_string(delivery)?;
+    let existing = tx
+        .query_one_raw(statement(
+            "SELECT task_payload,delivery_payload FROM history_tool_tasks WHERE call_id=?",
+            vec![delivery.call_id.clone().into()],
+        ))
+        .await?
+        .with_context(|| format!("tool delivery {} has no admitted task", delivery.call_id))?;
+    if let Some(stored) = existing.try_get::<Option<String>>("", "delivery_payload")? {
+        ensure!(
+            stored == payload,
+            "tool delivery {} conflicts with committed body",
+            delivery.call_id
+        );
+        return Ok(());
+    }
+    let task_payload: String = existing.try_get("", "task_payload")?;
+    let mut task: pl_core::thread::task::TaskRecord = serde_json::from_str(&task_payload)?;
+    if task.status == pl_core::thread::task::TaskStatus::Running {
+        task.status = match delivery.outcome {
+            pl_core::thread::ToolOutcome::Succeeded => pl_core::thread::task::TaskStatus::Succeeded,
+            pl_core::thread::ToolOutcome::Failed(_) => pl_core::thread::task::TaskStatus::Failed,
+            pl_core::thread::ToolOutcome::Cancelled => pl_core::thread::task::TaskStatus::Cancelled,
+            pl_core::thread::ToolOutcome::Interrupted => {
+                pl_core::thread::task::TaskStatus::Interrupted
+            }
+        };
+        task.revision = task
+            .revision
+            .checked_add(1)
+            .context("tool task revision exhausted")?;
+        if task.status == pl_core::thread::task::TaskStatus::Cancelled {
+            task.cancel_requested = true;
+        }
+    }
+    tx.execute_raw(statement(
+        "UPDATE history_tool_tasks SET revision=?,task_payload=?,delivery_payload=?,last_write_seq=? WHERE call_id=?",
+        vec![integer(task.revision)?.into(), serde_json::to_string(&task)?.into(), payload.into(), write_seq.into(), delivery.call_id.clone().into()],
+    ))
+    .await?;
+    Ok(())
 }
 
 /// Current durable write sequence of one already-open connection.
@@ -1680,6 +1966,23 @@ async fn query_items(
         .collect()
 }
 
+async fn query_chat_ids(
+    db: &DatabaseConnection,
+    sql: &str,
+    values: Vec<Value>,
+) -> Result<Vec<(u64, String)>> {
+    db.query_all_raw(statement(sql, values))
+        .await?
+        .into_iter()
+        .map(|row| {
+            Ok((
+                u64::try_from(row.try_get::<i64>("", "ordinal")?)?,
+                row.try_get("", "item_id")?,
+            ))
+        })
+        .collect()
+}
+
 async fn ordinal(connection: &HistoryConnection, item_id: &str) -> Result<i64> {
     connection
         .db
@@ -1781,10 +2084,6 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
         -- 扫描 + 排序。
         CREATE INDEX IF NOT EXISTS history_turns_by_last_ordinal
             ON history_turns(last_ordinal);
-        CREATE TABLE IF NOT EXISTS history_ordinals (
-            item_id TEXT PRIMARY KEY,
-            ordinal INTEGER NOT NULL
-        );
         CREATE TABLE IF NOT EXISTS history_input_identities (
             item_id TEXT PRIMARY KEY,
             ordinal INTEGER NOT NULL,
@@ -1811,6 +2110,13 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
             sequence INTEGER NOT NULL,
             digest TEXT,
             last_write_seq INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS history_tool_tasks (
+            call_id TEXT PRIMARY KEY,
+            revision INTEGER NOT NULL,
+            task_payload TEXT NOT NULL CHECK (json_valid(task_payload)),
+            delivery_payload TEXT CHECK (delivery_payload IS NULL OR json_valid(delivery_payload)),
+            last_write_seq INTEGER NOT NULL
         );",
     )
     .await?;
@@ -1834,7 +2140,7 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
         Some(row) => {
             let version: i64 = row.try_get("", "schema_version")?;
             ensure!(
-                version == HISTORY_SCHEMA_VERSION,
+                (1..=HISTORY_SCHEMA_VERSION).contains(&version),
                 "unsupported history schema {version}; existing data preserved"
             );
             let owner: String = row.try_get("", "thread_id")?;
@@ -1847,6 +2153,13 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
                 !database_id.is_empty(),
                 "history database identity is empty"
             );
+            if version < HISTORY_SCHEMA_VERSION {
+                db.execute_raw(statement(
+                    "UPDATE history_meta SET schema_version=? WHERE id=1 AND schema_version=?",
+                    vec![HISTORY_SCHEMA_VERSION.into(), version.into()],
+                ))
+                .await?;
+            }
             Ok(database_id)
         }
         None => {
@@ -1869,48 +2182,6 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
 
 fn statement(sql: &str, values: Vec<Value>) -> Statement {
     Statement::from_sql_and_values(DatabaseBackend::Sqlite, sql, values)
-}
-
-/// Ordinal already reserved for one item identity, if any.
-async fn reserved_ordinal(db: &impl ConnectionTrait, item_id: &str) -> Result<Option<u64>> {
-    let row = db
-        .query_one_raw(statement(
-            "SELECT ordinal FROM history_ordinals WHERE item_id=?",
-            vec![item_id.to_owned().into()],
-        ))
-        .await?;
-    match row {
-        Some(row) => Ok(Some(u64::try_from(row.try_get::<i64>("", "ordinal")?)?)),
-        None => Ok(None),
-    }
-}
-
-/// Next ordinal no written item and no live reservation has taken yet.
-async fn next_free_ordinal(db: &impl ConnectionTrait) -> Result<u64> {
-    let row = db
-        .query_one_raw(statement(
-            "SELECT MAX(ordinal) AS ordinal FROM (
-                 SELECT ordinal FROM history_items
-                 UNION ALL
-                 SELECT ordinal FROM history_ordinals
-             )",
-            vec![],
-        ))
-        .await?
-        .context("history ordinal query returned no row")?;
-    let current: Option<i64> = row.try_get("", "ordinal")?;
-    Ok(u64::try_from(current.unwrap_or(0))? + 1)
-}
-
-/// Records one reservation without releasing an existing one for the same identity.
-async fn reserve_ordinal(db: &impl ConnectionTrait, item_id: &str, ordinal: u64) -> Result<()> {
-    db.execute_raw(statement(
-        "INSERT INTO history_ordinals(item_id,ordinal) VALUES(?,?)
-         ON CONFLICT(item_id) DO NOTHING",
-        vec![item_id.to_owned().into(), integer(ordinal)?.into()],
-    ))
-    .await?;
-    Ok(())
 }
 
 /// 页字节预算必须保留的那一端。
@@ -2213,5 +2484,276 @@ fn kind_label(kind: ThreadItemKind) -> &'static str {
         ThreadItemKind::Skill => "skill",
         ThreadItemKind::File => "file",
         ThreadItemKind::ContextCompaction => "contextCompaction",
+    }
+}
+
+#[cfg(test)]
+mod storage_fault_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn session_orders_do_not_write_sqlite_reservations() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("history.sqlite");
+        let store = HistoryStore::open(&path, "local-orders").await?;
+        let session = pl_core::chat::Session::new(store.clone());
+        assert_eq!(session.reserve_order("input-1").await?, 1);
+        assert_eq!(session.reserve_order("input-1").await?, 1);
+        assert_eq!(session.reserve_order("input-2").await?, 2);
+        assert!(!tokio::fs::try_exists(&path).await?);
+
+        let mut item = ThreadItem::completed_user_message(
+            "input-1".to_owned(),
+            "local-orders".to_owned(),
+            "turn-1".to_owned(),
+            "hello".to_owned(),
+            vec![],
+            1,
+        );
+        item.ordinal = 1;
+        item.revision = 1;
+        store.commit(1, &[item], &[]).await?;
+        let row = store
+            .reader()
+            .await?
+            .context("missing committed history")?
+            .db
+            .query_one_raw(statement(
+                "SELECT COUNT(*) AS count FROM sqlite_master
+                 WHERE type='table' AND name='history_ordinals'",
+                vec![],
+            ))
+            .await?
+            .context("missing schema query")?;
+        assert_eq!(row.try_get::<i64>("", "count")?, 0);
+        let mut missing_order = ThreadItem::completed_user_message(
+            "missing-order".to_owned(),
+            "local-orders".to_owned(),
+            "turn-1".to_owned(),
+            "not allocated".to_owned(),
+            vec![],
+            2,
+        );
+        missing_order.revision = 2;
+        assert!(store.commit(2, &[missing_order], &[]).await.is_err());
+        assert_eq!(store.watermark().await?, 1);
+        let mut changed_order = store.read_item("input-1").await?.item;
+        changed_order.ordinal = 2;
+        changed_order.revision = 2;
+        assert!(store.commit(2, &[changed_order], &[]).await.is_err());
+        assert_eq!(store.watermark().await?, 1);
+        assert_eq!(session.reserve_order("input-3").await?, 3);
+
+        drop(session);
+        let reopened =
+            pl_core::chat::Session::new(HistoryStore::open(&path, "local-orders").await?);
+        // Uncommitted order 2 was never durable and is not reconstructed after restart.
+        assert_eq!(reopened.reserve_order("input-4").await?, 2);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn latest_window_only_keeps_one_hundred_committed_items() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store =
+            HistoryStore::open(&directory.path().join("history.sqlite"), "paged-thread").await?;
+        let items = (0..120)
+            .map(|index| {
+                let mut item = ThreadItem::completed_user_message(
+                    format!("message-{index}"),
+                    "paged-thread".to_owned(),
+                    "turn-1".to_owned(),
+                    "hello".to_owned(),
+                    vec![],
+                    1,
+                );
+                item.ordinal = index + 1;
+                item.revision = 1;
+                item
+            })
+            .collect::<Vec<_>>();
+        store.commit(1, &items, &[]).await?;
+        let page = store.page(&TimelineQuery::Latest, 100).await?;
+        assert_eq!(page.items.len(), 100);
+        assert_eq!(page.first_item_id.as_deref(), Some("message-20"));
+        assert_eq!(page.last_item_id.as_deref(), Some("message-119"));
+        let before = store
+            .page(
+                &TimelineQuery::Before {
+                    item_id: page.older_cursor.context("missing earlier history")?,
+                },
+                100,
+            )
+            .await?;
+        assert_eq!(before.items.len(), 20);
+
+        let session = pl_core::chat::Session::new(store.clone());
+        let view = session.open_chat(pl_core::chat::ChatFocus::Latest).await?;
+        let initial = view.snapshot();
+        assert_eq!(initial.items.len(), 32);
+        assert_eq!(initial.items.first().unwrap().item_id, "message-88");
+        assert_eq!(initial.items.last().unwrap().item_id, "message-119");
+        assert!(initial.has_older);
+        let older = view.load(pl_core::chat::Direction::Older).await?;
+        assert_eq!(older.items.len(), 64);
+        assert_eq!(older.items.first().unwrap().item_id, "message-56");
+        assert_eq!(older.items.last().unwrap().item_id, "message-119");
+
+        // Only persisted items seed the next Session; a discarded live allocation has no
+        // durable reservation to inflate the next ordinal after a restart.
+        let reopened =
+            HistoryStore::open(&directory.path().join("history.sqlite"), "paged-thread").await?;
+        let resumed = pl_core::chat::Session::new(reopened);
+        assert_eq!(resumed.reserve_order("message-120").await?, 121);
+        let mut committed = ThreadItem::completed_user_message(
+            "message-120".to_owned(),
+            "paged-thread".to_owned(),
+            "turn-1".to_owned(),
+            "resumed".to_owned(),
+            vec![],
+            2,
+        );
+        committed.ordinal = 121;
+        committed.revision = 2;
+        store.commit(2, &[committed], &[]).await?;
+        let final_session = pl_core::chat::Session::new(
+            HistoryStore::open(&directory.path().join("history.sqlite"), "paged-thread").await?,
+        );
+        assert_eq!(final_session.reserve_order("message-121").await?, 122);
+        Ok(())
+    }
+
+    async fn save_receipt(store: &HistoryStore, sequence: u64, id: &str) -> Result<()> {
+        let receipts = [FactReceiptWrite {
+            item_id: id.to_owned(),
+            revision: sequence,
+            kind: "interaction",
+            payload: "{}".to_owned(),
+        }];
+        store
+            .commit_effect(
+                sequence,
+                EffectCommit {
+                    items: &[],
+                    rolled_back_turns: &Default::default(),
+                    identities: &[],
+                    messages: &[],
+                    receipts: &receipts,
+                    tasks: &[],
+                    deliveries: &[],
+                    attempt: None,
+                },
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn sqlite_rejection_retains_watermark_and_same_batch_can_retry() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store =
+            HistoryStore::open(&directory.path().join("history.sqlite"), "thread-1").await?;
+        save_receipt(&store, 1, "first").await?;
+        store
+            .writer()
+            .await?
+            .db
+            .execute_unprepared(
+                "CREATE TRIGGER reject_receipt BEFORE INSERT ON history_fact_receipts \
+             BEGIN SELECT RAISE(ABORT, 'controlled history rejection'); END",
+            )
+            .await?;
+        assert!(save_receipt(&store, 2, "second").await.is_err());
+        assert_eq!(store.watermark().await?, 1);
+        assert!(store.latest_fact_receipt("second").await?.is_none());
+        store
+            .writer()
+            .await?
+            .db
+            .execute_unprepared("DROP TRIGGER reject_receipt")
+            .await?;
+        save_receipt(&store, 2, "second").await?;
+        save_receipt(&store, 2, "second").await?;
+        assert_eq!(store.watermark().await?, 2);
+        assert_eq!(
+            store
+                .latest_fact_receipt("second")
+                .await?
+                .context("missing retried receipt")?
+                .payload,
+            "{}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn task_identity_and_delivery_share_history_authority() -> Result<()> {
+        use pl_core::thread::task::{TaskRecord, TaskStatus};
+        use pl_core::thread::{ToolDelivery, ToolDeliveryTarget, ToolOutcome};
+
+        let directory = tempfile::tempdir()?;
+        let store =
+            HistoryStore::open(&directory.path().join("history.sqlite"), "thread-2").await?;
+        let tasks = [TaskRecord {
+            id: "task:call-1".to_owned(),
+            call_id: "call-1".to_owned(),
+            turn_id: "turn-1".to_owned(),
+            tool_id: "tool-1".to_owned(),
+            revision: 1,
+            status: TaskStatus::Running,
+            cancel_requested: false,
+            acknowledgement: None,
+        }];
+        let empty = std::collections::BTreeSet::new();
+        store
+            .commit_effect(
+                1,
+                EffectCommit {
+                    items: &[],
+                    rolled_back_turns: &empty,
+                    identities: &[],
+                    messages: &[],
+                    receipts: &[],
+                    tasks: &tasks,
+                    deliveries: &[],
+                    attempt: None,
+                },
+            )
+            .await?;
+        let delivery = ToolDelivery {
+            target: ToolDeliveryTarget::CallResult,
+            call_id: "call-1".to_owned(),
+            tool_id: "tool-1".to_owned(),
+            output: pl_core::tool::ToolOutput::new(
+                pl_core::context::OpaquePayload::text("done"),
+                vec![],
+            ),
+            delivered_context: vec![],
+            outcome: ToolOutcome::Succeeded,
+        };
+        store
+            .commit_effect(
+                2,
+                EffectCommit {
+                    items: &[],
+                    rolled_back_turns: &empty,
+                    identities: &[],
+                    messages: &[],
+                    receipts: &[],
+                    tasks: &[],
+                    deliveries: &[delivery],
+                    attempt: None,
+                },
+            )
+            .await?;
+        let result = store
+            .tool_task("task:call-1")
+            .await?
+            .context("missing committed task")?;
+        assert_eq!(result.task.status, TaskStatus::Succeeded);
+        assert_eq!(
+            result.delivery.context("missing delivery")?.call_id,
+            "call-1"
+        );
+        Ok(())
     }
 }

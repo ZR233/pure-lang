@@ -167,7 +167,13 @@ impl Owner {
                         .iter()
                         .any(|record| record.sequence > self.state.consumed_messages)
                     && self.pending.is_empty()
-                    && self.uncommitted_tools.is_empty();
+                    && self.uncommitted_tools.is_empty()
+                    && self.pending_effects.is_empty()
+                    && self.cold_error.is_none()
+                    && !self.cold.as_ref().is_some_and(|store| {
+                        let pressure = store.pressure(&self.id);
+                        pressure.thread_bytes > 0 || pressure.error.is_some()
+                    });
                 if idle {
                     self.interrupt.begin_close();
                     self.state.lifecycle = ThreadLifecycle::Closing;

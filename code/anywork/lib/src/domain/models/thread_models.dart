@@ -523,6 +523,7 @@ class ThreadItemView {
     this.contextDisposition = ThreadContextDisposition.active,
     this.bodyOmittedUnits = 0,
     this.bodyLoaded = false,
+    this.saved = true,
   });
 
   final String id;
@@ -540,6 +541,9 @@ class ThreadItemView {
 
   /// 只有用户显式回源（`loadItemBody`）后为 true：完整正文才会驻留并整篇渲染。
   final bool bodyLoaded;
+
+  /// Execution completion and history durability are independent.
+  final bool saved;
 
   /// 条目正文超过预算、只以有界预览驻留：需要显式回源完整正文。
   bool get bodyPreviewed => bodyOmittedUnits > 0 && !bodyLoaded;
@@ -896,6 +900,7 @@ class ThreadItemView {
     ThreadContextDisposition? contextDisposition,
     int? bodyOmittedUnits,
     bool? bodyLoaded,
+    bool? saved,
   }) {
     return ThreadItemView(
       id: id,
@@ -909,6 +914,7 @@ class ThreadItemView {
       contextDisposition: contextDisposition ?? this.contextDisposition,
       bodyOmittedUnits: bodyOmittedUnits ?? this.bodyOmittedUnits,
       bodyLoaded: bodyLoaded ?? this.bodyLoaded,
+      saved: saved ?? this.saved,
     );
   }
 }

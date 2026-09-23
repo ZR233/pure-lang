@@ -1,13 +1,10 @@
-//! 全局模型/工具调用事实库（`calls.sqlite`）。
+//! 全局调用统计投影（`calls.sqlite`）；Thread 历史与工具任务由会话库负责。
 //!
-//! 本库是每次实际 attempt 的独立权威诊断与用量来源：调用开始与终态更新共享同一调用身份，
-//! 显式重试形成新的 attempt；关联（Thread/Turn/Attempt/retry_of/tool）、状态、时延、token、
-//! 价格摘要结构化保存，请求/响应等大正文以内容寻址 calls blob 文件保存，数据库只保留引用。
+//! 每次实际 attempt 的调用身份、状态、时延、token 与价格摘要按尽力而为写入；
+//! 正文以内容寻址 calls blob 文件保存，数据库只保留引用。
 //!
-//! 单库只有一个逻辑 writer：`commit`（attempt effect）与 `record_billing`（计费观察）即使来自
-//! 不同调用点，也只能把不可变 mutation 受理进同一条有界队列，由本进程内唯一的后台 task 批量
-//! 落库。瞬时错误按有界指数退避自动重试并保留事实；不变量错误显式回给等待方。每次受理分配
-//! 单调 `ticket`，`flush_through(ticket)` 只等待调用时固定的目标而不是整个系统空闲。
+//! 单库只有一个逻辑 writer：effect 与计费观察进入同一条有界队列，后台批量落库。
+//! 统计队列满或写入失败只记录统计缺口，不阻塞 Thread 的权威历史提交。
 //!
 //! 调用库不参与 Thread 恢复或 Timeline 排序；计费与性能统计从本库的查询/聚合投影读取，不扫描
 //! 会话历史（见 design/15 §15.7/§15.8）。
@@ -24,15 +21,14 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail, ensure};
 use pl_core::model::ModelUsage;
 use pl_core::thread::journal::AttemptUpdate;
-use pl_core::thread::{AttemptOutcome, ThreadEffectBatch, ToolDelivery, ToolOutcome};
+use pl_core::thread::{AttemptOutcome, ThreadEffectBatch};
 use pl_protocol::{InferenceBillingRecord, RuntimeCostAmount};
 use sea_orm::sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};
 use sea_orm::{
     ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, QueryResult,
     Statement, TransactionTrait, Value,
 };
-use sha2::{Digest, Sha256};
-use tokio::sync::{Notify, oneshot, watch};
+use tokio::sync::{Notify, watch};
 
 use crate::hash::merge_costs;
 
@@ -54,8 +50,6 @@ const FAST_RETRIES: usize = 3;
 const RETRY_BACKOFF: Duration = Duration::from_millis(100);
 /// 退化后的最大自动重试间隔。
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
-/// 受限读取允许返回的最大正文长度。
-pub(crate) const MAX_CALL_BODY_READ: usize = 8 * 1024 * 1024;
 
 /// 调用结果类别；持久化为稳定字符串。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +60,6 @@ pub(crate) enum CallStatus {
     Cancelled,
     Failed,
     Interrupted,
-    Completed,
 }
 
 impl CallStatus {
@@ -78,45 +71,12 @@ impl CallStatus {
             Self::Cancelled => "cancelled",
             Self::Failed => "failed",
             Self::Interrupted => "interrupted",
-            Self::Completed => "completed",
         }
     }
 
     pub(crate) const fn is_terminal(self) -> bool {
         !matches!(self, Self::Running)
     }
-
-    /// Parses one persisted status string; unknown text is rejected instead of guessing a state.
-    ///
-    /// A reader must never present an unrecognized durable status as a finished result.
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        Some(match value {
-            "running" => Self::Running,
-            "committed" => Self::Committed,
-            "rejected" => Self::Rejected,
-            "cancelled" => Self::Cancelled,
-            "failed" => Self::Failed,
-            "interrupted" => Self::Interrupted,
-            "completed" => Self::Completed,
-            _ => return None,
-        })
-    }
-}
-
-/// 一次已受理工具调用的 durable 身份与状态（不含正文）。
-///
-/// core 的有界任务账本和 effect 窗口淘汰后，重复的只读任务查询用它回答“这个身份究竟是什么
-/// 状态”；`terminal` 为假表示交付尚未 durable，调用方不得把它当作完成态。
-#[derive(Debug, Clone)]
-pub(crate) struct DurableToolCall {
-    pub(crate) call_id: String,
-    pub(crate) turn_id: String,
-    pub(crate) tool_id: String,
-    pub(crate) revision: u64,
-    pub(crate) status: CallStatus,
-    pub(crate) terminal: bool,
-    /// Whether the durable task lifecycle already recorded a cancellation request.
-    pub(crate) cancel_requested: bool,
 }
 
 /// 写入 retention：区分主循环调用与内部/辅助推理。
@@ -170,13 +130,6 @@ pub(crate) struct ModelCallFact {
     pub(crate) has_unpriced_usage: bool,
     pub(crate) started_at: i64,
     pub(crate) finished_at: Option<i64>,
-}
-
-/// 一次计费/性能事实的幂等写入结果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BillingWrite {
-    Inserted,
-    Identical,
 }
 
 /// 单个 root 会话的费用聚合投影（由调用库 SQL 聚合得到）。
@@ -251,25 +204,11 @@ impl CallMutation {
     }
 }
 
-/// 一次受理的完成信号；等待方通过它拿到已提交或已拒绝的显式结果。
-enum CallCompletion {
-    Effect(oneshot::Sender<Result<()>>),
-    Billing(oneshot::Sender<Result<BillingWrite>>),
-}
-
-/// 单个 mutation 的应用结果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MutationOutcome {
-    Effect,
-    Billing(BillingWrite),
-}
-
 struct QueuedCallMutation {
     ticket: u64,
     accepted_at: tokio::time::Instant,
     bytes: usize,
     mutation: CallMutation,
-    completion: Option<CallCompletion>,
 }
 
 /// 不可重试的批量失败；保留消息用于错误上报与诊断。
@@ -293,13 +232,13 @@ struct CallsWriter {
     queue: Mutex<VecDeque<QueuedCallMutation>>,
     work_notify: Notify,
     retry_notify: Notify,
-    space_notify: Notify,
     admitted_ticket: AtomicU64,
     durable_ticket: watch::Sender<u64>,
     /// Encoded bytes of the batch currently being written; a read-only pressure observation.
     in_flight_bytes: AtomicU64,
     stopping: AtomicBool,
     last_error: Mutex<Option<String>>,
+    statistics_gap: AtomicBool,
 }
 
 /// 全局调用库句柄；clone 共享同一条队列、水位与后台 writer。
@@ -309,6 +248,29 @@ pub(crate) struct CallsStore {
 }
 
 impl CallsStore {
+    pub(crate) fn metrics(&self) -> super::coordinator::CallsQueueMetrics {
+        super::coordinator::CallsQueueMetrics {
+            admitted_sequence: self.admitted_ticket(),
+            durable_sequence: self.durable_ticket(),
+            pending_operations: u64::try_from(self.pending_count()).unwrap_or(u64::MAX),
+            pending_bytes: u64::try_from(self.pending_bytes()).unwrap_or(u64::MAX),
+            in_flight_bytes: u64::try_from(self.in_flight_bytes()).unwrap_or(u64::MAX),
+            oldest_pending_age_millis: self
+                .oldest_pending_age()
+                .map(|age| u64::try_from(age.as_millis()).unwrap_or(u64::MAX)),
+            last_error: self.last_error(),
+            pressure_paused: self.pressure_paused(),
+            statistics_gap: self.statistics_gap() || self.admitted_ticket() > self.durable_ticket(),
+        }
+    }
+
+    pub(crate) fn statistics_gap(&self) -> bool {
+        self.writer.statistics_gap.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn mark_statistics_gap(&self) {
+        self.writer.statistics_gap.store(true, Ordering::Release);
+    }
     pub(crate) async fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -341,18 +303,18 @@ impl CallsStore {
             queue: Mutex::new(VecDeque::new()),
             work_notify: Notify::new(),
             retry_notify: Notify::new(),
-            space_notify: Notify::new(),
             admitted_ticket: AtomicU64::new(0),
             durable_ticket,
             in_flight_bytes: AtomicU64::new(0),
             stopping: AtomicBool::new(false),
             last_error: Mutex::new(None),
+            statistics_gap: AtomicBool::new(false),
         });
         tokio::spawn(supervise_writer(writer.clone()));
         Ok(Self { writer })
     }
 
-    /// 当前已受理的最高 ticket；`flush_through` 的目标上界。
+    /// 当前已受理的最高统计 ticket，供持久化进度观测。
     pub(crate) fn admitted_ticket(&self) -> u64 {
         self.writer.admitted_ticket.load(Ordering::Acquire)
     }
@@ -418,58 +380,54 @@ impl CallsStore {
         queue.front().map(|entry| entry.accepted_at.elapsed())
     }
 
-    /// 把一次已提交 effect 的模型/工具调用事实写入调用库。
-    ///
-    /// 调用开始（Running）与终态更新共享同一 `(thread_id, call_id)` 身份；显式重试由
-    /// `retry_of` 关联新 attempt；较早的观察不能覆盖已写入的终态。返回时该事实已 durable。
-    pub(crate) async fn commit(&self, effect: &ThreadEffectBatch) -> Result<()> {
-        let (sender, receiver) = oneshot::channel();
-        self.admit(
-            CallMutation::Effect(Box::new(effect.clone())),
-            CallCompletion::Effect(sender),
-        )
-        .await?;
-        receiver
-            .await
-            .map_err(|_| anyhow::anyhow!("call writer dropped the admitted effect"))??;
-        Ok(())
-    }
-
-    /// 幂等写入一次模型调用计费/性能事实。
-    ///
-    /// 调用身份为 `(thread_id, billing.inference_id)`；同一身份同一正文幂等，不同正文明确失败。
-    /// 已写入的 `billing_ref` 不被不同观察覆盖。
-    #[allow(dead_code)]
-    pub(crate) async fn record_billing(
-        &self,
-        root_thread_id: &str,
-        thread_id: &str,
-        billing: &InferenceBillingRecord,
-        retention: CallRetention,
-    ) -> Result<BillingWrite> {
-        let (sender, receiver) = oneshot::channel();
-        self.admit(
-            CallMutation::Billing {
-                root_thread_id: root_thread_id.to_owned(),
-                thread_id: thread_id.to_owned(),
-                retention,
-                billing: Box::new(billing.clone()),
-            },
-            CallCompletion::Billing(sender),
-        )
-        .await?;
-        // The completion channel for a billing admission already carries `Result<BillingWrite>`: the
-        // writer rejects a mismatched outcome itself, so the caller just propagates the explicit result.
-        receiver
-            .await
-            .map_err(|_| anyhow::anyhow!("call writer dropped the admitted billing record"))?
+    /// Best-effort call statistics. Full task identities and deliveries belong to history.sqlite.
+    /// An unavailable/full statistics queue never blocks the executing Thread.
+    pub(crate) fn try_admit_effect(&self, effect: &ThreadEffectBatch) -> bool {
+        if self.writer.stopping.load(Ordering::Acquire) {
+            record_last_error(
+                &self.writer,
+                "call statistics writer is stopping".to_owned(),
+            );
+            return false;
+        }
+        let mutation = CallMutation::Effect(Box::new(effect.clone()));
+        let bytes = mutation.estimated_bytes();
+        let admitted = {
+            let mut queue = self
+                .writer
+                .queue
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if queue.len() >= MAX_QUEUE_MUTATIONS
+                || queue_bytes(&queue).saturating_add(bytes) > MAX_QUEUE_BYTES
+            {
+                false
+            } else {
+                let ticket = self.next_ticket();
+                queue.push_back(QueuedCallMutation {
+                    ticket,
+                    accepted_at: tokio::time::Instant::now(),
+                    bytes,
+                    mutation,
+                });
+                true
+            }
+        };
+        if admitted {
+            self.writer.work_notify.notify_one();
+        } else {
+            record_last_error(
+                &self.writer,
+                "call statistics queue is full; statistics gap".to_owned(),
+            );
+        }
+        admitted
     }
 
     /// 同步受理一次计费观察并把其 ticket 交回调用方。
     ///
-    /// 受理只入队、不等待 durability：计费观察来自同步投影路径，durability 由调用方在
-    /// Thread 关闭/Studio shutdown 时用固定的 ticket 等待（`flush_through`）。队列满或写入器
-    /// 停机时显式失败，让调用方暂停新的有费用执行，而不是静默丢弃事实。
+    /// 受理只入队、不等待 durability。队列满或写入器停机时返回错误，
+    /// 调用方记录统计缺口而不阻塞 Thread 执行。
     pub(crate) fn admit_billing(
         &self,
         root_thread_id: &str,
@@ -478,6 +436,7 @@ impl CallsStore {
         retention: CallRetention,
     ) -> Result<u64> {
         if self.writer.stopping.load(Ordering::Acquire) {
+            self.writer.statistics_gap.store(true, Ordering::Release);
             bail!("call writer is stopping");
         }
         let mutation = CallMutation::Billing {
@@ -493,18 +452,18 @@ impl CallsStore {
                 .queue
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            ensure!(
-                queue.len() < MAX_QUEUE_MUTATIONS
-                    && queue_bytes(&queue).saturating_add(bytes) <= MAX_QUEUE_BYTES,
-                "call writer queue is full"
-            );
+            if queue.len() >= MAX_QUEUE_MUTATIONS
+                || queue_bytes(&queue).saturating_add(bytes) > MAX_QUEUE_BYTES
+            {
+                self.writer.statistics_gap.store(true, Ordering::Release);
+                bail!("call writer queue is full");
+            }
             let ticket = self.next_ticket();
             queue.push_back(QueuedCallMutation {
                 ticket,
                 accepted_at: tokio::time::Instant::now(),
                 bytes,
                 mutation,
-                completion: None,
             });
             ticket
         };
@@ -512,97 +471,14 @@ impl CallsStore {
         Ok(ticket)
     }
 
-    /// 等待当前已受理的全部 mutation 落库；只使用受理时固定的 ticket。
-    pub(crate) async fn flush(&self) -> Result<()> {
-        self.flush_through(self.admitted_ticket()).await
-    }
-
-    /// 只等待调用时固定的目标 ticket 变为 durable，不等待整个系统空闲。
-    pub(crate) async fn flush_through(&self, ticket: u64) -> Result<()> {
-        if ticket == 0 || *self.writer.durable_ticket.borrow() >= ticket {
-            return Ok(());
+    /// Stop accepting statistics without waiting for the optional projection to drain.
+    pub(crate) fn stop_best_effort(&self) {
+        if self.pending_count() > 0 || self.in_flight_bytes() > 0 {
+            self.mark_statistics_gap();
         }
-        let mut progress = self.writer.durable_ticket.subscribe();
-        loop {
-            if *progress.borrow_and_update() >= ticket {
-                return Ok(());
-            }
-            if self.writer.stopping.load(Ordering::Acquire) && queue_is_empty(&self.writer) {
-                bail!("call writer stopped before ticket {ticket}");
-            }
-            progress
-                .changed()
-                .await
-                .map_err(|_| anyhow::anyhow!("call writer durability channel closed"))?;
-        }
-    }
-
-    /// 排空队列并停止受理；保存失败保留事实并返回错误。
-    pub(crate) async fn shutdown(&self) -> Result<()> {
         self.writer.stopping.store(true, Ordering::Release);
         self.writer.work_notify.notify_one();
         self.writer.retry_notify.notify_one();
-        let target = self.admitted_ticket();
-        let mut progress = self.writer.durable_ticket.subscribe();
-        loop {
-            let durable = *progress.borrow_and_update();
-            if durable >= target {
-                return Ok(());
-            }
-            if queue_is_empty(&self.writer) {
-                bail!(
-                    "call writer stopped with {} pending mutations",
-                    target.saturating_sub(durable)
-                );
-            }
-            progress
-                .changed()
-                .await
-                .map_err(|_| anyhow::anyhow!("call writer durability channel closed"))?;
-        }
-    }
-
-    /// 受理一次 mutation：队列有界，满时等待 writer 腾出空间；返回时只保证已入队。
-    async fn admit(&self, mutation: CallMutation, completion: CallCompletion) -> Result<()> {
-        let mut pending = Some((mutation, completion));
-        loop {
-            let notified = self.writer.space_notify.notified();
-            let bytes = {
-                let (mutation, _) = pending.as_ref().expect("pending admission");
-                mutation.estimated_bytes()
-            };
-            let admitted = {
-                let mut queue = self
-                    .writer
-                    .queue
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
-                if queue.len() < MAX_QUEUE_MUTATIONS
-                    && queue_bytes(&queue).saturating_add(bytes) <= MAX_QUEUE_BYTES
-                {
-                    let ticket = self.next_ticket();
-                    let (mutation, completion) = pending.take().expect("pending admission");
-                    queue.push_back(QueuedCallMutation {
-                        ticket,
-                        accepted_at: tokio::time::Instant::now(),
-                        bytes,
-                        mutation,
-                        completion: Some(completion),
-                    });
-                    true
-                } else {
-                    false
-                }
-            };
-            if admitted {
-                self.writer.work_notify.notify_one();
-                return Ok(());
-            }
-            if self.writer.stopping.load(Ordering::Acquire) {
-                bail!("call writer is stopping");
-            }
-            notified.await;
-        }
     }
 
     fn next_ticket(&self) -> u64 {
@@ -610,39 +486,6 @@ impl CallsStore {
             .admitted_ticket
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1)
-    }
-
-    /// 读取 root 会话的模型调用事实，供计费/性能投影按 root 聚合。
-    #[allow(dead_code)]
-    pub(crate) async fn session_model_calls(
-        &self,
-        root_thread_id: &str,
-        limit: u32,
-    ) -> Result<Vec<ModelCallFact>> {
-        let rows = self
-            .writer
-            .db
-            .query_all_raw(statement(
-                "SELECT * FROM model_calls WHERE root_thread_id=?
-                 ORDER BY finished_at DESC, started_at DESC LIMIT ?",
-                vec![root_thread_id.into(), i64::from(limit).into()],
-            ))
-            .await?;
-        rows.iter().map(model_fact).collect()
-    }
-
-    /// 读取单个 Thread 的模型调用诊断，顺序为调用开始时间。
-    #[allow(dead_code)]
-    pub(crate) async fn thread_model_calls(&self, thread_id: &str) -> Result<Vec<ModelCallFact>> {
-        let rows = self
-            .writer
-            .db
-            .query_all_raw(statement(
-                "SELECT * FROM model_calls WHERE thread_id=? ORDER BY started_at, call_id",
-                vec![thread_id.into()],
-            ))
-            .await?;
-        rows.iter().map(model_fact).collect()
     }
 
     /// 有界读取一个 Thread 在给定 effect 序号区间内已 durable 的模型调用事实。
@@ -819,122 +662,6 @@ impl CallsStore {
             .await?;
         rows.iter().map(performance_summary_row).collect()
     }
-
-    /// 受限读取一次调用正文。
-    ///
-    /// 引用必须是内容寻址摘要，路径只解析到 calls blob 根目录内的普通文件；超过 `limit`
-    /// 字节、非普通文件或摘要不匹配都显式失败，不返回部分正文。
-    #[allow(dead_code)]
-    pub(crate) async fn read_body(&self, body_ref: &str, limit: usize) -> Result<Option<String>> {
-        let name = blob_file_name(body_ref).context("invalid call body reference")?;
-        let path = self.writer.blobs_dir.join(name);
-        let metadata = match tokio::fs::symlink_metadata(&path).await {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.into()),
-        };
-        ensure!(
-            metadata.file_type().is_file(),
-            "call body reference is not a regular file"
-        );
-        let limit = limit.min(MAX_CALL_BODY_READ);
-        ensure!(
-            metadata.len() <= limit as u64,
-            "call body exceeds the permitted read length"
-        );
-        let bytes = tokio::fs::read(&path).await?;
-        ensure!(
-            bytes.len() <= limit,
-            "call body exceeds the permitted read length"
-        );
-        ensure!(
-            pl_core::context::content_hash(&bytes) == body_ref,
-            "call body content does not match its reference"
-        );
-        Ok(Some(String::from_utf8(bytes)?))
-    }
-
-    /// Reads one completed tool delivery by `(thread_id, call_id)` from the global calls store.
-    ///
-    /// This is the durable authority for a finished tool result after the core's transient effect
-    /// window has released it: the terminal `tool_calls` row holds the content-addressed reference
-    /// to the full `ToolDelivery`, so the caller gets the exact committed result without copying a
-    /// second live history into core and without re-executing the tool.
-    ///
-    /// A call that is not terminal (still running, rejected or cancelled before delivery) or a
-    /// different Thread returns `None`: the caller must report that explicitly instead of treating
-    /// it as a completed result or admitting it as new work. Reads are bounded by
-    /// [`MAX_CALL_BODY_READ`] and fail closed on a `body_ref` that is not a content-addressed
-    /// regular blob.
-    pub(crate) async fn tool_delivery(
-        &self,
-        thread_id: &str,
-        call_id: &str,
-    ) -> Result<Option<ToolDelivery>> {
-        let row = self
-            .writer
-            .db
-            .query_one_raw(statement(
-                "SELECT body_ref FROM tool_calls
-                 WHERE thread_id=? AND call_id=? AND terminal=1
-                 ORDER BY revision DESC LIMIT 1",
-                vec![thread_id.to_owned().into(), call_id.to_owned().into()],
-            ))
-            .await?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        let Some(reference) = row.try_get::<Option<String>>("", "body_ref")? else {
-            return Ok(None);
-        };
-        let Some(body) = self.read_body(&reference, MAX_CALL_BODY_READ).await? else {
-            return Ok(None);
-        };
-        Ok(Some(serde_json::from_str(&body)?))
-    }
-
-    /// Reads one admitted tool call's durable identity and status by its core task identity.
-    ///
-    /// The argument may be either the core task id (`task:{call_id}`) or the bare call id. This is
-    /// a primary-key read of `tool_calls` only: it never loads the result body, so a repeated
-    /// status query stays a bounded durable lookup instead of pulling the full result back into
-    /// memory. An unknown persisted status is reported as "not durably known" (`None`) rather than
-    /// being guessed into a terminal state.
-    pub(crate) async fn tool_task(
-        &self,
-        thread_id: &str,
-        task_id: &str,
-    ) -> Result<Option<DurableToolCall>> {
-        let call_id = task_id.strip_prefix("task:").unwrap_or(task_id);
-        let Some(row) = self
-            .writer
-            .db
-            .query_one_raw(statement(
-                "SELECT call_id,turn_id,tool_id,revision,status,terminal,cancel_requested
-                 FROM tool_calls
-                 WHERE thread_id=? AND call_id=? ORDER BY revision DESC LIMIT 1",
-                vec![thread_id.to_owned().into(), call_id.to_owned().into()],
-            ))
-            .await?
-        else {
-            return Ok(None);
-        };
-        let status: String = row.try_get("", "status")?;
-        let Some(status) = CallStatus::parse(&status) else {
-            return Ok(None);
-        };
-        let revision = u64::try_from(row.try_get::<i64>("", "revision")?)
-            .map_err(|_| anyhow::anyhow!("tool call revision is outside the supported range"))?;
-        Ok(Some(DurableToolCall {
-            call_id: row.try_get("", "call_id")?,
-            turn_id: row.try_get("", "turn_id")?,
-            tool_id: row.try_get("", "tool_id")?,
-            revision,
-            status,
-            terminal: row.try_get::<i32>("", "terminal")? != 0,
-            cancel_requested: row.try_get::<i32>("", "cancel_requested")? != 0,
-        }))
-    }
 }
 
 async fn initialize(db: &DatabaseConnection, blobs_dir: &Path) -> Result<()> {
@@ -943,10 +670,7 @@ async fn initialize(db: &DatabaseConnection, blobs_dir: &Path) -> Result<()> {
 
 /// Ensures the current calls schema exists, upgrading any older revision in place.
 ///
-/// It is shared by [`CallsStore::open`] and the one-time migration boundary so both normalize a
-/// legacy `calls.sqlite` through exactly the same additive, data-preserving upgrader instead of
-/// growing a second format definition. Additive `ALTER` upgrades keep every existing fact; a schema
-/// only ever moves forward, and a future revision fails closed with the original bytes preserved.
+/// Additive upgrades keep existing v2 facts; a future revision fails closed.
 async fn ensure_calls_schema(db: &DatabaseConnection, blobs_dir: &Path) -> Result<()> {
     db.execute_unprepared(
         "CREATE TABLE IF NOT EXISTS calls_meta (
@@ -1349,8 +1073,7 @@ async fn supervise_writer(shared: Arc<CallsWriter>) {
 
 /// 唯一的调用库写入循环：取批、应用、重试、推进水位。
 ///
-/// 受理方（attempt effect 与计费观察）会等待自己那次写入的结果，所以这里不做人为的批量等待：
-/// 只要队列非空就立刻取一批，批量大小来自并发受理自然堆积的条目。
+/// 队列非空就取一批，批量大小来自并发受理自然堆积的条目。
 async fn run_writer(shared: Arc<CallsWriter>) {
     let mut retries = 0usize;
     loop {
@@ -1385,31 +1108,26 @@ async fn run_writer(shared: Arc<CallsWriter>) {
         while let Some(entry) = pending.pop_front() {
             let ticket = entry.ticket;
             match apply_mutation(&shared, &entry.mutation).await {
-                Ok(outcome) => {
+                Ok(()) => {
                     retries = 0;
-                    complete_mutation(entry, outcome);
                     advance_durable(&shared, ticket);
                     clear_last_error(&shared);
-                    notify_space(&shared);
                 }
                 Err(failure) if failure.retryable && shared.stopping.load(Ordering::Acquire) => {
                     // 停机不再退避：未写入事实显式交回等待方，由调用方保留并重试。
                     fail_mutation(
                         &shared,
-                        entry,
                         &format!("call writer stopped before writing: {}", failure.message),
                     );
                     advance_durable(&shared, ticket);
-                    notify_space(&shared);
                 }
                 Err(failure) if failure.retryable => {
                     deferred = Some((entry, failure));
                     break;
                 }
                 Err(failure) => {
-                    fail_mutation(&shared, entry, &failure.message);
+                    fail_mutation(&shared, &failure.message);
                     advance_durable(&shared, ticket);
-                    notify_space(&shared);
                 }
             }
         }
@@ -1420,7 +1138,6 @@ async fn run_writer(shared: Arc<CallsWriter>) {
         };
         pending.push_front(entry);
         requeue(&shared, pending);
-        notify_space(&shared);
         retries = retries.saturating_add(1);
         if shared.stopping.load(Ordering::Acquire) {
             tokio::task::yield_now().await;
@@ -1491,43 +1208,13 @@ fn advance_durable(shared: &CallsWriter, ticket: u64) {
     }
 }
 
-fn complete_mutation(entry: QueuedCallMutation, outcome: MutationOutcome) {
-    match (entry.completion, outcome) {
-        (Some(CallCompletion::Effect(sender)), MutationOutcome::Effect) => {
-            let _ = sender.send(Ok(()));
-        }
-        (Some(CallCompletion::Effect(sender)), MutationOutcome::Billing(_)) => {
-            let _ = sender.send(Err(anyhow::anyhow!(
-                "call writer returned a mismatched mutation outcome"
-            )));
-        }
-        (Some(CallCompletion::Billing(sender)), MutationOutcome::Billing(write)) => {
-            let _ = sender.send(Ok(write));
-        }
-        (Some(CallCompletion::Billing(sender)), MutationOutcome::Effect) => {
-            let _ = sender.send(Err(anyhow::anyhow!(
-                "call writer returned a mismatched mutation outcome"
-            )));
-        }
-        (None, _) => {}
-    }
-}
-
-fn fail_mutation(shared: &CallsWriter, entry: QueuedCallMutation, message: &str) {
+fn fail_mutation(shared: &CallsWriter, message: &str) {
     tracing::error!(error = message, "call writer rejected a call fact");
     record_last_error(shared, message.to_owned());
-    match entry.completion {
-        Some(CallCompletion::Effect(sender)) => {
-            let _ = sender.send(Err(anyhow::anyhow!(message.to_owned())));
-        }
-        Some(CallCompletion::Billing(sender)) => {
-            let _ = sender.send(Err(anyhow::anyhow!(message.to_owned())));
-        }
-        None => {}
-    }
 }
 
 fn record_last_error(shared: &CallsWriter, message: String) {
+    shared.statistics_gap.store(true, Ordering::Release);
     tracing::error!(error = message, "call writer is degraded");
     *shared
         .last_error
@@ -1542,18 +1229,6 @@ fn clear_last_error(shared: &CallsWriter) {
         .last_error
         .lock()
         .unwrap_or_else(|error| error.into_inner()) = None;
-}
-
-fn notify_space(shared: &CallsWriter) {
-    shared.space_notify.notify_one();
-}
-
-fn queue_is_empty(shared: &CallsWriter) -> bool {
-    shared
-        .queue
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .is_empty()
 }
 
 fn queue_bytes(queue: &VecDeque<QueuedCallMutation>) -> usize {
@@ -1582,22 +1257,15 @@ fn queue_pressure(shared: &CallsWriter) -> QueuePressure {
     pressure
 }
 
-async fn apply_mutation(
-    shared: &CallsWriter,
-    mutation: &CallMutation,
-) -> Result<MutationOutcome, BatchFailure> {
+async fn apply_mutation(shared: &CallsWriter, mutation: &CallMutation) -> Result<(), BatchFailure> {
     let result = match mutation {
-        CallMutation::Effect(effect) => apply_effect(shared, effect)
-            .await
-            .map(|()| MutationOutcome::Effect),
+        CallMutation::Effect(effect) => apply_effect(shared, effect).await,
         CallMutation::Billing {
             root_thread_id,
             thread_id,
             retention,
             billing,
-        } => apply_billing(shared, root_thread_id, thread_id, billing, *retention)
-            .await
-            .map(MutationOutcome::Billing),
+        } => apply_billing(shared, root_thread_id, thread_id, billing, *retention).await,
     };
     result.map_err(|error| {
         let message = error.to_string();
@@ -1628,23 +1296,6 @@ async fn apply_effect(shared: &CallsWriter, effect: &ThreadEffectBatch) -> Resul
     if let Some(attempt) = &effect.attempt {
         upsert_attempt(shared, &tx, effect, attempt, sequence).await?;
     }
-    for delivery in effect.deliveries.iter() {
-        deliver_tool_call(
-            shared,
-            &tx,
-            &effect.thread_id,
-            delivery,
-            sequence,
-            effect.committed_at,
-        )
-        .await?;
-    }
-    // Task lifecycle facts (in particular a cancel request) are the source state a repeated cancel
-    // query needs after the owner released the task identity. Only the fact columns are recorded
-    // here; the terminal delivery keeps ownership of status/body.
-    for record in effect.tasks.iter() {
-        record_task_lifecycle(&tx, &effect.thread_id, record, sequence).await?;
-    }
     tx.execute_raw(statement(
         "INSERT INTO call_watermarks(thread_id,admitted_write_seq,durable_write_seq)
          VALUES(?,?,?)
@@ -1669,7 +1320,7 @@ async fn apply_billing(
     thread_id: &str,
     billing: &InferenceBillingRecord,
     retention: CallRetention,
-) -> Result<BillingWrite> {
+) -> Result<()> {
     let body = serde_json::to_string(billing)?;
     let body_ref = body_ref(&body);
     let tx = shared.db.begin().await?;
@@ -1684,7 +1335,7 @@ async fn apply_billing(
         match stored {
             Some(stored) if stored == body_ref => {
                 tx.rollback().await?;
-                return Ok(BillingWrite::Identical);
+                return Ok(());
             }
             Some(_) => {
                 bail!(
@@ -1798,7 +1449,7 @@ async fn apply_billing(
     ))
     .await?;
     tx.commit().await?;
-    Ok(BillingWrite::Inserted)
+    Ok(())
 }
 
 async fn upsert_attempt(
@@ -1864,136 +1515,6 @@ async fn upsert_attempt(
             cache_write_tokens.into(),
             reasoning_tokens.into(),
             total_tokens.into(),
-            body_ref.into(),
-        ],
-    ))
-    .await?;
-    if let AttemptOutcome::Committed(output) = &attempt.outcome {
-        for call in &output.tool_calls {
-            let arguments = serde_json::to_string(&call.arguments)?;
-            admit_tool_call(
-                shared,
-                tx,
-                &effect.thread_id,
-                &call.call_id,
-                &attempt.turn_id,
-                &call.tool_id,
-                sequence,
-                effect.committed_at,
-                &arguments,
-            )
-            .await?;
-        }
-    }
-    Ok(())
-}
-
-/// Records the task-lifecycle source state of one effect on its tool call row.
-///
-/// A cancel request is a core task revision, so it must be durable for a repeated cancel query to
-/// answer with the recorded receipt instead of treating the identity as unknown. Only the
-/// monotonically-raising facts are written: the revision never moves backwards and the terminal
-/// status/body stay owned by the delivery write.
-async fn record_task_lifecycle(
-    tx: &impl ConnectionTrait,
-    thread_id: &str,
-    record: &pl_core::thread::task::TaskRecord,
-    sequence: i64,
-) -> Result<()> {
-    let cancel_requested = if record.cancel_requested
-        || record.status == pl_core::thread::task::TaskStatus::Cancelled
-    {
-        1_i32
-    } else {
-        0_i32
-    };
-    tx.execute_raw(statement(
-        "UPDATE tool_calls SET revision=MAX(revision,?),cancel_requested=?
-         WHERE thread_id=? AND call_id=?",
-        vec![
-            sequence.into(),
-            cancel_requested.into(),
-            thread_id.to_owned().into(),
-            record.call_id.clone().into(),
-        ],
-    ))
-    .await?;
-    Ok(())
-}
-
-async fn deliver_tool_call(
-    shared: &CallsWriter,
-    tx: &impl ConnectionTrait,
-    thread_id: &str,
-    delivery: &ToolDelivery,
-    sequence: i64,
-    at: i64,
-) -> Result<()> {
-    let status = tool_status(&delivery.outcome);
-    let body = serde_json::to_string(delivery)?;
-    let body_ref = body_ref(&body);
-    put_body(shared, tx, &body_ref, &body, at).await?;
-    let existing = tx
-        .query_one_raw(statement(
-            "SELECT 1 FROM tool_calls WHERE thread_id=? AND call_id=?",
-            vec![thread_id.into(), delivery.call_id.clone().into()],
-        ))
-        .await?;
-    ensure!(
-        existing.is_some(),
-        "tool delivery {} has no admitted call",
-        delivery.call_id
-    );
-    tx.execute_raw(statement(
-        "UPDATE tool_calls SET revision=?,finished_at=?,status=?,terminal=1,body_ref=?
-         WHERE thread_id=? AND call_id=? AND terminal=0",
-        vec![
-            sequence.into(),
-            at.into(),
-            status.as_str().into(),
-            body_ref.into(),
-            thread_id.into(),
-            delivery.call_id.clone().into(),
-        ],
-    ))
-    .await?;
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn admit_tool_call(
-    shared: &CallsWriter,
-    tx: &impl ConnectionTrait,
-    thread_id: &str,
-    call_id: &str,
-    turn_id: &str,
-    tool_id: &str,
-    sequence: i64,
-    at: i64,
-    body: &str,
-) -> Result<()> {
-    let body_ref = body_ref(body);
-    put_body(shared, tx, &body_ref, body, at).await?;
-    tx.execute_raw(statement(
-        "INSERT INTO tool_calls(
-            thread_id,call_id,turn_id,tool_id,revision,admitted_at,started_at,finished_at,
-            status,terminal,body_ref)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?)
-         ON CONFLICT(thread_id,call_id) DO UPDATE SET
-            revision=excluded.revision,
-            body_ref=COALESCE(excluded.body_ref,tool_calls.body_ref)
-         WHERE excluded.revision > tool_calls.revision",
-        vec![
-            thread_id.into(),
-            call_id.into(),
-            turn_id.into(),
-            tool_id.into(),
-            sequence.into(),
-            at.into(),
-            at.into(),
-            Option::<i64>::None.into(),
-            CallStatus::Running.as_str().into(),
-            0_i32.into(),
             body_ref.into(),
         ],
     ))
@@ -2139,15 +1660,6 @@ fn attempt_status(outcome: &AttemptOutcome) -> CallStatus {
     }
 }
 
-fn tool_status(outcome: &ToolOutcome) -> CallStatus {
-    match outcome {
-        ToolOutcome::Succeeded => CallStatus::Completed,
-        ToolOutcome::Cancelled => CallStatus::Cancelled,
-        ToolOutcome::Interrupted => CallStatus::Interrupted,
-        ToolOutcome::Failed(_) => CallStatus::Failed,
-    }
-}
-
 fn outcome_usage(outcome: &AttemptOutcome) -> Option<&ModelUsage> {
     match outcome {
         AttemptOutcome::Running | AttemptOutcome::Interrupted => None,
@@ -2232,1022 +1744,3 @@ fn is_retryable_write(message: &str) -> bool {
         || message.contains("sqlite_locked")
         || message.contains("sqlite_ioerr")
 }
-
-/// 一次性 migration 边界对退役 `calls.sqlite` 的审计。
-///
-/// 只在持独占 Studio runtime 锁的一次性转换中产生，并写进 durable migration report：源格式版本、
-/// 源字节指纹、源的行/水位/正文计数与正文校验数量。`verified` 仅当身份、终态、列、水位与内容寻址
-/// 正文全部校验通过后为真；退役库只有在 `verified` 为真时才允许归档。
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub(crate) struct CallsImportReport {
-    /// 退役库是否实际存在并被检查；缺失时为 `false`，其余字段为零值。
-    pub(crate) source_present: bool,
-    /// 源库识别到的 `calls_meta.schema_version`。
-    pub(crate) source_schema_version: i64,
-    pub(crate) source_database_id: Option<String>,
-    /// 源库主文件 + `-wal` + `blobs` 正文的只读聚合指纹；phase-1 记录，phase-3/phase-4 在
-    /// "实时源位置 + 字节保留归档位置"的并集上复算并绑定到同一源字节。
-    pub(crate) source_fingerprint: String,
-    pub(crate) source_model_calls: u64,
-    pub(crate) source_tool_calls: u64,
-    pub(crate) source_watermarks: u64,
-    pub(crate) source_bodies: u64,
-    /// 源库引用的正文引用中，已在保留快照与 staged 目标库逐项校验通过的数量。
-    pub(crate) verified_bodies: u64,
-    /// 校验通过时 staged 目标库中的总行数；发布前对"实际发布的行"的最后观测。
-    pub(crate) destination_model_calls: u64,
-    pub(crate) destination_tool_calls: u64,
-    pub(crate) verified: bool,
-}
-
-/// 退役调用库的只读身份指纹：主文件与 `-wal` 的内容，以及 `blobs` 根下每个内容寻址 blob 的相对
-/// 路径与完整字节。phase-1 记录、phase-3 导入前与 phase-4 发布前复算，把审计绑定到同一源字节。
-///
-/// 流式：主文件、`-wal` 与每个 blob 正文都按固定缓冲读取并写入摘要，内存占用与源库/blob 规模无关
-/// 而是常数级；blob 正文一并纳入，等长内容篡改无法骗过身份比对。全程只读文件与目录，绝不打开
-/// SQLite（WAL 的只读打开可能创建 `-shm` 而改动源目录），也绝不写任何源文件。
-pub(crate) async fn legacy_call_store_fingerprint(source: &Path) -> Result<String> {
-    legacy_call_store_fingerprint_over(source, None).await
-}
-
-/// 目标调用库（staging 或已发布 canonical `calls/calls.sqlite`）的**逻辑内容**身份。
-///
-/// 与退役源不同，目标库在迁移期间会被本进程多次打开、关闭：SQLite 在连接关闭时会把 `-wal`
-/// 中的页 checkpoint 合并进主文件并删除 `-wal`。于是主文件与 `-wal` 的**物理字节**会在没有任何
-/// 事实变化时改变（纯粹的 WAL/checkpoint 重排），而发布边界的守卫只关心**事实**是否被改动或
-/// 丢失，因此这里对当前 schema 下可见的逻辑内容求指纹，而不是对物理字节求指纹：
-///
-/// * 以确定性顺序（按主键/身份列排序）摘要 `calls_meta`、`call_watermarks`、`model_calls`、
-///   `tool_calls`、`call_bodies` 的每一行，行内各列先经 SQLite `quote()` 规范化为稳定文本；
-/// * 摘要内容寻址 `blobs` 根下每个 blob 的相对路径与完整正文。
-///
-/// 任一事实行、水位、终态、正文登记或被引用 blob 的增删改都会改变指纹；只把同样的物理页在
-/// WAL 与主文件之间搬运的重排不会。读取经 SQLite 完成，主文件与 `-wal` 中的事实一并以当前视图
-/// 呈现，因此尚未 checkpoint 的写入也会被计入，绝不会因为只读主文件而漏判。phase-4 校验通过后
-/// 记录，续跑时复算比对：一致即证明目标**事实**未被改动（无需重读旧会话 journal），任一事实
-/// 变化都 fail closed。
-pub(crate) async fn calls_store_fingerprint(database: &Path) -> Result<String> {
-    ensure!(
-        tokio::fs::try_exists(database).await?,
-        "call store to fingerprint is missing: {}; existing data preserved",
-        database.display()
-    );
-    let db = connect_calls_database(database).await?;
-    let result = async {
-        let mut hasher = Sha256::new();
-        for (label, sql) in calls_content_fingerprint_queries() {
-            hasher.update(label.as_bytes());
-            hasher.update([0x1e]);
-            let rows = db.query_all_raw(statement(&sql, vec![])).await?;
-            for row in rows {
-                let canonical: String = row.try_get("", "row")?;
-                hasher.update(canonical.as_bytes());
-                hasher.update([0x1f]);
-            }
-            // 行集合终止符：空表与"缺一个终止分隔符"必须得到不同的摘要。
-            hasher.update([0x1d]);
-        }
-        digest_blob_identities(&mut hasher, &legacy_call_store_blobs_dir(database)).await?;
-        Ok(pl_core::context::content_hash(&hasher.finalize()))
-    }
-    .await;
-    close_connection(db, result).await
-}
-
-/// 逻辑内容指纹的确定性查询集合：每张表的全部事实列按稳定顺序投影成单列 `row` 文本。
-fn calls_content_fingerprint_queries() -> [(&'static str, String); 5] {
-    [
-        (
-            "calls_meta",
-            content_row_query("calls_meta", "id,schema_version,database_id", "id"),
-        ),
-        (
-            "call_watermarks",
-            content_row_query(
-                "call_watermarks",
-                "thread_id,admitted_write_seq,durable_write_seq",
-                "thread_id",
-            ),
-        ),
-        (
-            "model_calls",
-            content_row_query("model_calls", MODEL_CALL_COLUMNS, "thread_id,call_id"),
-        ),
-        (
-            "tool_calls",
-            // `cancel_requested` 不在合并列清单里（它是无条件补的列），但它是取消回执的真实事实，
-            // 必须一并绑进逻辑指纹。
-            content_row_query(
-                "tool_calls",
-                "thread_id,call_id,turn_id,tool_id,revision,admitted_at,started_at,finished_at,\
-                 status,terminal,body_ref,cancel_requested",
-                "thread_id,call_id",
-            ),
-        ),
-        (
-            "call_bodies",
-            content_row_query("call_bodies", "body_ref,byte_length,created_at", "body_ref"),
-        ),
-    ]
-}
-
-/// 把一列列名投影成稳定文本行：各列先取 `length(quote(col))`（列值的规范文本长度）再取
-/// `quote(col)`（SQL 字面量文本），用不会出现在长度前缀中的 `char(30)`/`char(31)` 分隔。长度前缀
-/// 让"某个值为空串/含分隔符"都无法与相邻列发生歧义，因此任一列字节变化都会改变行文本。
-fn content_row_query(table: &str, columns: &str, order_by: &str) -> String {
-    let projection = columns
-        .split(',')
-        .map(str::trim)
-        .filter(|column| !column.is_empty())
-        .map(|column| format!("length(quote({column}))||char(30)||quote({column})||char(31)"))
-        .collect::<Vec<_>>()
-        .join("||");
-    format!("SELECT {projection} AS row FROM {table} ORDER BY {order_by}")
-}
-
-/// 退役调用库在"实时源位置 + 字节保留归档位置"上的聚合身份。
-///
-/// 发布阶段逐个 `rename` 主文件、`-wal`、`-shm` 与 `blobs`，因此崩溃或文件系统错误可能让源位置与
-/// 归档位置各自持有同一制品的不同子集。该指纹从两个位置的并集中解析每个成员：某个成员只在其中
-/// 一处分存在时按该处字节计入，于是"分裂但完整"的源与"完整在源"或"完整在归档"算出同一指纹，
-/// 迁移得以在没有人工介入时继续推进。同一成员名在两处同时存在则判定为歧义并 fail closed，绝不
-/// 静默丢弃其中一份。
-pub(crate) struct LegacyCallStoreIdentity {
-    /// 主文件是否在实时源位置或归档位置之一存在。
-    pub(crate) present: bool,
-    /// 聚合字节指纹；`present` 为 `false` 时为空串。
-    pub(crate) fingerprint: String,
-}
-
-/// 计算退役调用库的聚合身份：先解析主文件是否存在，再对实时源与归档的并集串流求指纹。
-pub(crate) async fn legacy_call_store_identity(
-    source: &Path,
-    archived: Option<&Path>,
-) -> Result<LegacyCallStoreIdentity> {
-    if resolve_member(source, archived).await?.is_none() {
-        return Ok(LegacyCallStoreIdentity {
-            present: false,
-            fingerprint: String::new(),
-        });
-    }
-    let fingerprint = legacy_call_store_fingerprint_over(source, archived).await?;
-    Ok(LegacyCallStoreIdentity {
-        present: true,
-        fingerprint,
-    })
-}
-
-/// 逐成员计算退役调用库的聚合指纹；`archived` 为 `None` 时退化为只读实时源位置。
-async fn legacy_call_store_fingerprint_over(
-    source: &Path,
-    archived: Option<&Path>,
-) -> Result<String> {
-    let mut hasher = Sha256::new();
-    let _ = digest_member_file(&mut hasher, source, archived, true).await?;
-    let source_wal = sidecar_path(source, "-wal");
-    let archived_wal = archived.map(|path| sidecar_path(path, "-wal"));
-    let _ = digest_member_file(&mut hasher, &source_wal, archived_wal.as_deref(), false).await?;
-    let source_blobs = legacy_call_store_blobs_dir(source);
-    let archived_blobs = archived.map(legacy_call_store_blobs_dir);
-    digest_member_blobs(&mut hasher, &source_blobs, archived_blobs.as_deref()).await?;
-    let digest = hasher.finalize();
-    Ok(pl_core::context::content_hash(&digest))
-}
-
-/// 在实时源与归档之间解析一个常规文件成员，并把它流式写入摘要；返回唯一存在的路径。
-///
-/// 两处同时存在同名成员是歧义，fail closed；`required` 为真而两处都缺失同样 fail closed，否则写入
-/// "缺失"标记，使缺失成员与存在成员产生确定性的不同摘要。
-async fn digest_member_file(
-    hasher: &mut Sha256,
-    source: &Path,
-    archived: Option<&Path>,
-    required: bool,
-) -> Result<Option<PathBuf>> {
-    let source_exists = tokio::fs::try_exists(source).await?;
-    let archived_exists = match archived {
-        Some(path) => tokio::fs::try_exists(path).await?,
-        None => false,
-    };
-    ensure!(
-        !(source_exists && archived_exists),
-        "retired call store member exists both live and archived ({} and {}); refusing to guess \
-         which copy is authoritative; existing data preserved",
-        source.display(),
-        archived
-            .map(|path| path.display().to_string())
-            .unwrap_or_default()
-    );
-    if source_exists {
-        let _ = digest_file_into(hasher, source, false).await?;
-        return Ok(Some(source.to_path_buf()));
-    }
-    if let Some(path) = archived.filter(|_| archived_exists) {
-        let _ = digest_file_into(hasher, path, false).await?;
-        return Ok(Some(path.to_path_buf()));
-    }
-    ensure!(
-        !required,
-        "retired call store member is missing ({}); existing data preserved",
-        source.display()
-    );
-    hasher.update([0u8]);
-    Ok(None)
-}
-
-/// 在实时源与归档之间解析 `blobs` 根，并把整棵目录树（含正文）写入摘要；两处同名根 fail closed。
-async fn digest_member_blobs(
-    hasher: &mut Sha256,
-    source: &Path,
-    archived: Option<&Path>,
-) -> Result<()> {
-    let source_exists = tokio::fs::try_exists(source).await?;
-    let archived_exists = match archived {
-        Some(path) => tokio::fs::try_exists(path).await?,
-        None => false,
-    };
-    ensure!(
-        !(source_exists && archived_exists),
-        "retired call store blob root exists both live and archived ({} and {}); refusing to guess \
-         which copy is authoritative; existing data preserved",
-        source.display(),
-        archived
-            .map(|path| path.display().to_string())
-            .unwrap_or_default()
-    );
-    if source_exists {
-        return digest_blob_identities(hasher, source).await;
-    }
-    if let Some(path) = archived.filter(|_| archived_exists) {
-        return digest_blob_identities(hasher, path).await;
-    }
-    // 缺失 `blobs` 根与存在但为空的根产生不同摘要，保证成员集合完全确定。
-    hasher.update([0u8]);
-    Ok(())
-}
-
-/// 在实时源与归档之间解析一个成员名对应的唯一路径；找不到或两处都有歧义时返回 `None`/错误。
-async fn resolve_member(source: &Path, archived: Option<&Path>) -> Result<Option<PathBuf>> {
-    let source_exists = tokio::fs::try_exists(source).await?;
-    let archived_exists = match archived {
-        Some(path) => tokio::fs::try_exists(path).await?,
-        None => false,
-    };
-    ensure!(
-        !(source_exists && archived_exists),
-        "retired call store member exists both live and archived ({} and {}); refusing to guess \
-         which copy is authoritative; existing data preserved",
-        source.display(),
-        archived
-            .map(|path| path.display().to_string())
-            .unwrap_or_default()
-    );
-    Ok(if source_exists {
-        Some(source.to_path_buf())
-    } else {
-        archived.filter(|_| archived_exists).map(Path::to_path_buf)
-    })
-}
-
-/// 把一个文件流式写入摘要：先写存在/缺失标记与长度，再按固定缓冲写入内容；返回文件是否存在。
-async fn digest_file_into(hasher: &mut Sha256, path: &Path, missing_ok: bool) -> Result<bool> {
-    use tokio::io::AsyncReadExt;
-
-    const CHUNK: usize = 64 * 1024;
-    let mut file = match tokio::fs::File::open(path).await {
-        Ok(file) => file,
-        Err(error) if missing_ok && error.kind() == std::io::ErrorKind::NotFound => {
-            hasher.update([0u8]);
-            return Ok(false);
-        }
-        Err(error) => return Err(error.into()),
-    };
-    let metadata = file.metadata().await?;
-    hasher.update([1u8]);
-    hasher.update(metadata.len().to_le_bytes());
-    let mut buffer = vec![0u8; CHUNK];
-    loop {
-        let read = file.read(&mut buffer).await?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(true)
-}
-
-/// 把 `blobs` 目录下每个常规文件的相对路径与完整字节按名字排序后写入摘要；符号链接/重解析点 fail
-/// closed。正文按固定缓冲串流读取，因此等长内容篡改也会改变摘要，而内存占用保持常数级。
-async fn digest_blob_identities(hasher: &mut Sha256, blobs: &Path) -> Result<()> {
-    let present = tokio::fs::try_exists(blobs).await?;
-    hasher.update([u8::from(present)]);
-    let mut entries: Vec<(String, PathBuf)> = Vec::new();
-    if present {
-        let mut pending = vec![blobs.to_path_buf()];
-        while let Some(directory) = pending.pop() {
-            let mut listing = tokio::fs::read_dir(&directory).await?;
-            while let Some(entry) = listing.next_entry().await? {
-                let path = entry.path();
-                let file_type = entry.file_type().await?;
-                if file_type.is_dir() {
-                    pending.push(path);
-                    continue;
-                }
-                ensure!(
-                    file_type.is_file(),
-                    "retired call store blob is not a regular file: {}; existing data preserved",
-                    path.display()
-                );
-                let relative = path
-                    .strip_prefix(blobs)
-                    .context("retired call store blob escaped its root")?;
-                let name = relative
-                    .to_str()
-                    .context("retired call store blob name is not UTF-8")?
-                    .to_owned();
-                entries.push((name, path));
-            }
-        }
-    }
-    entries.sort();
-    for (name, path) in entries {
-        hasher.update(
-            u64::try_from(name.len())
-                .context("blob name is too long")?
-                .to_le_bytes(),
-        );
-        hasher.update(name.as_bytes());
-        // 正文一并绑定：名字与长度相同但内容被等长改写的 blob 必须改变摘要，phase-4 之后的篡改
-        // 才能被发布边界拒绝。
-        let _ = digest_file_into(hasher, &path, false).await?;
-    }
-    Ok(())
-}
-
-/// phase-3：在迁移工作副本上归一化旧 calls 格式并把事实合并进 staged 目标库。
-///
-/// `snapshot` 必须是 phase-1 备份出的字节副本；原始退役库从不被 SQLite 打开或改写。
-pub(crate) async fn merge_legacy_call_store(
-    snapshot: &Path,
-    destination: &Path,
-    work_dir: &Path,
-    source_fingerprint: &str,
-) -> Result<CallsImportReport> {
-    run_legacy_call_store(
-        snapshot,
-        destination,
-        work_dir,
-        source_fingerprint,
-        LegacyCallMode::Import,
-    )
-    .await
-}
-
-/// phase-4：只从同一保留快照重新推导审计，校验 staged 目标库完整覆盖源事实，不写目标库。
-pub(crate) async fn verify_legacy_call_store(
-    snapshot: &Path,
-    destination: &Path,
-    work_dir: &Path,
-    source_fingerprint: &str,
-) -> Result<CallsImportReport> {
-    run_legacy_call_store(
-        snapshot,
-        destination,
-        work_dir,
-        source_fingerprint,
-        LegacyCallMode::Verify,
-    )
-    .await
-}
-
-/// 一次退役调用库操作是"导入"还是"仅校验"。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LegacyCallMode {
-    /// phase-3：缺失的源事实被写入 staged 目标库。
-    Import,
-    /// phase-4：只读校验 staged 目标库，绝不写目标库。
-    Verify,
-}
-
-/// 相位机共享主体：从保留快照派生工作副本、归一化、导入或校验，全程不改原始源字节。
-///
-/// 只在持独占 Studio runtime 锁、且 staging 调用库 writer 已停止时调用：此时目标库只有本函数一个
-/// writer。`snapshot` 是早前备份出的字节副本；格式升级只发生在派生工作副本上。未知/损坏/超前格式、
-/// 正文缺失或哈希不符、目标库未覆盖源事实都会 fail closed 并保留全部原字节。
-async fn run_legacy_call_store(
-    snapshot: &Path,
-    destination: &Path,
-    work_dir: &Path,
-    source_fingerprint: &str,
-    mode: LegacyCallMode,
-) -> Result<CallsImportReport> {
-    ensure!(
-        snapshot != destination,
-        "refusing to import a retired call store onto itself; existing data preserved"
-    );
-    ensure!(
-        tokio::fs::try_exists(snapshot).await?,
-        "retired call store snapshot is missing: {}; existing data preserved",
-        snapshot.display()
-    );
-    // Bind the bytes we are about to derive from to the recorded source identity: a stale or partially
-    // written backup, or one whose blobs/sidecar differ from the recorded source, is refused before any
-    // normalization or merge. The digest is streamed, so this is a bounded-memory re-read.
-    ensure!(
-        !source_fingerprint.is_empty(),
-        "retired call store source fingerprint is absent; existing data preserved"
-    );
-    let snapshot_fingerprint = legacy_call_store_fingerprint(snapshot).await?;
-    ensure!(
-        snapshot_fingerprint == source_fingerprint,
-        "retired call store backup does not match the recorded source fingerprint; existing data \
-         preserved"
-    );
-    let destination_blobs = legacy_call_store_blobs_dir(destination);
-    remove_dir_if_present(work_dir).await?;
-    let result = async {
-        let work_database = snapshot_legacy_call_store(snapshot, work_dir).await?;
-        let work_blobs = work_dir.join(CALLS_BLOBS_DIR_NAME);
-        // 归一化只作用于工作副本：补齐当前列/表并把内联正文外置为内容寻址 blob（加法、幂等）。
-        let work = connect_calls_database(&work_database).await?;
-        let normalized = normalize_legacy_call_store(&work, &work_blobs).await;
-        let source_schema_version = close_connection(work, normalized).await?;
-
-        tokio::fs::create_dir_all(&destination_blobs).await?;
-        let target = connect_calls_database(destination).await?;
-        let inner = async {
-            ensure_calls_schema(&target, &destination_blobs).await?;
-            attach_legacy_call_store(&target, &work_database).await?;
-            let audit = apply_legacy_call_store(
-                &target,
-                source_schema_version,
-                source_fingerprint,
-                &work_blobs,
-                &destination_blobs,
-                mode,
-            )
-            .await;
-            let detach = detach_legacy_call_store(&target).await;
-            combine_import_and_detach(audit, detach)
-        }
-        .await;
-        close_connection(target, inner).await
-    }
-    .await;
-    let cleanup = remove_dir_if_present(work_dir).await;
-    match (result, cleanup) {
-        (Ok(report), Ok(())) => Ok(report),
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => {
-            Err(error.context("failed to clean the retired call store workspace"))
-        }
-    }
-}
-
-/// 在迁移工作副本上校验 `calls` 格式并就地升级；返回识别到的源 `schema_version`。
-async fn normalize_legacy_call_store(db: &DatabaseConnection, blobs_dir: &Path) -> Result<i64> {
-    let columns = table_columns(db, "calls_meta").await?;
-    ensure!(
-        columns.contains("schema_version"),
-        "retired call store snapshot is not a recognizable calls database (missing \
-         calls_meta.schema_version); existing data preserved"
-    );
-    let row = db
-        .query_one_raw(statement(
-            "SELECT schema_version FROM calls_meta WHERE id=1",
-            vec![],
-        ))
-        .await?
-        .context("retired call store snapshot has no calls_meta row; existing data preserved")?;
-    let version: i64 = row.try_get("", "schema_version")?;
-    ensure!(
-        (1..=CALLS_SCHEMA_VERSION).contains(&version),
-        "retired call store schema {version} is not a supported recognizable version (supported \
-         1..={CALLS_SCHEMA_VERSION}); existing data preserved"
-    );
-    ensure_calls_schema(db, blobs_dir).await?;
-    Ok(version)
-}
-
-/// 字节复制一份调用库（主文件、`-wal` 边车与 `blobs`）到 `destination` 目录，只读源。
-///
-/// 幂等且原子：目标主文件已存在时复用既有字节副本（phase-1 备份续跑不被改写；工作副本目录每轮先
-/// 删除再重建，因此总是全新复制）；否则先复制到 `<destination>.partial` 再整体改名，崩溃不会留下可
-/// 被误用的半成品。`-shm` 是瞬时索引文件，SQLite 打开副本时自建，故不入快照；原始退役库的 `-shm`
-/// 保持不动，只在归档时随原字节整体退休。返回复制后的库文件路径。
-///
-/// 复用既有副本时本函数**不**证明它与当前源一致；调用方必须用
-/// [`legacy_call_store_fingerprint`] 核对返回值与所记录的源指纹后才可使用。
-pub(crate) async fn snapshot_legacy_call_store(
-    source: &Path,
-    destination: &Path,
-) -> Result<PathBuf> {
-    let name = source
-        .file_name()
-        .context("retired call store has no file name")?;
-    let database = destination.join(name);
-    if tokio::fs::try_exists(&database).await? {
-        return Ok(database);
-    }
-    let partial = sidecar_path(destination, ".partial");
-    remove_dir_if_present(&partial).await?;
-    tokio::fs::create_dir_all(&partial).await?;
-    copy_regular_file(source, &partial.join(name)).await?;
-    let wal = sidecar_path(source, "-wal");
-    if tokio::fs::try_exists(&wal).await? {
-        let mut sidecar_name = name.to_os_string();
-        sidecar_name.push("-wal");
-        copy_regular_file(&wal, &partial.join(sidecar_name)).await?;
-    }
-    let blobs = legacy_call_store_blobs_dir(source);
-    if tokio::fs::try_exists(&blobs).await? {
-        copy_directory(&blobs, &partial.join(CALLS_BLOBS_DIR_NAME)).await?;
-    }
-    // The destination may hold a stale partial from an earlier crash; its main file is absent, so the
-    // directory is incomplete and safe to replace.
-    remove_dir_if_present(destination).await?;
-    if let Some(parent) = destination.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    tokio::fs::rename(&partial, destination).await?;
-    Ok(database)
-}
-
-async fn attach_legacy_call_store(db: &DatabaseConnection, source: &Path) -> Result<()> {
-    let source = source
-        .to_str()
-        .context("retired call store path is not UTF-8")?
-        .to_owned();
-    db.execute_raw(statement(
-        "ATTACH DATABASE ? AS legacy",
-        vec![Value::String(Some(source))],
-    ))
-    .await?;
-    Ok(())
-}
-
-async fn detach_legacy_call_store(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared("DETACH DATABASE legacy").await?;
-    Ok(())
-}
-
-fn combine_import_and_detach(
-    audit: Result<CallsImportReport>,
-    detach: Result<()>,
-) -> Result<CallsImportReport> {
-    match (audit, detach) {
-        (Ok(report), Ok(())) => Ok(report),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(error)) => Err(error.context("failed to detach the retired call store")),
-        (Err(error), Err(detach_error)) => Err(error.context(format!(
-            "detaching the retired call store also failed: {detach_error}"
-        ))),
-    }
-}
-
-/// 在已挂载 `legacy` 的目标库连接上校验 +（Import 时）合并源事实，并返回审计。
-///
-/// 正文校验先于引用写入：`legacy` 引用的每个内容寻址正文都必须能从保留快照读出且摘要匹配。
-async fn apply_legacy_call_store(
-    db: &DatabaseConnection,
-    source_schema_version: i64,
-    source_fingerprint: &str,
-    work_blobs: &Path,
-    destination_blobs: &Path,
-    mode: LegacyCallMode,
-) -> Result<CallsImportReport> {
-    let source_database_id = match db
-        .query_one_raw(statement(
-            "SELECT database_id FROM legacy.calls_meta WHERE id=1",
-            vec![],
-        ))
-        .await?
-    {
-        Some(row) => row.try_get::<Option<String>>("", "database_id")?,
-        None => None,
-    };
-    let source_model_calls = scalar_count(db, "SELECT COUNT(*) FROM legacy.model_calls").await?;
-    let source_tool_calls = scalar_count(db, "SELECT COUNT(*) FROM legacy.tool_calls").await?;
-    let source_watermarks = scalar_count(db, "SELECT COUNT(*) FROM legacy.call_watermarks").await?;
-    let source_bodies = scalar_count(db, "SELECT COUNT(*) FROM legacy.call_bodies").await?;
-
-    let verified_bodies =
-        reconcile_legacy_call_bodies(db, work_blobs, destination_blobs, mode).await?;
-
-    if mode == LegacyCallMode::Import {
-        merge_attached_rows(db, MODEL_CALL_COLUMNS, "model_calls", MODEL_CALL_MERGE).await?;
-        merge_attached_rows(db, TOOL_CALL_COLUMNS, "tool_calls", TOOL_CALL_MERGE).await?;
-        merge_call_watermarks(db).await?;
-        merge_call_bodies(db).await?;
-    }
-    verify_call_import(db, destination_blobs).await?;
-    let destination_model_calls = scalar_count(db, "SELECT COUNT(*) FROM main.model_calls").await?;
-    let destination_tool_calls = scalar_count(db, "SELECT COUNT(*) FROM main.tool_calls").await?;
-
-    Ok(CallsImportReport {
-        source_present: true,
-        source_schema_version,
-        source_database_id,
-        source_fingerprint: source_fingerprint.to_owned(),
-        source_model_calls: to_u64(source_model_calls)?,
-        source_tool_calls: to_u64(source_tool_calls)?,
-        source_watermarks: to_u64(source_watermarks)?,
-        source_bodies: to_u64(source_bodies)?,
-        verified_bodies: to_u64(verified_bodies)?,
-        destination_model_calls: to_u64(destination_model_calls)?,
-        destination_tool_calls: to_u64(destination_tool_calls)?,
-        verified: true,
-    })
-}
-
-/// 把 `legacy.<table>` 的行按身份合并进 `main.<table>`。新身份直接插入，已存在身份只补空列并提升
-/// `revision`/`terminal`；`merge_set` 必须只使用 `COALESCE(<table>.<col>,excluded.<col>)`、
-/// `MAX`/`MIN` 与由 `terminal`/`revision` 决定的 `status`，绝不覆盖目标库已有的更新事实。
-async fn merge_attached_rows(
-    db: &DatabaseConnection,
-    columns: &str,
-    table: &str,
-    merge_set: &str,
-) -> Result<()> {
-    let sql = format!(
-        "INSERT INTO main.{table}({columns}) \
-         SELECT {columns} FROM legacy.{table} WHERE 1 \
-         ON CONFLICT(thread_id,call_id) DO UPDATE SET {merge_set}"
-    );
-    db.execute_unprepared(&sql).await?;
-    Ok(())
-}
-
-async fn merge_call_watermarks(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared(
-        "INSERT INTO main.call_watermarks(thread_id,admitted_write_seq,durable_write_seq) \
-         SELECT thread_id,admitted_write_seq,durable_write_seq FROM legacy.call_watermarks WHERE 1 \
-         ON CONFLICT(thread_id) DO UPDATE SET \
-            admitted_write_seq=MAX(call_watermarks.admitted_write_seq,excluded.admitted_write_seq), \
-            durable_write_seq=MAX(call_watermarks.durable_write_seq,excluded.durable_write_seq)",
-    )
-    .await?;
-    Ok(())
-}
-
-async fn merge_call_bodies(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared(
-        "INSERT INTO main.call_bodies(body_ref,byte_length,created_at) \
-         SELECT body_ref,byte_length,created_at FROM legacy.call_bodies WHERE 1 \
-         ON CONFLICT(body_ref) DO NOTHING",
-    )
-    .await?;
-    Ok(())
-}
-
-/// 校验保留快照中被引用的全部正文：逐个读取并按内容寻址摘要验证。
-///
-/// `Import` 时把缺失的正文写进目标 blobs 根，`Verify` 时只读校验（目标库缺一个即在后续覆盖检查中
-/// fail closed）。返回校验通过的不同正文引用数。
-async fn reconcile_legacy_call_bodies(
-    db: &DatabaseConnection,
-    work_blobs: &Path,
-    destination_blobs: &Path,
-    mode: LegacyCallMode,
-) -> Result<i64> {
-    let rows = db
-        .query_all_raw(statement(
-            "SELECT body_ref AS body_ref FROM legacy.call_bodies WHERE body_ref IS NOT NULL \
-             UNION SELECT body_ref FROM legacy.model_calls WHERE body_ref IS NOT NULL \
-             UNION SELECT billing_ref FROM legacy.model_calls WHERE billing_ref IS NOT NULL \
-             UNION SELECT body_ref FROM legacy.tool_calls WHERE body_ref IS NOT NULL",
-            vec![],
-        ))
-        .await?;
-    let mut verified = 0i64;
-    for row in rows {
-        let reference: String = row.try_get("", "body_ref")?;
-        let name = blob_file_name(&reference).with_context(|| {
-            format!(
-                "retired call body reference {reference} is not content-addressed; existing data \
-                 preserved"
-            )
-        })?;
-        let source = work_blobs.join(name);
-        let bytes = tokio::fs::read(&source).await.with_context(|| {
-            format!(
-                "retired call body blob is missing: {}; existing data preserved",
-                source.display()
-            )
-        })?;
-        ensure!(
-            pl_core::context::content_hash(&bytes) == reference,
-            "retired call body {reference} content hash mismatch; existing data preserved"
-        );
-        if mode == LegacyCallMode::Import {
-            let destination = destination_blobs.join(name);
-            if !tokio::fs::try_exists(&destination).await? {
-                write_blob_bytes(destination_blobs, &reference, &bytes).await?;
-            }
-        }
-        verified = verified.saturating_add(1);
-    }
-    Ok(verified)
-}
-
-/// 逐项校验已合并的调用事实：没有源行丢失，没有非空源列丢失，终态/水位只进不退，且每个被引用的
-/// 正文都有内容寻址文件与库内登记。任一失败都保留原字节并回错误。
-async fn verify_call_import(db: &DatabaseConnection, destination_blobs: &Path) -> Result<()> {
-    let missing_model = scalar_count(
-        db,
-        "SELECT COUNT(*) FROM legacy.model_calls s \
-         LEFT JOIN main.model_calls d ON d.thread_id=s.thread_id AND d.call_id=s.call_id \
-         WHERE d.thread_id IS NULL",
-    )
-    .await?;
-    ensure!(
-        missing_model == 0,
-        "call import lost {missing_model} retired model call row(s); existing data preserved"
-    );
-    let missing_tool = scalar_count(
-        db,
-        "SELECT COUNT(*) FROM legacy.tool_calls s \
-         LEFT JOIN main.tool_calls d ON d.thread_id=s.thread_id AND d.call_id=s.call_id \
-         WHERE d.thread_id IS NULL",
-    )
-    .await?;
-    ensure!(
-        missing_tool == 0,
-        "call import lost {missing_tool} retired tool call row(s); existing data preserved"
-    );
-    let model_disagreement = scalar_count(db, MODEL_CALL_VERIFY).await?;
-    ensure!(
-        model_disagreement == 0,
-        "call import left {model_disagreement} retired model call fact(s) unreconciled; existing \
-         data preserved"
-    );
-    let tool_disagreement = scalar_count(db, TOOL_CALL_VERIFY).await?;
-    ensure!(
-        tool_disagreement == 0,
-        "call import left {tool_disagreement} retired tool call fact(s) unreconciled; existing data \
-         preserved"
-    );
-    let watermark_disagreement = scalar_count(
-        db,
-        "SELECT COUNT(*) FROM legacy.call_watermarks s \
-         LEFT JOIN main.call_watermarks d ON d.thread_id=s.thread_id \
-         WHERE d.thread_id IS NULL OR d.durable_write_seq < s.durable_write_seq \
-            OR d.admitted_write_seq < s.admitted_write_seq",
-    )
-    .await?;
-    ensure!(
-        watermark_disagreement == 0,
-        "call import regressed {watermark_disagreement} thread watermark(s); existing data preserved"
-    );
-    let unregistered = scalar_count(
-        db,
-        "SELECT COUNT(*) FROM (\
-            SELECT body_ref AS reference FROM main.model_calls WHERE body_ref IS NOT NULL \
-            UNION SELECT billing_ref FROM main.model_calls WHERE billing_ref IS NOT NULL \
-            UNION SELECT body_ref FROM main.tool_calls WHERE body_ref IS NOT NULL\
-         ) refs \
-         LEFT JOIN main.call_bodies b ON b.body_ref=refs.reference \
-         WHERE b.body_ref IS NULL",
-    )
-    .await?;
-    ensure!(
-        unregistered == 0,
-        "call import left {unregistered} call body reference(s) without a stored body; existing data \
-         preserved"
-    );
-    for row in db
-        .query_all_raw(statement(
-            "SELECT reference FROM (\
-                SELECT body_ref AS reference FROM main.model_calls WHERE body_ref IS NOT NULL \
-                UNION SELECT billing_ref FROM main.model_calls WHERE billing_ref IS NOT NULL \
-                UNION SELECT body_ref FROM main.tool_calls WHERE body_ref IS NOT NULL\
-             )",
-            vec![],
-        ))
-        .await?
-    {
-        let reference: String = row.try_get("", "reference")?;
-        let Some(name) = blob_file_name(&reference) else {
-            bail!(
-                "stored call body reference {reference} is not content-addressed; existing data \
-                 preserved"
-            );
-        };
-        let path = destination_blobs.join(name);
-        let bytes = tokio::fs::read(&path)
-            .await
-            .with_context(|| format!("stored call body blob is missing: {}", path.display()))?;
-        ensure!(
-            pl_core::context::content_hash(&bytes) == reference,
-            "stored call body {reference} content hash mismatch; existing data preserved"
-        );
-    }
-    Ok(())
-}
-
-async fn scalar_count(db: &DatabaseConnection, sql: &str) -> Result<i64> {
-    let row = db
-        .query_one_raw(statement(sql, vec![]))
-        .await?
-        .context("call import inspection returned no row")?;
-    Ok(row.try_get_by_index::<i64>(0)?)
-}
-
-fn to_u64(value: i64) -> Result<u64> {
-    u64::try_from(value).context("call import count is negative")
-}
-
-/// 退役调用库的 blobs 根（`calls.sqlite` 同目录的 `blobs`）；migration 备份/归档与 helper 共用。
-pub(crate) fn legacy_call_store_blobs_dir(database: &Path) -> PathBuf {
-    database
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(CALLS_BLOBS_DIR_NAME)
-}
-
-fn sidecar_path(path: &Path, suffix: &str) -> PathBuf {
-    let mut name = path.as_os_str().to_os_string();
-    name.push(suffix);
-    PathBuf::from(name)
-}
-
-/// 字节复制单个常规文件；符号链接/重解析点或非文件一律拒绝，避免把源目录结构带进工作副本。
-async fn copy_regular_file(source: &Path, destination: &Path) -> Result<()> {
-    let metadata = tokio::fs::symlink_metadata(source).await?;
-    ensure!(
-        metadata.is_file() && !pl_tool::workspace::path_safety::is_link_or_reparse(&metadata),
-        "retired call store member is not a regular file: {}; existing data preserved",
-        source.display()
-    );
-    if let Some(parent) = destination.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    let bytes = tokio::fs::read(source).await?;
-    tokio::fs::write(destination, &bytes).await?;
-    Ok(())
-}
-
-/// 递归字节复制目录；只有常规文件被复制，任何其它类型 fail closed。
-async fn copy_directory(source: &Path, destination: &Path) -> Result<()> {
-    tokio::fs::create_dir_all(destination).await?;
-    let mut pending = vec![source.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        let mut entries = tokio::fs::read_dir(&directory).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            let file_type = entry.file_type().await?;
-            let relative = path
-                .strip_prefix(source)
-                .context("retired call store blob escaped its root")?;
-            let target = destination.join(relative);
-            if file_type.is_dir() {
-                tokio::fs::create_dir_all(&target).await?;
-                pending.push(path);
-            } else if file_type.is_file() {
-                copy_regular_file(&path, &target).await?;
-            } else {
-                bail!(
-                    "retired call store blob is not a regular file: {}; existing data preserved",
-                    path.display()
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn remove_dir_if_present(path: &Path) -> Result<()> {
-    match tokio::fs::remove_dir_all(path).await {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-/// 打开一个 migration 边界专用的调用库连接；工作副本与目标库都由本模块独占使用。
-async fn connect_calls_database(path: &Path) -> Result<DatabaseConnection> {
-    let mut options = ConnectOptions::new(crate::studio::paths::sqlite_url(path));
-    options
-        .max_connections(1)
-        .min_connections(1)
-        .sqlx_logging(false);
-    Ok(Database::connect(options).await?)
-}
-
-async fn close_connection<T>(db: DatabaseConnection, result: Result<T>) -> Result<T> {
-    match (result, db.close().await) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(error)) => Err(error).context("failed to close a call store connection"),
-        (Err(error), Err(close)) => {
-            Err(error).context(format!("call store cleanup also failed: {close}"))
-        }
-    }
-}
-
-/// `model_calls` 的完整列清单；导入时源、目标都使用同一顺序，避免对列位置或 `SELECT *` 的隐式假设。
-const MODEL_CALL_COLUMNS: &str = concat!(
-    "thread_id,call_id,root_thread_id,turn_id,attempt_id,retry_of,revision,admitted_at,",
-    "started_at,finished_at,status,terminal,retention,purpose,provider_instance_id,",
-    "provider_display_name,configured_model,sent_model,reported_model,reasoning_effort,",
-    "input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,",
-    "total_tokens,ttft_millis,decode_millis,response_millis,cost_currency,cost_amount,",
-    "has_unpriced_usage,body_ref,billing_ref",
-);
-
-/// 导入 `model_calls` 冲突时的合并规则：只补空列、只提升 `revision`/`terminal`，`status` 按终态与
-/// revision 的支配关系选择，绝不覆盖目标库更完整或更新的事实。
-const MODEL_CALL_MERGE: &str = concat!(
-    "root_thread_id=COALESCE(model_calls.root_thread_id,excluded.root_thread_id),",
-    "turn_id=COALESCE(model_calls.turn_id,excluded.turn_id),",
-    "attempt_id=COALESCE(model_calls.attempt_id,excluded.attempt_id),",
-    "retry_of=COALESCE(model_calls.retry_of,excluded.retry_of),",
-    "revision=MAX(model_calls.revision,excluded.revision),",
-    "admitted_at=MIN(model_calls.admitted_at,excluded.admitted_at),",
-    "started_at=MIN(model_calls.started_at,excluded.started_at),",
-    "finished_at=COALESCE(model_calls.finished_at,excluded.finished_at),",
-    "status=CASE WHEN excluded.terminal>model_calls.terminal OR (excluded.terminal=model_calls.terminal AND excluded.revision>=model_calls.revision) THEN COALESCE(excluded.status,model_calls.status) ELSE COALESCE(model_calls.status,excluded.status) END,",
-    "terminal=MAX(model_calls.terminal,excluded.terminal),",
-    "retention=COALESCE(model_calls.retention,excluded.retention),",
-    "purpose=COALESCE(model_calls.purpose,excluded.purpose),",
-    "provider_instance_id=COALESCE(model_calls.provider_instance_id,excluded.provider_instance_id),",
-    "provider_display_name=COALESCE(model_calls.provider_display_name,excluded.provider_display_name),",
-    "configured_model=COALESCE(model_calls.configured_model,excluded.configured_model),",
-    "sent_model=COALESCE(model_calls.sent_model,excluded.sent_model),",
-    "reported_model=COALESCE(model_calls.reported_model,excluded.reported_model),",
-    "reasoning_effort=COALESCE(model_calls.reasoning_effort,excluded.reasoning_effort),",
-    "input_tokens=COALESCE(model_calls.input_tokens,excluded.input_tokens),",
-    "output_tokens=COALESCE(model_calls.output_tokens,excluded.output_tokens),",
-    "cache_read_tokens=COALESCE(model_calls.cache_read_tokens,excluded.cache_read_tokens),",
-    "cache_write_tokens=COALESCE(model_calls.cache_write_tokens,excluded.cache_write_tokens),",
-    "reasoning_tokens=COALESCE(model_calls.reasoning_tokens,excluded.reasoning_tokens),",
-    "total_tokens=COALESCE(model_calls.total_tokens,excluded.total_tokens),",
-    "ttft_millis=COALESCE(model_calls.ttft_millis,excluded.ttft_millis),",
-    "decode_millis=COALESCE(model_calls.decode_millis,excluded.decode_millis),",
-    "response_millis=COALESCE(model_calls.response_millis,excluded.response_millis),",
-    "cost_currency=COALESCE(model_calls.cost_currency,excluded.cost_currency),",
-    "cost_amount=COALESCE(model_calls.cost_amount,excluded.cost_amount),",
-    "has_unpriced_usage=MAX(model_calls.has_unpriced_usage,excluded.has_unpriced_usage),",
-    "body_ref=COALESCE(model_calls.body_ref,excluded.body_ref),",
-    "billing_ref=COALESCE(model_calls.billing_ref,excluded.billing_ref)",
-);
-
-const TOOL_CALL_COLUMNS: &str = concat!(
-    "thread_id,call_id,turn_id,tool_id,revision,admitted_at,started_at,finished_at,status,",
-    "terminal,body_ref",
-);
-
-const TOOL_CALL_MERGE: &str = concat!(
-    "turn_id=COALESCE(tool_calls.turn_id,excluded.turn_id),",
-    "tool_id=COALESCE(tool_calls.tool_id,excluded.tool_id),",
-    "revision=MAX(tool_calls.revision,excluded.revision),",
-    "admitted_at=MIN(tool_calls.admitted_at,excluded.admitted_at),",
-    "started_at=MIN(tool_calls.started_at,excluded.started_at),",
-    "finished_at=COALESCE(tool_calls.finished_at,excluded.finished_at),",
-    "status=CASE WHEN excluded.terminal>tool_calls.terminal OR (excluded.terminal=tool_calls.terminal AND excluded.revision>=tool_calls.revision) THEN COALESCE(excluded.status,tool_calls.status) ELSE COALESCE(tool_calls.status,excluded.status) END,",
-    "terminal=MAX(tool_calls.terminal,excluded.terminal),",
-    "body_ref=COALESCE(tool_calls.body_ref,excluded.body_ref)",
-);
-
-/// 校验 `model_calls` 的合并后置条件：没有非空源列丢失，`revision`/`terminal` 只进不退。
-const MODEL_CALL_VERIFY: &str = "SELECT COUNT(*) FROM legacy.model_calls s \
-     JOIN main.model_calls d ON d.thread_id=s.thread_id AND d.call_id=s.call_id \
-     WHERE d.revision<s.revision OR d.terminal<s.terminal \
-        OR (s.root_thread_id IS NOT NULL AND d.root_thread_id IS NULL) \
-        OR (s.turn_id IS NOT NULL AND d.turn_id IS NULL) \
-        OR (s.attempt_id IS NOT NULL AND d.attempt_id IS NULL) \
-        OR (s.retry_of IS NOT NULL AND d.retry_of IS NULL) \
-        OR (s.finished_at IS NOT NULL AND d.finished_at IS NULL) \
-        OR (s.status IS NOT NULL AND d.status IS NULL) \
-        OR (s.retention IS NOT NULL AND d.retention IS NULL) \
-        OR (s.purpose IS NOT NULL AND d.purpose IS NULL) \
-        OR (s.provider_instance_id IS NOT NULL AND d.provider_instance_id IS NULL) \
-        OR (s.provider_display_name IS NOT NULL AND d.provider_display_name IS NULL) \
-        OR (s.configured_model IS NOT NULL AND d.configured_model IS NULL) \
-        OR (s.sent_model IS NOT NULL AND d.sent_model IS NULL) \
-        OR (s.reported_model IS NOT NULL AND d.reported_model IS NULL) \
-        OR (s.reasoning_effort IS NOT NULL AND d.reasoning_effort IS NULL) \
-        OR (s.input_tokens IS NOT NULL AND d.input_tokens IS NULL) \
-        OR (s.output_tokens IS NOT NULL AND d.output_tokens IS NULL) \
-        OR (s.cache_read_tokens IS NOT NULL AND d.cache_read_tokens IS NULL) \
-        OR (s.cache_write_tokens IS NOT NULL AND d.cache_write_tokens IS NULL) \
-        OR (s.reasoning_tokens IS NOT NULL AND d.reasoning_tokens IS NULL) \
-        OR (s.total_tokens IS NOT NULL AND d.total_tokens IS NULL) \
-        OR (s.ttft_millis IS NOT NULL AND d.ttft_millis IS NULL) \
-        OR (s.decode_millis IS NOT NULL AND d.decode_millis IS NULL) \
-        OR (s.response_millis IS NOT NULL AND d.response_millis IS NULL) \
-        OR (s.cost_currency IS NOT NULL AND d.cost_currency IS NULL) \
-        OR (s.cost_amount IS NOT NULL AND d.cost_amount IS NULL) \
-        OR (s.has_unpriced_usage>d.has_unpriced_usage) \
-        OR (s.body_ref IS NOT NULL AND d.body_ref IS NULL) \
-        OR (s.billing_ref IS NOT NULL AND d.billing_ref IS NULL)";
-
-const TOOL_CALL_VERIFY: &str = "SELECT COUNT(*) FROM legacy.tool_calls s \
-     JOIN main.tool_calls d ON d.thread_id=s.thread_id AND d.call_id=s.call_id \
-     WHERE d.revision<s.revision OR d.terminal<s.terminal \
-        OR (s.turn_id IS NOT NULL AND d.turn_id IS NULL) \
-        OR (s.tool_id IS NOT NULL AND d.tool_id IS NULL) \
-        OR (s.finished_at IS NOT NULL AND d.finished_at IS NULL) \
-        OR (s.status IS NOT NULL AND d.status IS NULL) \
-        OR (s.body_ref IS NOT NULL AND d.body_ref IS NULL)";

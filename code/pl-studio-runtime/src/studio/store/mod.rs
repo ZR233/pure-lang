@@ -15,7 +15,6 @@ mod interaction;
 pub(in crate::studio) mod object;
 mod project;
 pub(in crate::studio) mod settings;
-pub(in crate::studio) mod ssh_migration;
 mod thread;
 pub(in crate::studio) mod workspaces;
 
@@ -82,6 +81,21 @@ impl StudioStore {
         Ok(self
             .thread_persistence
             .install_shared_history(thread_id, &opened))
+    }
+
+    /// One session per live Thread, shared by the writer and all reading windows.
+    /// Opening a cold view does not activate a Thread or create a database file.
+    pub(crate) async fn chat_session(
+        &self,
+        thread_id: &str,
+    ) -> anyhow::Result<pl_core::chat::Session> {
+        if let Some(active) = self.thread_persistence.chat_session(thread_id) {
+            return Ok(active);
+        }
+        let session = pl_core::chat::Session::new(self.history_writer(thread_id).await?);
+        Ok(self
+            .thread_persistence
+            .install_chat_session(thread_id, session))
     }
 
     pub(crate) fn state(&self, thread_id: &str) -> StateStore {

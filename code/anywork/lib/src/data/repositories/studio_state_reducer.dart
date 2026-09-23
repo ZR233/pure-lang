@@ -148,6 +148,8 @@ StudioReduceResult applyThreadUpdate(
   required int revision,
   required ThreadWorkspaceUpdate update,
   int? baseRevision,
+  bool chatWindowOwnsItems = false,
+  bool filteredItemRevisions = false,
 }) {
   final workspace = current.workspacesByThread[threadId];
   if (workspace == null) {
@@ -155,14 +157,27 @@ StudioReduceResult applyThreadUpdate(
   }
   // base revision 是生产端声明的"上一条水位"：只要它不接在当前状态之后，
   // 说明中间有缺口（广播 lag、乱序或 epoch 切换），必须重同步而不是拼接增量。
-  if (baseRevision != null && baseRevision != workspace.revision) {
+  if (!filteredItemRevisions &&
+      baseRevision != null &&
+      baseRevision != workspace.revision) {
     return StudioReduceResult(current, resyncThreadId: threadId);
   }
   if (revision <= workspace.revision) {
     return StudioReduceResult(current);
   }
-  if (revision != workspace.revision + 1) {
+  if (!filteredItemRevisions && revision != workspace.revision + 1) {
     return StudioReduceResult(current, resyncThreadId: threadId);
+  }
+  if (chatWindowOwnsItems &&
+      (update is ThreadItemUpsert || update is ThreadItemDeltaUpdate)) {
+    return StudioReduceResult(
+      current.copyWith(
+        workspacesByThread: {
+          ...current.workspacesByThread,
+          threadId: workspace.copyWith(revision: revision),
+        },
+      ),
+    );
   }
   final updated = switch (update) {
     ThreadTurnUpdate(:final turn) => _applyThreadTurn(
@@ -218,6 +233,96 @@ StudioReduceResult applyThreadUpdate(
               threadId: nextUi,
             },
           ),
+  );
+}
+
+/// ChatView owns the complete bounded reading window. The execution stream may
+/// advance its own revision, but cannot add a second copy of these items.
+StudioState applyChatWindowSnapshot(
+  StudioState current,
+  String threadId,
+  StudioChatSnapshot snapshot,
+) {
+  final workspace = current.workspacesByThread[threadId];
+  if (workspace == null) return current;
+  final expanded = {
+    for (final item in workspace.historyItems)
+      if (item.bodyLoaded) item.id: item,
+  };
+  final items = [
+    for (final entry in snapshot.items)
+      if (expanded[entry.item.id] case final previous?
+          when previous.revision == entry.item.revision &&
+              previous.isTerminal &&
+              entry.item.isTerminal)
+        previous.copyWith(saved: entry.saved)
+      else
+        entry.item,
+  ];
+  final next = workspace.copyWith(
+    items: items,
+    liveItems: const {},
+    timelineTurns: const {},
+  );
+  final ui = syncItemBodyState(_workspaceUi(current, threadId), next);
+  final history = ui.history.copyWith(
+    hasOlder: snapshot.hasOlder,
+    hasNewer: snapshot.hasNewer,
+    olderCursor: items.firstOrNull?.id,
+    newerCursor: items.lastOrNull?.id,
+    isLoading: false,
+    errorMessage: null,
+    newerError: null,
+    detached: snapshot.focusedItemId != null,
+    anchor: snapshot.focusedItemId == null
+        ? null
+        : TimelineAnchor(
+            snapshot.focusedItemId!,
+            ui.history.anchor?.offset ?? 0,
+          ),
+  );
+  return current.copyWith(
+    workspacesByThread: {...current.workspacesByThread, threadId: next},
+    workspaceUiByThread: {
+      ...current.workspaceUiByThread,
+      threadId: ui.copyWith(history: history),
+    },
+  );
+}
+
+StudioState applyChatWindowItemBody(
+  StudioState current,
+  String threadId,
+  String itemId,
+  ThreadItemView? incoming,
+) {
+  final workspace = current.workspacesByThread[threadId];
+  final ui = current.workspaceUiByThread[threadId];
+  if (workspace == null || ui == null) return current;
+  final index = workspace.historyItems.indexWhere((item) => item.id == itemId);
+  if (index < 0) return current;
+  final existing = workspace.historyItems[index];
+  if (incoming == null || incoming.revision < existing.revision) {
+    return current.copyWith(
+      workspaceUiByThread: {
+        ...current.workspaceUiByThread,
+        threadId: ui.copyWith(
+          history: ui.history.copyWith(
+            loadingItemIds: {...ui.history.loadingItemIds}..remove(itemId),
+            pendingItemBodyIds: {...ui.history.pendingItemBodyIds, itemId},
+          ),
+        ),
+      },
+    );
+  }
+  final items = workspace.historyItems.toList()..[index] = incoming;
+  final next = workspace.copyWith(items: items);
+  return current.copyWith(
+    workspacesByThread: {...current.workspacesByThread, threadId: next},
+    workspaceUiByThread: {
+      ...current.workspaceUiByThread,
+      threadId: syncItemBodyState(ui, next),
+    },
   );
 }
 
@@ -758,7 +863,7 @@ List<ThreadItemView> _overlayRolledBackItems(
   ];
 }
 
-const int maxTimelineWindowItems = 500;
+const int maxTimelineWindowItems = 100;
 
 /// Only SQL pages are bounded. Live output is owned by the overlay.
 ThreadWorkspace _boundedTimeline(

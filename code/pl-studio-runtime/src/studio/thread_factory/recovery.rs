@@ -1,7 +1,7 @@
 //! Current-layout checkpoint loading for cold Threads.
 //!
 //! Legacy shared journals are converted once by the locked pre-publication migration coordinator
-//! (`studio::session_migration`). Activation, timeline queries and recovery only ever read the
+//! (not imported into v2). Activation, timeline queries and recovery only ever read the
 //! current `state.toml`; they never replay the retired shared session database.
 
 use anyhow::Result;

@@ -433,6 +433,7 @@ class BridgeModelPerformanceSummary {
 /// checkpoint/history/calls 水位，并把队列字节、最老待保存年龄、在途字节与最近错误一并暴露，
 /// 因此 GUI 展示的落后量、压力与错误都来自持久化协调器的真实观测而非本地推算。
 class BridgePersistenceQueueSnapshot {
+  final bool statisticsGap;
   final BigInt pendingOperations;
   final BigInt pendingBytes;
   final BigInt inFlightBytes;
@@ -442,6 +443,7 @@ class BridgePersistenceQueueSnapshot {
   final List<BridgeThreadPersistenceSnapshot> threads;
 
   const BridgePersistenceQueueSnapshot({
+    required this.statisticsGap,
     required this.pendingOperations,
     required this.pendingBytes,
     required this.inFlightBytes,
@@ -453,6 +455,7 @@ class BridgePersistenceQueueSnapshot {
 
   @override
   int get hashCode =>
+      statisticsGap.hashCode ^
       pendingOperations.hashCode ^
       pendingBytes.hashCode ^
       inFlightBytes.hashCode ^
@@ -466,6 +469,7 @@ class BridgePersistenceQueueSnapshot {
       identical(this, other) ||
       other is BridgePersistenceQueueSnapshot &&
           runtimeType == other.runtimeType &&
+          statisticsGap == other.statisticsGap &&
           pendingOperations == other.pendingOperations &&
           pendingBytes == other.pendingBytes &&
           inFlightBytes == other.inFlightBytes &&
@@ -1156,6 +1160,8 @@ class BridgeThreadModelRouteUpdateResponse {
 /// 表示没有 writer 报告过该水位（例如仅通过 checkpoint 回退诊断出现），是未知而非零。
 class BridgeThreadPersistenceSnapshot {
   final String threadId;
+  final BigInt faultGeneration;
+  final String? fault;
   final BigInt? stateDirtyRevision;
   final BigInt? stateSavingRevision;
   final BigInt? stateDurableRevision;
@@ -1172,6 +1178,8 @@ class BridgeThreadPersistenceSnapshot {
 
   const BridgeThreadPersistenceSnapshot({
     required this.threadId,
+    required this.faultGeneration,
+    this.fault,
     this.stateDirtyRevision,
     this.stateSavingRevision,
     this.stateDurableRevision,
@@ -1190,6 +1198,8 @@ class BridgeThreadPersistenceSnapshot {
   @override
   int get hashCode =>
       threadId.hashCode ^
+      faultGeneration.hashCode ^
+      fault.hashCode ^
       stateDirtyRevision.hashCode ^
       stateSavingRevision.hashCode ^
       stateDurableRevision.hashCode ^
@@ -1210,6 +1220,8 @@ class BridgeThreadPersistenceSnapshot {
       other is BridgeThreadPersistenceSnapshot &&
           runtimeType == other.runtimeType &&
           threadId == other.threadId &&
+          faultGeneration == other.faultGeneration &&
+          fault == other.fault &&
           stateDirtyRevision == other.stateDirtyRevision &&
           stateSavingRevision == other.stateSavingRevision &&
           stateDurableRevision == other.stateDurableRevision &&

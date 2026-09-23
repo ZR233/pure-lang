@@ -17,8 +17,8 @@
 - 修改前理解当前架构、所有权和完整调用链，优先复用已有逻辑与抽象，沿用领域命名和测试方式，避免建立平行实现或第二份事实源。
 - 当前架构无法合理满足需求时，允许在任务范围及必要相邻边界进行破坏性调整。以职责清晰、事实源统一和长期可维护为优先，不为最小差异或保留旧接口牺牲架构，也不借此扩大为无关重构。
 - 架构调整须同步迁移受影响调用方、协议映射、测试与文档；完成后删除旧实现、旧接口、转发别名及兼容分支，只保留最新架构与逻辑。仓库外消费者通过版本变更说明指引升级，不在项目内保留旧接口。
-- anywork 用户数据、配置及凭据关联随版本迁移；历史格式解码与转换仅限迁移边界，正常运行只消费当前结构。迁移代码属于数据保全责任，不是旧架构运行入口；现役外部协议适配和平台支持也不属于应删除的兼容层。
-- 数据库与会话迁移遵循 [存储契约](design/17-studio-storage.md)，配置与凭据关联迁移遵循 [配置契约](design/20-config.md)。持久化结构变化必须在同一变更中提供迁移与验证，不能以备份后清空或恢复默认值代替迁移。
+- anywork 本次大版本不迁移旧会话、历史、调用统计及产品库：旧目录原样隔离，新会话写入独立 v2 数据根；供应商等非会话配置与凭据关联仍须安全迁移。其他需要迁移的用户数据只在明确迁移边界解码，正常运行只消费当前结构；现役外部协议适配和平台支持不属于应删除的兼容层。
+- 数据库与会话边界遵循 [存储契约](design/17-studio-storage.md)，配置与凭据关联迁移遵循 [配置契约](design/20-config.md)。本版本 v2 内后续持久化结构变化仍须迁移并验证，不能以备份后清空或恢复默认值代替迁移；断代不授权删除旧目录。
 - 破坏性代码或接口调整不授权删除用户数据，也不扩大提交、推送、发布或部署权限；相关授权统一遵循前节。
 
 ## Git 提交与 PR
@@ -134,7 +134,7 @@ crate 职责、依赖方向与禁止依赖的唯一权威源是 [Crate 边界](d
 
 - 验证按实际影响选择。纯文档、技能或协作规则修改（包括提交前）只检查内容、引用、规则一致性及适用格式，不运行 Rust、Flutter、GUI 或 live 全量验收；若同时改变构建／生成输入、运行配置或测试执行语义，则按这些实际影响验证。代码修改先运行定向检查，跨 crate、协议、构建或依赖变更扩展到相关消费者；提交前执行下述代码门禁，生成输入、GUI 行为与 live 验收另遵守对应要求。
 - 适用检查通过且需求已满足后直接交付；只有新修改、失败或尚未解决的具体风险才扩展或重复验证。只读分析以结论与出处为完成条件；修改任务以范围内修改完成、适用验证通过和差异可审查为完成条件；提 PR 任务还须交付 PR 链接及实际 CI 状态，排队或运行中不算通过。环境或权限阻塞时报告已完成项、原始失败和剩余工作，不声称全部完成。
-- 项目自有的自动化用例仅位于 `pl-model/tests/` 与 `pl-core/tests/`，只通过被测 crate 的公开 API 验证完整能力；不新增源码内单元测试、其他 crate 测试、Flutter widget/integration 测试或发布脚本测试。两库测试通过本地模拟供应商或脚本化模型运行；`pl-core` 不依赖 `pl-model`。上游预置技能自带的测试源码保持原样，但不进入本项目门禁。测试设计与失败传播遵循 [test-quality](.agents/skills/test-quality/SKILL.md)，具体边界见 [测试设计](design/24-testing.md)。
+- 项目自有的常规自动化用例仅位于 `pl-model/tests/` 与 `pl-core/tests/`，只通过被测 crate 的公开 API 验证完整能力；仅 `pl-studio-runtime` 历史保存与数据迁移允许专项故障注入测试，不为测试扩展生产公共接口。其他 crate 不新增测试，Flutter widget/integration 与发布脚本测试仍不进入门禁。两库测试通过本地模拟供应商或脚本化模型运行；`pl-core` 不依赖 `pl-model`。上游预置技能自带的测试源码保持原样，但不进入本项目门禁。测试设计与失败传播遵循 [test-quality](.agents/skills/test-quality/SKILL.md)，具体边界见 [测试设计](design/24-testing.md)。
 - `code/anywork/pubspec.lock` 是必须纳入 Git 的 canonical 应用依赖快照，不得加入 ignore；
   Flutter 直接依赖升级后必须同步提交重新解析的 lockfile。
 - 代码、构建、依赖或生成输入变更提交前，在本地执行与 CI 一致的检查清单（纯说明性变更按本节首条豁免；只需保证当前环境通过；
@@ -146,6 +146,7 @@ crate 职责、依赖方向与禁止依赖的唯一权威源是 [Crate 边界](d
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test -p pl-model
   cargo test -p pl-core --features sqlite
+  cargo test -p pl-studio-runtime
   cargo xtask verify-gui
   ```
 
@@ -157,7 +158,7 @@ crate 职责、依赖方向与禁止依赖的唯一权威源是 [Crate 边界](d
   API key，需要时以 `cargo run -p pl-studio-runtime --features live-tests --example model_observe -- <provider> <model> <task-file> <artifact-dir>` 等显式
   opt-in 执行，CI 与本地默认检查都不包含。
 - 真实模型和 GUI 任务使用人工观察入口；本地模拟验收记录执行结果和证据，不把模拟通过等同于真实供应商兼容。人工结论独立记录，默认为待评审。
-- CI（PR Quality Gate）只运行两库的确定性公开 API 集成测试、格式、静态分析、编译和 GUI 生成一致性检查，另执行 Conventional PR 标题、工作流静态检查及发布配置检查；GUI 人工验收与 live 模型观察不在 CI 中运行。GUI 行为改动交付前运行 `cargo xtask manual-gui`，核对截图、快照、日志和进程回收。
+- CI（PR Quality Gate）运行两库的确定性公开 API 集成测试与 Studio 历史保存专项故障测试，并保留格式、静态分析、编译和 GUI 生成一致性检查，另执行 Conventional PR 标题、工作流静态检查及发布配置检查；GUI 人工验收与 live 模型观察不在 CI 中运行。GUI 行为改动交付前运行 `cargo xtask manual-gui`，核对截图、快照、日志和进程回收。
 - `cargo doc --workspace --all-features --no-deps` 为按需检查项，CI 不执行。
 
 - Flutter、Dart、GUI 和生成文件检查统一使用前文定义的项目命令入口；验收时结合 widget tree、窗口截图和日志判断结果。

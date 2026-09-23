@@ -279,6 +279,18 @@ class _TimelineRowBlock extends StatelessWidget {
                       onToggleReasoning: onToggleReasoning,
                     ),
                   ),
+                  if (!row.saved)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Tooltip(
+                        message: context.l10n.timelinePendingSave,
+                        child: Icon(
+                          Icons.cloud_upload_outlined,
+                          size: 14,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
                   if (row.isRolledBack)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
@@ -704,7 +716,7 @@ class _ReasoningPart extends StatelessWidget {
         ? _reasoningCurrentSummary(group, label)
         : null;
     final semanticsLabel = secondary == null ? label : '$label · $secondary';
-    final details = group.details;
+    final details = expanded ? group.details : '';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -785,8 +797,12 @@ String _reasoningGroupLabel(
   if (isCurrentActivity) {
     return context.l10n.timelineReasoningActive;
   }
-  final summaries = group.summaries.take(3).toList(growable: true);
-  final hiddenCount = group.summaries.length - summaries.length;
+  final allSummaries = group.summaries;
+  final summaries = allSummaries
+      .take(3)
+      .map(_activityPreview)
+      .toList(growable: true);
+  final hiddenCount = allSummaries.length - summaries.length;
   if (hiddenCount > 0) {
     summaries.add('+$hiddenCount');
   }
@@ -803,14 +819,34 @@ String? _reasoningCurrentSummary(
   TimelineReasoningGroup group,
   String mainLabel,
 ) {
-  final latest = group.latestSummary?.trim();
+  String? latest;
+  for (final part in group.parts.reversed) {
+    for (final summary in part.reasoningSummary.reversed) {
+      if (summary.isNotEmpty) {
+        latest = summary;
+        break;
+      }
+    }
+    latest ??= part.text.isEmpty ? null : part.text;
+    if (latest != null) break;
+  }
   if (latest == null || latest.isEmpty) {
     return null;
   }
-  if (latest.toLowerCase() == mainLabel.toLowerCase()) {
+  final short = _activityPreview(latest);
+  if (short.toLowerCase() == mainLabel.toLowerCase()) {
     return null;
   }
-  return latest;
+  return short;
+}
+
+String _activityPreview(String text) {
+  const maxUnits = 160;
+  if (text.length <= maxUnits) return text.trim();
+  var start = text.length - maxUnits;
+  final current = text.codeUnitAt(start);
+  if (current >= 0xDC00 && current <= 0xDFFF) start++;
+  return '…${text.substring(start).trim()}';
 }
 
 class _TimelineActivitySummary extends StatelessWidget {
@@ -916,7 +952,7 @@ class _TimelineActivitySummary extends StatelessWidget {
     );
     if (hasSecondary) {
       return Semantics(
-        key: ValueKey('$label::$secondaryText'),
+        key: ValueKey((label, true)),
         liveRegion: isCurrentActivity,
         label: '$label · $secondaryText',
         excludeSemantics: true,

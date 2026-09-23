@@ -1,59 +1,10 @@
 //! Accepted input items retain stable product identity across queueing, steering and retries.
 use super::{ProjectionError, content::input_content};
-use pl_core::thread::{ThreadEffectBatch, ThreadSnapshot, input::InputState};
+use pl_core::thread::{ThreadSnapshot, input::InputState};
 use pl_protocol::{
     MessagePresentation, ThreadContentLifecycle, ThreadItem, ThreadItemState, ThreadTextChannel,
     ThreadTextItem,
 };
-use std::{collections::BTreeMap, sync::Arc};
-
-pub(in crate::studio) fn project_inputs(
-    thread_id: &str,
-    snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadEffectBatch>],
-) -> Result<Vec<ThreadItem>, ProjectionError> {
-    let commits = journal
-        .iter()
-        .filter(|commit| commit.sequence <= snapshot.commit_sequence)
-        .map(|commit| (commit.sequence, commit.as_ref()))
-        .collect::<BTreeMap<_, _>>();
-    let mut items = Vec::new();
-    for input in snapshot.inputs.iter() {
-        let accepted = commits
-            .get(&input.accepted_sequence)
-            .ok_or_else(|| ProjectionError::MissingInput(input.input.id.clone()))?;
-        let updated = journal
-            .iter()
-            .rev()
-            .filter(|commit| commit.sequence <= snapshot.commit_sequence)
-            .find(|commit| {
-                commit.inputs.iter().any(|change| match change {
-                    pl_core::thread::input::InputChange::Accepted(record) => {
-                        record.input.id == input.input.id
-                    }
-                    pl_core::thread::input::InputChange::Transition { id, .. } => {
-                        id == &input.input.id
-                    }
-                }) || commit
-                    .turn
-                    .as_ref()
-                    .is_some_and(|turn| turn.input_id.as_deref() == Some(input.input.id.as_str()))
-            })
-            .ok_or_else(|| ProjectionError::MissingInput(input.input.id.clone()))?;
-        if let Some(item) = project_input(
-            thread_id,
-            snapshot,
-            input,
-            input.ordinal,
-            accepted.committed_at,
-            updated.sequence,
-            updated.committed_at,
-        )? {
-            items.push(item);
-        }
-    }
-    Ok(items)
-}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn project_input(

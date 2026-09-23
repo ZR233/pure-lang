@@ -221,6 +221,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get persistenceQueueRefresh => 'Refresh diagnostics';
 
   @override
+  String get persistenceHistoryPaused => 'Session history saving is paused';
+
+  @override
+  String get persistenceHistoryQueueFull => 'History queue full';
+
+  @override
+  String get persistenceHistoryWriteFailed => 'History save failed';
+
+  @override
+  String get persistenceHistoryRetry => 'Retry saving and continue';
+
+  @override
+  String get persistenceStatisticsGap =>
+      'Call statistics are incomplete; missing usage is unknown, not zero.';
+
+  @override
   String recoveryGlobalWarning(int count) {
     return '$count recovery issue(s) need attention';
   }
@@ -1000,6 +1016,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get timelineRolledBack => 'Rolled back from active context';
+
+  @override
+  String get timelinePendingSave => 'Waiting to save';
 
   @override
   String get interactionSubmitEmptyAnswersHint =>

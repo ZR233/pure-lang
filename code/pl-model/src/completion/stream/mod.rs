@@ -76,10 +76,12 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                     event = next_event => event,
                     _ = token.cancelled() => {
                         accumulator.cancel_attempt("model invocation cancelled", event_tx);
-                        return Err(crate::completion::CompletionFailure::cancelled(
+                        let mut failure = crate::completion::CompletionFailure::cancelled(
                             PureError::LlmError("model invocation cancelled".to_string()),
                             Box::new(accumulator.accounting()),
-                        ).with_optional_model_observation(accumulator.model_observation()));
+                        ).with_optional_model_observation(accumulator.model_observation());
+                        failure.presentation_items = accumulator.take_presentation_items();
+                        return Err(failure);
                     }
                 }
             }
@@ -97,6 +99,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                     source: Box::new(error),
                     accounting: Box::new(accumulator.accounting()),
                     model_observation: accumulator.model_observation().map(Box::new),
+                    presentation_items: accumulator.take_presentation_items(),
                     cancelled: false,
                 });
             }
@@ -109,6 +112,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                     source: Box::new(error),
                     accounting: Box::new(accumulator.accounting()),
                     model_observation: accumulator.model_observation().map(Box::new),
+                    presentation_items: accumulator.take_presentation_items(),
                     cancelled: false,
                 });
             }
@@ -119,6 +123,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                 source: Box::new(error),
                 accounting: Box::new(accumulator.accounting()),
                 model_observation: accumulator.model_observation().map(Box::new),
+                presentation_items: accumulator.take_presentation_items(),
                 cancelled: false,
             });
         }
@@ -132,6 +137,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
             source: Box::new(source),
             accounting: Box::new(accounting),
             model_observation: model_observation.map(Box::new),
+            presentation_items: accumulator.take_presentation_items(),
             cancelled: false,
         })
 }

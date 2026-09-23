@@ -17,6 +17,10 @@ List<MarkdownComponent> _studioMarkdownInlineComponents(
   _StudioBareWebLink(),
 ];
 
+final RegExp _streamingMarkdownSyntax = RegExp(r'[\r\n\\`*_\[\]()#>~!|]');
+const _longPlainTextThreshold = 1024;
+const _plainTextPageSize = 1024;
+
 class _AgentMarkdown extends ConsumerWidget {
   const _AgentMarkdown({
     required this.id,
@@ -32,6 +36,28 @@ class _AgentMarkdown extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final plainText =
+        !_streamingMarkdownSyntax.hasMatch(text) &&
+        !text.contains('://') &&
+        !text.contains('www.');
+    if (text.length > _longPlainTextThreshold && plainText) {
+      return _PagedPlainText(
+        key: ValueKey('plain-paged-$id'),
+        id: id,
+        text: text,
+        surface: surface,
+      );
+    }
+    if (plainText) {
+      final content = Text(
+        text,
+        key: ValueKey('plain-$id'),
+        style: _markdownBodyStyle(context, surface),
+      );
+      return status == 'streaming'
+          ? SelectionContainer.disabled(child: content)
+          : content;
+    }
     final repaired = repairAgentMarkdownForDisplay(text);
     return GptMarkdown(
       repaired,
@@ -73,6 +99,88 @@ class _AgentMarkdown extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _PagedPlainText extends StatefulWidget {
+  const _PagedPlainText({
+    required this.id,
+    required this.text,
+    required this.surface,
+    super.key,
+  });
+
+  final String id;
+  final String text;
+  final _MarkdownSurface surface;
+
+  @override
+  State<_PagedPlainText> createState() => _PagedPlainTextState();
+}
+
+class _PagedPlainTextState extends State<_PagedPlainText> {
+  int _page = 0;
+  bool _followTail = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = widget.text;
+    final boundaries = <int>[0];
+    while (boundaries.last < text.length) {
+      var end = math.min(boundaries.last + _plainTextPageSize, text.length);
+      if (end < text.length) {
+        final previous = text.codeUnitAt(end - 1);
+        final next = text.codeUnitAt(end);
+        if (previous >= 0xD800 &&
+            previous <= 0xDBFF &&
+            next >= 0xDC00 &&
+            next <= 0xDFFF) {
+          end -= 1;
+        }
+      }
+      boundaries.add(end);
+    }
+    final last = boundaries.length - 2;
+    final page = _followTail ? last : _page.clamp(0, last);
+    final start = boundaries[page];
+    final end = boundaries[page + 1];
+    final material = MaterialLocalizations.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SelectableText(
+          text.substring(start, end),
+          key: ValueKey('plain-page-${widget.id}-$page'),
+          style: _markdownBodyStyle(context, widget.surface),
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: material.previousPageTooltip,
+              onPressed: page == 0
+                  ? null
+                  : () => setState(() {
+                      _followTail = false;
+                      _page = page - 1;
+                    }),
+              icon: const Icon(Icons.chevron_left),
+            ),
+            Text('${start + 1}–$end / ${text.length}'),
+            IconButton(
+              tooltip: material.nextPageTooltip,
+              onPressed: page == last
+                  ? null
+                  : () => setState(() {
+                      _page = page + 1;
+                      _followTail = _page == last;
+                    }),
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

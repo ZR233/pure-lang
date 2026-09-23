@@ -22,28 +22,3 @@ impl StudioRuntime {
             .await
     }
 }
-
-pub(super) fn rolled_back_turns(
-    snapshot: &pl_core::thread::ThreadSnapshot,
-) -> std::collections::BTreeSet<String> {
-    let mut removed = std::collections::BTreeSet::new();
-    for replacement in snapshot.context_replacements.iter() {
-        if replacement.reason != pl_core::thread::ContextReplacementReason::Rewind {
-            continue;
-        }
-        let retained = replacement
-            .current
-            .records
-            .iter()
-            .filter_map(|record| record.turn_id.as_ref())
-            .collect::<std::collections::BTreeSet<_>>();
-        for record in replacement.previous.records.iter() {
-            if let Some(turn) = &record.turn_id
-                && !retained.contains(turn)
-            {
-                removed.insert(turn.clone());
-            }
-        }
-    }
-    removed
-}

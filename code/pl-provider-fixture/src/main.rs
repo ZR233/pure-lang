@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use pl_provider_fixture::{FixtureServer, ReadyFile, gui_script};
+use pl_provider_fixture::{FixtureServer, ReadyFile, gui_script, gui_stress_script};
 
 #[derive(Parser)]
 struct Args {
@@ -12,6 +12,8 @@ struct Args {
     ready_file: PathBuf,
     #[arg(long)]
     requests_file: Option<PathBuf>,
+    #[arg(long)]
+    report_file: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -19,6 +21,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let steps = match args.scenario.as_str() {
         "gui" => gui_script(),
+        "stress" => gui_stress_script(),
         value => bail!("unknown fixture scenario: {value}"),
     };
     let fixture = FixtureServer::start(steps).await?;
@@ -47,6 +50,9 @@ async fn main() -> Result<()> {
         .context("fixture shutdown failed")?;
     if let Some(path) = args.requests_file.as_ref() {
         write_json(path, &report.requests)?;
+    }
+    if let Some(path) = args.report_file.as_ref() {
+        write_json(path, &report.stress)?;
     }
     report.verify().context("fixture scenario failed")?;
     println!(

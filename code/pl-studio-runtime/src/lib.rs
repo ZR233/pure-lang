@@ -5,6 +5,12 @@
 
 pub(crate) use pl_core::context::content_hash as canonical_content_hash;
 pub(crate) use pl_protocol::*;
+// Public Studio chat signatures use the core timeline types; adapters need no direct
+// dependency on the execution kernel to name them.
+pub use pl_core::chat::Direction as ChatDirection;
+pub use pl_core::chat::{
+    ChatError, ChatFocus, ChatItem, ChatSnapshot, ChatUpdate, ChatUpdates, ChatView, ViewChange,
+};
 mod hash;
 
 pub mod agent;
@@ -75,9 +81,6 @@ pub use studio::{
     StudioRuntimeStateKind, StudioStartNewThreadResponse, StudioStore, StudioThreadSubscription,
     StudioUpdateStateSnapshot, StudioWorktreeRecoveryPreview, ThreadRecord,
 };
-// Explicit, operator-invoked one-time conversion of a pre-`catalog.toml` installation. It shares the
-// coordinator's phase machine with normal startup and never starts the runtime.
-pub use studio::session_migration::{LegacyMigrationOutcome, migrate_legacy_storage};
 pub use updater::{
     StudioUpdate, StudioUpdateAsset, StudioUpdateCancellation, StudioUpdateCheck,
     StudioUpdateError, StudioUpdateErrorCode, StudioUpdateEvent, StudioUpdater,

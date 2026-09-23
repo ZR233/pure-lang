@@ -34,18 +34,6 @@ impl StudioRuntime {
         *slot = Some(BackgroundTask::new(tokio::spawn(async move {
             let mut issues = Vec::new();
             let result = async {
-                if let Some(notice) = &runtime.startup_recovery_notice {
-                    issues.push(crate::StudioRecoveryIssue {
-                        id: "fresh-start-archive".into(),
-                        scope: crate::StudioRecoveryIssueScope::Application,
-                        category: crate::StudioRecoveryIssueCategory::Storage,
-                        action: crate::StudioRecoveryIssueAction::None,
-                        project_id: None,
-                        thread_id: None,
-                        message: notice.archive.display().to_string(),
-                        worktree: None,
-                    });
-                }
                 let stage = crate::startup_timing::Stage::new("recover_sessions");
                 runtime.append_session_recovery_issues(&mut issues).await?;
                 drop(stage);

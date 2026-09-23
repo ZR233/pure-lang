@@ -186,6 +186,13 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     fs::create_dir(&home)?;
     let ready_file = working.path().join("fixture-ready.json");
     let requests_file = working.path().join("requests.json");
+    let stress_report_file = working.path().join("stress-report.json");
+    let probe_stop = working.path().join("probe-stop");
+    let probe_report = working.path().join("probe-report.json");
+    let probe_frames = working.path().join("probe-frames.json");
+    let stress_stage = working.path().join("stress-stage");
+    let probe_ready = working.path().join("probe-ready");
+    let probe_finished = working.path().join("probe-finished");
     let fixture_log_path = working.path().join("fixture.log");
     let fixture_log = File::create(&fixture_log_path)?;
     let mut fixture_command = Command::new("cargo");
@@ -197,12 +204,14 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             "pl-provider-fixture",
             "--",
             "--scenario",
-            "gui",
+            &options.scenario,
             "--ready-file",
         ])
         .arg(&ready_file)
         .arg("--requests-file")
         .arg(&requests_file)
+        .arg("--report-file")
+        .arg(&stress_report_file)
         .stdout(Stdio::from(fixture_log.try_clone()?))
         .stderr(Stdio::from(fixture_log));
     #[cfg(windows)]
@@ -226,6 +235,10 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             return Err(error);
         }
     };
+    ensure!(
+        ready.scenario == options.scenario,
+        "fixture scenario does not match request"
+    );
     if let Err(error) = write_config(&home, &ready) {
         let _ = fixture.stop(&requests_file);
         drop(fixture);
@@ -242,6 +255,9 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         .env("ANYWORK_HOME", &home)
         .stdout(Stdio::from(gui_log.try_clone()?))
         .stderr(Stdio::from(gui_log));
+    if options.scenario == "stress" {
+        gui_command.arg("--profile");
+    }
     let mut gui = match OwnedProcess::start(&mut gui_command, false) {
         Ok(gui) => gui,
         Err(error) => {
@@ -254,7 +270,59 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     };
     let session = (|| -> Result<()> {
         let vm_url = wait_for_vm(&gui_log_path, &mut gui, &mut fixture, &interrupt_rx)?;
+        let mut probe = None;
         println!("Native GUI is ready. Evidence: {}", output.display());
+        if options.scenario == "stress" {
+            let project = working.path().join("stress-project");
+            fs::create_dir(&project)?;
+            let git = Command::new("git")
+                .args(["init", "-q"])
+                .arg(&project)
+                .status()?;
+            ensure!(
+                git.success(),
+                "failed to initialize isolated stress project"
+            );
+            let mut command = Command::new("dart");
+            command
+                .current_dir(&app_dir)
+                .args(["run", "test_driver/stress_probe.dart", &vm_url])
+                .arg(&probe_stop)
+                .arg(&probe_report)
+                .arg(&probe_ready)
+                .arg(&probe_frames)
+                .arg(&probe_finished)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            probe = Some(OwnedProcess::start(&mut command, false)?);
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !probe_ready.exists() {
+                if let Some(process) = probe.as_mut() {
+                    ensure!(
+                        !process.exited()?,
+                        "GUI stress probe exited before attaching"
+                    );
+                }
+                ensure!(
+                    interrupt_rx.try_recv().is_err(),
+                    "GUI stress probe cancelled"
+                );
+                ensure!(Instant::now() < deadline, "GUI stress probe did not attach");
+                thread::sleep(Duration::from_millis(100));
+            }
+            start_stress_turn(
+                &app_dir,
+                &home,
+                &vm_url,
+                &project,
+                pl_provider_fixture::GUI_STRESS_PROMPT,
+                &stress_stage,
+                &interrupt_rx,
+            )?;
+            println!(
+                "Stress prompt submitted through Flutter Driver; inspect GUI and type done after completion."
+            );
+        }
         println!(
             "Record actions one per line: open-project, create-thread, select-model, send-prompt, inspect-response, stop-turn, open-settings, edit-settings, save-settings, other. Type done to capture and shut down; Ctrl-C cancels. Only action codes are saved."
         );
@@ -298,6 +366,31 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
                     continue;
                 }
                 Ok(InputEvent::Done) => {
+                    if let Some(probe) = probe.as_mut() {
+                        let deadline = Instant::now() + Duration::from_secs(120);
+                        while !probe_finished.exists() {
+                            ensure!(Instant::now() < deadline, "GUI stress turn did not finish");
+                            ensure!(
+                                !probe.exited()?,
+                                "GUI stress probe exited before completion"
+                            );
+                            ensure!(!gui.exited()?, "GUI exited before stress completion");
+                            ensure!(!fixture.exited()?, "provider fixture exited during stress");
+                            ensure!(
+                                interrupt_rx.try_recv().is_err(),
+                                "GUI stress wait cancelled"
+                            );
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                        thread::sleep(Duration::from_secs(1));
+                        fs::write(&probe_stop, "stop")?;
+                        let deadline = Instant::now() + Duration::from_secs(25);
+                        while !probe.exited()? {
+                            ensure!(Instant::now() < deadline, "GUI stress probe did not stop");
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                        ensure!(probe.child.wait()?.success(), "GUI stress probe failed");
+                    }
                     capture(&app_dir, &home, &vm_url, &output, &interrupt_rx)?;
                     return Ok(());
                 }
@@ -317,10 +410,37 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         }
     })();
     let gui_log_result = write_sanitized_log(&gui_log_path, &output.join("gui.log"));
+    if stress_stage.exists() {
+        fs::copy(&stress_stage, output.join("stress-stage.txt"))?;
+    }
+    let stress_screenshot = stress_stage.with_extension("png");
+    if stress_screenshot.exists() {
+        fs::copy(stress_screenshot, output.join("stress-start.png"))?;
+    }
+    let stress_tree = stress_stage.with_extension("tree");
+    if stress_tree.exists() {
+        fs::copy(stress_tree, output.join("stress-start.tree"))?;
+    }
+    if probe_report.exists() {
+        fs::copy(&probe_report, output.join("probe-report.json"))?;
+    }
+    if probe_frames.exists() {
+        fs::copy(&probe_frames, output.join("probe-frames.json"))?;
+    }
     drop(gui);
     let fixture_result = fixture.stop(&requests_file);
     drop(fixture);
     write_fixture_log(&fixture_log_path, &output.join("fixture.log"))?;
+    let stress_report: Option<pl_provider_fixture::StressReport> = if stress_report_file.exists() {
+        let report = serde_json::from_slice(&fs::read(&stress_report_file)?)?;
+        fs::write(
+            output.join("stress-report.json"),
+            serde_json::to_vec_pretty(&report)?,
+        )?;
+        report
+    } else {
+        None
+    };
     let requests = if requests_file.exists() {
         sanitize_requests(&requests_file, &output.join("requests.json"))?;
         Some(serde_json::from_slice::<Vec<serde_json::Value>>(
@@ -355,12 +475,14 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         output.join("fixture-status.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
             "scenario": fixture_state, "acceptedRequests": accepted, "rejectedRequests": rejected,
+            "emittedEvents": stress_report.as_ref().map(|report| report.emitted_events),
+            "elapsedMillis": stress_report.as_ref().map(|report| report.elapsed_millis),
         }))?,
     )?;
     println!("Evidence: {} (human verdict pending)", output.display());
     gui_log_result?;
-    session?;
     if fixture_state == "pending" {
+        session?;
         println!("Fixture main step was not exercised; review remains pending.");
         return Ok(());
     }
@@ -368,6 +490,149 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         fixture_state == "completed",
         "fixture {fixture_state}; verdict remains pending"
     );
+    session?;
+    if options.scenario == "stress" {
+        let report = stress_report.context("stress fixture did not emit a report")?;
+        let gui_errors = count_gui_errors(&gui_log_path)?;
+        let debug_log = output.join("gui-debug.log");
+        fs::copy(&gui_log_path, &debug_log)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&debug_log, fs::Permissions::from_mode(0o600))?;
+        }
+        fs::write(
+            output.join("gui-health.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "unhandledErrors": gui_errors, "humanVerdict": "pending"
+            }))?,
+        )?;
+        ensure!(
+            gui_errors == 0,
+            "GUI reported {gui_errors} unhandled errors during stress"
+        );
+        ensure!(
+            report.emitted_events == pl_provider_fixture::STRESS_EVENT_COUNT,
+            "stress stream incomplete: {}/{} events",
+            report.emitted_events,
+            pl_provider_fixture::STRESS_EVENT_COUNT
+        );
+        ensure!(
+            report.elapsed_millis >= 3_800,
+            "stress stream ran faster than 5,000 nominal tokens/s"
+        );
+        ensure!(
+            report.elapsed_millis <= 10_000,
+            "stress stream fell behind the 5,000 token/s fixture: {}ms for {} items",
+            report.elapsed_millis,
+            report.emitted_events
+        );
+        let finished = report
+            .finished_unix_millis
+            .context("stress stream did not finish")?;
+        let gui_finished: u128 = fs::read_to_string(&probe_finished)?
+            .trim()
+            .parse()
+            .context("GUI stress probe did not report its completion time")?;
+        let completion_lag = gui_finished.saturating_sub(finished);
+        ensure!(
+            completion_lag <= 15_000,
+            "GUI stress result lagged provider completion by {completion_lag}ms"
+        );
+        let samples: Vec<serde_json::Value> = serde_json::from_slice(
+            &fs::read(&probe_report).context("GUI stress probe did not write a report")?,
+        )?;
+        let overlapping: Vec<_> = samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("startedUnixMillis")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some_and(|time| {
+                        u128::from(time) >= report.started_unix_millis
+                            && u128::from(time) < finished
+                    })
+            })
+            .collect();
+        let failed = overlapping
+            .iter()
+            .filter(|sample| sample.get("ok") != Some(&serde_json::Value::Bool(true)))
+            .count();
+        let slowest = overlapping
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("elapsedMillis")
+                    .and_then(serde_json::Value::as_u64)
+            })
+            .max()
+            .unwrap_or(0);
+        let frames: serde_json::Value = serde_json::from_slice(
+            &fs::read(&probe_frames).context("GUI stress probe did not write frame timings")?,
+        )?;
+        let frame_samples = frames
+            .get("samples")
+            .and_then(serde_json::Value::as_array)
+            .context("GUI frame timing samples are unavailable")?;
+        let stream_frames: Vec<f64> = frame_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("completedUnixMillis")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some_and(|time| {
+                        u128::from(time) >= report.started_unix_millis
+                            && u128::from(time) < finished.saturating_add(1_000)
+                    })
+            })
+            .filter_map(|sample| {
+                sample
+                    .get("totalMillis")
+                    .and_then(serde_json::Value::as_f64)
+            })
+            .collect();
+        let slow_frames = stream_frames.iter().filter(|&&ms| ms > 33.333).count();
+        let slowest_frame = stream_frames.iter().copied().fold(0.0_f64, f64::max);
+        fs::write(
+            output.join("responsiveness.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "samplesDuringStream": overlapping.len(), "failed": failed,
+                "slowestSnapshotMillis": slowest,
+                "providerStreamMillis": report.elapsed_millis,
+                "guiCompletionLagMillis": completion_lag,
+                "streamAndDrainFrames": stream_frames.len(),
+                "streamAndDrainOver33Millis": slow_frames,
+                "streamAndDrainMaxFrameMillis": slowest_frame,
+                "fullSessionFrameTimings": {
+                    "frames": frames.get("frames"),
+                    "over33Millis": frames.get("over33Millis"),
+                    "maxFrameMillis": frames.get("maxFrameMillis"),
+                },
+                "verdict": "pending"
+            }))?,
+        )?;
+        ensure!(
+            stream_frames.len() >= 5,
+            "GUI did not report enough frames during the stress stream"
+        );
+        ensure!(
+            slowest_frame <= 100.0 && slow_frames * 20 <= stream_frames.len(),
+            "GUI stream frames stalled: max {slowest_frame:.1}ms, {slow_frames}/{} over 33ms",
+            stream_frames.len()
+        );
+        ensure!(
+            overlapping.len() >= 5,
+            "GUI was not probed during stress stream"
+        );
+        ensure!(
+            failed == 0,
+            "GUI snapshot probe failed {failed} times during stress stream"
+        );
+        ensure!(
+            slowest <= 2_000,
+            "GUI snapshot stalled for {slowest}ms during stress stream"
+        );
+    }
     Ok(())
 }
 
@@ -426,8 +691,8 @@ fn validate_ready(ready: &FixtureReady) -> Result<()> {
         "fixture base_url must be http://127.0.0.1:<port>/v1"
     );
     ensure!(
-        ready.scenario == "gui",
-        "fixture ready-file scenario must be gui"
+        matches!(ready.scenario.as_str(), "gui" | "stress"),
+        "unsupported fixture scenario"
     );
     ensure!(
         ready.ws_url == ready.base_url.replacen("http://", "ws://", 1),
@@ -550,6 +815,47 @@ fn capture(
     }
 }
 
+fn start_stress_turn(
+    app_dir: &Path,
+    home: &Path,
+    vm_url: &str,
+    project: &Path,
+    prompt: &str,
+    stage: &Path,
+    interrupt: &mpsc::Receiver<()>,
+) -> Result<()> {
+    let mut command = Command::new("dart");
+    command
+        .current_dir(app_dir)
+        .args(["run", "test_driver/stress_start.dart", vm_url])
+        .arg(project)
+        .arg(prompt)
+        .arg(stage)
+        .env("ANYWORK_HOME", home)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut drive = OwnedProcess::start(&mut command, false)?;
+    let deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        if let Some(status) = drive.child.try_wait()? {
+            ensure!(
+                status.success(),
+                "Flutter Driver could not submit the stress prompt (last stage: {})",
+                fs::read_to_string(stage).unwrap_or_else(|_| "connect".to_owned())
+            );
+            drive.stopped = true;
+            return Ok(());
+        }
+        ensure!(interrupt.try_recv().is_err(), "stress startup cancelled");
+        ensure!(
+            Instant::now() < deadline,
+            "stress GUI actions timed out (last stage: {})",
+            fs::read_to_string(stage).unwrap_or_else(|_| "connect".to_owned())
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn write_sanitized_log(source: &Path, destination: &Path) -> Result<()> {
     let log = fs::read_to_string(source)?;
     let mut output = File::create(destination)?;
@@ -565,9 +871,29 @@ fn write_sanitized_log(source: &Path, destination: &Path) -> Result<()> {
             writeln!(output, "vm_service=ready (address redacted)")?;
         } else if line.contains("resident command exited:") {
             writeln!(output, "gui_process=exited")?;
+        } else if let Some(metrics) = line.split("timeline_frame_work ").nth(1)
+            && metrics
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b' ' | b'=' | b'_' | b'\r'))
+        {
+            writeln!(output, "timeline_frame_work {metrics}")?;
         }
     }
     Ok(())
+}
+
+fn count_gui_errors(source: &Path) -> Result<usize> {
+    let log = fs::read_to_string(source)?;
+    Ok(log
+        .lines()
+        .filter(|line| {
+            line.contains("Unhandled Exception")
+                || line.contains("EXCEPTION CAUGHT BY")
+                || line.starts_with("E/flutter ")
+                || line.contains("] E/flutter ")
+                || line.contains("ERROR:flutter/runtime")
+        })
+        .count())
 }
 
 fn sanitize_requests(source: &Path, destination: &Path) -> Result<()> {

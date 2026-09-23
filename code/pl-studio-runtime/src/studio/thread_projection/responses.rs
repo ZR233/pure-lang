@@ -3,74 +3,141 @@ use super::{ProjectionError, content::text_content};
 use pl_core::{
     context::ContextContent,
     model::ModelStepOutput,
-    thread::{AttemptOutcome, ThreadEffectBatch, ThreadSnapshot},
+    thread::{AttemptOutcome, ThreadSnapshot},
+};
+use pl_model::completion::{
+    CompletionPresentationItem, CompletionPresentationItemKind, CompletionPresentationPart,
+    CompletionPresentationPartKind,
 };
 use pl_protocol::{
     ThreadContentLifecycle, ThreadItem, ThreadItemState, ThreadTextChannel, ThreadTextItem,
     ThreadThinkingItem,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
-pub(in crate::studio) fn project_responses(
-    thread_id: &str,
-    snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadEffectBatch>],
-) -> Result<Vec<ThreadItem>, ProjectionError> {
-    let mut stamps = BTreeMap::new();
-    for commit in journal
-        .iter()
-        .filter(|commit| commit.sequence <= snapshot.commit_sequence)
-    {
-        if let Some(attempt) = &commit.attempt {
-            let stamp = stamps.entry(attempt.attempt_id.as_str()).or_insert((
-                commit.sequence,
-                commit.committed_at,
-                commit.sequence,
-                commit.committed_at,
-            ));
-            stamp.2 = commit.sequence;
-            stamp.3 = commit.committed_at;
-        }
-    }
-    let mut items = Vec::new();
-    for attempt in snapshot.attempts.iter() {
-        let &(ordinal, created_at, revision, updated_at) = stamps
-            .get(attempt.attempt_id.as_str())
-            .ok_or_else(|| ProjectionError::MissingAttempt(attempt.attempt_id.clone()))?;
-        items.extend(project_attempt(
-            thread_id,
-            snapshot,
-            attempt,
-            ordinal,
-            created_at,
-            revision,
-            updated_at,
-            &BTreeSet::new(),
-        )?);
-    }
-    Ok(items)
-}
-
-/// Terminal streaming channels an attempt actually started.
+/// Terminal streaming identities an attempt actually started.
 ///
-/// The channel identity is fixed by the attempt id, so the caller supplies the same set to the
-/// durable writer and to the live projection from one durable fact (an existing history item or a
-/// reserved ordinal). A channel that never streamed is absent, so no empty placeholder is created.
+/// Aggregate preview identities are probed even for itemized responses so an earlier preview can
+/// be closed without emitting duplicate aggregate content. Provider part identities use the same
+/// function as terminal projection and the caller's durable item/reservation fact.
 pub(in crate::studio) fn started_channels(
-    attempt_id: &str,
+    attempt: &pl_core::thread::RequestAttempt,
+    known_ids: impl IntoIterator<Item = String>,
     started: impl Fn(&str) -> bool,
 ) -> BTreeSet<String> {
     let mut channels = BTreeSet::new();
     for kind in ["reasoning", "text"] {
-        let id = super::order::response_id(attempt_id, kind);
+        let id = super::order::response_id(&attempt.attempt_id, kind);
         if started(&id) {
             channels.insert(id);
         }
     }
+    let output = match &attempt.outcome {
+        AttemptOutcome::Committed(output)
+        | AttemptOutcome::Rejected { output, .. }
+        | AttemptOutcome::Cancelled { result: Ok(output) } => Some(output),
+        _ => None,
+    };
+    // A malformed receipt is projected as Raw by project_attempt, not as presentation content.
+    if let Some(Ok(Some(receipt))) = output.map(pl_model::runtime::model_response_receipt) {
+        for id in super::order::presentation_ids(
+            &attempt.attempt_id,
+            &receipt.response.presentation_items,
+        ) {
+            if started(&id) {
+                channels.insert(id);
+            }
+        }
+    }
+    let prefix = super::order::presentation_prefix(&attempt.attempt_id);
+    for id in known_ids {
+        if id.starts_with(&prefix) && started(&id) {
+            channels.insert(id);
+        }
+    }
     channels
+}
+
+/// Closes preview parts absent from a terminal receipt (notably a bounded failure preview).
+/// The previous item is required to preserve its channel and partially streamed content.
+pub(super) fn finalize_missing_presentation(
+    thread_id: &str,
+    attempt: &pl_core::thread::RequestAttempt,
+    revision: u64,
+    updated_at: i64,
+    finalize: &BTreeSet<String>,
+    existing: &BTreeMap<String, ThreadItem>,
+    items: &mut Vec<ThreadItem>,
+) -> Result<(), ProjectionError> {
+    let lifecycle = match &attempt.outcome {
+        AttemptOutcome::Running => return Ok(()),
+        AttemptOutcome::Committed(_) => ThreadContentLifecycle::completed(updated_at),
+        AttemptOutcome::Rejected { reason, .. } => {
+            ThreadContentLifecycle::failed(updated_at, reason.to_string())
+        }
+        AttemptOutcome::Failed(error) => {
+            ThreadContentLifecycle::failed(updated_at, error.to_string())
+        }
+        AttemptOutcome::Cancelled { result: Ok(_) } => ThreadContentLifecycle::cancelled(
+            updated_at,
+            "The model returned after cancellation; this output was not committed to context."
+                .into(),
+        ),
+        AttemptOutcome::Cancelled { result: Err(error) } => {
+            ThreadContentLifecycle::cancelled(updated_at, error.to_string())
+        }
+        AttemptOutcome::Interrupted => ThreadContentLifecycle::cancelled(
+            updated_at,
+            "Execution interrupted before recovery".into(),
+        ),
+    };
+    let prefix = super::order::presentation_prefix(&attempt.attempt_id);
+    let emitted = items
+        .iter()
+        .map(|item| item.id.clone())
+        .collect::<BTreeSet<_>>();
+    for id in finalize.iter().filter(|id| id.starts_with(&prefix)) {
+        if emitted.contains(id) {
+            continue;
+        }
+        let previous = existing.get(id).ok_or_else(|| {
+            ProjectionError::History(format!("missing previously started provider item {id}"))
+        })?;
+        if previous.is_terminal() {
+            continue;
+        }
+        let state = match previous.state() {
+            ThreadItemState::Text(text) => ThreadItemState::Text(ThreadTextItem::new(
+                text.channel(),
+                text.text().to_owned(),
+                text.attachments().to_vec(),
+                lifecycle.clone(),
+            )),
+            ThreadItemState::Thinking(thinking) => {
+                ThreadItemState::Thinking(ThreadThinkingItem::new(
+                    thinking.summary().to_vec(),
+                    thinking.content().to_vec(),
+                    lifecycle.clone(),
+                ))
+            }
+            _ => {
+                return Err(ProjectionError::UnsupportedOutput(
+                    "started provider presentation has no content state".into(),
+                ));
+            }
+        };
+        items.push(ThreadItem::new(
+            id.clone(),
+            thread_id.into(),
+            attempt.turn_id.clone(),
+            previous.ordinal,
+            revision,
+            previous.created_at,
+            updated_at,
+            state,
+        ));
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -188,6 +255,7 @@ pub(super) fn project_attempt(
             ResponseContent {
                 text: String::new(),
                 reasoning: None,
+                presentation_items: Vec::new(),
             },
             ThreadContentLifecycle::cancelled(
                 updated_at,
@@ -209,12 +277,59 @@ pub(super) fn project_attempt(
     // 上述终态即使正文为空也要发出，但只对**实际开始过 streaming 的同一 identity channel**
     // 收束；`finalize.contains` 是一次 durable 事实查询的结果，因此 writer 与 live 对同一
     // identity 落相同终态，而从未开始的 channel 不会凭空出现空条目。
-    let terminates_live_channels = matches!(
-        attempt.outcome,
-        AttemptOutcome::Interrupted
-            | AttemptOutcome::Failed(_)
-            | AttemptOutcome::Cancelled { result: Err(_) }
-    );
+    let terminates_live_channels = !matches!(attempt.outcome, AttemptOutcome::Running);
+    if !response.presentation_items.is_empty() {
+        items.extend(project_presentation_items(
+            thread_id,
+            attempt,
+            ordinal,
+            created_at,
+            revision,
+            updated_at,
+            &response.presentation_items,
+            &lifecycle,
+        )?);
+        // The legacy preview has only two aggregate identities. When one was already started,
+        // finalize it without repeating the provider's aggregate text or reasoning.
+        if terminates_live_channels
+            && finalize.contains(&super::order::response_id(&attempt.attempt_id, "reasoning"))
+        {
+            items.push(ThreadItem::new(
+                super::order::response_id(&attempt.attempt_id, "reasoning"),
+                thread_id.into(),
+                attempt.turn_id.clone(),
+                ordinal,
+                revision,
+                created_at,
+                updated_at,
+                ThreadItemState::Thinking(ThreadThinkingItem::new(
+                    Vec::new(),
+                    Vec::new(),
+                    lifecycle.clone(),
+                )),
+            ));
+        }
+        if terminates_live_channels
+            && finalize.contains(&super::order::response_id(&attempt.attempt_id, "text"))
+        {
+            items.push(ThreadItem::new(
+                super::order::response_id(&attempt.attempt_id, "text"),
+                thread_id.into(),
+                attempt.turn_id.clone(),
+                ordinal,
+                revision,
+                created_at,
+                updated_at,
+                ThreadItemState::Text(ThreadTextItem::new(
+                    ThreadTextChannel::Commentary,
+                    String::new(),
+                    Vec::new(),
+                    lifecycle,
+                )),
+            ));
+        }
+        return Ok(items);
+    }
     if let Some(reasoning) = response.reasoning.filter(|text| !text.is_empty()) {
         items.push(ThreadItem::new(
             super::order::response_id(&attempt.attempt_id, "reasoning"),
@@ -284,6 +399,104 @@ pub(super) fn project_attempt(
         ));
     }
     Ok(items)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn project_presentation_items(
+    thread_id: &str,
+    attempt: &pl_core::thread::RequestAttempt,
+    ordinal: u64,
+    created_at: i64,
+    revision: u64,
+    updated_at: i64,
+    presentation_items: &[CompletionPresentationItem],
+    lifecycle: &ThreadContentLifecycle,
+) -> Result<Vec<ThreadItem>, ProjectionError> {
+    let mut projected = Vec::new();
+    let mut ids = BTreeSet::new();
+    for item in presentation_items {
+        for part in item
+            .parts
+            .iter()
+            .map(Some)
+            .chain(item.parts.is_empty().then_some(None))
+        {
+            let id = super::order::presentation_id(
+                &attempt.attempt_id,
+                &item.provider_item_id,
+                part.map(super::order::presentation_part),
+            );
+            if !ids.insert(id.clone()) {
+                return Err(ProjectionError::UnsupportedOutput(
+                    "duplicate provider presentation identity".into(),
+                ));
+            }
+            let state = match (item.kind, part) {
+                (CompletionPresentationItemKind::Text(channel), None)
+                | (
+                    CompletionPresentationItemKind::Text(channel),
+                    Some(CompletionPresentationPart {
+                        kind: CompletionPresentationPartKind::OutputText,
+                        ..
+                    }),
+                ) => {
+                    let channel = match channel {
+                        pl_protocol::trace::TraceTextChannel::User => ThreadTextChannel::User,
+                        pl_protocol::trace::TraceTextChannel::Commentary => {
+                            ThreadTextChannel::Commentary
+                        }
+                        pl_protocol::trace::TraceTextChannel::Final => ThreadTextChannel::Final,
+                    };
+                    ThreadItemState::Text(ThreadTextItem::new(
+                        channel,
+                        part.map_or_else(String::new, |part| part.text.clone()),
+                        Vec::new(),
+                        lifecycle.clone(),
+                    ))
+                }
+                (CompletionPresentationItemKind::Reasoning, None)
+                | (
+                    CompletionPresentationItemKind::Reasoning,
+                    Some(CompletionPresentationPart {
+                        kind: CompletionPresentationPartKind::ReasoningText,
+                        ..
+                    }),
+                ) => ThreadItemState::Thinking(ThreadThinkingItem::new(
+                    Vec::new(),
+                    part.map_or_else(Vec::new, |part| vec![part.text.clone()]),
+                    lifecycle.clone(),
+                )),
+                (
+                    CompletionPresentationItemKind::Reasoning,
+                    Some(CompletionPresentationPart {
+                        kind: CompletionPresentationPartKind::SummaryText,
+                        text,
+                        ..
+                    }),
+                ) => ThreadItemState::Thinking(ThreadThinkingItem::new(
+                    vec![text.clone()],
+                    Vec::new(),
+                    lifecycle.clone(),
+                )),
+                _ => {
+                    return Err(ProjectionError::UnsupportedOutput(
+                        "provider presentation part does not match its item".into(),
+                    ));
+                }
+            };
+            projected.push(ThreadItem::new(
+                id,
+                thread_id.into(),
+                attempt.turn_id.clone(),
+                ordinal,
+                revision,
+                created_at,
+                updated_at,
+                state,
+            ));
+        }
+    }
+    Ok(projected)
 }
 
 fn inference_item(
@@ -363,31 +576,51 @@ fn inference_item(
 struct ResponseContent {
     text: String,
     reasoning: Option<String>,
+    presentation_items: Vec<CompletionPresentationItem>,
 }
 
 fn failure_content(error: &pl_core::model::ModelError) -> Result<ResponseContent, ProjectionError> {
-    let progress = if error
+    let receipt = error
         .details
         .as_ref()
         .is_some_and(|details| details.format() == "pl.model.failure")
+        .then(|| pl_model::runtime::model_failure_receipt(error))
+        .transpose()?
+        .flatten();
+    let mut content = match receipt
+        .as_ref()
+        .and_then(|receipt| receipt.partial_progress.as_ref())
     {
-        pl_model::runtime::model_failure_receipt(error)?
-            .and_then(|receipt| receipt.partial_progress)
-    } else {
-        None
-    };
-    match progress {
-        Some(progress) => progress_content(&progress),
-        None => Ok(ResponseContent {
+        Some(progress) => progress_content(progress)?,
+        None => ResponseContent {
             text: String::new(),
             reasoning: None,
-        }),
+            presentation_items: Vec::new(),
+        },
+    };
+    if let Some(receipt) = receipt
+        && !receipt.presentation_items.is_empty()
+    {
+        content.presentation_items = receipt.presentation_items;
     }
+    Ok(content)
 }
 
 fn progress_content(
     progress: &pl_core::model::ModelProgress,
 ) -> Result<ResponseContent, ProjectionError> {
+    let presentation_items = progress
+        .presentation
+        .iter()
+        .map(|payload| {
+            if payload.format() != "pl.model.presentation-item" || payload.version() != 1 {
+                return Err(ProjectionError::UnsupportedOutput(
+                    "unsupported model presentation preview".into(),
+                ));
+            }
+            serde_json::from_str(payload.content()).map_err(ProjectionError::Encoding)
+        })
+        .collect::<Result<Vec<CompletionPresentationItem>, _>>()?;
     let reasoning = progress
         .reasoning
         .as_ref()
@@ -403,6 +636,7 @@ fn progress_content(
     Ok(ResponseContent {
         text: text_content(&progress.content),
         reasoning,
+        presentation_items,
     })
 }
 
@@ -428,8 +662,18 @@ fn response_content(output: &ModelStepOutput) -> Result<ResponseContent, Project
             }
         }
     }
+    let (reasoning, presentation_items) = receipt.map_or_else(
+        || (None, Vec::new()),
+        |receipt| {
+            (
+                receipt.response.reasoning_content,
+                receipt.response.presentation_items,
+            )
+        },
+    );
     Ok(ResponseContent {
         text: text_content(&output.content),
-        reasoning: receipt.and_then(|receipt| receipt.response.reasoning_content),
+        reasoning,
+        presentation_items,
     })
 }

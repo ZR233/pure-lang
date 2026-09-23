@@ -1,8 +1,7 @@
 //! `settings.toml`: 产品设置键值对象的 canonical TOML 存储。
 //!
-//! 旧 `app_settings` 表只在持独占锁的一次性 migration 边界被读取（`session_migration` 把
-//! 行转换为本文件后归档旧库）；普通启动与运行期读写都不再访问它。每个 mutation 使用同一把锁
-//! 完成读取-修改-原子替换，`revision` 单调递增并提供幂等 no-op。
+//! 旧 `app_settings` 表属于旧会话版本，v2 不导入；普通启动与运行期只读写本文件。
+//! 每个 mutation 使用同一把锁完成读取-修改-原子替换，`revision` 单调递增并提供幂等 no-op。
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -66,11 +65,6 @@ impl SettingsStore {
             .map(|entry| entry.value.clone())
     }
 
-    /// 当前条目快照；迁移发布用它区分"已有 canonical 条目优先"与"本次新增条目"。
-    pub(in crate::studio) fn entries(&self) -> Vec<SettingEntry> {
-        self.lock().entries.clone()
-    }
-
     pub(in crate::studio) async fn put(&self, key: &str, value: &str) -> Result<()> {
         ensure!(!key.trim().is_empty(), "setting key must not be empty");
         let key = key.to_string();
@@ -114,27 +108,6 @@ impl SettingsStore {
             pl_tool::workspace::write_file_atomically(&path, &contents).map_err(anyhow::Error::from)
         })
         .await?
-    }
-
-    /// Idempotently seeds entries from the retired `app_settings` table (migration boundary only).
-    /// Existing TOML entries win by key.
-    pub(in crate::studio) async fn merge(&self, entries: Vec<SettingEntry>) -> Result<()> {
-        self.mutate(move |document| {
-            let mut changed = false;
-            for entry in entries {
-                if document
-                    .entries
-                    .iter()
-                    .any(|existing| existing.key == entry.key)
-                {
-                    continue;
-                }
-                document.entries.push(entry);
-                changed = true;
-            }
-            changed
-        })
-        .await
     }
 
     async fn mutate(

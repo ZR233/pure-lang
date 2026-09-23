@@ -1,3 +1,4 @@
+use crate::completion::CompletionPresentationItem;
 use pl_protocol::UsageReport;
 use pl_protocol::search::WebSearchAction;
 use pl_protocol::trace::TraceTextChannel;
@@ -73,6 +74,9 @@ pub enum ModelStreamEvent {
     },
     ResponsesContextItem {
         item: ResponsesContextItem,
+    },
+    PresentationItem {
+        item: CompletionPresentationItem,
     },
     WebSearchStarted {
         item_id: String,
@@ -156,6 +160,7 @@ impl ModelStreamEvent {
             | Self::ToolCallReady { .. }
             | Self::ToolCallCaller { .. }
             | Self::ResponsesContextItem { .. }
+            | Self::PresentationItem { .. }
             | Self::WebSearchStarted { .. }
             | Self::WebSearchCompleted { .. }
             | Self::Usage(_)

@@ -140,26 +140,6 @@ pub struct AttachmentRecord {
     pub created_at: i64,
 }
 
-impl AttachmentRecord {
-    pub(crate) fn from_session_entry(
-        entry: &pl_core::storage::SessionEntry,
-    ) -> anyhow::Result<Self> {
-        anyhow::ensure!(
-            entry.type_id == "studio.attachment" && entry.schema_version == 1,
-            "unsupported attachment payload {} version {}",
-            entry.type_id,
-            entry.schema_version
-        );
-        let record: Self = serde_json::from_str(&entry.payload)?;
-        anyhow::ensure!(
-            record.thread_id == entry.session_id
-                && entry.id == format!("pl.resource.{}", record.id),
-            "attachment payload ownership differs from its entry"
-        );
-        Ok(record)
-    }
-}
-
 /// Product directory status; runtime state is projected from the Thread checkpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

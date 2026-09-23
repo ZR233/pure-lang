@@ -116,18 +116,8 @@ impl StudioRuntime {
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             self.agent_facility.persistence.lock().await.take();
         }
-        // 调用库是独立的全局 writer：只等待受理时固定的 ticket 变为 durable，随后停止受理。
-        // 保存失败保留事实并显式上报，绝不在 pending 未清零时报告关机成功。
-        self.store
-            .calls()
-            .flush()
-            .await
-            .context("failed to flush call records")?;
-        self.store
-            .calls()
-            .shutdown()
-            .await
-            .context("failed to shut down the call writer")?;
+        // Call statistics are a lossy projection; they never hold up authoritative history.
+        self.store.calls().stop_best_effort();
         Ok(())
     }
 
@@ -135,7 +125,6 @@ impl StudioRuntime {
     pub async fn pending_persistence_commits(&self) -> usize {
         let repository = self.agent_facility.persistence.lock().await.clone();
         repository.map_or(0, |repository| repository.pending_commit_count())
-            + self.store.calls().pending_count()
             + usize::try_from(self.store.thread_persistence().snapshot().pending_commits)
                 .unwrap_or(usize::MAX)
     }

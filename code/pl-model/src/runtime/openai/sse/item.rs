@@ -1,3 +1,7 @@
+use crate::completion::{
+    CompletionPresentationItem, CompletionPresentationItemKind, CompletionPresentationPart,
+    CompletionPresentationPartKind,
+};
 use serde_json::Value;
 
 use crate::completion::stream::event::{
@@ -198,17 +202,22 @@ pub(super) fn assistant_message_identity(
     Some((item_id, channel))
 }
 
-pub(super) fn assistant_message_text(item: &Value) -> Option<String> {
-    let text = item
-        .get("content")
+pub(super) fn assistant_message_parts(item: &Value) -> Vec<(u32, String)> {
+    item.get("content")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|part| part.get("type").and_then(Value::as_str) == Some("output_text"))
-        .filter_map(|part| part.get("text").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .concat();
-    (!text.is_empty()).then_some(text)
+        .enumerate()
+        .filter_map(|(index, part)| {
+            if part.get("type").and_then(Value::as_str) != Some("output_text") {
+                return None;
+            }
+            Some((
+                u32::try_from(index).ok()?,
+                part.get("text")?.as_str()?.to_owned(),
+            ))
+        })
+        .collect()
 }
 
 pub(super) fn reasoning_item_id(item: &Value) -> Option<String> {
@@ -231,6 +240,59 @@ pub(super) fn reasoning_summary_texts(item: &Value) -> Option<Vec<String>> {
         }
     }
     (!summaries.is_empty()).then_some(summaries)
+}
+
+pub(super) fn presentation_item(
+    item: &Value,
+    output_index: Option<u32>,
+) -> Option<CompletionPresentationItem> {
+    let provider_item_id = item.get("id")?.as_str()?.to_owned();
+    let kind = match item.get("type")?.as_str()? {
+        "message" => {
+            CompletionPresentationItemKind::Text(assistant_message_identity(Some(item))?.1)
+        }
+        "reasoning" => CompletionPresentationItemKind::Reasoning,
+        _ => return None,
+    };
+    let mut parts = Vec::new();
+    for (field, part_kind) in [
+        ("content", CompletionPresentationPartKind::ReasoningText),
+        ("summary", CompletionPresentationPartKind::SummaryText),
+    ] {
+        if let Some(content) = item.get(field).and_then(Value::as_array) {
+            for (index, part) in content.iter().enumerate() {
+                let kind = match part.get("type").and_then(Value::as_str) {
+                    Some("output_text") if field == "content" => {
+                        CompletionPresentationPartKind::OutputText
+                    }
+                    Some("reasoning_text") if field == "content" => {
+                        CompletionPresentationPartKind::ReasoningText
+                    }
+                    Some("summary_text" | "reasoning_summary_text") if field == "summary" => {
+                        part_kind
+                    }
+                    _ => continue,
+                };
+                if let (Ok(content_index), Some(text)) = (
+                    u32::try_from(index),
+                    part.get("text").and_then(Value::as_str),
+                ) {
+                    parts.push(CompletionPresentationPart {
+                        content_index,
+                        provider_part_id: part.get("id").and_then(Value::as_str).map(str::to_owned),
+                        kind,
+                        text: text.to_owned(),
+                    });
+                }
+            }
+        }
+    }
+    Some(CompletionPresentationItem {
+        provider_item_id,
+        output_index,
+        kind,
+        parts,
+    })
 }
 
 fn value_string(value: &Value, field: &str) -> Option<String> {

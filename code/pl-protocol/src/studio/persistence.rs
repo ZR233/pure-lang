@@ -5,11 +5,27 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryFault {
+    QueueFull,
+    WriteFailed,
+    WriterUnavailable,
+    NoProgress,
+    CheckpointFailed,
+    BlobFailed,
+}
+
 /// One Thread's persistence watermarks and queue pressure.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadPersistenceSnapshot {
     pub thread_id: String,
+    /// Generation required by the per-Thread manual recovery command.
+    #[serde(default)]
+    pub fault_generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fault: Option<HistoryFault>,
     /// Newest checkpoint revision admitted for publication; absent when no writer ever reported.
     ///
     /// A `None` is *unknown*, not measured zero: a Thread that only appears through a recovery
@@ -55,6 +71,9 @@ pub struct ThreadPersistenceSnapshot {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PersistenceQueueSnapshot {
+    /// Call statistics may be incomplete; a missing usage value must not be read as zero.
+    #[serde(default)]
+    pub statistics_gap: bool,
     /// Total queued operations across all Threads.
     pub pending_operations: u64,
     /// Total queued bytes across all Threads.

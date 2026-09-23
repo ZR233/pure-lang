@@ -1,9 +1,7 @@
 mod agent_host;
 pub(crate) mod catalog;
-mod collaboration_migration;
 pub(crate) mod entity;
 mod ids;
-mod mappers;
 mod merged_page;
 pub(crate) mod model_route;
 mod paths;
@@ -14,7 +12,6 @@ mod recovery_registry;
 mod runtime;
 mod runtime_lock;
 mod runtime_state;
-pub(crate) mod session_migration;
 mod storage;
 pub(crate) mod store;
 mod store_support;

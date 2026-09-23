@@ -91,6 +91,7 @@ pub(super) async fn compact_context(
         source: Box::new(source),
         accounting: Box::new(accounting.clone()),
         model_observation: model_observation.clone().map(Box::new),
+        presentation_items: response.presentation_items,
         cancelled: false,
     })?;
     Ok(ModelCompactionResponse {

@@ -65,6 +65,9 @@ pub(crate) struct ToolOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub(crate) struct ManualGuiOptions {
+    /// Run the regular or paced 20,000-event provider fixture.
+    #[arg(long, default_value = "gui", value_parser = ["gui", "stress"])]
+    pub(crate) scenario: String,
     /// Directory for sanitized evidence (defaults to target/manual-gui/<timestamp>-<pid>).
     #[arg(long, value_name = "DIR")]
     pub(crate) output: Option<PathBuf>,
@@ -78,6 +81,9 @@ pub(crate) struct RunGuiOptions {
     /// Enable Flutter Driver through test_driver/driver_main.dart.
     #[arg(long)]
     pub(crate) driver: bool,
+    /// Run the Driver in profile/AOT mode for representative frame timings.
+    #[arg(long, requires = "driver")]
+    pub(crate) profile: bool,
     /// Deterministic file-picker result exposed only to the Driver build.
     #[arg(long, value_name = "PATH", requires = "driver")]
     pub(crate) driver_attachment: Option<std::path::PathBuf>,

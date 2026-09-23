@@ -5,7 +5,8 @@ use pl_core::{
 };
 use pl_model::{
     completion::{
-        AttachmentInput, AttachmentModality, AttachmentSource, CompletionRequest, ContentPart,
+        AttachmentInput, AttachmentModality, AttachmentSource, CompletionPresentationItemKind,
+        CompletionPresentationPartKind, CompletionRequest, CompletionTraceContext, ContentPart,
         HostedWebSearchOptions, Message, MessageContent, MessageRole, ModelContextItem,
         ReasoningConfig, ReasoningSummary, ToolCallKind, ToolSpec, programmatic_tool_declaration,
     },
@@ -17,6 +18,7 @@ use pl_model::{
     },
     runtime::{CancellationToken, ModelInvocationContext, ModelRuntime, ModelSession},
 };
+use pl_protocol::trace::{InMemoryTraceEventSink, TraceEventKind, TracePartKind, TraceTextChannel};
 use pl_protocol::{PricingOutcome, ToolCallCaller, ToolResultRecord};
 use pl_provider_fixture::{
     FixtureServer, GUI_PROMPT, Protocol, Reply, RequestMatch, Step, gui_script, responses_text,
@@ -205,6 +207,245 @@ async fn gui_fixture_accepts_either_order_of_main_and_optional_title_requests() 
         assert_eq!(requests.len(), 2);
         assert!(requests.iter().all(|request| request.accepted));
     }
+}
+
+#[tokio::test]
+async fn paced_provider_stream_preserves_all_mixed_events_and_limits_rate() {
+    let fixture = FixtureServer::start(vec![Step::prompt(
+        Protocol::ResponsesHttp,
+        "paced stress wire",
+        0,
+        Reply::PacedSse {
+            events: 1_200,
+            tokens_per_second: 5_000,
+        },
+    )])
+    .await
+    .unwrap();
+    let runtime = ModelRuntime::new(
+        ProviderEndpoint::compatible("fixture", fixture.base_url()),
+        model("fixture-model", ModelTransportProfile::responses_http()),
+    )
+    .unwrap();
+    let sink = Arc::new(InMemoryTraceEventSink::new("paced-session", 0));
+    let result = runtime
+        .complete(
+            request("paced stress wire"),
+            ModelInvocationContext::new(ModelSession::default()).with_trace(
+                CompletionTraceContext {
+                    session_id: "paced-session".into(),
+                    turn_id: "paced-turn".into(),
+                    inference_id: "paced-inference".into(),
+                },
+                sink.clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.accounting.usage.output_tokens, Some(1_200));
+    assert_eq!(result.presentation_items.len(), 1_200);
+    assert_eq!(
+        result
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .matches("answer-")
+            .count(),
+        300
+    );
+    assert_eq!(
+        result
+            .reasoning_content
+            .as_deref()
+            .unwrap_or_default()
+            .matches("thought-")
+            .count(),
+        300
+    );
+    let mut provider_ids = std::collections::BTreeSet::new();
+    for (index, item) in result.presentation_items.iter().enumerate() {
+        assert_eq!(item.provider_item_id, format!("stress-item-{index}"));
+        assert_eq!(item.output_index, Some(index as u32));
+        assert!(provider_ids.insert(&item.provider_item_id));
+        assert_eq!(item.parts.len(), 1);
+        assert_eq!(item.parts[0].content_index, 0);
+        assert_eq!(
+            item.parts[0].provider_part_id.as_deref(),
+            Some(format!("stress-part-{index}").as_str())
+        );
+        assert_eq!(
+            item.parts[0].text,
+            format!(
+                "{}-{index} ",
+                ["answer", "comment", "note", "thought"][index % 4]
+            )
+        );
+    }
+    assert_eq!(
+        result.presentation_items[0].kind,
+        CompletionPresentationItemKind::Text(TraceTextChannel::Final)
+    );
+    assert_eq!(
+        result.presentation_items[1].kind,
+        CompletionPresentationItemKind::Text(TraceTextChannel::Commentary)
+    );
+    assert_eq!(
+        result.presentation_items[2].kind,
+        CompletionPresentationItemKind::Reasoning
+    );
+    assert_eq!(
+        result.presentation_items[2].parts[0].kind,
+        CompletionPresentationPartKind::SummaryText
+    );
+    assert_eq!(
+        result.presentation_items[3].parts[0].kind,
+        CompletionPresentationPartKind::ReasoningText
+    );
+    let trace = sink.events();
+    let started = trace
+        .iter()
+        .filter_map(|event| match &event.kind {
+            TraceEventKind::TracePartStarted { item }
+                if matches!(item.kind(), TracePartKind::Text | TracePartKind::Thinking) =>
+            {
+                Some(item.item_id())
+            }
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(started.len(), 1_200);
+    assert_eq!(
+        trace
+            .iter()
+            .filter(|event| matches!(event.kind, TraceEventKind::TracePartCompleted { .. }))
+            .count(),
+        1_200
+    );
+    let report = fixture.shutdown().await.unwrap();
+    report.verify().unwrap();
+    let stress = report.stress.unwrap();
+    assert_eq!(stress.emitted_events, 1_200);
+    assert!(
+        stress.elapsed_millis >= 230,
+        "fixture exceeded its configured nominal token rate"
+    );
+}
+
+#[tokio::test]
+async fn responses_message_parts_retain_distinct_provider_identity_and_trace_rows() {
+    let events = vec![
+        json!({"type":"response.created","response":{"id":"parts-response","model":"parts-model"}}),
+        json!({"type":"response.output_item.added","output_index":0,"item":{"id":"message-a","type":"message","role":"assistant","content":[]}}),
+        json!({"type":"response.output_text.delta","item_id":"message-a","content_index":1,"delta":"first "}),
+        json!({"type":"response.output_text.delta","item_id":"message-a","content_index":2,"delta":"second"}),
+        json!({"type":"response.output_item.done","output_index":0,"item":{"id":"message-a","type":"message","role":"assistant","content":[{"type":"refusal","refusal":""},{"id":"part-a","type":"output_text","text":"first "},{"id":"part-b","type":"output_text","text":"second"}]}}),
+        json!({"type":"response.completed","response":{"id":"parts-response","model":"parts-model","usage":{"input_tokens":1,"output_tokens":2}}}),
+    ];
+    let fixture = FixtureServer::start(vec![Step::prompt(
+        Protocol::ResponsesHttp,
+        "two parts",
+        0,
+        Reply::Sse(events),
+    )])
+    .await
+    .unwrap();
+    let runtime = ModelRuntime::new(
+        ProviderEndpoint::compatible("fixture", fixture.base_url()),
+        model("parts-model", ModelTransportProfile::responses_http()),
+    )
+    .unwrap();
+    let sink = Arc::new(InMemoryTraceEventSink::new("parts-session", 0));
+    let result = runtime
+        .complete(
+            request("two parts"),
+            ModelInvocationContext::new(ModelSession::default()).with_trace(
+                CompletionTraceContext {
+                    session_id: "parts-session".into(),
+                    turn_id: "parts-turn".into(),
+                    inference_id: "parts-inference".into(),
+                },
+                sink.clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.content.as_deref(), Some("first second"));
+    assert_eq!(result.presentation_items.len(), 1);
+    let item = &result.presentation_items[0];
+    assert_eq!(item.provider_item_id, "message-a");
+    assert_eq!(item.output_index, Some(0));
+    assert_eq!(
+        item.parts
+            .iter()
+            .map(|part| (part.content_index, part.provider_part_id.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![(1, Some("part-a")), (2, Some("part-b"))]
+    );
+    let started = sink
+        .events()
+        .into_iter()
+        .filter_map(|event| match event.kind {
+            TraceEventKind::TracePartStarted { item } if item.kind() == TracePartKind::Text => {
+                Some(item.item_id().to_owned())
+            }
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(started.len(), 2);
+    fixture.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn full_gui_stress_stream_reaches_model_public_api_without_loss() {
+    let fixture = FixtureServer::start(vec![Step::prompt(
+        Protocol::ResponsesHttp,
+        "full paced stress wire",
+        0,
+        Reply::PacedSse {
+            events: pl_provider_fixture::STRESS_EVENT_COUNT,
+            tokens_per_second: pl_provider_fixture::STRESS_TOKENS_PER_SECOND,
+        },
+    )])
+    .await
+    .unwrap();
+    let result = complete(
+        &fixture,
+        model("fixture-model", ModelTransportProfile::responses_http()),
+        request("full paced stress wire"),
+        ModelSession::default(),
+    )
+    .await;
+    assert_eq!(result.accounting.usage.output_tokens, Some(20_000));
+    assert_eq!(result.presentation_items.len(), 20_000);
+    assert_eq!(
+        result.presentation_items[19_999].provider_item_id,
+        "stress-item-19999"
+    );
+    assert_eq!(result.presentation_items[19_999].output_index, Some(19_999));
+    assert_eq!(
+        result
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .matches("answer-")
+            .count(),
+        5_000
+    );
+    assert_eq!(
+        result
+            .reasoning_content
+            .as_deref()
+            .unwrap_or_default()
+            .matches("thought-")
+            .count(),
+        5_000
+    );
+    let report = fixture.shutdown().await.unwrap();
+    report.verify().unwrap();
+    let stress = report.stress.unwrap();
+    assert_eq!(stress.emitted_events, 20_000);
+    assert!(stress.finished_unix_millis.is_some());
+    assert!(stress.elapsed_millis >= 3_800);
 }
 
 #[tokio::test]
@@ -642,6 +883,54 @@ async fn cancellation_unwinds_a_stalled_sse_without_fabricating_usage() {
     assert!(failure.is_cancelled());
     assert_eq!(failure.accounting.usage.input_tokens, None);
     fixture.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn failed_stream_retains_every_received_item_beyond_the_live_window() {
+    let events = std::iter::once(json!({
+        "type": "response.created",
+        "response": { "id": "partial-response", "model": "fixture-model" },
+    }))
+    .chain((0..150).map(|index| {
+        json!({
+            "type": "response.output_item.done",
+            "output_index": index,
+            "item": {
+                "id": format!("partial-item-{index}"),
+                "type": "message",
+                "role": "assistant",
+                "phase": "final_answer",
+                "content": [{"type": "output_text", "text": format!("part-{index}")}],
+            },
+        })
+    }))
+    .collect();
+    let fixture = FixtureServer::start(vec![Step::prompt(
+        Protocol::ResponsesHttp,
+        "incomplete items",
+        0,
+        Reply::Sse(events),
+    )])
+    .await
+    .unwrap();
+    let runtime = ModelRuntime::new(
+        ProviderEndpoint::compatible("fixture", fixture.base_url()),
+        model("fixture-model", ModelTransportProfile::responses_http()),
+    )
+    .unwrap();
+    let failure = runtime
+        .complete(
+            request("incomplete items"),
+            ModelInvocationContext::new(ModelSession::default()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(failure.presentation_items.len(), 150);
+    for (index, item) in failure.presentation_items.iter().enumerate() {
+        assert_eq!(item.provider_item_id, format!("partial-item-{index}"));
+        assert_eq!(item.parts[0].text, format!("part-{index}"));
+    }
+    assert_eq!(fixture.finish().await.unwrap().len(), 1);
 }
 
 #[tokio::test]

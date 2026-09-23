@@ -23,7 +23,7 @@ Cargo.toml 为准；Flutter 应用目录本身不是 workspace 成员，其 Rust
 
 | crate | 所有权 |
 | --- | --- |
-| pl-core | context/model/tool/thread 通用契约、内存 owner、当前状态 checkpoint 与不可变 effect |
+| pl-core | context/model/tool/thread 通用契约、内存 owner、当前状态 checkpoint、不可变 effect，以及产品无关的 Session/ChatView 有界时间线协调 |
 | pl-model | provider/transport、模型目录、配置值对象、路由、媒体编码、缓存、usage 与核心模型会话适配 |
 | pl-tool | 文件、命令、SSH、Git、LSP、MCP、Skill、搜索、交互、笔记、todo、完成和协作工具 |
 | pl-protocol | Studio 与外围 adapter 使用的产品 wire、DTO、错误和业务状态类型 |
@@ -31,7 +31,7 @@ Cargo.toml 为准；Flutter 应用目录本身不是 workspace 成员，其 Rust
 | pl-lsp | 语言服务连接、探测和协议 |
 | pl-output / pl-patch / pl-skill-core | 输出算法、patch 规则、Skill 元数据与路径规则 |
 | pl-remote-helper | 本地进程监督、SSH 远端文件/进程协议及统一进程创建策略 |
-| pl-studio-runtime | TOML/SQLite 持久化、历史与调用查询、项目、Profile、Mode/workflow/Plan、子代理协调、资源租约与 root/child/恢复的唯一 Thread 装配 |
+| pl-studio-runtime | TOML/SQLite 持久化及 core 时间线存储适配、产品条目投影、项目、Profile、Mode/workflow/Plan、子代理协调、资源租约与 root/child/恢复的唯一 Thread 装配 |
 | pl-studio-bridge / pl-studio-server | 同一 Studio 运行时的 FRB / HTTP 适配 |
 
 core 不提供默认工具安装、provider 配置、MCP 目录、产品 working set 或旧引擎门面。工具实例通过
@@ -40,11 +40,13 @@ core 不提供默认工具安装、provider 配置、MCP 目录、产品 working
 
 ## 2.3 存储与投影
 
-Thread 内存是活动状态唯一事实源；core 默认纯内存，只导出当前 checkpoint 与本次状态提交产生的
-不可变 effect，不拥有 SQLite 历史仓库。Studio 将 checkpoint 原子保存为 TOML，将产品历史和调用
-事实分别写入会话/全局 SQLite，并直接提供 keyset query。Studio 使用通用扩展 CAS 保存业务状态并
-提交其模型上下文投影；GUI 只消费 canonical 产品 DTO。Provider 配置从 model、工具配置从 tool、
-业务协议从 protocol 导入，不借 core 镜像导出。
+Thread 内存是活动执行状态唯一事实源；core 默认纯内存，导出当前 checkpoint、不可变 effect，
+并负责有界聊天窗口对最近缓存、活动条目、待保存事实和历史查询的统一合并。core 不依赖产品协议
+或 SQLite；按身份与顺序键查询的存储能力由 core 定义，Studio 负责产品条目投影、SQLite 实现与
+TOML checkpoint 原子保存。历史分页由 ChatView 协调，Studio 不能另建 GUI 专用历史缓存或消息
+交接链；冷历史浏览不激活模型、工具或执行 owner。可丢统计由全局 calls 库独立写入。Studio 使用
+通用扩展 CAS 保存业务状态并提交其模型上下文投影；GUI 只消费 canonical 产品 DTO。Provider 配置
+从 model、工具配置从 tool、业务协议从 protocol 导入，不借 core 镜像导出。
 
 契约详见 [15](./15-session-storage.md) 与 [16](./16-core-contracts.md)。文档定义边界；验收结果
 以实际检查记录为准。

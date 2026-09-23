@@ -97,11 +97,7 @@ impl StudioStore {
         // The data root is resolved once; every session, call and attachment path comes from the
         // canonical layout instead of being re-joined by each consumer.
         let paths = StudioPaths::resolve(Some(studio_home_from_database(&path)?))?;
-        // The single authoritative publication gate: while a layout switch is announced but not
-        // committed, no opener may classify, read or create the canonical layout. Opening here would
-        // otherwise create an empty canonical `calls/calls.sqlite` / `sessions/` on a half-published
-        // home, which makes publication skip the verified staged roots and drop their facts.
-        crate::studio::session_migration::ensure_layout_committed(&paths).await?;
+        // Old-version publication state lives outside this version's data root and is never read.
         // Decide the canonical-document contract before opening anything that creates state of its
         // own: this classification must see the home as it was left by the previous run, and every
         // store below (calls, database) materializes files on a fresh open.
@@ -218,13 +214,25 @@ impl StudioStore {
 
 /// Derives the Studio home that owns a product database file.
 ///
-/// The canonical layout places the product database at `<home>/studio/studio.sqlite`; a database
+/// The canonical layout places the product database at `<home>/studio/v2/studio.sqlite`; a database
 /// configured directly in its own directory keeps that directory as the home. Both cases resolve
 /// the same relative layout for sessions, calls and attachments.
 fn studio_home_from_database(database: &Path) -> Result<PathBuf> {
     let parent = database
         .parent()
         .context("Studio database path has no parent directory")?;
+    if parent.file_name().is_some_and(|name| name == "v2")
+        && parent
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == "studio")
+    {
+        return parent
+            .parent()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .context("Studio versioned data directory has no home");
+    }
     if parent.file_name().is_some_and(|name| name == "studio") {
         return parent
             .parent()
@@ -246,9 +254,7 @@ pub(in crate::studio) struct ProjectRow {
 async fn detect_installation(paths: &StudioPaths) -> Result<InstallationState> {
     for candidate in [
         paths.sessions_dir(),
-        paths.legacy_sessions_database(),
         paths.migrations_dir(),
-        paths.legacy_attachments_dir(),
         paths.calls_database(),
         paths.attachment_drafts_dir(),
         paths.catalog_file(),
@@ -547,4 +553,49 @@ fn sidecar_path(path: &Path, suffix: &str) -> PathBuf {
     let mut value = path.as_os_str().to_os_string();
     value.push(suffix);
     PathBuf::from(value)
+}
+
+#[cfg(test)]
+mod major_version_storage_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn old_sessions_are_never_imported_or_recreated() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let paths = StudioPaths::resolve(Some(temp.path().to_path_buf()))?;
+        let old_session = temp.path().join("sessions/old-thread/state.toml");
+        let old_catalog = temp.path().join("catalog.toml");
+        let old_product = temp.path().join("studio/studio.sqlite");
+        let config = temp.path().join("config.toml");
+        for (path, data) in [
+            (&old_session, b"old checkpoint".as_slice()),
+            (&old_catalog, b"old catalog".as_slice()),
+            (&old_product, b"old product database".as_slice()),
+            (&config, b"provider configuration".as_slice()),
+        ] {
+            tokio::fs::create_dir_all(path.parent().expect("test path parent")).await?;
+            tokio::fs::write(path, data).await?;
+        }
+        let store = StudioStore::open(paths.database()).await?;
+        assert!(store.catalog().entries().is_empty());
+        assert!(tokio::fs::try_exists(paths.catalog_file()).await?);
+        assert_eq!(paths.config_file(), config);
+        for (path, expected) in [
+            (&old_session, b"old checkpoint".as_slice()),
+            (&old_catalog, b"old catalog".as_slice()),
+            (&old_product, b"old product database".as_slice()),
+            (&config, b"provider configuration".as_slice()),
+        ] {
+            assert_eq!(tokio::fs::read(path).await?, expected);
+        }
+
+        tokio::fs::remove_file(paths.catalog_file()).await?;
+        let error = match StudioStore::open(paths.database()).await {
+            Ok(_) => anyhow::bail!("a missing v2 catalog was accepted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("catalog.toml is missing"));
+        assert_eq!(tokio::fs::read(old_catalog).await?, b"old catalog");
+        Ok(())
+    }
 }

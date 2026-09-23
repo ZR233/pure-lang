@@ -472,7 +472,9 @@ class _TimelineViewState extends State<TimelineView> {
           _pendingNewEvents = 0;
         });
       }
-    } else if (_followingBottom || !_detachedByUser) {
+    } else if (_controller.position.userScrollDirection !=
+            ScrollDirection.idle &&
+        (_followingBottom || !_detachedByUser)) {
       setState(() {
         _followingBottom = false;
         _detachedByUser = true;
@@ -572,18 +574,23 @@ class _TimelineViewState extends State<TimelineView> {
 
   void _scrollToBottom() {
     if (!_controller.hasClients) return;
-    _programmaticScroll = true;
-    try {
-      _controller.jumpTo(_controller.position.maxScrollExtent);
-    } finally {
-      _programmaticScroll = false;
+    final position = _controller.position;
+    if ((position.pixels - position.maxScrollExtent).abs() > 0.5) {
+      _programmaticScroll = true;
+      try {
+        _controller.jumpTo(position.maxScrollExtent);
+      } finally {
+        _programmaticScroll = false;
+      }
     }
-    setState(() {
-      _followingBottom = true;
-      _detachedByUser = false;
-      _pendingNewEvents = 0;
-    });
-    _saveThreadState(widget.threadId);
+    if (!_followingBottom || _detachedByUser || _pendingNewEvents != 0) {
+      setState(() {
+        _followingBottom = true;
+        _detachedByUser = false;
+        _pendingNewEvents = 0;
+      });
+      _saveThreadState(widget.threadId);
+    }
   }
 
   void _jumpToLatest() {

@@ -1,72 +1,15 @@
 //! Turn lifecycle and diagnostics projected from saved commit metadata.
 use super::ProjectionError;
 use pl_core::thread::{
-    AttemptOutcome, ThreadEffectBatch, ThreadSnapshot, TurnOutcome as CoreTurnOutcome, TurnRecord,
+    AttemptOutcome, ThreadSnapshot, TurnOutcome as CoreTurnOutcome, TurnRecord,
     TurnState as CoreTurnState,
 };
 use pl_protocol::{Turn, TurnPhase, TurnState};
-use std::{collections::BTreeMap, sync::Arc};
 
 struct Stamp {
     started_at: i64,
     updated_at: i64,
     revision: u64,
-}
-
-pub(in crate::studio) fn project_turns(
-    thread_id: &str,
-    snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadEffectBatch>],
-) -> Result<Vec<Turn>, ProjectionError> {
-    let mut stamps = BTreeMap::<String, Stamp>::new();
-    for commit in journal
-        .iter()
-        .filter(|commit| commit.sequence <= snapshot.commit_sequence)
-    {
-        if let Some(turn) = &commit.turn {
-            let stamp = stamps.entry(turn.turn_id.clone()).or_insert(Stamp {
-                started_at: commit.committed_at,
-                updated_at: commit.committed_at,
-                revision: commit.sequence,
-            });
-            stamp.updated_at = commit.committed_at;
-            stamp.revision = commit.sequence;
-        }
-        if let Some(attempt) = &commit.attempt
-            && let Some(stamp) = stamps.get_mut(&attempt.turn_id)
-        {
-            stamp.updated_at = commit.committed_at;
-            stamp.revision = commit.sequence;
-        }
-        for task in commit.tasks.iter() {
-            if let Some(stamp) = stamps.get_mut(&task.turn_id)
-                && snapshot.turns.iter().any(|turn| {
-                    turn.turn_id == task.turn_id && turn.state == CoreTurnState::Running
-                })
-            {
-                stamp.updated_at = commit.committed_at;
-                stamp.revision = commit.sequence;
-            }
-        }
-    }
-    snapshot
-        .turns
-        .iter()
-        .map(|record| {
-            let stamp = stamps
-                .get(&record.turn_id)
-                .ok_or_else(|| ProjectionError::MissingTurn(record.turn_id.clone()))?;
-            let state = state(snapshot, record, stamp)?;
-            Ok(Turn {
-                input_id: record.input_id.clone(),
-                id: record.turn_id.clone(),
-                thread_id: thread_id.into(),
-                revision: stamp.revision,
-                state,
-                updated_at: stamp.updated_at,
-            })
-        })
-        .collect()
 }
 
 pub(super) fn project_turn(

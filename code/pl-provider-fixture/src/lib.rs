@@ -3,6 +3,7 @@
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
@@ -26,6 +27,9 @@ use tokio_util::sync::CancellationToken;
 
 /// The GUI script accepts exactly this user prompt for its sole completion step.
 pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
+pub const GUI_STRESS_PROMPT: &str = "Stream the local GUI stress fixture";
+pub const STRESS_EVENT_COUNT: usize = 20_000;
+pub const STRESS_TOKENS_PER_SECOND: u64 = 5_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
@@ -56,6 +60,11 @@ pub enum RequestMatch {
 pub enum Reply {
     /// Data payloads are serialized as SSE frames, followed by `[DONE]`.
     Sse(Vec<Value>),
+    /// One independently identified output item per paced token, with three SSE frames each.
+    PacedSse {
+        events: usize,
+        tokens_per_second: u64,
+    },
     /// Sends initial events then waits for shutdown or client cancellation.
     HangingSse(Vec<Value>),
     WebSocket(Vec<Value>),
@@ -123,10 +132,38 @@ pub struct FixtureReport {
     pub consumed_steps: usize,
     pub expected_steps: usize,
     pub remaining_optional: bool,
+    pub stress: Option<StressReport>,
+    expected_stress_events: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StressReport {
+    pub emitted_events: usize,
+    pub elapsed_millis: u128,
+    pub started_unix_millis: u128,
+    pub finished_unix_millis: Option<u128>,
+}
+
+#[derive(Default)]
+struct StressProgress {
+    started: Option<std::time::Instant>,
+    finished: Option<std::time::Instant>,
+    started_unix_millis: u128,
+    finished_unix_millis: Option<u128>,
+    emitted: usize,
 }
 
 impl FixtureReport {
     pub fn verify(&self) -> Result<()> {
+        if let Some(expected) = self.expected_stress_events {
+            let actual = self
+                .stress
+                .as_ref()
+                .map_or(0, |stress| stress.emitted_events);
+            if actual != expected {
+                bail!("fixture stress stream incomplete: emitted {actual}/{expected} data events");
+            }
+        }
         if !self.remaining_optional || self.requests.iter().any(|r| !r.accepted) {
             bail!(
                 "fixture script consumed {}/{} steps; requests: {:?}",
@@ -150,6 +187,7 @@ struct ScriptState {
 struct AppState {
     script: Arc<Mutex<ScriptState>>,
     stopping: CancellationToken,
+    stress: Arc<Mutex<StressProgress>>,
 }
 
 /// A listening fixture. Drop aborts the listener; `finish` additionally verifies the script.
@@ -170,6 +208,7 @@ impl FixtureServer {
                 ..Default::default()
             })),
             stopping: CancellationToken::new(),
+            stress: Arc::new(Mutex::new(StressProgress::default())),
         };
         let app = Router::new()
             .route(
@@ -234,11 +273,33 @@ impl FixtureServer {
             task.await.context("fixture listener task failed")??;
         }
         let state = self.state.script.lock().expect("fixture state poisoned");
+        let stress = self
+            .state
+            .stress
+            .lock()
+            .expect("fixture stress state poisoned");
         Ok(FixtureReport {
             requests: state.requests.clone(),
             consumed_steps: state.cursor,
             expected_steps: state.steps.len(),
             remaining_optional: state.steps[state.cursor..].iter().all(|step| step.optional),
+            stress: stress.started.map(|started| StressReport {
+                emitted_events: stress.emitted,
+                elapsed_millis: stress
+                    .finished
+                    .unwrap_or_else(std::time::Instant::now)
+                    .duration_since(started)
+                    .as_millis(),
+                started_unix_millis: stress.started_unix_millis,
+                finished_unix_millis: stress.finished_unix_millis,
+            }),
+            expected_stress_events: state.steps.iter().find_map(|step| {
+                if let Reply::PacedSse { events, .. } = step.reply {
+                    Some(events)
+                } else {
+                    None
+                }
+            }),
         })
     }
 }
@@ -296,6 +357,25 @@ pub fn gui_script() -> Vec<Step> {
     ]
 }
 
+pub fn gui_stress_script() -> Vec<Step> {
+    let mut steps = gui_script();
+    for step in &mut steps {
+        if matches!(&step.request, RequestMatch::Prompt { text, .. } if text == GUI_PROMPT) {
+            step.request = RequestMatch::Prompt {
+                text: GUI_STRESS_PROMPT.into(),
+                step: 1,
+            };
+            step.reply = Reply::PacedSse {
+                events: STRESS_EVENT_COUNT,
+                tokens_per_second: STRESS_TOKENS_PER_SECOND,
+            };
+        } else if let RequestMatch::Prompt { text, .. } = &mut step.request {
+            *text = text.replace(GUI_PROMPT, GUI_STRESS_PROMPT);
+        }
+    }
+    steps
+}
+
 /// Responses SSE/WebSocket events for a completed text message.
 pub fn responses_text(text: &str, id: &str, model: &str) -> Vec<Value> {
     vec![
@@ -323,6 +403,15 @@ async fn handle(State(state): State<AppState>, request: axum::extract::Request) 
     };
     match match_step(&state, &method, &path, &body) {
         Ok(Reply::Sse(events)) => sse_reply(events, false, state.stopping.clone()),
+        Ok(Reply::PacedSse {
+            events,
+            tokens_per_second,
+        }) => paced_sse_reply(
+            events,
+            tokens_per_second,
+            state.stopping.clone(),
+            state.stress.clone(),
+        ),
         Ok(Reply::HangingSse(events)) => sse_reply(events, true, state.stopping.clone()),
         Ok(Reply::HttpError {
             status,
@@ -470,7 +559,10 @@ fn match_step(state: &AppState, method: &str, path: &str, body: &Value) -> Resul
                 (Protocol::ResponsesWebSocket, Reply::WebSocket(_))
                     | (
                         Protocol::ResponsesHttp | Protocol::Chat,
-                        Reply::Sse(_) | Reply::HangingSse(_) | Reply::HttpError { .. }
+                        Reply::Sse(_)
+                            | Reply::PacedSse { .. }
+                            | Reply::HangingSse(_)
+                            | Reply::HttpError { .. }
                     )
                     | (Protocol::Files, Reply::Json(_) | Reply::HttpError { .. })
             );
@@ -536,4 +628,86 @@ fn sse_reply(events: Vec<Value>, hanging: bool, stopping: CancellationToken) -> 
         Body::from_stream(items.boxed())
     };
     ([(header::CONTENT_TYPE, "text/event-stream")], body).into_response()
+}
+
+fn paced_sse_reply(
+    events: usize,
+    tokens_per_second: u64,
+    stopping: CancellationToken,
+    progress: Arc<Mutex<StressProgress>>,
+) -> Response {
+    let started = std::time::Instant::now();
+    {
+        let mut progress = progress.lock().expect("fixture stress state poisoned");
+        progress.started = Some(started);
+        progress.started_unix_millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+    }
+    let body = stream::unfold(0usize, move |index| {
+        let stopping = stopping.clone();
+        let progress = progress.clone();
+        async move {
+            if index > events * 3 + 2 || stopping.is_cancelled() {
+                return None;
+            }
+            if (1..=events * 3).contains(&index) && (index - 1) % 3 == 0 {
+                let ordinal = (index - 1) / 3;
+                let offset = Duration::from_secs_f64(ordinal as f64 / tokens_per_second as f64);
+                tokio::select! {
+                    () = tokio::time::sleep_until((started + offset).into()) => {},
+                    () = stopping.cancelled() => return None,
+                }
+            }
+            let event = match index {
+                0 => json!({"type":"response.created","response":{"id":"stress-response","model":"fixture-model"}}).to_string(),
+                n if n <= events * 3 => {
+                    let ordinal = (n - 1) / 3;
+                    let phase = (n - 1) % 3;
+                    let item_id = format!("stress-item-{ordinal}");
+                    let part_id = format!("stress-part-{ordinal}");
+                    let text = format!("{}-{ordinal} ", match ordinal % 4 {
+                        0 => "answer",
+                        1 => "comment",
+                        2 => "note",
+                        _ => "thought",
+                    });
+                    match (ordinal % 4, phase) {
+                        (0 | 1, 0) => json!({"type":"response.output_item.added","output_index":ordinal,"item":{"id":item_id,"type":"message","role":"assistant","phase":if ordinal % 4 == 0 {"final_answer"} else {"commentary"},"content":[]}}).to_string(),
+                        (0 | 1, 1) => json!({"type":"response.output_text.delta","item_id":item_id,"output_index":ordinal,"content_index":0,"delta":text}).to_string(),
+                        (0 | 1, _) => json!({"type":"response.output_item.done","output_index":ordinal,"item":{"id":item_id,"type":"message","role":"assistant","phase":if ordinal % 4 == 0 {"final_answer"} else {"commentary"},"content":[{"id":part_id,"type":"output_text","text":text}]}}).to_string(),
+                        (_, 0) => json!({"type":"response.output_item.added","output_index":ordinal,"item":{"id":item_id,"type":"reasoning","summary":[],"content":[]}}).to_string(),
+                        (2, 1) => json!({"type":"response.reasoning_summary_text.delta","item_id":item_id,"output_index":ordinal,"summary_index":0,"delta":text}).to_string(),
+                        (3, 1) => json!({"type":"response.reasoning_text.delta","item_id":item_id,"output_index":ordinal,"content_index":0,"delta":text}).to_string(),
+                        (2, _) => json!({"type":"response.output_item.done","output_index":ordinal,"item":{"id":item_id,"type":"reasoning","summary":[{"id":part_id,"type":"summary_text","text":text}]}}).to_string(),
+                        _ => json!({"type":"response.output_item.done","output_index":ordinal,"item":{"id":item_id,"type":"reasoning","content":[{"id":part_id,"type":"reasoning_text","text":text}]}}).to_string(),
+                    }
+                }
+                n if n == events * 3 + 1 => json!({"type":"response.completed","response":{"id":"stress-response","model":"fixture-model","usage":{"input_tokens":11,"output_tokens":events}}}).to_string(),
+                _ => {
+                    let mut progress = progress.lock().expect("fixture stress state poisoned");
+                    progress.finished = Some(std::time::Instant::now());
+                    progress.finished_unix_millis = Some(std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+                    "[DONE]".into()
+                }
+            };
+            if (1..=events * 3).contains(&index) && (index - 1) % 3 == 2 {
+                progress
+                    .lock()
+                    .expect("fixture stress state poisoned")
+                    .emitted += 1;
+            }
+            Some((
+                Ok::<_, std::io::Error>(Bytes::from(format!("data: {event}\n\n"))),
+                index + 1,
+            ))
+        }
+    });
+    (
+        [(header::CONTENT_TYPE, "text/event-stream")],
+        Body::from_stream(body),
+    )
+        .into_response()
 }

@@ -155,6 +155,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(check_provider_usage))
         .routes(routes!(read_recovery, retry_recovery))
         .routes(routes!(retry_persistence))
+        .routes(routes!(retry_thread_history))
         .routes(routes!(read_persistence_queue))
         .routes(routes!(read_skills))
         .routes(routes!(discover_skills))
@@ -845,6 +846,20 @@ async fn retry_persistence(State(state): State<AppState>) -> Result<impl IntoRes
         state
             .runtime
             .retry_persistence()
+            .await
+            .map_err(ApiError::from)?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/runtime/threads/{thread_id}/history/retry/{fault_generation}", operation_id = "persistence.retryThreadHistory", params(("thread_id" = String, Path), ("fault_generation" = u64, Path)), responses(StudioApiErrors, (status = 200)))]
+async fn retry_thread_history(
+    State(state): State<AppState>,
+    Path((thread_id, fault_generation)): Path<(String, u64)>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .retry_thread_history(&thread_id, fault_generation)
             .await
             .map_err(ApiError::from)?,
     ))

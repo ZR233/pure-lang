@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show debugPrint, kDebugMode, visibleForTesting;
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -26,7 +27,16 @@ class StudioController extends _$StudioController {
   final Map<String, int> _windowLoadGeneration = {};
   final Map<String, Timer> _terminalRefreshTimers = {};
   final List<(ThreadNotificationFrame, String, int)> _pendingThreadDeltas = [];
+  StudioChatWindow? _chatWindow;
+  String? _chatWindowThreadId;
+  String? _chatFocusedItemId;
+  int _chatWindowOperation = 0;
+  Future<void>? _openingChatWindow;
   bool _deltaFrameScheduled = false;
+  int _debugThreadFrameCount = 0;
+  int _debugThreadFrameMicros = 0;
+  int _debugThreadFrameMaxMicros = 0;
+  int _debugThreadFrameStartedAt = 0;
 
   /// 每个会话已观测到的实时广播 epoch；临时 map，断开或重订阅时释放。
   final Map<String, int> _streamEpochByThread = {};
@@ -50,6 +60,7 @@ class StudioController extends _$StudioController {
       _markThreadDisconnected,
     );
     ref.onDispose(() {
+      _closeChatWindow();
       unawaited(_productCoordinator.dispose());
       unawaited(_threadCoordinator.dispose());
       _windowLoadGeneration.clear();
@@ -522,6 +533,7 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> _subscribeThread(String? threadId) async {
+    if (_chatWindowThreadId != threadId) _closeChatWindow();
     final generation = _threadCoordinator.switchThread(threadId);
     if (!ref.mounted || threadId == null) return;
     // 重订阅开启新的广播生命周期：旧 epoch 立即失效。
@@ -543,11 +555,141 @@ class StudioController extends _$StudioController {
   /// 释放一个会话级的临时 map：切换、归档/关闭或 controller 销毁时调用，避免
   /// epoch / 首窗 generation / 在途请求标记随访问过的会话无限增长。
   void _releaseThreadSession(String threadId) {
+    if (_chatWindowThreadId == threadId) _closeChatWindow();
     _windowLoadGeneration.remove(threadId);
     _streamEpochByThread.remove(threadId);
     _historyRequests.remove(threadId);
     _terminalRefreshTimers.remove(threadId)?.cancel();
     _pendingThreadDeltas.removeWhere((entry) => entry.$2 == threadId);
+  }
+
+  void _closeChatWindow() {
+    _chatWindowOperation++;
+    _openingChatWindow = null;
+    _chatWindowThreadId = null;
+    _chatFocusedItemId = null;
+    final window = _chatWindow;
+    _chatWindow = null;
+    if (window != null) unawaited(window.close());
+  }
+
+  Future<void> _openChatWindow(String threadId) {
+    final reader = _api;
+    if (reader is! ChatWindowReader) {
+      return Future<void>.value();
+    }
+    if (_chatWindowThreadId == threadId && _chatWindow != null) {
+      return Future<void>.value();
+    }
+    final opening = _openingChatWindow;
+    if (opening != null && _chatWindowThreadId == threadId) return opening;
+    final started = _startChatWindow(reader as ChatWindowReader, threadId);
+    _openingChatWindow = started;
+    return started.whenComplete(() {
+      if (identical(_openingChatWindow, started)) _openingChatWindow = null;
+    });
+  }
+
+  Future<void> _startChatWindow(
+    ChatWindowReader reader,
+    String threadId,
+  ) async {
+    _chatWindowThreadId = threadId;
+    final operation = ++_chatWindowOperation;
+    StudioChatWindow? window;
+    try {
+      window = await reader.openChatWindow(threadId);
+      var initial = await window.initial();
+      final anchor = state.value?.workspaceUiByThread[threadId]?.history.anchor;
+      if (anchor != null && !anchor.followingBottom) {
+        initial = await window.focus(anchor.itemId);
+      }
+      if (!_acceptChatWindow(threadId, operation)) return;
+      _chatWindow = window;
+      _adoptChatWindow(threadId, initial);
+      unawaited(_pullChatWindow(threadId, window));
+      window = null;
+    } catch (error) {
+      if (_acceptChatWindow(threadId, operation)) {
+        _chatWindowThreadId = null;
+        final current = state.value;
+        if (current != null) {
+          state = AsyncData(
+            _withWorkspaceUi(
+              current,
+              threadId,
+              (ui) => ui.copyWith(
+                history: ui.history.copyWith(errorMessage: error.toString()),
+              ),
+            ),
+          );
+        }
+      }
+    } finally {
+      if (window != null) await window.close();
+    }
+  }
+
+  bool _acceptChatWindow(String threadId, int operation) =>
+      ref.mounted &&
+      _chatWindowThreadId == threadId &&
+      _chatWindowOperation == operation &&
+      state.value?.selectedThreadId == threadId;
+
+  void _adoptChatWindow(String threadId, StudioChatSnapshot snapshot) {
+    final current = state.value;
+    if (current == null || current.selectedThreadId != threadId) return;
+    _chatFocusedItemId = snapshot.focusedItemId;
+    state = AsyncData(applyChatWindowSnapshot(current, threadId, snapshot));
+  }
+
+  Future<void> _pullChatWindow(String threadId, StudioChatWindow window) async {
+    while (_chatWindow == window && ref.mounted) {
+      final operation = _chatWindowOperation;
+      try {
+        final snapshot = await window.next();
+        if (snapshot == null) {
+          if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {
+            _closeChatWindow();
+            final current = state.value;
+            if (current != null) {
+              state = AsyncData(
+                _withWorkspaceUi(
+                  current,
+                  threadId,
+                  (ui) => ui.copyWith(
+                    history: ui.history.copyWith(
+                      errorMessage: 'Chat window connection closed',
+                    ),
+                  ),
+                ),
+              );
+            }
+          }
+          return;
+        }
+        if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {
+          _adoptChatWindow(threadId, snapshot);
+        }
+      } catch (error) {
+        if (_chatWindow == window) {
+          final current = state.value;
+          if (current != null && current.selectedThreadId == threadId) {
+            state = AsyncData(
+              _withWorkspaceUi(
+                current,
+                threadId,
+                (ui) => ui.copyWith(
+                  history: ui.history.copyWith(errorMessage: error.toString()),
+                ),
+              ),
+            );
+          }
+          _closeChatWindow();
+        }
+        return;
+      }
+    }
   }
 
   /// 把某个会话标记回“未打开”；仅用于非显式选择变化，不触发订阅或释放。
@@ -620,6 +762,26 @@ class StudioController extends _$StudioController {
       return;
     }
     state = AsyncData(startItemBodyLoad(current, threadId, itemId));
+    final chatWindow = _chatWindowThreadId == threadId ? _chatWindow : null;
+    if (chatWindow != null) {
+      try {
+        final item = await chatWindow.readItem(itemId);
+        if (!ref.mounted || _chatWindow != chatWindow) return;
+        final latest = state.value;
+        if (latest != null && latest.selectedThreadId == threadId) {
+          state = AsyncData(
+            applyChatWindowItemBody(latest, threadId, itemId, item),
+          );
+        }
+      } catch (error) {
+        if (ref.mounted && _chatWindow == chatWindow && state.value != null) {
+          state = AsyncData(
+            failItemBodyLoad(state.value!, threadId, itemId, error.toString()),
+          );
+        }
+      }
+      return;
+    }
     try {
       final page = await _readTimelineItemBody(threadId, itemId);
       if (!ref.mounted) return;
@@ -684,6 +846,12 @@ class StudioController extends _$StudioController {
     );
     // 滚动/定位是显式交互：未打开的会话在此激活。
     unawaited(_ensureThreadOpen(threadId));
+    if (!anchor.followingBottom &&
+        _chatWindowThreadId == threadId &&
+        _chatWindow != null &&
+        _chatFocusedItemId == null) {
+      unawaited(_focusChatWindow(threadId, anchor.itemId));
+    }
   }
 
   Future<void> jumpToLatest(String threadId) async {
@@ -692,6 +860,10 @@ class StudioController extends _$StudioController {
     final current = state.value;
     if (current == null || current.selectedThreadId != threadId) return;
     state = AsyncData(jumpTimelineToLatest(current, threadId));
+    if (_chatWindowThreadId == threadId && _chatWindow != null) {
+      await _focusChatWindow(threadId, null);
+      return;
+    }
     await _reloadTimelineWindow(
       threadId,
       _threadCoordinator.generation,
@@ -715,6 +887,10 @@ class StudioController extends _$StudioController {
         current.selectedThreadId != threadId ||
         _workspaceUi(current, threadId).subscriptionGeneration != generation ||
         (!force && _windowLoadGeneration[threadId] == generation)) {
+      return;
+    }
+    if (_api is ChatWindowReader) {
+      await _openChatWindow(threadId);
       return;
     }
     final anchor = _workspaceUi(current, threadId).history.anchor;
@@ -741,6 +917,28 @@ class StudioController extends _$StudioController {
     String? aroundItemId,
     bool resetWindow = false,
   }) async {
+    if (_chatWindowThreadId == threadId && _chatWindow != null) {
+      if (aroundItemId != null) {
+        await _focusChatWindow(threadId, aroundItemId);
+      } else if (resetWindow) {
+        await _focusChatWindow(threadId, null);
+      } else {
+        await _loadChatWindow(threadId, direction);
+      }
+      return true;
+    }
+    if (_api is ChatWindowReader) {
+      await _openChatWindow(threadId);
+      if (_chatWindowThreadId == threadId && _chatWindow != null) {
+        return _loadTimelinePage(
+          threadId,
+          direction,
+          aroundItemId: aroundItemId,
+          resetWindow: resetWindow,
+        );
+      }
+      return false;
+    }
     final current = state.value;
     if (current == null) return false;
     final workspace = current.workspacesByThread[threadId];
@@ -869,6 +1067,87 @@ class StudioController extends _$StudioController {
       return false;
     }
     return true;
+  }
+
+  Future<void> _focusChatWindow(String threadId, String? itemId) async {
+    final window = _chatWindow;
+    if (window == null || _chatWindowThreadId != threadId) return;
+    if (_chatFocusedItemId == itemId) return;
+    final operation = ++_chatWindowOperation;
+    try {
+      final snapshot = await window.focus(itemId);
+      if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {
+        _adoptChatWindow(threadId, snapshot);
+      }
+    } catch (error) {
+      if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {
+        final current = state.value;
+        if (current != null) {
+          state = AsyncData(
+            _withWorkspaceUi(
+              current,
+              threadId,
+              (ui) => ui.copyWith(
+                history: ui.history.copyWith(errorMessage: error.toString()),
+              ),
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _loadChatWindow(
+    String threadId,
+    TimelineDirection direction,
+  ) async {
+    final window = _chatWindow;
+    if (window == null || _chatWindowThreadId != threadId) return;
+    if (!_historyRequests.add(threadId)) return;
+    final operation = ++_chatWindowOperation;
+    final current = state.value;
+    if (current != null) {
+      state = AsyncData(
+        _withWorkspaceUi(
+          current,
+          threadId,
+          (ui) => ui.copyWith(
+            history: ui.history.copyWith(isLoading: true, direction: direction),
+          ),
+        ),
+      );
+    }
+    try {
+      final snapshot = await window.load(direction);
+      if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {
+        _adoptChatWindow(threadId, snapshot);
+      }
+    } catch (error) {
+      if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {
+        final latest = state.value;
+        if (latest != null) {
+          state = AsyncData(
+            _withWorkspaceUi(
+              latest,
+              threadId,
+              (ui) => ui.copyWith(
+                history: ui.history.copyWith(
+                  isLoading: false,
+                  errorMessage: direction == TimelineDirection.older
+                      ? error.toString()
+                      : ui.history.errorMessage,
+                  newerError: direction == TimelineDirection.newer
+                      ? error.toString()
+                      : ui.history.newerError,
+                ),
+              ),
+            ),
+          );
+        }
+      }
+    } finally {
+      _historyRequests.remove(threadId);
+    }
   }
 
   void _scheduleTerminalRefresh(String threadId) {
@@ -1891,6 +2170,11 @@ class StudioController extends _$StudioController {
     state = AsyncData(applyPersistenceState(latest, persistence));
   }
 
+  Future<PersistenceQueueSnapshot> retryThreadHistory(
+    String threadId,
+    int faultGeneration,
+  ) => _api.retryThreadHistory(threadId, faultGeneration);
+
   /// 读取进程级持久化队列压力；只在当前 API 实现该观测能力时返回，否则为未知。
   ///
   /// 该值用于诊断展示，不写入会话状态、也不驱动任何执行：它是协调器已观测到的真实
@@ -2027,19 +2311,43 @@ class StudioController extends _$StudioController {
     String threadId,
     int generation,
   ) {
-    if (frame case ThreadNotificationFrame(update: ThreadItemDeltaUpdate())) {
-      _pendingThreadDeltas.add((frame, threadId, generation));
-      if (!_deltaFrameScheduled) {
-        _deltaFrameScheduled = true;
-        SchedulerBinding.instance.scheduleFrameCallback((_) {
-          _deltaFrameScheduled = false;
-          _flushThreadDeltas();
-        });
+    final stopwatch = kDebugMode ? (Stopwatch()..start()) : null;
+    try {
+      if (frame case ThreadNotificationFrame(update: ThreadItemDeltaUpdate())) {
+        _pendingThreadDeltas.add((frame, threadId, generation));
+        if (!_deltaFrameScheduled) {
+          _deltaFrameScheduled = true;
+          SchedulerBinding.instance.scheduleFrameCallback((_) {
+            _deltaFrameScheduled = false;
+            _flushThreadDeltas();
+          });
+        }
+        return;
       }
-      return;
+      _flushThreadDeltas();
+      _applyThreadFrame(frame, threadId, generation);
+    } finally {
+      if (stopwatch != null) {
+        final elapsed = stopwatch.elapsedMicroseconds;
+        _debugThreadFrameCount++;
+        _debugThreadFrameMicros += elapsed;
+        if (elapsed > _debugThreadFrameMaxMicros) {
+          _debugThreadFrameMaxMicros = elapsed;
+        }
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (_debugThreadFrameStartedAt == 0) _debugThreadFrameStartedAt = now;
+        if (now - _debugThreadFrameStartedAt >= 500) {
+          debugPrint(
+            'timeline_frame_work count=$_debugThreadFrameCount '
+            'total_us=$_debugThreadFrameMicros max_us=$_debugThreadFrameMaxMicros',
+          );
+          _debugThreadFrameCount = 0;
+          _debugThreadFrameMicros = 0;
+          _debugThreadFrameMaxMicros = 0;
+          _debugThreadFrameStartedAt = now;
+        }
+      }
     }
-    _flushThreadDeltas();
-    _applyThreadFrame(frame, threadId, generation);
   }
 
   void _flushThreadDeltas() {
@@ -2069,6 +2377,9 @@ class StudioController extends _$StudioController {
         revision: frame.revision,
         update: frame.update,
         baseRevision: frame.baseRevision,
+        chatWindowOwnsItems:
+            _chatWindowThreadId == threadId && _chatWindow != null,
+        filteredItemRevisions: _api is ChatWindowReader,
       );
       if (reduced.resyncThreadId != null) {
         unawaited(_resyncThread(threadId, generation));
@@ -2124,14 +2435,19 @@ class StudioController extends _$StudioController {
           revision: revision,
           update: update,
           baseRevision: frame.baseRevision,
+          chatWindowOwnsItems:
+              _chatWindowThreadId == threadId && _chatWindow != null,
+          filteredItemRevisions: _api is ChatWindowReader,
         );
         if (reduced.resyncThreadId != null) {
           unawaited(_resyncThread(threadId, generation));
           return;
         }
         state = AsyncData(reduced.state);
-        if (update case ThreadItemUpsert(:final item) when item.isTerminal) {
-          _scheduleTerminalRefresh(threadId);
+        if (_chatWindow == null) {
+          if (update case ThreadItemUpsert(:final item) when item.isTerminal) {
+            _scheduleTerminalRefresh(threadId);
+          }
         }
       case ThreadResyncRequiredFrame():
         unawaited(_resyncThread(threadId, generation));

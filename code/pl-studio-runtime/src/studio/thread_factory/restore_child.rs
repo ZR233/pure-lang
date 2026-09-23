@@ -197,7 +197,9 @@ impl StudioThreadFactory {
         let persistence = crate::studio::storage::thread_writer::ThreadStorageSink::new(
             self.services.store.clone(),
             protocol_thread,
-        );
+        )
+        .await
+        .map_err(|error| resource_error("open restored child chat session", error))?;
         let mut initial_extensions = BTreeMap::new();
         if bootstrap_profile {
             initial_extensions.insert(

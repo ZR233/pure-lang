@@ -133,45 +133,6 @@ impl PersistedStudioObject for WorktreeLease {
     }
 }
 
-/// Version 1 worktree lease payload.
-///
-/// Only the Studio schema 20 → 21 migration decodes it; it is never a runtime
-/// compatibility entry point.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WorktreeLeaseV1 {
-    revision: u64,
-    state: WorktreeLeaseState,
-    child_id: String,
-    root_thread_id: String,
-    project_id: String,
-    ssh_server_id: Option<String>,
-    repository_root: String,
-    path: String,
-    branch: String,
-    base_commit: String,
-}
-
-/// Rewrites one persisted lease payload from version 1 (`childId`) to version 2
-/// (`ownerKind` + `ownerThreadId`).
-pub(in crate::studio) fn migrate_lease_payload_v1_to_v2(payload_json: &str) -> Result<String> {
-    let legacy: WorktreeLeaseV1 = serde_json::from_str(payload_json)?;
-    let migrated = serde_json::json!({
-        "revision": legacy.revision,
-        "state": legacy.state,
-        "ownerKind": WorktreeLeaseOwnerKind::Child,
-        "ownerThreadId": legacy.child_id,
-        "rootThreadId": legacy.root_thread_id,
-        "projectId": legacy.project_id,
-        "sshAlias": legacy.ssh_server_id,
-        "repositoryRoot": legacy.repository_root,
-        "path": legacy.path,
-        "branch": legacy.branch,
-        "baseCommit": legacy.base_commit,
-    });
-    Ok(serde_json::to_string(&migrated)?)
-}
-
 pub(in crate::studio) async fn load_leases(store: &StudioStore) -> Result<Vec<WorktreeLease>> {
     load_objects(store.database()).await
 }

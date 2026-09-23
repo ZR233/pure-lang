@@ -235,6 +235,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
         target,
         &version_define,
         driver_mode,
+        options.profile,
         driver_attachment_define.as_deref(),
     );
     let process_mode = match driver_mode {
@@ -245,7 +246,11 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
         &workspace_root,
         target,
         demo_mode,
-        BridgeConfiguration::Debug,
+        if options.profile {
+            BridgeConfiguration::Profile
+        } else {
+            BridgeConfiguration::Debug
+        },
     )?;
     run_flutter_with_process_mode(
         &workspace_root,
@@ -264,6 +269,7 @@ fn run_gui_args<'a>(
     target: DesktopTarget,
     version_define: &'a str,
     driver_mode: DriverMode,
+    profile: bool,
     driver_attachment_define: Option<&'a str>,
 ) -> Vec<&'a str> {
     let mut args = Vec::new();
@@ -277,6 +283,9 @@ fn run_gui_args<'a>(
         version_define,
         "--no-pub",
     ]);
+    if profile {
+        args.push("--profile");
+    }
     if matches!(driver_mode, DriverMode::Enabled) {
         args.extend([
             "-t",

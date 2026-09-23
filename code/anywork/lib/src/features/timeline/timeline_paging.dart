@@ -185,7 +185,8 @@ extension on _TimelineViewState {
       final position = _controller.position;
       final underfull = position.maxScrollExtent - position.minScrollExtent < 1;
       final threshold = 1.5 * position.viewportDimension;
-      if ((_scrollingOlder || underfull) &&
+      if (_detachedByUser &&
+          (_scrollingOlder || underfull) &&
           position.extentBefore < threshold &&
           widget.onLoadOlder != null &&
           widget.olderError == null &&

@@ -235,6 +235,7 @@ PersistenceQueueSnapshot _persistenceQueueFromFrb(
   frb.BridgePersistenceQueueSnapshot snapshot,
 ) {
   return PersistenceQueueSnapshot(
+    statisticsGap: snapshot.statisticsGap,
     pendingOperations: snapshot.pendingOperations.toInt(),
     pendingBytes: snapshot.pendingBytes.toInt(),
     inFlightBytes: snapshot.inFlightBytes.toInt(),
@@ -245,6 +246,8 @@ PersistenceQueueSnapshot _persistenceQueueFromFrb(
       for (final thread in snapshot.threads)
         ThreadPersistenceSnapshot(
           threadId: thread.threadId,
+          faultGeneration: thread.faultGeneration.toInt(),
+          fault: thread.fault,
           // `None` 是未知（没有 writer 上报），与已观测到的 0 区分保留。
           stateDirtyRevision: thread.stateDirtyRevision?.toInt(),
           stateSavingRevision: thread.stateSavingRevision?.toInt(),

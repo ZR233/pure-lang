@@ -1,5 +1,6 @@
 //! Minimal Thread execution, model/tool contracts, immutable context and optional cold storage.
 //! Product configuration, provider protocols and concrete tools are owned by embedding crates.
+pub mod chat;
 pub mod context;
 mod error_record;
 pub mod model;

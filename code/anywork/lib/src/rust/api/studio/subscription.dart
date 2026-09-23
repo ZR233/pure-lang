@@ -23,10 +23,13 @@ part 'subscription.freezed.dart';
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeSubscriptionInner`, `BridgeSubscriptionKind`, `BridgeTaskRegistry`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`
 
-Future<BridgeEventSubscription> subscribeThread({required String threadId}) =>
-    RustLib.instance.api.crateApiStudioSubscriptionSubscribeThread(
-      threadId: threadId,
-    );
+Future<BridgeEventSubscription> subscribeThread({
+  required String threadId,
+  required bool stateOnly,
+}) => RustLib.instance.api.crateApiStudioSubscriptionSubscribeThread(
+  threadId: threadId,
+  stateOnly: stateOnly,
+);
 
 Future<BridgeEventSubscription> createProductSubscription() =>
     RustLib.instance.api.crateApiStudioSubscriptionCreateProductSubscription();

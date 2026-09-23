@@ -152,10 +152,6 @@ impl CatalogStore {
         })
     }
 
-    pub(in crate::studio) fn revision(&self) -> u64 {
-        self.lock().revision
-    }
-
     /// 全部条目的稳定快照（按 `(updated_at, id)` 降序）。
     pub(in crate::studio) fn entries(&self) -> Vec<CatalogEntry> {
         let mut entries = self.lock().entries.clone();
@@ -247,32 +243,6 @@ impl CatalogStore {
         .await
     }
 
-    /// 幂等批量写入（迁移发布用）：内容一致时整体 no-op。
-    pub(in crate::studio) async fn merge(&self, entries: Vec<CatalogEntry>) -> Result<()> {
-        self.mutate(move |document| {
-            let mut changed = false;
-            for entry in entries {
-                match document
-                    .entries
-                    .iter_mut()
-                    .find(|existing| existing.id == entry.id)
-                {
-                    Some(existing) if *existing == entry => {}
-                    Some(existing) => {
-                        *existing = entry;
-                        changed = true;
-                    }
-                    None => {
-                        document.entries.push(entry);
-                        changed = true;
-                    }
-                }
-            }
-            changed
-        })
-        .await
-    }
-
     /// 幂等标记归档；条目缺失或已归档时不落盘。
     pub(in crate::studio) async fn archive(
         &self,
@@ -317,8 +287,7 @@ impl CatalogStore {
 
     /// 把当前内存文档写入 canonical 文件；文件已存在时不覆盖。
     ///
-    /// 只有迁移发布/补齐阶段使用：它先幂等合并旧产品库的目录事实，再确保 `catalog.toml` 存在，
-    /// 使任何已有安装都拥有完整的 canonical 文档，而正常运行路径只在文档已存在时读写。
+    /// 新安装启动时确保 `catalog.toml` 存在，以便后续缺失被识别为数据丢失。
     pub(in crate::studio) async fn persist_if_absent(&self) -> Result<()> {
         let inner = self.inner.clone();
         let path = self.path.clone();

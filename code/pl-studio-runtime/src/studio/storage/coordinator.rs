@@ -2,18 +2,22 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicU64},
 };
 
 use anyhow::{Result, bail};
+use pl_core::chat::{Session, WeakSession};
 use pl_core::thread::UsageSummary;
 use tokio::sync::{Notify, watch};
 
 use crate::studio::storage::history::{HistoryStore, HistoryStoreShare};
+use crate::studio::storage::thread_writer::HistoryChannel;
 
 /// Per-Thread persistence watermarks and queue pressure reported by the owning writer.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ThreadPersistenceMetrics {
+    pub(crate) fault_generation: u64,
+    pub(crate) fault: Option<pl_protocol::studio::HistoryFault>,
     pub(crate) state_dirty_revision: u64,
     pub(crate) state_saving_revision: u64,
     pub(crate) state_durable_revision: u64,
@@ -57,6 +61,7 @@ pub(crate) struct ThreadPersistenceSnapshot {
     pub(crate) calls_last_error: Option<String>,
     /// Whether the call recorder is refusing admission under queue pressure.
     pub(crate) calls_pressure_paused: bool,
+    pub(crate) statistics_gap: bool,
     pub(crate) error: Option<String>,
 }
 
@@ -73,6 +78,7 @@ pub(crate) struct CallsQueueMetrics {
     pub(crate) oldest_pending_age_millis: Option<u64>,
     pub(crate) last_error: Option<String>,
     pub(crate) pressure_paused: bool,
+    pub(crate) statistics_gap: bool,
 }
 
 /// Watermarks reported by one per-Thread writer incarnation.
@@ -153,6 +159,10 @@ struct Inner {
     /// database connections (there is no never-expiring strong history cache), while re-activating a
     /// Thread that still has a live holder reuses the same writer identity.
     history: Mutex<BTreeMap<String, HistoryStoreShare>>,
+    /// Views and the active writer share one session without pinning cold sessions forever.
+    chats: Mutex<BTreeMap<String, WeakSession>>,
+    channels: Mutex<BTreeMap<String, Arc<HistoryChannel>>>,
+    queued_bytes: Arc<AtomicU64>,
     state: watch::Sender<ThreadPersistenceSnapshot>,
     retry: Notify,
 }
@@ -168,6 +178,9 @@ impl Default for ThreadPersistenceCoordinator {
             usage: Mutex::new(BTreeMap::new()),
             calls: Mutex::new(CallsQueueMetrics::default()),
             history: Mutex::new(BTreeMap::new()),
+            chats: Mutex::new(BTreeMap::new()),
+            channels: Mutex::new(BTreeMap::new()),
+            queued_bytes: Arc::new(AtomicU64::new(0)),
             state,
             retry: Notify::new(),
         }))
@@ -175,6 +188,73 @@ impl Default for ThreadPersistenceCoordinator {
 }
 
 impl ThreadPersistenceCoordinator {
+    pub(crate) fn chat_session(&self, thread_id: &str) -> Option<Session> {
+        let mut chats = self
+            .0
+            .chats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let active = chats.get(thread_id).and_then(WeakSession::upgrade);
+        if active.is_none() {
+            chats.remove(thread_id);
+        }
+        active
+    }
+
+    pub(crate) fn install_chat_session(&self, thread_id: &str, session: Session) -> Session {
+        let mut chats = self
+            .0
+            .chats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(active) = chats.get(thread_id).and_then(WeakSession::upgrade) {
+            return active;
+        }
+        chats.retain(|_, session| session.upgrade().is_some());
+        chats.insert(thread_id.to_owned(), session.downgrade());
+        session
+    }
+
+    /// The manager owns admitted history independently of a writer or GUI subscription.
+    pub(crate) fn history_channel(&self, thread_id: &str) -> Arc<HistoryChannel> {
+        self.0
+            .channels
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(thread_id.to_owned())
+            .or_insert_with(|| Arc::new(HistoryChannel::new(self.0.queued_bytes.clone())))
+            .clone()
+    }
+
+    /// Retry a fixed session fault generation and wait for its required history/checkpoint fence.
+    pub(crate) async fn retry_history(&self, thread_id: &str, generation: u64) -> Result<()> {
+        let channel = self
+            .0
+            .channels
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(thread_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Thread has no pending history recovery"))?;
+        let mut updates = channel.subscribe();
+        channel.retry(generation)?;
+        loop {
+            let status = updates.borrow_and_update().clone();
+            if status.fault_generation != generation {
+                bail!(
+                    "history fault generation changed during recovery: {}",
+                    status.error.unwrap_or_default()
+                );
+            }
+            if status.fault.is_none() {
+                return Ok(());
+            }
+            updates
+                .changed()
+                .await
+                .map_err(|_| anyhow::anyhow!("history status channel closed"))?;
+        }
+    }
     pub(crate) fn subscribe(&self) -> watch::Receiver<ThreadPersistenceSnapshot> {
         self.0.state.subscribe()
     }
@@ -190,6 +270,7 @@ impl ThreadPersistenceCoordinator {
     pub(crate) fn queue_snapshot(&self) -> pl_protocol::PersistenceQueueSnapshot {
         let snapshot = self.0.state.borrow().clone();
         pl_protocol::PersistenceQueueSnapshot {
+            statistics_gap: snapshot.statistics_gap,
             pending_operations: snapshot
                 .pending_commits
                 .saturating_add(snapshot.calls_pending_operations),
@@ -206,7 +287,7 @@ impl ThreadPersistenceCoordinator {
                 (Some(left), Some(right)) => Some(left.min(right)),
                 (left, right) => left.or(right),
             },
-            pressure_paused: snapshot.pressure_paused || snapshot.calls_pressure_paused,
+            pressure_paused: snapshot.pressure_paused,
             last_error: snapshot.error.clone().or(snapshot.calls_last_error.clone()),
             threads: snapshot.threads,
         }
@@ -258,6 +339,12 @@ impl ThreadPersistenceCoordinator {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let status = threads.entry(thread_id.to_owned()).or_default();
+            // A prior task has ended, but its channel and unacknowledged batches survived here.
+            // The replacement adopts that same queue, so the predecessor's diagnostic is no
+            // longer a separate outstanding obligation.
+            status
+                .incarnations
+                .retain(|_, previous| previous.released_dirty.is_none());
             let superseded: Vec<usize> = status
                 .incarnations
                 .iter()
@@ -294,6 +381,7 @@ impl ThreadPersistenceCoordinator {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut empty = false;
+        let mut unavailable = false;
         if let Some(status) = threads.get_mut(thread_id) {
             // Decide before mutating: `record_released_commits` deliberately keeps the row alive
             // when it owes commits, so the removal decision must come from the pre-release state.
@@ -314,6 +402,14 @@ impl ThreadPersistenceCoordinator {
                 // pending entries are kept so the drain keeps seeing them and fails explicitly.
                 record_released_commits(incarnation, thread_id);
             }
+            unavailable = release
+                && !status
+                    .incarnations
+                    .iter()
+                    .any(|(id, incarnation)| *id != owner && incarnation.is_live());
+            if release && !unavailable {
+                status.incarnations.remove(&owner);
+            }
             if let Some(error) = stale_error {
                 tracing::error!(
                     thread_id,
@@ -331,6 +427,21 @@ impl ThreadPersistenceCoordinator {
             threads.remove(thread_id);
         }
         drop(threads);
+        if unavailable {
+            self.history_channel(thread_id).mark_unavailable();
+        } else if empty {
+            let mut channels = self
+                .0
+                .channels
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if channels
+                .get(thread_id)
+                .is_some_and(|channel| channel.is_clean())
+            {
+                channels.remove(thread_id);
+            }
+        }
         // The history registry holds no strong reference, so prune the entries whose Thread released
         // its last handle: the map stays bounded by the Threads that currently have a history writer
         // instead of growing with every Thread this process ever touched.
@@ -524,6 +635,7 @@ fn aggregate(
         calls_oldest_pending_age_millis: calls.oldest_pending_age_millis,
         calls_last_error: calls.last_error.clone(),
         calls_pressure_paused: calls.pressure_paused,
+        statistics_gap: calls.statistics_gap,
         ..Default::default()
     };
     for (id, status) in threads {
@@ -576,6 +688,8 @@ fn aggregate(
                 .threads
                 .push(pl_protocol::ThreadPersistenceSnapshot {
                     thread_id: id.clone(),
+                    fault_generation: metrics.fault_generation,
+                    fault: metrics.fault,
                     state_dirty_revision: live.then_some(metrics.state_dirty_revision),
                     state_saving_revision: live.then_some(metrics.state_saving_revision),
                     state_durable_revision: live.then_some(metrics.state_durable_revision),

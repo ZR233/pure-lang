@@ -1,91 +1,12 @@
 //! Tool timeline facts use original call bytes and the context actually delivered by core.
 use super::{ProjectionError, content::text_content};
 use pl_core::thread::{
-    AttemptOutcome, ThreadEffectBatch, ThreadSnapshot, ToolDelivery, ToolOutcome,
-    permissions::PermissionState, task::TaskStatus,
+    ThreadSnapshot, ToolDelivery, ToolOutcome, permissions::PermissionState, task::TaskStatus,
 };
 use pl_protocol::{
     ThreadItem, ThreadItemState, ThreadToolInvocation, ThreadToolItem, ThreadToolOutput,
     ThreadToolState,
 };
-use std::{collections::BTreeMap, sync::Arc};
-
-struct Call<'a> {
-    turn_id: &'a str,
-    call: &'a pl_core::model::ModelToolCall,
-    sequence: u64,
-    at: i64,
-}
-
-pub(in crate::studio) fn project_tools(
-    thread_id: &str,
-    snapshot: &ThreadSnapshot,
-    journal: &[Arc<ThreadEffectBatch>],
-) -> Result<Vec<ThreadItem>, ProjectionError> {
-    let mut calls = BTreeMap::new();
-    let mut updates = BTreeMap::new();
-    for commit in journal
-        .iter()
-        .filter(|commit| commit.sequence <= snapshot.commit_sequence)
-    {
-        if let Some(attempt) = &commit.attempt
-            && let AttemptOutcome::Committed(output) = &attempt.outcome
-        {
-            for call in &output.tool_calls {
-                if calls
-                    .insert(
-                        call.call_id.as_str(),
-                        Call {
-                            turn_id: &attempt.turn_id,
-                            call,
-                            sequence: commit.sequence,
-                            at: commit.committed_at,
-                        },
-                    )
-                    .is_some()
-                {
-                    return Err(ProjectionError::DuplicateCall(call.call_id.clone()));
-                }
-            }
-        }
-        for task in commit.tasks.iter() {
-            updates.insert(
-                task.call_id.as_str(),
-                (commit.sequence, commit.committed_at),
-            );
-        }
-        for permission in commit.permissions.iter() {
-            updates.insert(
-                permission.call_id.as_str(),
-                (commit.sequence, commit.committed_at),
-            );
-        }
-        for delivery in commit.deliveries.iter() {
-            updates.insert(
-                delivery.call_id.as_str(),
-                (commit.sequence, commit.committed_at),
-            );
-        }
-    }
-    let mut items = Vec::new();
-    for (id, saved) in calls {
-        let (revision, at) = updates
-            .get(id)
-            .copied()
-            .unwrap_or((saved.sequence, saved.at));
-        items.extend(project_tool_call(
-            thread_id,
-            snapshot,
-            saved.turn_id,
-            saved.call,
-            saved.sequence,
-            saved.at,
-            revision,
-            at,
-        )?);
-    }
-    Ok(items)
-}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn project_tool_call(

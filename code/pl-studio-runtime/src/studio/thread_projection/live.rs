@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use pl_core::{
+    chat::Session,
     context::ContextSnapshot,
     thread::{
         RequestAttempt, ThreadEffectBatch, ThreadSnapshot, TurnRecord, TurnState,
@@ -60,19 +61,21 @@ pub(in crate::studio) struct LiveProjection {
     state: ThreadSnapshot,
     items: BTreeMap<String, ThreadItem>,
     turns_seen: BTreeSet<String>,
+    preview_attempt: Option<String>,
+    preview_payloads: BTreeSet<String>,
 }
 
 impl LiveProjection {
     /// Seeds the projection from the current owner snapshot.
     ///
-    /// Ordinals are not seeded locally: every item identity is reserved through the history
-    /// database, so live and durable allocation are the same fact instead of two phases that have
-    /// to be kept in step.
+    /// The shared session assigns new orders before either preview or persistence.
     pub(in crate::studio) fn seed(state: ThreadSnapshot) -> Self {
         Self {
             state,
             items: BTreeMap::new(),
             turns_seen: BTreeSet::new(),
+            preview_attempt: None,
+            preview_payloads: BTreeSet::new(),
         }
     }
 
@@ -80,7 +83,7 @@ impl LiveProjection {
     ///
     /// Identity alignment is two-pass, exactly like the history writer: the effect is projected
     /// once to discover the item identities it touches, those identities are resolved against the
-    /// durable phase and reserved in the history database, and the effect is projected again with
+    /// durable phase and reserved in the shared session, and the effect is projected again with
     /// that phase. A live item therefore carries the ordinal the durable item will have, so window
     /// eviction, resubscription, lagged replay and multiple subscribers never renumber it.
     ///
@@ -90,7 +93,7 @@ impl LiveProjection {
     pub(in crate::studio) async fn advance(
         &mut self,
         history: &crate::studio::storage::history::HistoryStore,
-        history_writer: &crate::studio::storage::history::HistoryStore,
+        chat: &Session,
         usage: &pl_core::thread::UsageSummary,
         thread: &pl_protocol::Thread,
         effect: &ThreadEffectBatch,
@@ -106,7 +109,7 @@ impl LiveProjection {
         let (mut existing, mut reserved) = self
             .resolve_phase(
                 history,
-                history_writer,
+                chat,
                 provisional.items.iter().map(|item| item.id.clone()),
             )
             .await?;
@@ -114,25 +117,37 @@ impl LiveProjection {
         // Only its already durable item can complete that reference, and reading it must not reserve
         // an ordinal for an identity this effect does not project.
         if !provisional.unresolved_inputs.is_empty() {
+            let mut missing = Vec::new();
+            for id in &provisional.unresolved_inputs {
+                match chat
+                    .read_item(id)
+                    .await
+                    .map_err(|error| ProjectionError::History(error.to_string()))?
+                {
+                    Some(item) => {
+                        let decoded = serde_json::from_str(&item.body)
+                            .map_err(|error| ProjectionError::History(error.to_string()))?;
+                        existing.entry(id.clone()).or_insert(decoded);
+                    }
+                    None => missing.push(id.clone()),
+                }
+            }
             for (id, item) in history
-                .existing_items(provisional.unresolved_inputs.iter().cloned())
+                .existing_items(missing)
                 .await
                 .map_err(|error| ProjectionError::History(error.to_string()))?
             {
                 existing.entry(id).or_insert(item);
             }
         }
-        // 只读地并入本 effect 可能要收束的 streaming channel 已预留的 identity；这里绝不新建
-        // 预留，因此未开始的 channel 不会被误判为已开始。writer 走同一张 `history_ordinals`。
+        // Only already-started channels may be finalized by this effect.
         if let Some(attempt) = &effect.attempt {
             let channels = ["reasoning", "text"]
                 .map(|channel| super::attempt_channel_id(&attempt.attempt_id, channel));
-            for (id, ordinal) in history
-                .reserved_ordinals(channels)
-                .await
-                .map_err(|error| ProjectionError::History(error.to_string()))?
-            {
-                reserved.entry(id).or_insert(ordinal);
+            for id in channels {
+                if let Some(ordinal) = chat.assigned_order(&id) {
+                    reserved.entry(id).or_insert(ordinal);
+                }
             }
         }
         let projected =
@@ -141,6 +156,11 @@ impl LiveProjection {
         projected.ensure_complete()?;
         let mut events = Vec::new();
         for item in projected.items {
+            chat.publish(
+                crate::studio::storage::history::chat_item(item.clone(), false)
+                    .map_err(|error| ProjectionError::History(error.to_string()))?,
+            )
+            .map_err(|error| ProjectionError::History(error.to_string()))?;
             events.extend(self.record(item)?);
         }
         if let Some(record) = &effect.turn {
@@ -206,42 +226,49 @@ impl LiveProjection {
     /// Resolves the authoritative ordinal phase for one effect's item identities.
     ///
     /// Already written identities keep the durable payload they were assigned; identities this
-    /// effect introduces are reserved in the same table the writer allocates from, so the durable
-    /// item that the writer later inserts reuses exactly this ordinal. Identities the live window
-    /// still holds are merged last so a projection never renumbers them either.
-    ///
-    /// The lookup reads through the subscription's read-only handle, while the allocation is a write
-    /// on the Thread's *single* ordered writer handle — the same one its effect commit uses. A live
-    /// frame therefore never becomes a second SQLite writer, and in the steady state — where every
-    /// identity is already durable — the reservation needs no write at all.
+    /// effect introduces are allocated by the shared session, and the writer uses the same order.
     async fn resolve_phase(
         &self,
         history: &crate::studio::storage::history::HistoryStore,
-        history_writer: &crate::studio::storage::history::HistoryStore,
+        chat: &Session,
         ids: impl IntoIterator<Item = String>,
     ) -> Result<(BTreeMap<String, ThreadItem>, BTreeMap<String, u64>), ProjectionError> {
         let ids = ids.into_iter().collect::<Vec<_>>();
+        // Once every identity is owned by this session, streaming updates need no
+        // database round trip. The durable lookup below remains necessary for an
+        // identity encountered for the first time after reopening a session.
+        let assigned = ids
+            .iter()
+            .map(|id| {
+                self.items
+                    .contains_key(id)
+                    .then(|| chat.assigned_order(id))
+                    .flatten()
+                    .map(|order| (id.clone(), order))
+            })
+            .collect::<Option<Vec<_>>>();
+        if let Some(assigned) = assigned {
+            let existing = ids
+                .into_iter()
+                .filter_map(|id| self.items.get(&id).cloned().map(|item| (id, item)))
+                .collect();
+            return Ok((existing, assigned.into_iter().collect()));
+        }
         let mut existing = history
             .existing_items(ids.clone())
             .await
             .map_err(|error| ProjectionError::History(error.to_string()))?;
-        // Read the already-durable phase without a transaction; only genuinely new identities reach
-        // the shared writer.
-        let mut reserved = history
-            .reserved_ordinals(ids.clone())
-            .await
-            .map_err(|error| ProjectionError::History(error.to_string()))?;
+        let mut reserved = BTreeMap::new();
         let missing = ids
             .into_iter()
-            .filter(|id| !reserved.contains_key(id))
+            .filter(|id| !reserved.contains_key(id) && !existing.contains_key(id))
             .collect::<Vec<_>>();
-        if !missing.is_empty() {
-            reserved.extend(
-                history_writer
-                    .reserve_missing_ordinals(missing)
-                    .await
-                    .map_err(|error| ProjectionError::History(error.to_string()))?,
-            );
+        for id in missing {
+            let order = chat
+                .reserve_order(&id)
+                .await
+                .map_err(|error| ProjectionError::History(error.to_string()))?;
+            reserved.insert(id, order);
         }
         for (id, item) in &self.items {
             existing.entry(id.clone()).or_insert_with(|| item.clone());
@@ -323,12 +350,14 @@ impl LiveProjection {
     pub(in crate::studio) async fn stream(
         &mut self,
         history: &crate::studio::storage::history::HistoryStore,
-        history_writer: &crate::studio::storage::history::HistoryStore,
+        chat: &Session,
         thread: &pl_protocol::Thread,
         state: &ThreadSnapshot,
         applied: u64,
     ) -> Result<Vec<LiveEvent>, ProjectionError> {
         let Some(preview) = state.model_progress.as_ref() else {
+            self.preview_attempt = None;
+            self.preview_payloads.clear();
             return Ok(Vec::new());
         };
         let Some(attempt) = state
@@ -340,14 +369,147 @@ impl LiveProjection {
         };
         let at = crate::studio::unix_seconds();
         let mut events = Vec::new();
+        if !preview.progress.presentation.is_empty() {
+            if self.preview_attempt.as_deref() != Some(preview.attempt_id.as_str()) {
+                self.preview_attempt = Some(preview.attempt_id.clone());
+                self.preview_payloads.clear();
+            }
+            let previous_payloads = std::mem::take(&mut self.preview_payloads);
+            for channel in ["text", "reasoning"] {
+                let id = super::order::response_id(&attempt.attempt_id, channel);
+                if self
+                    .items
+                    .get(&id)
+                    .is_some_and(|item| !item.state().is_terminal())
+                {
+                    self.items.remove(&id);
+                    chat.drop_preview(&id);
+                }
+            }
+            for payload in &preview.progress.presentation {
+                let content = payload.content();
+                self.preview_payloads.insert(content.to_owned());
+                if previous_payloads.contains(content) {
+                    continue;
+                }
+                if payload.format() != "pl.model.presentation-item" || payload.version() != 1 {
+                    return Err(ProjectionError::UnsupportedOutput(
+                        "unsupported model presentation preview".into(),
+                    ));
+                }
+                let item: pl_model::completion::CompletionPresentationItem =
+                    serde_json::from_str(payload.content())
+                        .map_err(|error| ProjectionError::UnsupportedOutput(error.to_string()))?;
+                for part in item
+                    .parts
+                    .iter()
+                    .map(Some)
+                    .chain(item.parts.is_empty().then_some(None))
+                {
+                    let id = super::order::presentation_id(
+                        &attempt.attempt_id,
+                        &item.provider_item_id,
+                        part.map(super::order::presentation_part),
+                    );
+                    if self
+                        .items
+                        .get(&id)
+                        .is_some_and(|previous| previous.state().is_terminal())
+                    {
+                        continue;
+                    }
+                    let state = match (item.kind, part.map(|part| part.kind)) {
+                        (
+                            pl_model::completion::CompletionPresentationItemKind::Text(channel),
+                            None,
+                        )
+                        | (
+                            pl_model::completion::CompletionPresentationItemKind::Text(channel),
+                            Some(pl_model::completion::CompletionPresentationPartKind::OutputText),
+                        ) => {
+                            let channel = match channel {
+                                pl_protocol::trace::TraceTextChannel::User => {
+                                    ThreadTextChannel::User
+                                }
+                                pl_protocol::trace::TraceTextChannel::Commentary => {
+                                    ThreadTextChannel::Commentary
+                                }
+                                pl_protocol::trace::TraceTextChannel::Final => {
+                                    ThreadTextChannel::Final
+                                }
+                            };
+                            ThreadItemState::Text(ThreadTextItem::new(
+                                channel,
+                                part.map_or_else(String::new, |part| part.text.clone()),
+                                Vec::new(),
+                                ThreadContentLifecycle::streaming(),
+                            ))
+                        }
+                        (pl_model::completion::CompletionPresentationItemKind::Reasoning, None)
+                        | (
+                            pl_model::completion::CompletionPresentationItemKind::Reasoning,
+                            Some(
+                                pl_model::completion::CompletionPresentationPartKind::ReasoningText,
+                            ),
+                        ) => ThreadItemState::Thinking(ThreadThinkingItem::new(
+                            Vec::new(),
+                            part.map_or_else(Vec::new, |part| vec![part.text.clone()]),
+                            ThreadContentLifecycle::streaming(),
+                        )),
+                        (
+                            pl_model::completion::CompletionPresentationItemKind::Reasoning,
+                            Some(pl_model::completion::CompletionPresentationPartKind::SummaryText),
+                        ) => ThreadItemState::Thinking(ThreadThinkingItem::new(
+                            part.map_or_else(Vec::new, |part| vec![part.text.clone()]),
+                            Vec::new(),
+                            ThreadContentLifecycle::streaming(),
+                        )),
+                        _ => {
+                            return Err(ProjectionError::UnsupportedOutput(
+                                "provider presentation part does not match its item".into(),
+                            ));
+                        }
+                    };
+                    if self
+                        .items
+                        .get(&id)
+                        .is_some_and(|previous| previous.state() == &state)
+                    {
+                        continue;
+                    }
+                    let order = chat
+                        .reserve_order(&id)
+                        .await
+                        .map_err(|error| ProjectionError::History(error.to_string()))?;
+                    let revision = self.preview_revision(&id, applied);
+                    let created_at = self.created_at(&id, at);
+                    let projected = ThreadItem::new(
+                        id,
+                        thread.id.clone(),
+                        attempt.turn_id.clone(),
+                        order,
+                        revision,
+                        created_at,
+                        at,
+                        state,
+                    );
+                    chat.publish_preview(
+                        crate::studio::storage::history::chat_item(projected.clone(), false)
+                            .map_err(|error| ProjectionError::History(error.to_string()))?,
+                    )
+                    .map_err(|error| ProjectionError::History(error.to_string()))?;
+                    events.extend(self.record(projected)?);
+                }
+            }
+            return Ok(events);
+        }
         let reasoning = preview.progress.reasoning.as_ref().and_then(|payload| {
             (payload.format() == "text/plain" && payload.version() == 1)
                 .then(|| payload.content().to_owned())
         });
         let text = super::content::text_content(&preview.progress.content);
         let reasoning = reasoning.filter(|text| !text.is_empty());
-        // 流式预览也是身份分配事实：先在同一张表预留终态 item 会使用的 ordinal，预览与最终
-        // 终态才是同一条目，而不是两个各自编号的 overlay。
+        // The streaming preview and its terminal item share an in-memory identity assignment.
         let reasoning_id = super::order::response_id(&attempt.attempt_id, "reasoning");
         let text_id = super::order::response_id(&attempt.attempt_id, "text");
         let mut ids = Vec::new();
@@ -357,13 +519,13 @@ impl LiveProjection {
         if !text.is_empty() {
             ids.push(text_id.clone());
         }
-        let (existing, reserved) = self.resolve_phase(history, history_writer, ids).await?;
+        let (existing, reserved) = self.resolve_phase(history, chat, ids).await?;
         if let Some(reasoning) = reasoning {
             let id = reasoning_id;
             let revision = self.preview_revision(&id, applied);
             let created_at = self.created_at(&id, at);
             let ordinal = phase_ordinal(&existing, &reserved, &id);
-            events.extend(self.record(ThreadItem::new(
+            let item = ThreadItem::new(
                 id,
                 thread.id.clone(),
                 attempt.turn_id.clone(),
@@ -376,14 +538,20 @@ impl LiveProjection {
                     vec![reasoning],
                     ThreadContentLifecycle::streaming(),
                 )),
-            ))?);
+            );
+            chat.publish_preview(
+                crate::studio::storage::history::chat_item(item.clone(), false)
+                    .map_err(|error| ProjectionError::History(error.to_string()))?,
+            )
+            .map_err(|error| ProjectionError::History(error.to_string()))?;
+            events.extend(self.record(item)?);
         }
         if !text.is_empty() {
             let id = text_id;
             let revision = self.preview_revision(&id, applied);
             let created_at = self.created_at(&id, at);
             let ordinal = phase_ordinal(&existing, &reserved, &id);
-            events.extend(self.record(ThreadItem::new(
+            let item = ThreadItem::new(
                 id,
                 thread.id.clone(),
                 attempt.turn_id.clone(),
@@ -397,7 +565,13 @@ impl LiveProjection {
                     Vec::new(),
                     ThreadContentLifecycle::streaming(),
                 )),
-            ))?);
+            );
+            chat.publish_preview(
+                crate::studio::storage::history::chat_item(item.clone(), false)
+                    .map_err(|error| ProjectionError::History(error.to_string()))?,
+            )
+            .map_err(|error| ProjectionError::History(error.to_string()))?;
+            events.extend(self.record(item)?);
         }
         Ok(events)
     }

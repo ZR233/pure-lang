@@ -1,8 +1,7 @@
 //! `workspaces.toml`: Project/Workspace 目录事实的 canonical TOML 存储。
 //!
-//! 旧 `projects` 表只在持独占锁的一次性 migration 边界被读取（`session_migration` 把行转换
-//! 为本文件后归档旧库）；普通目录读取不再访问它。写路径与 catalog 一样使用单锁读取-修改-原子
-//! 替换，`revision` 单调递增并保证同内容幂等。
+//! 旧 `projects` 表属于旧会话版本，v2 不导入；普通目录读取只访问本文件。
+//! 写路径与 catalog 一样使用单锁读取-修改-原子替换，`revision` 单调递增并保证同内容幂等。
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -173,27 +172,6 @@ impl WorkspaceStore {
                     existing.updated_at = existing.updated_at.max(closed_at);
                     changed = true;
                 }
-            }
-            changed
-        })
-        .await
-    }
-
-    /// Idempotently seeds the TOML document from the retired `projects` table (migration boundary
-    /// only). Existing entries win by id, and content that is already present never rewrites.
-    pub(in crate::studio) async fn merge(&self, entries: Vec<WorkspaceEntry>) -> Result<()> {
-        self.mutate(move |document| {
-            let mut changed = false;
-            for entry in entries {
-                if document
-                    .workspaces
-                    .iter()
-                    .any(|existing| existing.id == entry.id)
-                {
-                    continue;
-                }
-                document.workspaces.push(entry);
-                changed = true;
             }
             changed
         })

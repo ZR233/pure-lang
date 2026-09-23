@@ -137,11 +137,23 @@ class _PersistenceStatusPanelState
   bool _loadingQueue = false;
   bool _queueSupported = true;
   PersistenceQueueSnapshot? _queue;
+  Timer? _historyStatusTimer;
+  final Set<String> _retryingThreads = {};
 
   @override
   void initState() {
     super.initState();
     unawaited(_refreshQueue());
+    _historyStatusTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => unawaited(_refreshQueue()),
+    );
+  }
+
+  @override
+  void dispose() {
+    _historyStatusTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -160,7 +172,12 @@ class _PersistenceStatusPanelState
     final state = snapshot.state;
     final attention = state.needsAttention;
     final queue = _queue;
-    if (!attention && queue?.pressurePaused != true) {
+    final historyFault =
+        queue?.threads.any((thread) => thread.fault != null) ?? false;
+    if (!attention &&
+        !historyFault &&
+        queue?.pressurePaused != true &&
+        queue?.statisticsGap != true) {
       return const SizedBox.shrink();
     }
     final colors = Theme.of(context).colorScheme;
@@ -175,7 +192,9 @@ class _PersistenceStatusPanelState
     };
     return ColoredBox(
       key: const ValueKey('persistence-state-banner'),
-      color: attention ? colors.errorContainer : colors.surfaceContainer,
+      color: attention || historyFault
+          ? colors.errorContainer
+          : colors.surfaceContainer,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
         child: Column(
@@ -184,12 +203,19 @@ class _PersistenceStatusPanelState
             Row(
               children: [
                 Icon(
-                  attention ? Icons.save_outlined : Icons.save_as_outlined,
+                  attention || historyFault
+                      ? Icons.save_outlined
+                      : Icons.save_as_outlined,
                   size: 18,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(message ?? context.l10n.persistenceQueueTitle),
+                  child: Text(
+                    message ??
+                        (historyFault
+                            ? context.l10n.persistenceHistoryPaused
+                            : context.l10n.persistenceQueueTitle),
+                  ),
                 ),
                 if (attention)
                   TextButton.icon(
@@ -239,6 +265,7 @@ class _PersistenceStatusPanelState
       if (queue.oldestPendingAgeMillis case final age?)
         context.l10n.persistenceQueueOldestAge(age),
       if (queue.pressurePaused) context.l10n.persistenceQueuePressurePaused,
+      if (queue.statisticsGap) context.l10n.persistenceStatisticsGap,
       if (queue.lastError case final error?)
         context.l10n.persistenceQueueError(error),
     ];
@@ -254,11 +281,29 @@ class _PersistenceStatusPanelState
               style: Theme.of(context).textTheme.labelSmall
                   ?.copyWith(color: colors.onSurfaceVariant),
             ),
-          for (final thread in queue.threads.take(_maxThreadRows))
-            Text(
-              _persistenceThreadLine(thread),
-              style: Theme.of(context).textTheme.labelSmall
-                  ?.copyWith(color: colors.onSurfaceVariant),
+          for (final thread in [
+            ...queue.threads.where((thread) => thread.fault != null),
+            ...queue.threads.where((thread) => thread.fault == null),
+          ].take(_maxThreadRows))
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${_persistenceThreadLine(thread)}${thread.fault == null ? '' : ' · ${thread.fault == 'queueFull' ? context.l10n.persistenceHistoryQueueFull : context.l10n.persistenceHistoryWriteFailed}'}',
+                    style: Theme.of(context).textTheme.labelSmall
+                        ?.copyWith(color: colors.onSurfaceVariant),
+                  ),
+                ),
+                if (thread.fault != null)
+                  TextButton.icon(
+                    key: ValueKey('history-retry-${thread.threadId}'),
+                    onPressed: _retryingThreads.contains(thread.threadId)
+                        ? null
+                        : () => unawaited(_retryThread(thread)),
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: Text(context.l10n.persistenceHistoryRetry),
+                  ),
+              ],
             ),
           if (queue.threads.length > _maxThreadRows)
             Text(
@@ -299,6 +344,24 @@ class _PersistenceStatusPanelState
       await _refreshQueue();
     } finally {
       if (mounted) setState(() => _retrying = false);
+    }
+  }
+
+  Future<void> _retryThread(ThreadPersistenceSnapshot thread) async {
+    setState(() => _retryingThreads.add(thread.threadId));
+    try {
+      final queue = await ref
+          .read(studioControllerProvider.notifier)
+          .retryThreadHistory(thread.threadId, thread.faultGeneration);
+      if (mounted) setState(() => _queue = queue);
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
+        await _refreshQueue();
+      }
+    } finally {
+      if (mounted) setState(() => _retryingThreads.remove(thread.threadId));
     }
   }
 }

@@ -14,6 +14,15 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 Future<BridgePersistenceStateSnapshot> retryPersistence() =>
     RustLib.instance.api.crateApiStudioHandlersPersistenceRetryPersistence();
 
+/// Retry exactly one latched Thread fault; returns only after its fixed save fence is confirmed.
+Future<BridgePersistenceQueueSnapshot> retryThreadHistory({
+  required String threadId,
+  required BigInt faultGeneration,
+}) => RustLib.instance.api.crateApiStudioHandlersPersistenceRetryThreadHistory(
+  threadId: threadId,
+  faultGeneration: faultGeneration,
+);
+
 /// 读取进程级持久化队列压力与逐 Thread 水位。
 ///
 /// 返回协调器已观测到的真实值：队列操作数、字节、在途字节、最老待保存年龄与最近错误，

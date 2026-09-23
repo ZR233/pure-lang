@@ -16,6 +16,7 @@ impl Owner {
         id: String,
         cancellation: CancellationToken,
     ) -> Result<ToolDispatch, ThreadError> {
+        self.await_storage_admission(&cancellation).await?;
         let foreground = self
             .pending
             .get(&id)

@@ -7,6 +7,42 @@ use pl_protocol::{ThreadItem, ThreadItemState, ThreadRawItem, ThreadTurnItem};
 
 use super::{ProjectionError, order};
 
+/// Projects only newly accepted visible input from this effect. Admission cannot wait
+/// for a history reader; later state transitions and old identities are resolved by
+/// the durable writer against the canonical history.
+pub(in crate::studio) fn project_accepted_inputs(
+    thread_id: &str,
+    state: &ThreadSnapshot,
+    effect: &ThreadEffectBatch,
+) -> Result<Vec<ThreadItem>, ProjectionError> {
+    let mut items = Vec::new();
+    for change in effect.inputs.iter() {
+        let InputChange::Accepted(record) = change else {
+            continue;
+        };
+        if record.accepted_sequence != effect.sequence {
+            return Err(ProjectionError::MissingInput(record.input.id.clone()));
+        }
+        let input = state
+            .inputs
+            .iter()
+            .find(|input| input.input.id == record.input.id)
+            .ok_or_else(|| ProjectionError::MissingInput(record.input.id.clone()))?;
+        if let Some(item) = super::inputs::project_input(
+            thread_id,
+            state,
+            input,
+            0,
+            effect.committed_at,
+            effect.sequence,
+            effect.committed_at,
+        )? {
+            items.push(item);
+        }
+    }
+    Ok(items)
+}
+
 /// Timeline items one committed effect contributes, plus the identities it references but cannot
 /// materialize from the state that effect carried.
 ///
@@ -170,9 +206,11 @@ pub(in crate::studio) fn project_effect_items(
         let (ordinal, created_at) = stamp(existing, reserved, &inference_id, effect.committed_at);
         // 收束集合来自同一份 durable 事实：已存在的 item 或已预留的 identity。writer 与 live 都
         // 传同一张 existing/reserved，因此同一 item 的终态一致，未开始的 channel 不会凭空出现。
-        let finalize = super::responses::started_channels(&attempt.attempt_id, |id| {
-            existing.contains_key(id) || reserved.contains_key(id)
-        });
+        let finalize = super::responses::started_channels(
+            current,
+            existing.keys().chain(reserved.keys()).cloned(),
+            |id| existing.contains_key(id) || reserved.contains_key(id),
+        );
         let mut projected = super::responses::project_attempt(
             &thread.id,
             state,
@@ -182,6 +220,15 @@ pub(in crate::studio) fn project_effect_items(
             effect.sequence,
             effect.committed_at,
             &finalize,
+        )?;
+        super::responses::finalize_missing_presentation(
+            &thread.id,
+            current,
+            effect.sequence,
+            effect.committed_at,
+            &finalize,
+            existing,
+            &mut projected,
         )?;
         canonicalize(&mut projected, existing, reserved, effect.committed_at);
         items.extend(projected);
@@ -311,14 +358,21 @@ pub(in crate::studio) fn project_effect_items(
     }
 
     items.sort_by_key(|item| (item.ordinal == 0, item.ordinal));
+    // An empty phase is only for discovering provisional identities. Once the caller supplies
+    // committed or Session-assigned orders, no item may fall through to storage-side allocation.
+    if (!existing.is_empty() || !reserved.is_empty())
+        && let Some(item) = items.iter().find(|item| item.ordinal == 0)
+    {
+        return Err(ProjectionError::ItemOrder(item.id.clone()));
+    }
     Ok(EffectProjection {
         items,
         unresolved_inputs,
     })
 }
 
-/// Ordinal phase of one identity: the durable item when it exists, otherwise the ordinal a live
-/// reservation already took, otherwise zero so the durable writer allocates it on insert.
+/// Ordinal phase of one identity: the committed item, an in-memory Session assignment, or zero
+/// only during the first identity-discovery projection. The final projection rejects zero.
 fn stamp(
     existing: &BTreeMap<String, ThreadItem>,
     reserved: &BTreeMap<String, u64>,

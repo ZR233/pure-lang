@@ -36,6 +36,7 @@ pub struct SseStreamEvent {
     pub status_code: Option<serde_json::Value>,
     pub summary_index: Option<i64>,
     pub content_index: Option<i64>,
+    pub output_index: Option<u32>,
     pub choices: Option<Vec<ChatStreamChoice>>,
     pub usage: Option<ProviderTokenUsage>,
 }

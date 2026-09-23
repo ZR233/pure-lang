@@ -458,6 +458,36 @@ abstract class AppLocalizations {
   /// **'Refresh diagnostics'**
   String get persistenceQueueRefresh;
 
+  /// No description provided for @persistenceHistoryPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Session history saving is paused'**
+  String get persistenceHistoryPaused;
+
+  /// No description provided for @persistenceHistoryQueueFull.
+  ///
+  /// In en, this message translates to:
+  /// **'History queue full'**
+  String get persistenceHistoryQueueFull;
+
+  /// No description provided for @persistenceHistoryWriteFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'History save failed'**
+  String get persistenceHistoryWriteFailed;
+
+  /// No description provided for @persistenceHistoryRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry saving and continue'**
+  String get persistenceHistoryRetry;
+
+  /// No description provided for @persistenceStatisticsGap.
+  ///
+  /// In en, this message translates to:
+  /// **'Call statistics are incomplete; missing usage is unknown, not zero.'**
+  String get persistenceStatisticsGap;
+
   /// No description provided for @recoveryGlobalWarning.
   ///
   /// In en, this message translates to:
@@ -1810,6 +1840,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Rolled back from active context'**
   String get timelineRolledBack;
+
+  /// No description provided for @timelinePendingSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting to save'**
+  String get timelinePendingSave;
 
   /// No description provided for @interactionSubmitEmptyAnswersHint.
   ///

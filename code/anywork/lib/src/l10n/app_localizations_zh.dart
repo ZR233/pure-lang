@@ -212,6 +212,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get persistenceQueueRefresh => '刷新诊断';
 
   @override
+  String get persistenceHistoryPaused => '会话历史保存已暂停';
+
+  @override
+  String get persistenceHistoryQueueFull => '历史队列已满';
+
+  @override
+  String get persistenceHistoryWriteFailed => '历史保存失败';
+
+  @override
+  String get persistenceHistoryRetry => '重试保存并继续';
+
+  @override
+  String get persistenceStatisticsGap => '调用统计不完整；缺失的用量未知，不能按零计算。';
+
+  @override
   String recoveryGlobalWarning(int count) {
     return '有 $count 个恢复问题需要处理';
   }
@@ -955,6 +970,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get timelineRolledBack => '已从有效上下文回退';
+
+  @override
+  String get timelinePendingSave => '等待保存';
 
   @override
   String get interactionSubmitEmptyAnswersHint => '未作答的问题将留空提交。';

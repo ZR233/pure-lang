@@ -189,9 +189,14 @@ fn persist_panic(crash_dir: &Path, info: &std::panic::PanicHookInfo<'_>) {
 }
 
 fn diagnostics_root() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
+    std::env::var_os("ANYWORK_HOME")
         .map(PathBuf::from)
-        .map(|path| path.join("anywork"))
+        .map(|path| path.join("studio"))
+        .or_else(|| {
+            std::env::var_os("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .map(|path| path.join("anywork"))
+        })
         .or_else(|| {
             std::env::var_os("USERPROFILE")
                 .or_else(|| std::env::var_os("HOME"))

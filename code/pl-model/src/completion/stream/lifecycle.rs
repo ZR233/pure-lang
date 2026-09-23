@@ -260,6 +260,9 @@ impl StreamLifecycle {
             ModelStreamEvent::ResponsesContextItem { item } => {
                 vec![ModelStreamEvent::ResponsesContextItem { item }]
             }
+            ModelStreamEvent::PresentationItem { item } => {
+                vec![ModelStreamEvent::PresentationItem { item }]
+            }
             ModelStreamEvent::Usage(usage) => vec![ModelStreamEvent::Usage(usage)],
             ModelStreamEvent::Failed {
                 code,

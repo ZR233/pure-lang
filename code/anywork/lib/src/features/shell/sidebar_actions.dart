@@ -86,7 +86,9 @@ class _DriverProjectPathDialogState extends State<_DriverProjectPathDialog> {
           child: Text(context.l10n.settingsCancel),
         ),
         FilledButton(
-          key: StudioDriverKeys.projectPathSubmit,
+          key: _path.isEmpty
+              ? const ValueKey('project-path-submit-disabled')
+              : StudioDriverKeys.projectPathSubmit,
           onPressed: _path.isEmpty ? null : _submit,
           child: Text(context.l10n.sidebarOpen),
         ),

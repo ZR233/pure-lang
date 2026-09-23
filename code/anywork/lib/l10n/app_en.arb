@@ -124,6 +124,11 @@
     }
   },
   "persistenceQueueRefresh": "Refresh diagnostics",
+  "persistenceHistoryPaused": "Session history saving is paused",
+  "persistenceHistoryQueueFull": "History queue full",
+  "persistenceHistoryWriteFailed": "History save failed",
+  "persistenceHistoryRetry": "Retry saving and continue",
+  "persistenceStatisticsGap": "Call statistics are incomplete; missing usage is unknown, not zero.",
   "recoveryGlobalWarning": "{count} recovery issue(s) need attention",
   "recoveryArchiveNotice": "Migration could not continue. Previous data was archived and anywork started with default settings. Archive:",
   "recoveryArchiveDismiss": "Dismiss archive notice",
@@ -596,6 +601,7 @@
   "interactionLastQuestion": "Last question",
   "interactionContinueAfterAnswer": "Continue after answering",
   "timelineRolledBack": "Rolled back from active context",
+  "timelinePendingSave": "Waiting to save",
   "interactionSubmitEmptyAnswersHint": "Unanswered questions are submitted as empty arrays.",
   "interactionAnsweredPendingHint": "{answeredCount} answered · {pendingCount} pending",
   "@interactionAnsweredPendingHint": {

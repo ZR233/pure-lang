@@ -160,6 +160,7 @@ impl ThreadModel {
                             source: Box::new(source),
                             accounting: Box::new(result.2),
                             model_observation: result.3.map(Box::new),
+                            presentation_items: Vec::new(),
                             cancelled: false,
                         },
                         None,

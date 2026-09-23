@@ -158,6 +158,7 @@ impl RemoteCompaction<'_> {
                     source: Box::new(source),
                     accounting: Box::new(response.accounting.clone()),
                     model_observation: response.model_observation.clone().map(Box::new),
+                    presentation_items: Vec::new(),
                     cancelled: false,
                 }
             })?;

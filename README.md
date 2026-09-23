@@ -35,11 +35,12 @@ model/tool 实现核心接口且不相互依赖。Studio 拥有配置、项目�
 | `pl-protocol` | `code/pl-protocol/` | 跨 crate 协议类型：消息、事件、错误、权限 |
 | `pl-trace` | `code/pl-trace/` | 通用 Thread 日志的只读诊断和用量投影 |
 | `pl-model` | `code/pl-model/` | LLM provider 抽象与适配：OpenAI 兼容 API、SSE 流式、模型元数据管理 |
+| `pl-provider-fixture` | `code/pl-provider-fixture/` | 本地固定请求/流的模拟供应商与 GUI 压力场景 |
 | `pl-lsp` | `code/pl-lsp/` | LSP 客户端：rust-analyzer 支持、代码智能查询 |
 | `pl-output` | `code/pl-output/` | 工具输出截断与模型可见投影算法 |
 | `pl-patch` | `code/pl-patch/` | apply-patch 语法、匹配与 backend 契约 |
 | `pl-skill-core` | `code/pl-skill-core/` | Skill frontmatter 与路径安全规则 |
-| `pl-core` | `code/pl-core/` | 产品无关的 Thread、模型/工具端口、上下文、不可变日志与可选 SQLite |
+| `pl-core` | `code/pl-core/` | 产品无关的 Thread、Session/ChatView 有界时间线、模型/工具端口与可选 SQLite |
 | `pl-tool` | `code/pl-tool/` | 文件、命令、SSH、Git、LSP、MCP、Skill、搜索与交互等工具实现 |
 | `pl-remote-helper` | `code/pl-remote-helper/` | Linux 本地进程监督与 SSH 远端助手，共用物理进程协议 |
 | `pl-studio-runtime` | `code/pl-studio-runtime/` | Studio 产品 SQLite、项目、配置、恢复与产品事件的唯一业务 façade |
@@ -221,15 +222,22 @@ cargo install --path code/pl-remote-helper --locked
 cargo xtask run-gui
 ```
 
-Flutter 端通过 `pl-studio-bridge` 调用同一个 `pl-studio-runtime`。每个打开的 Thread 只订阅自己的高频 Item/Turn/interaction 流；MCP/LSP health、配置和项目列表等低频事件走全局产品流。
+Flutter 端通过 `pl-studio-bridge` 调用同一个 `pl-studio-runtime`。打开聊天窗口先取得 core
+的有界 `ChatView` 首帧，再订阅批量差量；分页、跳转和回到最新由 core 统一处理。关闭窗口
+不取消 Thread 执行或待保存历史。MCP/LSP health、配置和项目列表等低频事件走全局产品流。
 
 首次启动后，在 anywork 设置页面配置 LLM Provider。配置保存在：
 
 ```text
-~/.anywork/config.toml                 # 全局配置（provider、模型、角色）
-~/.anywork/studio/studio.sqlite        # Studio 项目、配置关联与产品事实
-~/.anywork/studio/sessions.sqlite      # 通用 Thread journal、不可变载荷与资源元数据
+~/.anywork/config.toml                             # 全局 provider、模型与角色配置
+~/.anywork/studio/v2/studio.sqlite                  # 本版本产品数据库
+~/.anywork/v2/catalog.toml                          # 本版本会话目录
+~/.anywork/v2/sessions/<storage-key>/state.toml     # 单会话 checkpoint
+~/.anywork/v2/sessions/<storage-key>/history.sqlite # 单会话历史
+~/.anywork/v2/calls/calls.sqlite                    # 尽力而为的调用统计
 ```
+
+旧会话库保留在原位置，本次大版本不导入旧会话；供应商配置与凭据关联沿用原配置。
 
 DeepSeek V4 的 Responses route 支持服务端原生联网搜索；Studio 默认启用
 `[deepseek_web_search]`，当前 DeepSeek route 满足凭据、transport 和模型能力门控时优先使用，
@@ -244,6 +252,7 @@ pure-lang/
 │   ├── pl-protocol/          # 公共协议层
 │   ├── pl-trace/             # 内部 trace 事件
 │   ├── pl-model/             # LLM provider 适配
+│   ├── pl-provider-fixture/  # 本地模拟供应商
 │   ├── pl-lsp/               # LSP 客户端（rust-analyzer 支持）
 │   ├── pl-output/            # 输出截断算法
 │   ├── pl-patch/             # apply-patch 引擎
@@ -333,6 +342,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test -p pl-model
 cargo test -p pl-core --features sqlite
+cargo test -p pl-studio-runtime
 
 # 按需检查 core 的可选特性边界
 cargo check -p pl-core --no-default-features --all-targets
@@ -363,6 +373,9 @@ cargo xtask verify-gui
 # 隔离 Studio home 与本地模拟供应商，启动原生 GUI 并收集人工验收证据
 cargo xtask manual-gui
 
+# 20,000 条混合事件、约 5,000 token/s 的原生 profile/AOT 压力证据
+cargo xtask manual-gui --scenario stress
+
 # 使用用户已有配置，人工观察真实供应商（不修改用户配置）
 cargo xtask run-gui --driver
 
@@ -382,7 +395,8 @@ Markdown/timeline 视觉检查可以使用本地 demo 数据启动，不连接 r
 cargo xtask run-gui --demo
 ```
 
-项目自有自动化行为测试仅在 `pl-model` 和 `pl-core` 的公开 API 边界。模拟供应商服务严格按
+项目自有常规自动化行为测试仅在 `pl-model` 和 `pl-core` 的公开 API 边界；Studio 历史
+保存另有小范围 SQLite 专项测试。模拟供应商服务严格按
 固定提示词返回固定 HTTP/SSE 或 WebSocket 消息流，未知请求明确失败。`manual-gui` 运行
 非 demo 原生桥：在 GUI 中发送 `Reply with exactly: fixture ready`，在终端逐行记录
 动作代码，输入 `done` 后采集脱敏请求、截图、快照和日志；运行完成不构成人工通过结论。

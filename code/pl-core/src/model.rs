@@ -103,24 +103,73 @@ pub struct ModelRequest {
 pub struct ModelProgress {
     pub content: Vec<ContextContent>,
     pub reasoning: Option<OpaquePayload>,
+    /// At most the producer's latest presentation items. This is disposable
+    /// observation; the committed model output still owns the complete result.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presentation: Vec<OpaquePayload>,
 }
 
 /// A bounded latest-value observer. Slow observers coalesce previews without blocking execution.
 #[derive(Debug, Clone)]
-pub struct ModelProgressSender(tokio::sync::watch::Sender<ModelProgress>);
+pub struct ModelProgressSender {
+    sender: tokio::sync::watch::Sender<ModelProgress>,
+    reservation: Option<ModelProgressReservation>,
+}
+
+#[derive(Debug, Clone)]
+struct ModelProgressReservation {
+    store: crate::thread::cold::ColdStoreHandle,
+    thread_id: String,
+    attempt_id: String,
+}
+
 impl ModelProgressSender {
-    pub(crate) fn channel() -> (Self, tokio::sync::watch::Receiver<ModelProgress>) {
+    pub(crate) fn channel(
+        store: Option<crate::thread::cold::ColdStoreHandle>,
+        thread_id: &str,
+        attempt_id: &str,
+    ) -> (Self, tokio::sync::watch::Receiver<ModelProgress>) {
         let (sender, receiver) = tokio::sync::watch::channel(ModelProgress::default());
-        (Self(sender), receiver)
+        let reservation = store.map(|store| ModelProgressReservation {
+            store,
+            thread_id: thread_id.to_owned(),
+            attempt_id: attempt_id.to_owned(),
+        });
+        (
+            Self {
+                sender,
+                reservation,
+            },
+            receiver,
+        )
+    }
+
+    /// Reserves one raw presentation identity before its preview is coalesced or truncated.
+    ///
+    /// # Errors
+    /// Returns the attached cold store's synchronous reservation failure.
+    pub fn reserve_observed_item(
+        &self,
+        provider_item_id: &str,
+        part: Option<crate::chat::PresentationPart>,
+    ) -> Result<(), crate::thread::cold::ColdStoreError> {
+        if let Some(reservation) = &self.reservation {
+            let item_id =
+                crate::chat::presentation_item_id(&reservation.attempt_id, provider_item_id, part);
+            reservation
+                .store
+                .reserve_observed_item(&reservation.thread_id, &item_id)?;
+        }
+        Ok(())
     }
     /// Publishes a complete preview. It cannot advance a Thread context or grant execution authority.
     pub fn publish(&self, progress: ModelProgress) {
-        self.0.send_replace(progress);
+        self.sender.send_replace(progress);
     }
 
     /// Captures the last published preview for a terminal failure receipt.
     pub fn latest(&self) -> ModelProgress {
-        self.0.borrow().clone()
+        self.sender.borrow().clone()
     }
 }
 

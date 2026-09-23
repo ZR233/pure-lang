@@ -1,14 +1,4 @@
 //! One deterministic timeline order, derived from immutable fact admission rather than current rendering.
-use super::ProjectionError;
-use pl_core::thread::{AttemptOutcome, ThreadEffectBatch, input::InputChange};
-use std::{collections::BTreeMap, sync::Arc};
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct Position {
-    pub ordinal: u64,
-    pub created_at: i64,
-}
-
 pub(super) fn compaction_id(id: &str) -> String {
     format!("compaction:{}:{id}", id.len())
 }
@@ -44,66 +34,57 @@ pub(super) fn response_id(id: &str, kind: &str) -> String {
     format!("model:{}:{id}:{kind}", id.len())
 }
 
-/// Reserved slots include hidden/empty projections so later schema interpretation cannot shift history.
-pub(super) fn positions(
-    journal: &[Arc<ThreadEffectBatch>],
-    through: u64,
-) -> Result<BTreeMap<String, Position>, ProjectionError> {
-    let mut positions = BTreeMap::new();
-    let mut ordinal = 0_u64;
-    let mut next_sequence = 1;
-    let mut owner_id = None;
-    for commit in journal.iter().filter(|commit| commit.sequence <= through) {
-        if commit.sequence != next_sequence || owner_id.is_some_and(|id| id != commit.thread_id) {
-            return Err(ProjectionError::JournalOrder);
+pub(super) fn presentation_prefix(attempt_id: &str) -> String {
+    pl_core::chat::presentation_prefix(attempt_id)
+}
+
+pub(in crate::studio) use pl_core::chat::PresentationPart;
+
+/// Shared by receipt and preview projection. Output index and optional part ID can arrive after
+/// streaming starts, so only the provider item's identity and the part's kind/index define a row.
+pub(in crate::studio) fn presentation_id(
+    attempt_id: &str,
+    provider_item_id: &str,
+    part: Option<PresentationPart>,
+) -> String {
+    pl_core::chat::presentation_item_id(attempt_id, provider_item_id, part)
+}
+
+pub(super) fn presentation_part(
+    part: &pl_model::completion::CompletionPresentationPart,
+) -> PresentationPart {
+    use pl_model::completion::CompletionPresentationPartKind;
+    match part.kind {
+        CompletionPresentationPartKind::OutputText => {
+            PresentationPart::OutputText(part.content_index)
         }
-        owner_id = Some(commit.thread_id.as_str());
-        next_sequence = next_sequence.checked_add(1).ok_or(ProjectionError::Count)?;
-        let mut insert = |id: String| -> Result<(), ProjectionError> {
-            if let std::collections::btree_map::Entry::Vacant(entry) = positions.entry(id) {
-                ordinal = ordinal.checked_add(1).ok_or(ProjectionError::Count)?;
-                entry.insert(Position {
-                    ordinal,
-                    created_at: commit.committed_at,
-                });
-            }
-            Ok(())
-        };
-        for input in commit.inputs.iter() {
-            if let InputChange::Accepted(record) = input {
-                insert(record.input.id.clone())?;
-            }
+        CompletionPresentationPartKind::ReasoningText => {
+            PresentationPart::ReasoningText(part.content_index)
         }
-        for record in commit.inbox.iter() {
-            insert(message_id(&record.message.id))?;
-        }
-        if let Some(turn) = &commit.turn {
-            insert(turn_id(&turn.turn_id))?;
-        }
-        for change in commit.extensions.iter() {
-            if let pl_core::thread::extensions::ExtensionChange::Put { id, record } = change
-                && record.payload.format() == "pl.studio.compaction"
-            {
-                insert(compaction_id(id))?;
-            }
-        }
-        for delivery in commit.deliveries.iter() {
-            insert(skill_id(&delivery.call_id))?;
-            insert(completion_id(&delivery.call_id))?;
-        }
-        if let Some(attempt) = &commit.attempt {
-            insert(response_id(&attempt.attempt_id, "inference"))?;
-            insert(response_id(&attempt.attempt_id, "reasoning"))?;
-            insert(response_id(&attempt.attempt_id, "text"))?;
-            if let AttemptOutcome::Committed(output) = &attempt.outcome {
-                for call in &output.tool_calls {
-                    insert(tool_id(&call.call_id))?;
-                }
-            }
+        CompletionPresentationPartKind::SummaryText => {
+            PresentationPart::SummaryText(part.content_index)
         }
     }
-    if through != next_sequence - 1 {
-        return Err(ProjectionError::JournalOrder);
-    }
-    Ok(positions)
+}
+
+pub(super) fn presentation_ids<'a>(
+    attempt_id: &'a str,
+    items: &'a [pl_model::completion::CompletionPresentationItem],
+) -> impl Iterator<Item = String> + 'a {
+    items.iter().flat_map(move |item| {
+        item.parts
+            .iter()
+            .map(move |part| {
+                presentation_id(
+                    attempt_id,
+                    &item.provider_item_id,
+                    Some(presentation_part(part)),
+                )
+            })
+            .chain(
+                item.parts
+                    .is_empty()
+                    .then(|| presentation_id(attempt_id, &item.provider_item_id, None)),
+            )
+    })
 }

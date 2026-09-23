@@ -147,6 +147,7 @@ pub enum BridgePersistenceState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgePersistenceQueueSnapshot {
+    pub statistics_gap: bool,
     pub pending_operations: u64,
     pub pending_bytes: u64,
     pub in_flight_bytes: u64,
@@ -164,6 +165,8 @@ pub struct BridgePersistenceQueueSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct BridgeThreadPersistenceSnapshot {
     pub thread_id: String,
+    pub fault_generation: u64,
+    pub fault: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_dirty_revision: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

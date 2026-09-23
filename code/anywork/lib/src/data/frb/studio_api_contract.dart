@@ -25,6 +25,11 @@ abstract interface class PersistenceQueueReader {
   Future<PersistenceQueueSnapshot> readPersistenceQueue();
 }
 
+/// Opens a bounded chat window without asking the UI to reconcile live and SQL items.
+abstract interface class ChatWindowReader {
+  Future<StudioChatWindow> openChatWindow(String threadId);
+}
+
 abstract class StudioApi {
   Future<RecoveryStateSnapshot> retryRecovery();
   Future<ProviderCatalogView> loadProviderCatalog();
@@ -74,6 +79,10 @@ abstract class StudioApi {
   Future<ArchiveThreadResult> archiveThread(String threadId);
   Future<void> archiveProject(String projectId);
   Future<PersistenceStateSnapshot> retryPersistence();
+  Future<PersistenceQueueSnapshot> retryThreadHistory(
+    String threadId,
+    int faultGeneration,
+  );
   Future<SettingsStateSnapshot> setModelRole({
     required int expectedSettingsRevision,
     required String roleKey,
@@ -219,7 +228,11 @@ AttachmentDraftView _attachmentDraftFromFrb(
 }
 
 class FrbStudioApi
-    implements StudioApi, TimelineItemBodyReader, PersistenceQueueReader {
+    implements
+        StudioApi,
+        TimelineItemBodyReader,
+        PersistenceQueueReader,
+        ChatWindowReader {
   static final startupProgress = ValueNotifier(
     StudioStartupPhase.loadingBridge,
   );
@@ -696,6 +709,22 @@ class FrbStudioApi
   }
 
   @override
+  Future<PersistenceQueueSnapshot> retryThreadHistory(
+    String threadId,
+    int faultGeneration,
+  ) async {
+    await _ensureReady();
+    return _persistenceQueueFromFrb(
+      await _bridgeCall(
+        () => frb.retryThreadHistory(
+          threadId: threadId,
+          faultGeneration: BigInt.from(faultGeneration),
+        ),
+      ),
+    );
+  }
+
+  @override
   Future<PersistenceQueueSnapshot> readPersistenceQueue() async {
     await _ensureReady();
     return _persistenceQueueFromFrb(
@@ -961,7 +990,7 @@ class FrbStudioApi
       try {
         await _ensureReady();
         final created = await _bridgeCall(
-          () => frb.subscribeThread(threadId: threadId),
+          () => frb.subscribeThread(threadId: threadId, stateOnly: true),
         );
         if (cancelled) {
           await created.cancel();
@@ -998,6 +1027,18 @@ class FrbStudioApi
       },
     );
     return controller.stream;
+  }
+
+  @override
+  Future<StudioChatWindow> openChatWindow(String threadId) async {
+    await _ensureReady();
+    final view = await _bridgeCall(
+      () => frb_chat.openChatView(
+        threadId: threadId,
+        focus: const frb_chat_types.BridgeChatFocus.latest(),
+      ),
+    );
+    return FrbChatWindow(view);
   }
 
   @override
