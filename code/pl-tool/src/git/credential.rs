@@ -6,73 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use pl_protocol::PureError;
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::shell::shell_quote_word;
 use crate::tool_error;
 
 pub const GIT_TOKEN_ENV: &str = "PL_GIT_TOKEN";
-
-/// git shell 命令的凭据注入模式。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GitShellCredential {
-    Disabled,
-    EnvToken,
-}
-
-/// 生成可在 shell backend 中执行的 git 命令。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GitShellCommandRequest<'a> {
-    pub safe_directory: &'a str,
-    pub args: &'a [&'a str],
-    pub credential: GitShellCredential,
-}
-
-pub fn git_shell_command(request: GitShellCommandRequest<'_>) -> String {
-    let mut command_parts = vec![
-        "git".to_string(),
-        "-c".to_string(),
-        shell_quote_word("core.hooksPath=/dev/null"),
-        "-c".to_string(),
-        shell_quote_word(&format!("safe.directory={}", request.safe_directory)),
-        "-c".to_string(),
-        shell_quote_word("credential.helper="),
-    ];
-    command_parts.extend(request.args.iter().map(|arg| shell_quote_word(arg)));
-    let git_command = command_parts.join(" ");
-    match request.credential {
-        GitShellCredential::Disabled => git_command,
-        GitShellCredential::EnvToken => git_shell_command_with_askpass(&git_command),
-    }
-}
-
-/// 生成 shell 脚本片段，为后续 git 命令安装统一 askpass 凭据环境。
-pub fn git_shell_credential_prelude() -> String {
-    format!(
-        "askpass=/tmp/pl-git-askpass-$$.sh\n\
-         trap 'rm -f \"$askpass\"' EXIT\n\
-         cat > \"$askpass\" <<'PL_GIT_ASKPASS'\n\
-         {}PL_GIT_ASKPASS\n\
-         chmod 700 \"$askpass\"\n\
-         export GIT_ASKPASS=\"$askpass\"\n\
-         export GIT_TERMINAL_PROMPT=0\n",
-        git_askpass_script()
-    )
-}
-
-/// 生成 sidecar shell 脚本中可复用的 `git_with_retry` 函数。
-pub fn git_shell_retry_function() -> &'static str {
-    "git_with_retry() {\n\
-       attempts=0\n\
-       while :; do\n\
-         attempts=$((attempts + 1))\n\
-         git -c credential.helper= -c http.version=HTTP/1.1 \"$@\" && return 0\n\
-         status=$?\n\
-         if [ \"$attempts\" -ge 3 ]; then\n\
-           return \"$status\"\n\
-         fi\n\
-         sleep $((attempts * 2))\n\
-       done\n\
-     }\n"
-}
 
 /// 需要 git 凭据的操作类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,11 +94,4 @@ pub(super) async fn write_askpass_script(tool: &str) -> Result<PathBuf, PureErro
 /// 返回统一的 git askpass 脚本文本。
 pub fn git_askpass_script() -> &'static str {
     "#!/bin/sh\ncase \"$1\" in\n  *Username*) printf '%s\\n' x-access-token ;;\n  *Password*) printf '%s\\n' \"$PL_GIT_TOKEN\" ;;\n  *) printf '\\n' ;;\nesac\n"
-}
-
-fn git_shell_command_with_askpass(git_command: &str) -> String {
-    format!(
-        "askpass=$(mktemp) && cat > \"$askpass\" <<'PL_GIT_ASKPASS'\n{}PL_GIT_ASKPASS\nchmod 700 \"$askpass\" && GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=\"$askpass\" {git_command}; status=$?; rm -f \"$askpass\"; exit $status",
-        git_askpass_script()
-    )
 }

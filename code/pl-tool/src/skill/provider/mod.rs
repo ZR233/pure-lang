@@ -604,7 +604,7 @@ impl FrozenSkillCatalog {
                 resource_base: activation_resource_base(&definition.summary.resource_base),
                 turn_id: turn_id.to_string(),
                 cause: SkillActivationCause::UserGesture { invocation_id },
-                activated_at: crate::skill::unix_seconds(),
+                activated_at: crate::unix_seconds(),
             });
             definitions.push(definition);
         }

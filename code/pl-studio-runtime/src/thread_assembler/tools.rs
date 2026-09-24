@@ -214,12 +214,7 @@ impl StudioThreadTools {
                     );
                 }
                 if capabilities.workspace_files {
-                    for kind in [
-                        pl_tool::remote::RemoteMutationKind::CreateDirectory,
-                        pl_tool::remote::RemoteMutationKind::Delete,
-                        pl_tool::remote::RemoteMutationKind::Copy,
-                        pl_tool::remote::RemoteMutationKind::Move,
-                    ] {
+                    for &kind in pl_tool::remote::RemoteMutationKind::all() {
                         let tool = pl_tool::remote::RemoteWorkspaceMutationTool::new(
                             kind,
                             Arc::new(host.files.clone()),
@@ -466,19 +461,16 @@ fn file_tools<B: pl_tool::workspace_file::WorkspaceFileBackend + 'static>(
     media: Arc<super::media::MediaHost>,
 ) -> Result<Vec<Registration>, ThreadAssemblyError> {
     use pl_tool::workspace_file::{ThreadWorkspaceFileTool, WorkspaceFileToolKind};
-    let mut tools = [
-        WorkspaceFileToolKind::ReadFile,
-        WorkspaceFileToolKind::ListFiles,
-        WorkspaceFileToolKind::ApplyPatch,
-    ]
-    .into_iter()
-    .map(|kind| {
-        Ok(
-            ThreadWorkspaceFileTool::new(kind, backend.clone(), workspace.clone())
-                .registration(declaration(ThreadBuiltin::File(kind))?)?,
-        )
-    })
-    .collect::<Result<Vec<_>, ThreadAssemblyError>>()?;
+    let mut tools = WorkspaceFileToolKind::all()
+        .iter()
+        .copied()
+        .map(|kind| {
+            Ok(
+                ThreadWorkspaceFileTool::new(kind, backend.clone(), workspace.clone())
+                    .registration(declaration(ThreadBuiltin::File(kind))?)?,
+            )
+        })
+        .collect::<Result<Vec<_>, ThreadAssemblyError>>()?;
     tools.push(
         pl_tool::image::ThreadViewImageTool::new(backend.clone(), workspace.authorization(), media)
             .registration(declaration(ThreadBuiltin::ViewImage)?)?,

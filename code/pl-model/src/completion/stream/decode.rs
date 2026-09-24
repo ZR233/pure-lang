@@ -23,10 +23,11 @@ pub(crate) fn decode_raw_event_stream(
     stream: OpenAiRawEventStream,
     protocol: OpenAiProtocol,
 ) -> CompletionEventStream {
+    let visible_output_protocol = protocol.visible_output_protocol();
     let state = ProviderStreamDecodeState {
         stream,
-        decoder: protocol.new_stream_decoder(),
-        visible_output: VisibleOutputDecoder::new(protocol.visible_output_protocol()),
+        decoder: sse::OpenAiStreamDecoder::new(visible_output_protocol),
+        visible_output: VisibleOutputDecoder::new(visible_output_protocol),
         pending: VecDeque::new(),
         stream_finished: false,
     };

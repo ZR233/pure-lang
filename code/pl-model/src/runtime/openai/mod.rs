@@ -51,10 +51,6 @@ impl OpenAiProtocol {
         build_openai_request_body(self.endpoint, request, model, prompt_cache_key)
     }
 
-    pub(crate) fn new_stream_decoder(&self) -> sse::OpenAiStreamDecoder {
-        sse::OpenAiStreamDecoder::new(self.visible_output_protocol())
-    }
-
     pub(crate) fn visible_output_protocol(&self) -> VisibleOutputProtocol {
         match self.endpoint {
             OpenAiEndpoint::Responses => VisibleOutputProtocol::NativePhases,

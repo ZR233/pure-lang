@@ -2048,7 +2048,8 @@ mod storage_fault_tests {
                 tokio::task::yield_now().await;
             }
         })
-        .await?;
+        .await
+        .context("call writer did not report the injected worker exit")?;
         assert!(calls.statistics_gap());
         let dropped_ticket = calls.admitted_ticket();
         assert!(calls.try_admit_effect(&ticket("statistics-crash", 2).effect));
@@ -2056,7 +2057,9 @@ mod storage_fault_tests {
         assert!(resumed_ticket > dropped_ticket);
 
         sink.admit("statistics-crash", ticket("statistics-crash", 1))?;
-        tokio::time::timeout(Duration::from_secs(5), sink.flush("statistics-crash", 1)).await??;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush("statistics-crash", 1))
+            .await
+            .context("history flush stalled after the call writer exit")??;
         assert_eq!(
             store.history("statistics-crash").await?.watermark().await?,
             1
@@ -2070,7 +2073,8 @@ mod storage_fault_tests {
                 tokio::task::yield_now().await;
             }
         })
-        .await?;
+        .await
+        .context("call writer did not advance the resumed ticket")?;
         assert!(calls.statistics_gap());
         Ok(())
     }

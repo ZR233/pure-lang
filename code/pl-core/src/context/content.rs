@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use super::OpaquePayload;
 
@@ -95,7 +94,7 @@ impl ResourceReference {
     /// Rejects truncated or replaced content, or malformed reference metadata.
     pub fn verify(&self, content: &[u8]) -> Result<(), ResourceError> {
         self.validate()?;
-        let digest = format!("sha256:{}", hex::encode(Sha256::digest(content)));
+        let digest = super::content_hash(content);
         if content.len() as u64 != self.byte_len || digest != self.content_digest {
             return Err(ResourceError::ContentMismatch);
         }

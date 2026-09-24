@@ -16,6 +16,8 @@ use anyhow::{Context, Result, bail, ensure};
 use pl_protocol::studio::{ThreadDirectoryMatchFields, ThreadDirectoryQuery};
 use pl_protocol::{Thread, ThreadModeId, ThreadStatus, ThreadWorkspaceMode};
 
+use super::toml_store::{self, RevisionedDocument};
+
 pub(in crate::studio) const CATALOG_SCHEMA_VERSION: u32 = 1;
 
 /// 一个会话的轻量目录摘要。
@@ -88,6 +90,14 @@ struct CatalogDocument {
     entries: Vec<CatalogEntry>,
 }
 
+impl RevisionedDocument for CatalogDocument {
+    const KIND: &'static str = "Studio catalog";
+
+    fn revision_mut(&mut self) -> &mut u64 {
+        &mut self.revision
+    }
+}
+
 /// 目录摘要的进程内 owner：文件是唯一事实源，内存缓存避免分页时的重复解析。
 ///
 /// 所有 mutation 都走同一把锁内的读取-修改-原子替换，`revision` 单调递增用于
@@ -139,7 +149,7 @@ impl CatalogStore {
         cursor: Option<&(i64, String)>,
         limit: usize,
     ) -> Vec<Thread> {
-        let mut matched = self
+        let matched = self
             .lock()
             .entries
             .iter()
@@ -157,17 +167,7 @@ impl CatalogStore {
             })
             .cloned()
             .collect::<Vec<_>>();
-        sort_desc(&mut matched);
-        matched
-            .into_iter()
-            .filter(|entry| {
-                cursor.is_none_or(|(updated_at, id)| {
-                    (entry.updated_at, entry.id.clone()) < (*updated_at, id.clone())
-                })
-            })
-            .take(limit)
-            .map(|entry| entry.to_thread())
-            .collect()
+        page_threads(matched, cursor, limit)
     }
 
     /// 未归档 root Thread 的冷分页（无搜索过滤）。
@@ -176,24 +176,14 @@ impl CatalogStore {
         cursor: Option<&(i64, String)>,
         limit: usize,
     ) -> Vec<Thread> {
-        let mut matched = self
+        let matched = self
             .lock()
             .entries
             .iter()
             .filter(|entry| !entry.archived && entry.parent_thread_id.is_none())
             .cloned()
             .collect::<Vec<_>>();
-        sort_desc(&mut matched);
-        matched
-            .into_iter()
-            .filter(|entry| {
-                cursor.is_none_or(|(updated_at, id)| {
-                    (entry.updated_at, entry.id.clone()) < (*updated_at, id.clone())
-                })
-            })
-            .take(limit)
-            .map(|entry| entry.to_thread())
-            .collect()
+        page_threads(matched, cursor, limit)
     }
 
     /// 幂等写入/替换一个条目；内容不变时不推进 revision，也不落盘。
@@ -266,17 +256,7 @@ impl CatalogStore {
     pub(in crate::studio) async fn persist_if_absent(&self) -> Result<()> {
         let inner = self.inner.clone();
         let path = self.path.clone();
-        tokio::task::spawn_blocking(move || {
-            if path.exists() {
-                return Ok(());
-            }
-            let document = inner.lock().unwrap_or_else(PoisonError::into_inner);
-            let contents = toml::to_string_pretty(&*document)
-                .context("failed to serialize Studio catalog")?
-                .into_bytes();
-            pl_tool::workspace::write_file_atomically(&path, &contents).map_err(anyhow::Error::from)
-        })
-        .await?
+        tokio::task::spawn_blocking(move || toml_store::persist_if_absent(&inner, &path)).await?
     }
 
     async fn mutate(
@@ -285,34 +265,12 @@ impl CatalogStore {
     ) -> Result<()> {
         let inner = self.inner.clone();
         let path = self.path.clone();
-        tokio::task::spawn_blocking(move || mutate_document(&inner, &path, change)).await?
+        tokio::task::spawn_blocking(move || toml_store::mutate_document(&inner, &path, change))
+            .await?
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, CatalogDocument> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-fn mutate_document(
-    inner: &Mutex<CatalogDocument>,
-    path: &Path,
-    change: impl FnOnce(&mut CatalogDocument) -> bool,
-) -> Result<()> {
-    let mut document = inner.lock().unwrap_or_else(PoisonError::into_inner);
-    let previous = document.clone();
-    if !change(&mut document) {
-        return Ok(());
-    }
-    document.revision = document.revision.saturating_add(1);
-    let contents = toml::to_string_pretty(&*document)
-        .context("failed to serialize Studio catalog")?
-        .into_bytes();
-    match pl_tool::workspace::write_file_atomically(path, &contents) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            *document = previous;
-            Err(error.into())
-        }
     }
 }
 
@@ -351,6 +309,24 @@ fn decode(path: &Path, content: &str) -> Result<CatalogDocument> {
         bail!("Studio catalog lost all entries without a fresh install");
     }
     Ok(document)
+}
+
+fn page_threads(
+    mut entries: Vec<CatalogEntry>,
+    cursor: Option<&(i64, String)>,
+    limit: usize,
+) -> Vec<Thread> {
+    sort_desc(&mut entries);
+    entries
+        .into_iter()
+        .filter(|entry| {
+            cursor.is_none_or(|(updated_at, id)| {
+                (entry.updated_at, entry.id.as_str()) < (*updated_at, id.as_str())
+            })
+        })
+        .take(limit)
+        .map(|entry| entry.to_thread())
+        .collect()
 }
 
 fn sort_desc(entries: &mut [CatalogEntry]) {

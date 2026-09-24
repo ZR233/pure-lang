@@ -241,7 +241,7 @@ pub fn bump_project_view(project_dir: &Path, skill: &SkillMetadata) -> Result<()
         return Ok(());
     }
     util::validate_usage_write(project_dir, &skill.path)?;
-    let now = crate::skill::unix_seconds();
+    let now = crate::unix_seconds();
     let mut usage =
         util::load_usage(&skill.path)?.unwrap_or_else(|| SkillUsage::agent_created(now));
     usage.views += 1;
@@ -255,22 +255,15 @@ pub fn mark_project_skill_created(project_dir: &Path, skill_dir: &Path) -> Resul
     util::save_usage(
         project_dir,
         skill_dir,
-        &SkillUsage::agent_created(crate::skill::unix_seconds()),
+        &SkillUsage::agent_created(crate::unix_seconds()),
     )
 }
 
 pub fn bump_project_patch(project_dir: &Path, skill_dir: &Path) -> Result<()> {
     util::validate_usage_write(project_dir, skill_dir)?;
-    let now = crate::skill::unix_seconds();
+    let now = crate::unix_seconds();
     let mut usage = util::load_usage(skill_dir)?.unwrap_or_else(|| SkillUsage::agent_created(now));
     usage.patches += 1;
     usage.updated_at = now;
     util::save_usage(project_dir, skill_dir, &usage)
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }

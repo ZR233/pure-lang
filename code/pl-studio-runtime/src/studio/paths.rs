@@ -12,11 +12,9 @@ const SKILLS_DIR_NAME: &str = "skills";
 const SYSTEM_SKILLS_DIR_NAME: &str = ".system";
 const STUDIO_HOME_ENV: &str = "ANYWORK_HOME";
 const CALLS_FILE_NAME: &str = "calls.sqlite";
-const CONFIG_FILE_NAME: &str = "config.toml";
 const SETTINGS_FILE_NAME: &str = "settings.toml";
 const WORKSPACES_FILE_NAME: &str = "workspaces.toml";
 const CATALOG_FILE_NAME: &str = "catalog.toml";
-const AGENTS_DIR_NAME: &str = "agents";
 const SESSIONS_DIR_NAME: &str = "sessions";
 const CALLS_DIR_NAME: &str = "calls";
 const MIGRATIONS_DIR_NAME: &str = "migrations";
@@ -67,20 +65,8 @@ impl StudioPaths {
 /// Layout entry points fixed by `design/17` §17.1.
 ///
 /// Every slice (store, config, catalog) resolves its location here instead of
-/// re-deriving names. Entries that no slice consumes yet are marked `dead_code` so a mid-refactor
-/// tree still builds under `-D warnings`.
-#[allow(dead_code)]
+/// re-deriving names.
 impl StudioPaths {
-    /// Data root holding the versioned session and call databases.
-    pub fn data_dir(&self) -> &Path {
-        &self.data_dir
-    }
-
-    /// Global provider/model/Skill configuration (`design/17` §17.1).
-    pub fn config_file(&self) -> PathBuf {
-        self.home.join(CONFIG_FILE_NAME)
-    }
-
     /// Product and UI settings store.
     pub fn settings_file(&self) -> PathBuf {
         self.versioned_home().join(SETTINGS_FILE_NAME)
@@ -102,11 +88,6 @@ impl StudioPaths {
     /// config runtime consumes this view instead of re-deriving the layout.
     pub fn config_paths(&self) -> crate::config::ConfigPaths {
         crate::config::ConfigPaths::from_config_dir(self.home.clone())
-    }
-
-    /// One stable TOML file per user Agent Profile.
-    pub fn agents_dir(&self) -> PathBuf {
-        self.home.join(AGENTS_DIR_NAME)
     }
 
     /// Root of per-Thread session directories; one child owns `state.toml`, `history.sqlite` and

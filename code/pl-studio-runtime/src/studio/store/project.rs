@@ -578,7 +578,6 @@ mod major_version_storage_tests {
         let store = StudioStore::open(paths.database()).await?;
         assert!(store.catalog().entries().is_empty());
         assert!(tokio::fs::try_exists(paths.catalog_file()).await?);
-        assert_eq!(paths.config_file(), config);
         for (path, expected) in [
             (&old_session, b"old checkpoint".as_slice()),
             (&old_catalog, b"old catalog".as_slice()),

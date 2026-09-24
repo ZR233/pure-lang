@@ -57,12 +57,9 @@ pub struct ChatStreamDelta {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub struct ChatStreamToolCallDelta {
     pub index: Option<usize>,
     pub id: Option<String>,
-    #[serde(rename = "type")]
-    pub kind: Option<String>,
     pub function: Option<ChatStreamFunctionDelta>,
     pub custom: Option<ChatStreamCustomDelta>,
 }

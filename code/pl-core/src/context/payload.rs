@@ -4,7 +4,6 @@ use std::fmt;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 /// Immutable UTF-8 content whose encoding and semantics belong to its producer.
 ///
@@ -78,10 +77,7 @@ impl OpaquePayload {
 
     /// Returns a digest of the exact content bytes; format and version remain separate identity.
     pub fn content_digest(&self) -> String {
-        format!(
-            "sha256:{}",
-            hex::encode(Sha256::digest(self.content.as_bytes()))
-        )
+        super::content_hash(self.content.as_bytes())
     }
 }
 

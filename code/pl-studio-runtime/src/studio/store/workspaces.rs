@@ -11,6 +11,7 @@ use anyhow::{Context, Result, bail, ensure};
 use crate::studio::records::ProjectRecord;
 use crate::studio::store::StudioStore;
 use crate::studio::store::directory::DirectoryDelta;
+use crate::studio::toml_store::{self, RevisionedDocument};
 
 pub(in crate::studio) const WORKSPACES_SCHEMA_VERSION: u32 = 1;
 
@@ -50,6 +51,14 @@ struct WorkspacesDocument {
     workspaces: Vec<WorkspaceEntry>,
 }
 
+impl RevisionedDocument for WorkspacesDocument {
+    const KIND: &'static str = "Studio workspaces";
+
+    fn revision_mut(&mut self) -> &mut u64 {
+        &mut self.revision
+    }
+}
+
 #[derive(Clone)]
 pub(in crate::studio) struct WorkspaceStore {
     path: PathBuf,
@@ -71,11 +80,6 @@ impl WorkspaceStore {
             path,
             inner: Arc::new(Mutex::new(document)),
         })
-    }
-
-    #[allow(dead_code)]
-    pub(in crate::studio) fn revision(&self) -> u64 {
-        self.lock().revision
     }
 
     pub(in crate::studio) fn entries(&self) -> Vec<WorkspaceEntry> {
@@ -185,17 +189,7 @@ impl WorkspaceStore {
     pub(in crate::studio) async fn persist_if_absent(&self) -> Result<()> {
         let inner = self.inner.clone();
         let path = self.path.clone();
-        tokio::task::spawn_blocking(move || {
-            if path.exists() {
-                return Ok(());
-            }
-            let document = inner.lock().unwrap_or_else(PoisonError::into_inner);
-            let contents = toml::to_string_pretty(&*document)
-                .context("failed to serialize Studio workspaces")?
-                .into_bytes();
-            pl_tool::workspace::write_file_atomically(&path, &contents).map_err(anyhow::Error::from)
-        })
-        .await?
+        tokio::task::spawn_blocking(move || toml_store::persist_if_absent(&inner, &path)).await?
     }
 
     async fn mutate(
@@ -204,34 +198,12 @@ impl WorkspaceStore {
     ) -> Result<()> {
         let inner = self.inner.clone();
         let path = self.path.clone();
-        tokio::task::spawn_blocking(move || mutate_document(&inner, &path, change)).await?
+        tokio::task::spawn_blocking(move || toml_store::mutate_document(&inner, &path, change))
+            .await?
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, WorkspacesDocument> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-fn mutate_document(
-    inner: &Mutex<WorkspacesDocument>,
-    path: &Path,
-    change: impl FnOnce(&mut WorkspacesDocument) -> bool,
-) -> Result<()> {
-    let mut document = inner.lock().unwrap_or_else(PoisonError::into_inner);
-    let previous = document.clone();
-    if !change(&mut document) {
-        return Ok(());
-    }
-    document.revision = document.revision.saturating_add(1);
-    let contents = toml::to_string_pretty(&*document)
-        .context("failed to serialize Studio workspaces")?
-        .into_bytes();
-    match pl_tool::workspace::write_file_atomically(path, &contents) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            *document = previous;
-            Err(error.into())
-        }
     }
 }
 
