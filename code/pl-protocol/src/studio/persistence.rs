@@ -71,7 +71,7 @@ pub struct ThreadPersistenceSnapshot {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PersistenceQueueSnapshot {
-    /// Call statistics may be incomplete; a missing usage value must not be read as zero.
+    /// Call statistics were lost or the writer failed; pending writes are not a gap.
     #[serde(default)]
     pub statistics_gap: bool,
     /// Total queued operations across all Threads.

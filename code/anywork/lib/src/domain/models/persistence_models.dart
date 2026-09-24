@@ -125,9 +125,10 @@ class PersistenceQueueSnapshot {
       pressurePaused = false,
       threads = const [];
 
-  /// 跨全部 Thread 的排队操作数（含一次保留的 checkpoint 发布）。
+  /// 统计投影发生真实缺口；正常排队未落盘不构成缺口。
   final bool statisticsGap;
 
+  /// 跨全部 Thread 的排队操作数（含一次保留的 checkpoint 发布）。
   final int pendingOperations;
 
   /// 排队事实的编码字节数。

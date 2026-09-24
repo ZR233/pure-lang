@@ -262,7 +262,7 @@ impl CallsStore {
                 .map(|age| u64::try_from(age.as_millis()).unwrap_or(u64::MAX)),
             last_error: self.last_error(),
             pressure_paused: self.pressure_paused(),
-            statistics_gap: self.statistics_gap() || self.admitted_ticket() > self.durable_ticket(),
+            statistics_gap: self.statistics_gap(),
         }
     }
 
