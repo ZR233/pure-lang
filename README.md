@@ -85,7 +85,7 @@ rustup component add rustfmt clippy
 生成 Flutter/Rust 桥接代码还需要与仓库依赖一致的代码生成器：
 
 ```powershell
-cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
 ```
 
 远程助手推荐使用 [Zig](https://ziglang.org/) 与
@@ -415,7 +415,7 @@ cargo xtask run-gui --demo
 HTTP/SSE 观察可使用 `pl-studio-server` 的隔离 `--studio-home` 与空闲 loopback 端口。
 GUI 布局与交互由原生人工验收核对；`verify-gui` 仅负责静态与生成一致性检查。
 
-本仓库要求 Flutter 端使用 `flutter_rust_bridge` v2.12.x；本机 codegen 版本应与 Dart/Rust 依赖保持同一小版本。
+本仓库要求 Flutter 端使用 `flutter_rust_bridge` v2.13.0；本机 codegen 版本必须与 Dart/Rust 依赖一致。
 
 ## 设计文档
 

@@ -199,5 +199,5 @@ fn canonical_json_hash(value: &serde_json::Value) -> String {
     let mut value = value.clone();
     crate::completion::canonicalize_json(&mut value);
     let digest = Sha256::digest(value.to_string().as_bytes());
-    format!("sha256:{digest:x}")
+    format!("sha256:{}", hex::encode(digest))
 }

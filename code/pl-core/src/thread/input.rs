@@ -26,7 +26,7 @@ impl ThreadInput {
             hasher.update([0]);
             hasher.update(serde_json::to_vec(content).unwrap_or_default());
         }
-        format!("sha256:{:x}", hasher.finalize())
+        format!("sha256:{}", hex::encode(hasher.finalize()))
     }
 }
 

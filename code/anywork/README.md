@@ -7,7 +7,7 @@ Windows and Linux Flutter desktop client for anywork.
 - Flutter Material 3
 - Riverpod state controller and selectors
 - go_router page stack
-- flutter_rust_bridge v2.12.x
+- flutter_rust_bridge v2.13.0
 - `pl-studio-bridge` Rust crate in `rust/`
 
 ## Commands

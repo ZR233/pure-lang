@@ -86,8 +86,8 @@ impl ThreadSkillTool {
             digest.update(policy.as_bytes());
         }
         let authorization = pl_core::tool::opaque::ToolAuthorization::new(format!(
-            "pl.skills:{:x}",
-            digest.finalize()
+            "pl.skills:{}",
+            hex::encode(digest.finalize())
         ));
         let registration =
             Registration::new(name.into(), declaration, self)?.with_authorization(authorization);
@@ -185,8 +185,10 @@ impl Tool for ThreadSkillTool {
                     return Err(ToolError::new(source).with_output(output));
                 }
                 let id = format!(
-                    "pl.tool.skill-view:{:x}",
-                    Sha256::digest(result.skill.name.to_ascii_lowercase().as_bytes())
+                    "pl.tool.skill-view:{}",
+                    hex::encode(Sha256::digest(
+                        result.skill.name.to_ascii_lowercase().as_bytes()
+                    ))
                 );
                 let previous = context.extensions.get(&id);
                 if previous.is_some_and(|record| record.payload == payload) {

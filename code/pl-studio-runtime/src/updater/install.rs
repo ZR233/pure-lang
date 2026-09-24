@@ -322,7 +322,7 @@ async fn download_installer(
             ),
         ));
     }
-    let actual_hash = format!("{:x}", hasher.finalize());
+    let actual_hash = hex::encode(hasher.finalize());
     if actual_hash != update.installer.sha256 {
         return Err(StudioUpdateError::new(
             StudioUpdateErrorCode::HashMismatch,
@@ -386,7 +386,7 @@ async fn hash_file(path: &Path) -> Result<String, StudioUpdateError> {
             }
             hasher.update(&buffer[..count]);
         }
-        Ok(format!("{:x}", hasher.finalize()))
+        Ok(hex::encode(hasher.finalize()))
     })
     .await
     .map_err(|error| {

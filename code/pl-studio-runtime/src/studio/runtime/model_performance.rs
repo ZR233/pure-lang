@@ -556,7 +556,7 @@ fn throughput(completion_tokens: u64, decode_millis: u64) -> f64 {
 
 fn billing_fingerprint(billing: &InferenceBillingRecord) -> Result<String, PureError> {
     let bytes = serde_json::to_vec(billing)?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
+    Ok(hex::encode(Sha256::digest(bytes)))
 }
 
 fn call_retention(retention: BillingRetention) -> CallRetention {

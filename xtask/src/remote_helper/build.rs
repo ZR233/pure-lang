@@ -174,7 +174,7 @@ fn build_target(workspace_root: &Path, target: &str, builder: CargoBuilder) -> R
     })?;
     let bytes = fs::read(&output)
         .with_context(|| format!("failed to read helper artifact: {}", output.display()))?;
-    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let digest = hex::encode(Sha256::digest(&bytes));
     let checksum = output.with_extension("sha256");
     fs::write(&checksum, format!("{digest}  {HELPER_FILE_NAME}\n")).with_context(|| {
         format!(

@@ -2,21 +2,6 @@ part of 'timeline_view.dart';
 
 enum _MarkdownSurface { assistant, user, panel, reasoning, error }
 
-final List<MarkdownComponent> _studioMarkdownComponents = MarkdownComponent
-    .globalComponents
-    .map(
-      (component) => component is BlockQuote ? _StudioBlockQuote() : component,
-    )
-    .toList(growable: false);
-
-List<MarkdownComponent> _studioMarkdownInlineComponents(
-  _MarkdownSurface surface,
-) => [
-  for (final component in MarkdownComponent.inlineComponents)
-    if (component is ImageMd) _StudioImageMd(surface) else component,
-  _StudioBareWebLink(),
-];
-
 final RegExp _streamingMarkdownSyntax = RegExp(r'[\r\n\\`*_\[\]()#>~!|]');
 const _longPlainTextThreshold = 1024;
 const _plainTextPageSize = 1024;
@@ -59,18 +44,60 @@ class _AgentMarkdown extends ConsumerWidget {
           : content;
     }
     final repaired = repairAgentMarkdownForDisplay(text);
+    final imageAlts = repaired.contains('![')
+        ? _markdownImageAlts(repaired)
+        : const <String, String>{};
+    final scheme = Theme.of(context).colorScheme;
     return GptMarkdown(
       repaired,
       key: ValueKey('gpt-markdown-$id-$status'),
       style: _markdownBodyStyle(context, surface),
-      components: _studioMarkdownComponents,
-      inlineComponents: _studioMarkdownInlineComponents(surface),
+      styleSheet: GptMarkdownStyleSheet(
+        blockQuote: BlockQuoteStyle(
+          textStyle: TextStyle(
+            color: context.colors.onSurfaceVariant,
+            height: 1.5,
+          ),
+        ),
+      ),
       onLinkTap: (url, _) {
         unawaited(_openTimelineWebLink(context, ref, url));
       },
-      highlightBuilder: (context, text, style) {
-        return _MarkdownInlineCode(text: text, style: style, surface: surface);
-      },
+      inlineLinkBuilder: (link) => safeExternalWebUrl(link.url) == null
+          ? TextSpan(children: link.labelSpans, style: link.style)
+          : link.defaultSpan(),
+      inlineCodeStyle: InlineCodeStyle(
+        fontFamily: 'JetBrains Mono',
+        fontFamilyFallback: const ['Consolas', 'monospace'],
+        fontSizeFactor: 0.9,
+        fontWeight: FontWeight.w600,
+        color: scheme.onSurface,
+        backgroundColor: surface == _MarkdownSurface.user
+            ? scheme.surfaceContainerLowest
+            : scheme.surfaceContainerLow,
+        borderColor: scheme.outlineVariant,
+        borderRadius: Radius.circular(StudioRadii.xs),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
+      ),
+      blockQuoteBuilder: (context, content, style) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: DecoratedBox(
+          key: const ValueKey('studio-markdown-quote'),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerLow,
+            border: BorderDirectional(
+              start: BorderSide(color: context.colors.primary, width: 3),
+            ),
+            borderRadius: BorderRadius.circular(StudioRadii.sm),
+          ),
+          child: Padding(
+            padding: const EdgeInsetsDirectional.fromSTEB(10, 7, 10, 7),
+            child: content,
+          ),
+        ),
+      ),
+      imageBuilder: (context, url, _, _) =>
+          _studioMarkdownImage(context, url, imageAlts[url] ?? '', surface),
       codeBuilder: (context, name, code, closed) {
         final scheme = Theme.of(context).colorScheme;
         final textTheme = Theme.of(context).textTheme;
@@ -206,125 +233,6 @@ Future<void> _openTimelineWebLink(
   }
 }
 
-class _StudioBareWebLink extends InlineMd {
-  @override
-  RegExp get exp => RegExp(r'(?<!\]\()[hH][tT][tT][pP][sS]?://[^\s<]+');
-
-  @override
-  InlineSpan span(BuildContext context, String text, GptMarkdownConfig config) {
-    final urlEnd = _bareWebUrlEnd(text);
-    final candidate = text.substring(0, urlEnd);
-    final url = safeExternalWebUrl(candidate);
-    if (url == null) {
-      return TextSpan(text: text, style: config.style);
-    }
-    final theme = GptMarkdownTheme.of(context);
-    return TextSpan(
-      children: [
-        WidgetSpan(
-          alignment: PlaceholderAlignment.baseline,
-          baseline: TextBaseline.alphabetic,
-          child: _BareWebLinkText(
-            text: candidate,
-            style: config.style ?? const TextStyle(),
-            color: theme.linkColor,
-            hoverColor: theme.linkHoverColor,
-            onTap: () => config.onLinkTap?.call(url, candidate),
-          ),
-        ),
-        if (urlEnd < text.length)
-          TextSpan(text: text.substring(urlEnd), style: config.style),
-      ],
-    );
-  }
-}
-
-class _BareWebLinkText extends StatefulWidget {
-  const _BareWebLinkText({
-    required this.text,
-    required this.style,
-    required this.color,
-    required this.hoverColor,
-    required this.onTap,
-  });
-
-  final String text;
-  final TextStyle style;
-  final Color color;
-  final Color hoverColor;
-  final VoidCallback onTap;
-
-  @override
-  State<_BareWebLinkText> createState() => _BareWebLinkTextState();
-}
-
-class _BareWebLinkTextState extends State<_BareWebLinkText> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _hovered ? widget.hoverColor : widget.color;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: Text(
-          widget.text,
-          key: ValueKey('studio-markdown-web-link:${widget.text}'),
-          style: widget.style.copyWith(
-            color: color,
-            decoration: TextDecoration.underline,
-            decorationColor: color,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-int _bareWebUrlEnd(String candidate) {
-  final balances = <String, int>{')': 0, ']': 0, '}': 0, '>': 0};
-  for (final char in candidate.characters) {
-    switch (char) {
-      case '(':
-        balances[')'] = balances[')']! + 1;
-      case ')':
-        balances[')'] = balances[')']! - 1;
-      case '[':
-        balances[']'] = balances[']']! + 1;
-      case ']':
-        balances[']'] = balances[']']! - 1;
-      case '{':
-        balances['}'] = balances['}']! + 1;
-      case '}':
-        balances['}'] = balances['}']! - 1;
-      case '<':
-        balances['>'] = balances['>']! + 1;
-      case '>':
-        balances['>'] = balances['>']! - 1;
-    }
-  }
-
-  var end = candidate.length;
-  while (end > 0) {
-    final char = candidate.substring(0, end).characters.last;
-    final balance = balances[char];
-    final shouldTrim = balance == null
-        ? const {',', '.', ';', '!', "'", '"'}.contains(char)
-        : balance < 0;
-    if (!shouldTrim) {
-      break;
-    }
-    if (balance != null) {
-      balances[char] = balance + 1;
-    }
-    end -= char.length;
-  }
-  return end;
-}
-
 TextStyle? _markdownBodyStyle(BuildContext context, _MarkdownSurface surface) {
   final theme = Theme.of(context);
   if (surface == _MarkdownSurface.reasoning) {
@@ -343,117 +251,4 @@ TextStyle? _markdownBodyStyle(BuildContext context, _MarkdownSurface surface) {
     color: theme.colorScheme.onSurface,
     height: 1.52,
   );
-}
-
-class _MarkdownInlineCode extends StatelessWidget {
-  const _MarkdownInlineCode({
-    required this.text,
-    required this.style,
-    required this.surface,
-  });
-
-  final String text;
-  final TextStyle style;
-  final _MarkdownSurface surface;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final fill = surface == _MarkdownSurface.user
-        ? scheme.surfaceContainerLowest
-        : scheme.surfaceContainerLow;
-    final border = scheme.outlineVariant;
-    final codeStyle = style.copyWith(
-      color: scheme.onSurface,
-      fontFamily: 'JetBrains Mono',
-      fontFamilyFallback: const ['Consolas', 'monospace'],
-      fontSize: (style.fontSize ?? 14) * 0.9,
-      fontWeight: FontWeight.w600,
-      height: 1.0,
-      letterSpacing: 0,
-      background: null,
-    );
-
-    return DecoratedBox(
-      key: const ValueKey('studio-markdown-inline-code'),
-      decoration: BoxDecoration(
-        color: fill,
-        borderRadius: BorderRadius.circular(StudioRadii.xs),
-        border: Border.all(color: border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
-        child: Text(
-          text,
-          style: codeStyle,
-          textHeightBehavior: const TextHeightBehavior(
-            applyHeightToFirstAscent: false,
-            applyHeightToLastDescent: false,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StudioBlockQuote extends MarkdownComponent {
-  @override
-  bool get inline => false;
-
-  @override
-  RegExp get exp => RegExp(
-    r"(?:(?:^)\ *>[^\n]+)(?:(?:\n)\ *>[^\n]+)*",
-    dotAll: true,
-    multiLine: true,
-  );
-
-  @override
-  InlineSpan span(BuildContext context, String text, GptMarkdownConfig config) {
-    final data = _plainQuoteText(text);
-    final scheme = Theme.of(context).colorScheme;
-    final quoteStyle = (config.style ?? DefaultTextStyle.of(context).style)
-        .copyWith(color: context.colors.onSurfaceVariant, height: 1.5);
-    final quoteConfig = config.copyWith(style: quoteStyle);
-    final child = TextSpan(
-      children: MarkdownComponent.generate(context, data, quoteConfig, true),
-    );
-
-    return WidgetSpan(
-      child: Directionality(
-        textDirection: config.textDirection,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: DecoratedBox(
-            key: const ValueKey('studio-markdown-quote'),
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerLow,
-              border: BorderDirectional(
-                start: BorderSide(color: context.colors.primary, width: 3),
-              ),
-              borderRadius: BorderRadius.circular(StudioRadii.sm),
-            ),
-            child: Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(10, 7, 10, 7),
-              child: config.getRich(child),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-String _plainQuoteText(String text) {
-  return text
-      .split('\n')
-      .map((line) {
-        final trimmed = line.trimLeft();
-        if (!trimmed.startsWith('>')) {
-          return line;
-        }
-        final body = trimmed.substring(1);
-        return body.startsWith(' ') ? body.substring(1) : body;
-      })
-      .join('\n')
-      .trim();
 }

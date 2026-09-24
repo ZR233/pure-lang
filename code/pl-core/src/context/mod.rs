@@ -18,5 +18,5 @@ pub use inheritance::{ContextInheritance, HistoryInheritance, InstructionInherit
 /// Stable identity of actual UTF-8 or binary content, without interpreting its format.
 pub fn content_hash(content: &[u8]) -> String {
     use sha2::Digest;
-    format!("sha256:{:x}", sha2::Sha256::digest(content))
+    format!("sha256:{}", hex::encode(sha2::Sha256::digest(content)))
 }

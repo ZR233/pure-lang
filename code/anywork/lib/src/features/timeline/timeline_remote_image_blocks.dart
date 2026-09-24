@@ -1,34 +1,59 @@
 part of 'timeline_view.dart';
 
-class _StudioImageMd extends InlineMd {
-  _StudioImageMd(this.surface);
+Map<String, String> _markdownImageAlts(String source) {
+  final alts = <String, String>{};
 
-  final _MarkdownSurface surface;
-
-  @override
-  RegExp get exp => RegExp(r'\!\[[^\[\]]*\]\([^\s]*\)');
-
-  @override
-  InlineSpan span(BuildContext context, String text, GptMarkdownConfig config) {
-    final match = RegExp(r'^\!\[([^\[\]]*)\]\((.*)\)$').firstMatch(text.trim());
-    if (match == null) return TextSpan(text: text, style: config.style);
-    final alt = match.group(1)?.trim() ?? '';
-    final destination = match.group(2)?.trim() ?? '';
-    final url = _safeHttpsImageUrl(destination);
-    final enabled =
-        surface == _MarkdownSurface.assistant ||
-        surface == _MarkdownSurface.panel;
-    if (!enabled || url == null) {
-      return TextSpan(
-        text: alt.isNotEmpty ? alt : destination,
-        style: config.style,
-      );
+  void visit(MdNode node) {
+    if (node is MdImage) {
+      alts.putIfAbsent(node.url, () => node.alt.trim());
+      return;
     }
-    return WidgetSpan(
-      alignment: PlaceholderAlignment.middle,
-      child: _RemoteMarkdownImageCard(url: url, alt: alt),
-    );
+    final children = switch (node) {
+      MdHeading(:final children) ||
+      MdParagraph(:final children) ||
+      MdBlockQuote(:final children) ||
+      MdCheckbox(:final children) ||
+      MdRadio(:final children) ||
+      MdBold(:final children) ||
+      MdItalic(:final children) ||
+      MdStrike(:final children) ||
+      MdUnderline(:final children) ||
+      MdLink(:final children) => children,
+      MdUnorderedList(:final items) || MdOrderedList(:final items) => [
+        for (final item in items) ...item.children,
+      ],
+      MdTable(:final header, :final rows) => [
+        for (final cell in header.cells) ...cell.content,
+        for (final row in rows)
+          for (final cell in row.cells) ...cell.content,
+      ],
+      _ => const <MdNode>[],
+    };
+    for (final child in children) {
+      visit(child);
+    }
   }
+
+  for (final node in Plusparse.parse(source).children) {
+    visit(node);
+  }
+  return alts;
+}
+
+Widget _studioMarkdownImage(
+  BuildContext context,
+  String destination,
+  String alt,
+  _MarkdownSurface surface,
+) {
+  final url = _safeHttpsImageUrl(destination);
+  final enabled =
+      surface == _MarkdownSurface.assistant ||
+      surface == _MarkdownSurface.panel;
+  if (!enabled || url == null) {
+    return Text(alt.isNotEmpty ? alt : destination);
+  }
+  return _RemoteMarkdownImageCard(url: url, alt: alt);
 }
 
 String? _safeHttpsImageUrl(String value) {

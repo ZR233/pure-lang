@@ -69,7 +69,10 @@ impl ToolWorkspace {
                 }
             }
         }
-        pl_core::tool::opaque::ToolAuthorization::new(format!("pl.workspace:{:x}", hash.finalize()))
+        pl_core::tool::opaque::ToolAuthorization::new(format!(
+            "pl.workspace:{}",
+            hex::encode(hash.finalize())
+        ))
     }
 
     pub fn root(&self) -> &std::path::Path {

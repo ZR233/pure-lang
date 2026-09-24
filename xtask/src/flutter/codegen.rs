@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const FRB_CODEGEN_VERSION: &str = "2.12.0";
+const FRB_CODEGEN_VERSION: &str = "2.13.0";
 // build_runner 2.7+ always removes conflicting outputs. The former
 // --delete-conflicting-outputs option is removed and only emits a warning.
 const BUILD_RUNNER_ARGS: &[&str] = &["run", "build_runner", "build"];

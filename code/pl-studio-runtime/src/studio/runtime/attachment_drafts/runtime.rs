@@ -101,7 +101,7 @@ impl AttachmentDraftRuntime {
                     filename,
                     storage_path,
                     byte_size: normalized.bytes.len() as u64,
-                    content_sha256: format!("{:x}", Sha256::digest(&normalized.bytes)),
+                    content_sha256: hex::encode(Sha256::digest(&normalized.bytes)),
                     width: normalized.width,
                     height: normalized.height,
                     initial_remote_url: loaded.initial_remote_url,

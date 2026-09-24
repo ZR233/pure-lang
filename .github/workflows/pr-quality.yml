@@ -151,7 +151,7 @@ jobs:
           cache: true
 
       - name: Install FRB code generator
-        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+        run: cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
 
       # 只跑确定性检查；Flutter Driver / 任务流 / live 模型验收在本地
       # Windows 环境执行（见 AGENTS.md 提交前检查清单）。

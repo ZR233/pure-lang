@@ -112,7 +112,7 @@ fn verify_file_helper(helper: &std::path::Path) -> Result<Arc<[u8]>, RemoteClien
     let bytes = std::fs::read(helper).map_err(|error| {
         RemoteClientError::Protocol(format!("failed to read helper artifact: {error}"))
     })?;
-    let actual = format!("{:x}", Sha256::digest(&bytes));
+    let actual = hex::encode(Sha256::digest(&bytes));
     if !actual.eq_ignore_ascii_case(expected) {
         return Err(RemoteClientError::Protocol(format!(
             "helper checksum mismatch for {}",
@@ -138,7 +138,7 @@ pub(super) async fn upload_helper(
     ssh_config: &super::super::ssh_config::SshConfigFile,
     bytes: &[u8],
 ) -> Result<String, RemoteClientError> {
-    let digest = format!("{:x}", Sha256::digest(bytes));
+    let digest = hex::encode(Sha256::digest(bytes));
     let version = env!("CARGO_PKG_VERSION");
     let directory = format!(
         "\"$HOME/.anywork/remote-helper/{version}/{}\"",

@@ -16,6 +16,11 @@ data 层负责 FRB DTO 到 domain 的一次转换；reducer 接收小型 canonic
 和增量 notification；
 Widget 只负责展示与发命令。窗口关闭必须等待 typed shutdown 完成并回收 Flutter、DTD、
 MCP/LSP 和 child process tree。
+shutdown 成功后 bridge 可先于进度流订阅解除初始化；订阅取消仅在 bridge 仍可用时调用
+native cancel，随后始终释放 Dart 侧订阅与句柄，不得在 `RustLib.dispose()` 后调用 FRB API。
+Timeline Markdown 使用 `gpt_markdown` 的现代解析管线与内置 autolink，不传递旧版
+`components` / `inlineComponents`；自定义引用块、图片与链接通过 builder 扩展。外链点击仍经过
+HTTP(S) URL 校验，远程图片仅允许 HTTPS 且由用户主动加载；图片 alt 从结构化 Markdown 节点读取。
 
 状态栏上下文悬浮窗展示 runtime 的已用 token 与模型总容量，容量来自模型调用时冻结的
 binding，不在前端按 provider 硬编码或查询当前目录回填历史。容量未知（包括映射中的非正值）

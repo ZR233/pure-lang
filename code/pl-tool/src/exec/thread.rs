@@ -245,7 +245,7 @@ impl<B: CommandBackend, A: CommandOutputArchive> Tool for ThreadExecTool<B, A> {
 // Model-supplied call IDs are not filesystem components.
 fn safe_identity(id: &str) -> String {
     let digest = Sha256::digest(id.as_bytes());
-    format!("task-{digest:x}")
+    format!("task-{}", hex::encode(digest))
 }
 
 fn projection(

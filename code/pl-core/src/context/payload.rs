@@ -78,7 +78,10 @@ impl OpaquePayload {
 
     /// Returns a digest of the exact content bytes; format and version remain separate identity.
     pub fn content_digest(&self) -> String {
-        format!("sha256:{:x}", Sha256::digest(self.content.as_bytes()))
+        format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(self.content.as_bytes()))
+        )
     }
 }
 

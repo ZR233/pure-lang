@@ -233,9 +233,9 @@ impl AttachmentBackend<'_> {
         let key = (
             self.fingerprint,
             format!(
-                "{}:{:x}",
+                "{}:{}",
                 self.endpoint.service_capabilities.files.policy_key(),
-                Sha256::digest(bytes)
+                hex::encode(Sha256::digest(bytes))
             ),
         );
         {

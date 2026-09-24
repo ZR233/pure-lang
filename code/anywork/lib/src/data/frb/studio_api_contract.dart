@@ -878,8 +878,13 @@ class FrbStudioApi
         cancelled = true;
         final activeHandle = handle;
         if (activeHandle != null) {
-          await activeHandle.cancel();
-          activeHandle.dispose();
+          try {
+            if (RustLib.instance.initialized) {
+              await activeHandle.cancel();
+            }
+          } finally {
+            activeHandle.dispose();
+          }
         }
         await subscription?.cancel();
       },

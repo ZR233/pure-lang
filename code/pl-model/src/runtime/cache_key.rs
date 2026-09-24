@@ -19,7 +19,7 @@ pub fn derive_prompt_cache_key(isolation: &str, prompt: &ThreadPromptSnapshot) -
         hash.update((part.len() as u64).to_le_bytes());
         hash.update(part.as_bytes());
     }
-    format!("pl:{:x}", hash.finalize())
+    format!("pl:{}", hex::encode(hash.finalize()))
 }
 
 /// Creates an account/deployment isolation namespace without exposing endpoint credentials.
@@ -54,5 +54,5 @@ pub fn binding_cache_namespace(
         field(name.as_bytes());
         field(value.as_bytes());
     }
-    format!("binding:{:x}", hash.finalize())
+    format!("binding:{}", hex::encode(hash.finalize()))
 }

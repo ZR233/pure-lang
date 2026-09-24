@@ -95,7 +95,7 @@ impl ResourceReference {
     /// Rejects truncated or replaced content, or malformed reference metadata.
     pub fn verify(&self, content: &[u8]) -> Result<(), ResourceError> {
         self.validate()?;
-        let digest = format!("sha256:{:x}", Sha256::digest(content));
+        let digest = format!("sha256:{}", hex::encode(Sha256::digest(content)));
         if content.len() as u64 != self.byte_len || digest != self.content_digest {
             return Err(ResourceError::ContentMismatch);
         }

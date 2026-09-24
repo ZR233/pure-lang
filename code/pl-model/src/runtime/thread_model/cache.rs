@@ -33,5 +33,5 @@ pub(super) fn key(
     crate::completion::canonicalize_json(&mut prefix);
     let encoded = serde_json::to_vec(&prefix)
         .map_err(|error| super::failure(ModelFailureKind::InvalidResponse, error))?;
-    Ok(Some(format!("pl:{:x}", Sha256::digest(encoded))))
+    Ok(Some(format!("pl:{}", hex::encode(Sha256::digest(encoded)))))
 }

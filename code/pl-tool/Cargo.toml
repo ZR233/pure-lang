@@ -25,6 +25,7 @@ reqwest = { workspace = true }
 which = { workspace = true }
 image = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
 rmcp = { workspace = true, features = ["auth", "client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 pl-protocol = { workspace = true }
 pl-output = { workspace = true }

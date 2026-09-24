@@ -1206,7 +1206,7 @@ async fn deepseek_file_upload_precedes_responses_and_sends_only_file_reference()
     let fixture = FixtureServer::start(vec![
         Step::exact(Protocol::Files, json!({
             "purpose":"user_data", "expires_after[anchor]":"created_at", "expires_after[seconds]":"86400",
-            "file":{"filename":"tiny.png","mime_type":"image/png","sha256":format!("{:x}", Sha256::digest(&bytes))}
+            "file":{"filename":"tiny.png","mime_type":"image/png","sha256":hex::encode(Sha256::digest(&bytes))}
         }), Reply::Json(json!({"id":"file-fixture"}))),
         Step::prompt(Protocol::ResponsesHttp, "inspect", 1,
             Reply::Sse(responses_text("uploaded", "deep-file", "deepseek-flash"))),

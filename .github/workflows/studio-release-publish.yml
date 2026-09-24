@@ -243,7 +243,7 @@ jobs:
         run: cargo test -p pl-core --features sqlite
 
       - name: Install FRB code generator
-        run: cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+        run: cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
 
       - name: Verify Flutter application
         run: cargo xtask verify-gui

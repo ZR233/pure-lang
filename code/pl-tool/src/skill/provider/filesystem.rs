@@ -301,5 +301,5 @@ fn list_local_skills(
 }
 
 fn content_revision(content: &str) -> String {
-    format!("{:x}", Sha256::digest(content.as_bytes()))
+    hex::encode(Sha256::digest(content.as_bytes()))
 }

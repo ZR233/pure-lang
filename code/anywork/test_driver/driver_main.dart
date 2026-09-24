@@ -4,6 +4,7 @@ import 'package:anywork/main.dart' as studio;
 import 'package:anywork/src/app/studio_shutdown.dart';
 import 'package:anywork/src/data/repositories/studio_repository.dart';
 import 'package:anywork/src/shared/studio_driver_state.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_driver/driver_extension.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -164,7 +165,8 @@ Future<String> _handleDriverData(String? message) async {
       try {
         await (_shutdownTask ??= _runShutdown());
         return jsonEncode({'shutdown': 'completed'});
-      } on Object {
+      } on Object catch (error, stackTrace) {
+        debugPrint('driver_shutdown_error=$error\n$stackTrace');
         _shutdownTask = null;
         return jsonEncode({'shutdown': 'failed'});
       }

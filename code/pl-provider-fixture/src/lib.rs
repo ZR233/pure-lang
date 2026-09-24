@@ -572,7 +572,7 @@ async fn files(State(state): State<AppState>, mut multipart: Multipart) -> Respo
                 record_rejected(&state, "POST".into(), "/v1/files".into(), Value::Null);
                 return StatusCode::BAD_REQUEST.into_response();
             };
-            json!({"filename":filename,"mime_type":mime_type,"sha256":format!("{:x}", Sha256::digest(&bytes))})
+            json!({"filename":filename,"mime_type":mime_type,"sha256":hex::encode(Sha256::digest(&bytes))})
         } else {
             let Ok(text) = field.text().await else {
                 record_rejected(&state, "POST".into(), "/v1/files".into(), Value::Null);

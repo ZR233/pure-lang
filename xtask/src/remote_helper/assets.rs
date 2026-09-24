@@ -74,7 +74,7 @@ fn verify_local_asset(binary: &Path) -> Result<()> {
         .next()
         .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
         .context("remote helper checksum is invalid")?;
-    let actual = format!("{:x}", Sha256::digest(fs::read(binary)?));
+    let actual = hex::encode(Sha256::digest(fs::read(binary)?));
     ensure!(
         actual.eq_ignore_ascii_case(expected),
         "remote helper SHA-256 mismatch: {}",

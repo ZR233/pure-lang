@@ -218,5 +218,5 @@ fn ensure_not_cancelled(cancellation: &CancellationToken) -> Result<()> {
 }
 
 fn content_revision(content: &str) -> String {
-    format!("{:x}", Sha256::digest(content.as_bytes()))
+    hex::encode(Sha256::digest(content.as_bytes()))
 }

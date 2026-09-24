@@ -159,7 +159,7 @@ impl StudioPaths {
 
 /// Stable on-disk key for a Thread session directory.
 pub fn thread_storage_key(thread_id: &str) -> String {
-    format!("{:x}", Sha256::digest(thread_id.as_bytes()))
+    hex::encode(Sha256::digest(thread_id.as_bytes()))
 }
 
 pub fn default_db_path() -> Result<PathBuf> {

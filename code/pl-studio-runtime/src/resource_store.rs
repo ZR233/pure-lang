@@ -204,7 +204,7 @@ fn retain_input(
             .checked_add(count as u64)
             .ok_or_else(|| store_error(std::io::Error::other("resource length overflow")))?;
     }
-    let hash = format!("{:x}", digest.finalize());
+    let hash = hex::encode(digest.finalize());
     let reference = ResourceReference::new(
         format!("{ID_PREFIX}{hash}"),
         format!("sha256:{hash}"),
@@ -296,7 +296,7 @@ fn verify_file(path: &Path, reference: &ResourceReference) -> Result<(), Resourc
         digest.update(&buffer[..count]);
     }
     if length != reference.byte_len()
-        || format!("sha256:{:x}", digest.finalize()) != reference.content_digest()
+        || format!("sha256:{}", hex::encode(digest.finalize())) != reference.content_digest()
     {
         return Err(ResourceStoreError::Integrity(
             pl_core::context::ResourceError::ContentMismatch,

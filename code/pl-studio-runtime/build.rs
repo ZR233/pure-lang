@@ -38,7 +38,7 @@ fn main() {
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
     fs::write(
         output.join("system_skills_fingerprint"),
-        format!("{:x}", digest.finalize()),
+        hex::encode(digest.finalize()),
     )
     .expect("write Skill fingerprint");
 }

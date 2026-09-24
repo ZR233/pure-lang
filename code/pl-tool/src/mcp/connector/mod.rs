@@ -80,14 +80,14 @@ impl McpConnector {
 
 #[derive(Clone)]
 pub(super) struct McpClientHandler {
-    info: ClientInfo,
+    info: ClientConfig,
     server_id: Arc<std::sync::RwLock<String>>,
     tool_list_changed: Arc<std::sync::RwLock<Option<ToolListChangedSink>>>,
 }
 
 impl McpClientHandler {
     fn new(
-        info: ClientInfo,
+        info: ClientConfig,
         server_id: String,
         tool_list_changed: Option<ToolListChangedSink>,
     ) -> Self {
@@ -100,7 +100,7 @@ impl McpClientHandler {
 }
 
 impl ClientHandler for McpClientHandler {
-    fn get_info(&self) -> ClientInfo {
+    fn get_info(&self) -> ClientConfig {
         self.info.clone()
     }
 
@@ -463,8 +463,8 @@ fn should_retry_http_with_initialize(error: &ClientInitializeError) -> bool {
     )
 }
 
-fn client_info(protocol_version: ProtocolVersion) -> ClientInfo {
-    ClientInfo::new(
+fn client_info(protocol_version: ProtocolVersion) -> ClientConfig {
+    ClientConfig::new(
         ClientCapabilities::default(),
         Implementation::new("pure-lang", env!("CARGO_PKG_VERSION")),
     )

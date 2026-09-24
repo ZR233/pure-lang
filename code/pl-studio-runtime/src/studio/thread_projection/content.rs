@@ -134,7 +134,7 @@ pub(in crate::studio) fn prompt_request_digest(
         MessagePresentation::Visible => b"visible".as_slice(),
         MessagePresentation::Hidden => b"hidden".as_slice(),
     });
-    format!("sha256:{:x}", hasher.finalize())
+    format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
 /// 从已保存的 `pl.studio.prompt` 载荷重建 host 提交身份摘要。

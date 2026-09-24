@@ -401,7 +401,7 @@ fn flutter_dependency_fingerprint(app_dir: &Path, hosted_url: Option<&str>) -> R
         hasher.update([0]);
     }
     hasher.update(hosted_url.unwrap_or("<default-hosted-url>").as_bytes());
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn has_cached_flutter_dependencies(app_dir: &Path, fingerprint: &str) -> Result<bool> {
