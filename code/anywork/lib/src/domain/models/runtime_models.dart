@@ -244,7 +244,6 @@ class ThreadRuntimeView {
     required this.activeSkills,
     required this.activeMcpServers,
     required this.activeLspServers,
-    required this.agentCount,
     this.promptTokens = 0,
     this.completionTokens = 0,
     this.cachedPromptTokens = 0,
@@ -273,7 +272,6 @@ class ThreadRuntimeView {
   final List<String> activeSkills;
   final List<String> activeMcpServers;
   final List<String> activeLspServers;
-  final int agentCount;
   final int promptTokens;
   final int completionTokens;
   final int cachedPromptTokens;
@@ -312,7 +310,6 @@ class ThreadRuntimeView {
             listEquals(activeSkills, other.activeSkills) &&
             listEquals(activeMcpServers, other.activeMcpServers) &&
             listEquals(activeLspServers, other.activeLspServers) &&
-            agentCount == other.agentCount &&
             promptTokens == other.promptTokens &&
             completionTokens == other.completionTokens &&
             cachedPromptTokens == other.cachedPromptTokens &&
@@ -343,7 +340,6 @@ class ThreadRuntimeView {
     Object.hashAll(activeSkills),
     Object.hashAll(activeMcpServers),
     Object.hashAll(activeLspServers),
-    agentCount,
     promptTokens,
     completionTokens,
     cachedPromptTokens,
@@ -373,7 +369,6 @@ class ThreadRuntimeView {
     List<String>? activeSkills,
     List<String>? activeMcpServers,
     List<String>? activeLspServers,
-    int? agentCount,
     int? promptTokens,
     int? completionTokens,
     int? cachedPromptTokens,
@@ -402,7 +397,6 @@ class ThreadRuntimeView {
       activeSkills: activeSkills ?? this.activeSkills,
       activeMcpServers: activeMcpServers ?? this.activeMcpServers,
       activeLspServers: activeLspServers ?? this.activeLspServers,
-      agentCount: agentCount ?? this.agentCount,
       promptTokens: promptTokens ?? this.promptTokens,
       completionTokens: completionTokens ?? this.completionTokens,
       cachedPromptTokens: cachedPromptTokens ?? this.cachedPromptTokens,

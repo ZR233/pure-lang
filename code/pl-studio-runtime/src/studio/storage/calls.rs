@@ -95,39 +95,15 @@ impl CallRetention {
     }
 }
 
-/// 结构化调用事实，供性能与计费投影按 root 会话或 Thread 读取。
-#[allow(dead_code)]
-#[derive(Debug, Clone, Default)]
+/// Durable attempt identity and timing needed to recover a skipped billing effect.
+#[derive(Debug)]
 pub(crate) struct ModelCallFact {
     /// Effect sequence that admitted this call; the durable recovery cursor.
     pub(crate) revision: u64,
-    pub(crate) thread_id: String,
-    pub(crate) root_thread_id: Option<String>,
     pub(crate) call_id: String,
     pub(crate) turn_id: String,
-    pub(crate) retry_of: Option<String>,
-    pub(crate) status: String,
     pub(crate) terminal: bool,
     pub(crate) retention: Option<String>,
-    pub(crate) purpose: Option<String>,
-    pub(crate) provider_instance_id: Option<String>,
-    pub(crate) provider_display_name: Option<String>,
-    pub(crate) configured_model: Option<String>,
-    pub(crate) sent_model: Option<String>,
-    pub(crate) reported_model: Option<String>,
-    pub(crate) reasoning_effort: Option<String>,
-    pub(crate) input_tokens: Option<u64>,
-    pub(crate) output_tokens: Option<u64>,
-    pub(crate) cache_read_tokens: Option<u64>,
-    pub(crate) cache_write_tokens: Option<u64>,
-    pub(crate) reasoning_tokens: Option<u64>,
-    pub(crate) total_tokens: Option<u64>,
-    pub(crate) ttft_millis: Option<u64>,
-    pub(crate) decode_millis: Option<u64>,
-    pub(crate) response_millis: Option<u64>,
-    pub(crate) cost_currency: Option<String>,
-    pub(crate) cost_amount: Option<f64>,
-    pub(crate) has_unpriced_usage: bool,
     pub(crate) started_at: i64,
     pub(crate) finished_at: Option<i64>,
     pub(crate) body_ref: Option<String>,
@@ -523,7 +499,7 @@ impl CallsStore {
             .writer
             .db
             .query_all_raw(statement(
-                "SELECT * FROM model_calls
+                "SELECT revision, call_id, turn_id, terminal, retention, started_at, finished_at, body_ref FROM model_calls
                  WHERE thread_id=? AND revision > ? AND revision <= ? AND billing_ref IS NULL
                  ORDER BY revision ASC, call_id ASC LIMIT ?",
                 vec![
@@ -1567,33 +1543,10 @@ async fn upsert_attempt(
 fn model_fact(row: &QueryResult) -> Result<ModelCallFact> {
     Ok(ModelCallFact {
         revision: u64::try_from(row.try_get::<i64>("", "revision")?)?,
-        thread_id: row.try_get("", "thread_id")?,
-        root_thread_id: row.try_get("", "root_thread_id")?,
         call_id: row.try_get("", "call_id")?,
         turn_id: row.try_get("", "turn_id")?,
-        retry_of: row.try_get("", "retry_of")?,
-        status: row.try_get("", "status")?,
         terminal: row.try_get::<i64>("", "terminal")? != 0,
         retention: row.try_get("", "retention")?,
-        purpose: row.try_get("", "purpose")?,
-        provider_instance_id: row.try_get("", "provider_instance_id")?,
-        provider_display_name: row.try_get("", "provider_display_name")?,
-        configured_model: row.try_get("", "configured_model")?,
-        sent_model: row.try_get("", "sent_model")?,
-        reported_model: row.try_get("", "reported_model")?,
-        reasoning_effort: row.try_get("", "reasoning_effort")?,
-        input_tokens: opt_u64(row.try_get("", "input_tokens")?),
-        output_tokens: opt_u64(row.try_get("", "output_tokens")?),
-        cache_read_tokens: opt_u64(row.try_get("", "cache_read_tokens")?),
-        cache_write_tokens: opt_u64(row.try_get("", "cache_write_tokens")?),
-        reasoning_tokens: opt_u64(row.try_get("", "reasoning_tokens")?),
-        total_tokens: opt_u64(row.try_get("", "total_tokens")?),
-        ttft_millis: opt_u64(row.try_get("", "ttft_millis")?),
-        decode_millis: opt_u64(row.try_get("", "decode_millis")?),
-        response_millis: opt_u64(row.try_get("", "response_millis")?),
-        cost_currency: row.try_get("", "cost_currency")?,
-        cost_amount: row.try_get("", "cost_amount")?,
-        has_unpriced_usage: row.try_get::<i64>("", "has_unpriced_usage")? != 0,
         started_at: row.try_get("", "started_at")?,
         finished_at: row.try_get("", "finished_at")?,
         body_ref: row.try_get("", "body_ref")?,
@@ -1758,10 +1711,6 @@ fn usage_columns(
 
 fn opt_i64(value: u64) -> Option<i64> {
     i64::try_from(value).ok()
-}
-
-fn opt_u64(value: Option<i64>) -> Option<u64> {
-    value.and_then(|value| u64::try_from(value).ok())
 }
 
 fn required_u64(row: &QueryResult, column: &str) -> Result<u64> {

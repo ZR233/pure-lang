@@ -152,9 +152,8 @@ impl StudioStore {
         let mut prepared = Vec::with_capacity(drafts.len());
         for draft in drafts {
             let result = async {
-                // New and migrated attachments share the same per-session content-addressed blob
-                // root (`sessions/<storage-key>/blobs`), so the catalog path can never diverge from
-                // the one the one-time migration coordinator wrote.
+                // Current attachments share the per-session content-addressed blob root
+                // (`sessions/<storage-key>/blobs`) with their catalog.
                 let dir = self
                     .thread_blobs_dir(thread_id)
                     .join(&draft.content_sha256[..2]);
@@ -241,8 +240,7 @@ impl StudioStore {
                 Ok(catalog.records)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                // Attachment catalogs are created by the one-time migration coordinator or by this
-                // owner; a missing file simply means the Thread has no attachments yet.
+                // A missing catalog means this Thread has no attachments yet.
                 Ok(Vec::new())
             }
             Err(error) => Err(error.into()),
@@ -260,9 +258,8 @@ impl StudioStore {
     }
 }
 
-/// Writes one canonical `attachments.toml`, shared with the one-time migration coordinator so both
-/// producers emit byte-identical catalogs.
-pub(in crate::studio) async fn write_attachment_catalog(
+/// Writes the canonical attachment catalog for one Thread.
+async fn write_attachment_catalog(
     path: &std::path::Path,
     thread_id: &str,
     records: &[AttachmentRecord],

@@ -42,7 +42,6 @@ const _emptySessionRuntime = ThreadRuntimeView(
   activeSkills: [],
   activeMcpServers: [],
   activeLspServers: [],
-  agentCount: 0,
 );
 
 class StudioState {
@@ -144,10 +143,8 @@ class StudioState {
 
   StudioTurnView? get turn => selectedWorkspace?.activeTurn;
 
-  ThreadRuntimeView get runtime {
-    final canonical = selectedWorkspace?.runtime ?? _emptySessionRuntime;
-    return canonical.copyWith(agentCount: threadsForSelectedRoot.length);
-  }
+  ThreadRuntimeView get runtime =>
+      selectedWorkspace?.runtime ?? _emptySessionRuntime;
 
   ComposerThreadState get composer => selectedWorkspaceUi.composer;
 

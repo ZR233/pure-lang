@@ -790,6 +790,5 @@ class DirectoryStateSnapshot<T> extends ObservedStateSnapshot<List<T>> {
 }
 
 typedef ProjectDirectoryState = DirectoryStateSnapshot<StudioProject>;
-typedef ThreadDirectoryState = DirectoryStateSnapshot<StudioThread>;
 typedef AgentDirectoryState = DirectoryStateSnapshot<StudioAgentView>;
 typedef RecoveryStateSnapshot = DirectoryStateSnapshot<StudioRecoveryIssue>;

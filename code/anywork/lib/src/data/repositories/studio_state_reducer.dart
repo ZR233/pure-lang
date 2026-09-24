@@ -815,54 +815,6 @@ bool timelinePageIsStale(
   return false;
 }
 
-/// 恢复事实注入：历史页携带的 rolledBack 标记优先于窗口内任何条目（标记
-/// 来自恢复投影的 rolled-back 范围，只有 DB 历史查询会给出，且可能落在
-/// 比 内存投影更旧的 revision 上）。这不是翻页事件，不改变窗口分页状态。
-StudioState applyRecoveredDispositions(
-  StudioState current,
-  String threadId,
-  ThreadHistoryPage page,
-) {
-  final workspace = current.workspacesByThread[threadId];
-  if (workspace == null) return current;
-  final items = _overlayRolledBackItems(
-    workspace.historyItems,
-    page.items,
-    threadId,
-  );
-  if (identical(items, workspace.historyItems)) return current;
-  return current.copyWith(
-    workspacesByThread: {
-      ...current.workspacesByThread,
-      threadId: workspace.copyWith(items: items),
-    },
-  );
-}
-
-/// rolledBack 条目（按 id）强制覆盖窗口内同 id 条目的 disposition；
-/// 内存投影不产生 rolledBack 事实，故覆盖不受 revision 门槛约束。
-List<ThreadItemView> _overlayRolledBackItems(
-  List<ThreadItemView> items,
-  List<ThreadItemView> pageItems,
-  String threadId,
-) {
-  final rolledBackIds = {
-    for (final item in pageItems)
-      if (item.threadId == threadId &&
-          item.contextDisposition == ThreadContextDisposition.rolledBack)
-        item.id,
-  };
-  if (rolledBackIds.isEmpty) return items;
-  return [
-    for (final item in items)
-      if (rolledBackIds.contains(item.id) &&
-          item.contextDisposition == ThreadContextDisposition.active)
-        item.copyWith(contextDisposition: ThreadContextDisposition.rolledBack)
-      else
-        item,
-  ];
-}
-
 const int maxTimelineWindowItems = 100;
 
 /// Only SQL pages are bounded. Live output is owned by the overlay.
@@ -1143,18 +1095,6 @@ StudioState _applyObservedSnapshot<T extends ObservedStateSnapshot<dynamic>>(
 ) {
   if (next.revision <= previous.revision) return current;
   return replace(next);
-}
-
-String planFollowUpPrompt(
-  PendingInteraction interaction,
-  InteractionResolutionCommand resolution,
-) {
-  final reason = switch (resolution) {
-    ToolApprovalResolutionCommand(:final reason) => reason?.trim() ?? '',
-    UserInputResolutionCommand() => '',
-  };
-  if (reason.isNotEmpty) return reason;
-  return interaction.body.trim();
 }
 
 /// Live frames never mutate the SQL window. The writer owns durable content.

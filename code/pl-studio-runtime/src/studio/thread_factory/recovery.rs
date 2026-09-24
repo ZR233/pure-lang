@@ -1,8 +1,7 @@
 //! Current-layout checkpoint loading for cold Threads.
 //!
-//! Legacy shared journals are converted once by the locked pre-publication migration coordinator
-//! (not imported into v2). Activation, timeline queries and recovery only ever read the
-//! current `state.toml`; they never replay the retired shared session database.
+//! Old shared journals remain isolated outside v2. Activation and timeline queries only read
+//! current session storage; checkpoints are validated on explicit activation.
 
 use anyhow::Result;
 use pl_core::thread::ThreadCheckpoint;

@@ -34,9 +34,6 @@ impl StudioRuntime {
         *slot = Some(BackgroundTask::new(tokio::spawn(async move {
             let mut issues = Vec::new();
             let result = async {
-                let stage = crate::startup_timing::Stage::new("recover_sessions");
-                runtime.append_session_recovery_issues(&mut issues).await?;
-                drop(stage);
                 let stage = crate::startup_timing::Stage::new("recover_worktrees");
                 runtime.append_worktree_recovery_issues(&mut issues).await?;
                 drop(stage);

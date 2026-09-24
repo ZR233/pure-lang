@@ -787,36 +787,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusLspSection => 'LSP';
 
   @override
-  String get statusSubagentsSection => 'Subagents';
-
-  @override
-  String get statusAgentChipTooltip => 'Subagent status';
-
-  @override
-  String get agentDetailTitle => 'Subagents';
-
-  @override
-  String agentDetailSummary(int count, int running) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count agents · $running running',
-      one: '1 agent · $running running',
-    );
-    return '$_temp0';
-  }
-
-  @override
-  String get agentDetailEmpty => 'No subagents';
-
-  @override
   String get agentDetailStatusQueued => 'Queued';
 
   @override
   String get agentDetailStatusRunning => 'Running';
-
-  @override
-  String get agentDetailStatusWaiting => 'Waiting';
 
   @override
   String get agentDetailStatusCompleted => 'Completed';
@@ -829,18 +803,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get agentDetailStatusShutdown => 'Shutdown';
-
-  @override
-  String get agentDetailStatusNotFound => 'Not found';
-
-  @override
-  String get agentDetailSummaryLabel => 'Summary';
-
-  @override
-  String get agentDetailErrorLabel => 'Error';
-
-  @override
-  String get agentDetailReasonLabel => 'Reason';
 
   @override
   String get agentDetailPathLabel => 'Path';
@@ -993,9 +955,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get agentDetailStatusClosing => 'Closing';
-
-  @override
-  String get agentDetailStatusCleanupFailed => 'Cleanup failed';
 
   @override
   String timelineToolQueued(String name) {

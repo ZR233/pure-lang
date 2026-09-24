@@ -1,7 +1,5 @@
 pub mod text;
 
-use std::collections::VecDeque;
-
 use serde::{Deserialize, Serialize};
 
 /// 单个输出流的截断结果。
@@ -72,110 +70,6 @@ pub fn bounded_text(value: &str, max_bytes: usize, offset: usize) -> BoundedOutp
         truncated: true,
         bytes_omitted: value.len().saturating_sub(end),
         next_offset: Some(offset.saturating_add(end)),
-    }
-}
-
-#[derive(Debug)]
-pub struct HeadTailBuffer {
-    cap: usize,
-    head: Vec<u8>,
-    tail: VecDequeBytes,
-    total: usize,
-}
-
-impl HeadTailBuffer {
-    pub fn new(cap: usize) -> Self {
-        Self {
-            cap,
-            head: Vec::new(),
-            tail: VecDequeBytes::new(cap / 2),
-            total: 0,
-        }
-    }
-
-    pub fn push(&mut self, bytes: &[u8]) {
-        self.total = self.total.saturating_add(bytes.len());
-        if self.cap == 0 {
-            return;
-        }
-        let head_cap = self.head_cap();
-        if self.head.len() < head_cap {
-            let take = (head_cap - self.head.len()).min(bytes.len());
-            self.head.extend_from_slice(&bytes[..take]);
-            if take < bytes.len() {
-                self.tail.push(&bytes[take..]);
-            }
-        } else {
-            self.tail.push(bytes);
-        }
-    }
-
-    pub fn truncated(&self) -> bool {
-        self.total > self.cap
-    }
-
-    pub fn into_bytes(self) -> Vec<u8> {
-        if !self.truncated() {
-            let mut out = self.head;
-            out.extend_from_slice(&self.tail.into_vec());
-            return out;
-        }
-        let omitted = self
-            .total
-            .saturating_sub(self.head.len())
-            .saturating_sub(self.tail.len());
-        let marker = format!("\n... omitted {omitted} bytes ...\n");
-        let mut out = self.head;
-        out.extend_from_slice(marker.as_bytes());
-        out.extend_from_slice(&self.tail.into_vec());
-        out
-    }
-
-    fn head_cap(&self) -> usize {
-        self.cap.saturating_sub(self.cap / 2)
-    }
-}
-
-#[derive(Debug)]
-struct VecDequeBytes {
-    cap: usize,
-    bytes: VecDeque<u8>,
-}
-
-impl VecDequeBytes {
-    fn new(cap: usize) -> Self {
-        Self {
-            cap,
-            bytes: VecDeque::new(),
-        }
-    }
-
-    fn push(&mut self, bytes: &[u8]) {
-        if self.cap == 0 {
-            return;
-        }
-        if bytes.len() >= self.cap {
-            self.bytes.clear();
-            self.bytes.extend(
-                bytes[bytes.len().saturating_sub(self.cap)..]
-                    .iter()
-                    .copied(),
-            );
-            return;
-        }
-        self.bytes.extend(bytes.iter().copied());
-        if self.bytes.len() > self.cap {
-            let excess = self.bytes.len() - self.cap;
-            self.bytes.drain(..excess);
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.bytes.len()
-    }
-
-    fn into_vec(self) -> Vec<u8> {
-        self.bytes.into_iter().collect()
     }
 }
 

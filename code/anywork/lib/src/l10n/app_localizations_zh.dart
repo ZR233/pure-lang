@@ -744,30 +744,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusLspSection => 'LSP';
 
   @override
-  String get statusSubagentsSection => '子智能体';
-
-  @override
-  String get statusAgentChipTooltip => '子智能体状态';
-
-  @override
-  String get agentDetailTitle => '子智能体';
-
-  @override
-  String agentDetailSummary(int count, int running) {
-    return '共 $count 个，$running 个运行中';
-  }
-
-  @override
-  String get agentDetailEmpty => '暂无子智能体';
-
-  @override
   String get agentDetailStatusQueued => '排队中';
 
   @override
   String get agentDetailStatusRunning => '运行中';
-
-  @override
-  String get agentDetailStatusWaiting => '等待中';
 
   @override
   String get agentDetailStatusCompleted => '已完成';
@@ -780,18 +760,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get agentDetailStatusShutdown => '已关闭';
-
-  @override
-  String get agentDetailStatusNotFound => '未找到';
-
-  @override
-  String get agentDetailSummaryLabel => '摘要';
-
-  @override
-  String get agentDetailErrorLabel => '错误';
-
-  @override
-  String get agentDetailReasonLabel => '原因';
 
   @override
   String get agentDetailPathLabel => '路径';
@@ -943,9 +911,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get agentDetailStatusClosing => '正在关闭';
-
-  @override
-  String get agentDetailStatusCleanupFailed => '清理失败';
 
   @override
   String timelineToolQueued(String name) {

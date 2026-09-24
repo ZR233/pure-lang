@@ -102,15 +102,45 @@ pub enum ThreadDirectoryFilter {
     Attention,
 }
 
+/// Fields needed to apply the same directory query to hot Threads and cold catalog entries.
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadDirectoryMatchFields<'a> {
+    pub parent_thread_id: Option<&'a str>,
+    pub archived: bool,
+    pub project_id: &'a str,
+    pub title: &'a str,
+    pub status: crate::ThreadStatus,
+}
+
+impl<'a> From<&'a crate::Thread> for ThreadDirectoryMatchFields<'a> {
+    fn from(thread: &'a crate::Thread) -> Self {
+        Self {
+            parent_thread_id: thread.parent_thread_id.as_deref(),
+            archived: thread.archived,
+            project_id: &thread.project_id,
+            title: &thread.title,
+            status: thread.status,
+        }
+    }
+}
+
 impl ThreadDirectoryQuery {
     pub fn matches(&self, thread: &crate::Thread, project_matches: bool) -> bool {
+        self.matches_fields(thread.into(), project_matches)
+    }
+
+    pub fn matches_fields(
+        &self,
+        thread: ThreadDirectoryMatchFields<'_>,
+        project_matches: bool,
+    ) -> bool {
         use crate::ThreadStatus;
         thread.parent_thread_id.is_none()
             && thread.archived == self.archived
             && self
                 .project_id
                 .as_ref()
-                .is_none_or(|id| *id == thread.project_id)
+                .is_none_or(|id| id.as_str() == thread.project_id)
             && (project_matches
                 || self.search.as_ref().is_none_or(|text| {
                     thread

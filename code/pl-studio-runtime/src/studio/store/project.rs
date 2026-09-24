@@ -24,12 +24,11 @@ enum ExistingDatabaseState {
 ///
 /// The product database is deliberately *not* part of this decision: every installation, including
 /// a brand-new one, materializes `<home>/studio/studio.sqlite`, so its presence says nothing about
-/// migrated user data. The evidence that matters is state the canonical TOML documents describe:
-/// a published session layout, an unmigrated legacy session database, a started (or partially
-/// published) migration, a legacy attachment root, call facts, attachment-draft state, or a
-/// canonical document that already exists. Call and draft state are usable as evidence because a
-/// fresh open publishes the three canonical documents before it opens the call store and before the
-/// runtime creates its draft root, so either without the documents means the fact source was lost
+/// prior v2 state. The evidence is a session or migration directory, call facts,
+/// attachment-draft state, or an existing canonical document. Call and draft state are usable as
+/// evidence because a fresh open publishes the three canonical documents before it opens the
+/// call store and before the runtime creates its draft root, so either without the documents
+/// means the fact source was lost
 /// rather than never written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InstallationState {
@@ -114,7 +113,7 @@ impl StudioStore {
                 initialize_studio_schema(&db).await?;
             }
             // ExistingDatabaseState::Current was already verified before opening writable.
-            // Session upgrades belong to the locked pre-publication coordinator.
+            // Old session storage remains isolated outside v2.
             validate_database(&db).await
         }
         .await;

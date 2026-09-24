@@ -161,7 +161,6 @@ StudioState _agentWorkspacePreviewState({
     activeSkills: selectChild ? const ['review-skill'] : const ['planning'],
     activeMcpServers: const ['dart'],
     activeLspServers: const ['rust-analyzer'],
-    agentCount: 1,
   );
   return StudioState(
     projectDirectory: ProjectDirectoryState.fromState(

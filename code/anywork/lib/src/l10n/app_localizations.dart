@@ -1465,36 +1465,6 @@ abstract class AppLocalizations {
   /// **'LSP'**
   String get statusLspSection;
 
-  /// No description provided for @statusSubagentsSection.
-  ///
-  /// In en, this message translates to:
-  /// **'Subagents'**
-  String get statusSubagentsSection;
-
-  /// No description provided for @statusAgentChipTooltip.
-  ///
-  /// In en, this message translates to:
-  /// **'Subagent status'**
-  String get statusAgentChipTooltip;
-
-  /// No description provided for @agentDetailTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Subagents'**
-  String get agentDetailTitle;
-
-  /// No description provided for @agentDetailSummary.
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, =1{1 agent · {running} running} other{{count} agents · {running} running}}'**
-  String agentDetailSummary(int count, int running);
-
-  /// No description provided for @agentDetailEmpty.
-  ///
-  /// In en, this message translates to:
-  /// **'No subagents'**
-  String get agentDetailEmpty;
-
   /// No description provided for @agentDetailStatusQueued.
   ///
   /// In en, this message translates to:
@@ -1506,12 +1476,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Running'**
   String get agentDetailStatusRunning;
-
-  /// No description provided for @agentDetailStatusWaiting.
-  ///
-  /// In en, this message translates to:
-  /// **'Waiting'**
-  String get agentDetailStatusWaiting;
 
   /// No description provided for @agentDetailStatusCompleted.
   ///
@@ -1536,30 +1500,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Shutdown'**
   String get agentDetailStatusShutdown;
-
-  /// No description provided for @agentDetailStatusNotFound.
-  ///
-  /// In en, this message translates to:
-  /// **'Not found'**
-  String get agentDetailStatusNotFound;
-
-  /// No description provided for @agentDetailSummaryLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Summary'**
-  String get agentDetailSummaryLabel;
-
-  /// No description provided for @agentDetailErrorLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Error'**
-  String get agentDetailErrorLabel;
-
-  /// No description provided for @agentDetailReasonLabel.
-  ///
-  /// In en, this message translates to:
-  /// **'Reason'**
-  String get agentDetailReasonLabel;
 
   /// No description provided for @agentDetailPathLabel.
   ///
@@ -1798,12 +1738,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Closing'**
   String get agentDetailStatusClosing;
-
-  /// No description provided for @agentDetailStatusCleanupFailed.
-  ///
-  /// In en, this message translates to:
-  /// **'Cleanup failed'**
-  String get agentDetailStatusCleanupFailed;
 
   /// No description provided for @timelineToolQueued.
   ///

@@ -89,7 +89,6 @@ ThreadRuntimeView _emptyRuntimeView() {
     activeSkills: [],
     activeMcpServers: [],
     activeLspServers: [],
-    agentCount: 0,
   );
 }
 

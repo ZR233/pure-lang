@@ -193,17 +193,3 @@ AsyncValue<TimelinePaneView?> agentTimeline(Ref ref, String threadId) {
     ),
   );
 }
-
-@riverpod
-AsyncValue<AgentWorkspaceView?> agentWorkspace(Ref ref, String threadId) {
-  return ref.watch(
-    studioControllerProvider.select(
-      (state) => state.whenData((state) {
-        if (state.selectedThreadId != threadId) {
-          return null;
-        }
-        return state.selectedAgentWorkspace;
-      }),
-    ),
-  );
-}

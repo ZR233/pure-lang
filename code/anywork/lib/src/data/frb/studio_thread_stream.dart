@@ -744,7 +744,6 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
     activeSkills: value.activeSkills,
     activeMcpServers: value.activeMcpServers,
     activeLspServers: value.activeLspServers,
-    agentCount: 0,
     workflow: value.workflow == null
         ? null
         : _workflowRuntimeFromFrb(value.workflow!),

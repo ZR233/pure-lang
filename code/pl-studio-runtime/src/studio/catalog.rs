@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context, Result, bail, ensure};
-use pl_protocol::studio::ThreadDirectoryQuery;
+use pl_protocol::studio::{ThreadDirectoryMatchFields, ThreadDirectoryQuery};
 use pl_protocol::{Thread, ThreadModeId, ThreadStatus, ThreadWorkspaceMode};
 
 pub(in crate::studio) const CATALOG_SCHEMA_VERSION: u32 = 1;
@@ -76,42 +76,6 @@ impl CatalogEntry {
             updated_at: self.updated_at,
             archived: self.archived,
         }
-    }
-
-    /// 与 `pl_protocol::ThreadDirectoryQuery::matches` 同一判定语义，供冷分页与搜索使用。
-    ///
-    /// `project_matches` 由调用方按 Project 名称/路径命中集合传入；目录自身不读取 Project。
-    pub(in crate::studio) fn matches(
-        &self,
-        query: &ThreadDirectoryQuery,
-        project_matches: bool,
-    ) -> bool {
-        self.parent_thread_id.is_none()
-            && self.archived == query.archived
-            && query
-                .project_id
-                .as_ref()
-                .is_none_or(|id| *id == self.project_id)
-            && (project_matches
-                || query.search.as_ref().is_none_or(|text| {
-                    self.title
-                        .to_lowercase()
-                        .contains(&text.trim().to_lowercase())
-                }))
-            && match query.filter {
-                pl_protocol::studio::ThreadDirectoryFilter::All => true,
-                pl_protocol::studio::ThreadDirectoryFilter::Running => matches!(
-                    self.status,
-                    ThreadStatus::Queued
-                        | ThreadStatus::Running
-                        | ThreadStatus::WaitingTool
-                        | ThreadStatus::Cancelling
-                ),
-                pl_protocol::studio::ThreadDirectoryFilter::Attention => matches!(
-                    self.status,
-                    ThreadStatus::WaitingInteraction | ThreadStatus::Faulted
-                ),
-            }
     }
 }
 
@@ -179,7 +143,18 @@ impl CatalogStore {
             .lock()
             .entries
             .iter()
-            .filter(|entry| entry.matches(query, project_matches.contains(&entry.project_id)))
+            .filter(|entry| {
+                query.matches_fields(
+                    ThreadDirectoryMatchFields {
+                        parent_thread_id: entry.parent_thread_id.as_deref(),
+                        archived: entry.archived,
+                        project_id: &entry.project_id,
+                        title: &entry.title,
+                        status: entry.status,
+                    },
+                    project_matches.contains(&entry.project_id),
+                )
+            })
             .cloned()
             .collect::<Vec<_>>();
         sort_desc(&mut matched);

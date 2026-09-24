@@ -431,16 +431,6 @@ impl StudioRuntime {
         }
         Ok(())
     }
-
-    pub(super) async fn append_session_recovery_issues(
-        &self,
-        _recovery_issues: &mut Vec<StudioRecoveryIssue>,
-    ) -> Result<()> {
-        // A normal startup never traverses historical sessions: legacy journals are converted once
-        // by the locked pre-publication migration coordinator, and current checkpoints are validated
-        // lazily on explicit activation. There is nothing session-scoped to audit here.
-        Ok(())
-    }
 }
 
 #[cfg(windows)]
