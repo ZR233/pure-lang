@@ -60,6 +60,7 @@ pub(in crate::studio) enum LiveEvent {
 pub(in crate::studio) struct LiveProjection {
     state: ThreadSnapshot,
     items: BTreeMap<String, ThreadItem>,
+    hidden_inputs: BTreeSet<String>,
     turns_seen: BTreeSet<String>,
     preview_attempt: Option<String>,
     preview_payloads: BTreeSet<String>,
@@ -73,6 +74,7 @@ impl LiveProjection {
         Self {
             state,
             items: BTreeMap::new(),
+            hidden_inputs: BTreeSet::new(),
             turns_seen: BTreeSet::new(),
             preview_attempt: None,
             preview_payloads: BTreeSet::new(),
@@ -99,12 +101,20 @@ impl LiveProjection {
         effect: &ThreadEffectBatch,
     ) -> Result<Vec<LiveEvent>, ProjectionError> {
         self.apply(effect);
+        for change in effect.inputs.iter() {
+            if let InputChange::Accepted(record) = change
+                && super::input_presentation(record) == pl_protocol::MessagePresentation::Hidden
+            {
+                self.hidden_inputs.insert(record.input.id.clone());
+            }
+        }
         let provisional = super::project_effect_items(
             thread,
             &self.state,
             effect,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeSet::new(),
         )?;
         let (mut existing, mut reserved) = self
             .resolve_phase(
@@ -143,6 +153,11 @@ impl LiveProjection {
                 existing.entry(id).or_insert(item);
             }
         }
+        let mut hidden_inputs = history
+            .hidden_input_identities(provisional.unresolved_inputs.iter().cloned())
+            .await
+            .map_err(|error| ProjectionError::History(error.to_string()))?;
+        hidden_inputs.extend(self.hidden_inputs.iter().cloned());
         // Only already-started channels may be finalized by this effect.
         if let Some(attempt) = &effect.attempt {
             let channels = ["reasoning", "text"]
@@ -153,8 +168,14 @@ impl LiveProjection {
                 }
             }
         }
-        let projected =
-            super::project_effect_items(thread, &self.state, effect, &existing, &reserved)?;
+        let projected = super::project_effect_items(
+            thread,
+            &self.state,
+            effect,
+            &existing,
+            &reserved,
+            &hidden_inputs,
+        )?;
         // 实时帧同样不允许带着无法补全的 identity 继续：投影失败由调用方转成 lagged 重同步。
         projected.ensure_complete()?;
         let mut events = Vec::new();
@@ -223,6 +244,24 @@ impl LiveProjection {
         }
         // 该 effect 自己的事实已经投影完，不再需要由它消费/收束的历史记录。
         self.prune_consumed_facts();
+        let mut active_inputs = self
+            .state
+            .turns
+            .iter()
+            .filter_map(|turn| {
+                (turn.state == TurnState::Running)
+                    .then_some(turn.input_id.as_deref())
+                    .flatten()
+            })
+            .collect::<BTreeSet<_>>();
+        active_inputs.extend(
+            self.state
+                .inputs
+                .iter()
+                .map(|record| record.input.id.as_str()),
+        );
+        self.hidden_inputs
+            .retain(|id| active_inputs.contains(id.as_str()));
         Ok(events)
     }
 

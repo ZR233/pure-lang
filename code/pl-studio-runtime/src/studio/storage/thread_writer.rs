@@ -18,7 +18,7 @@
 //! that effect, so a candidate never carries a summary the state it saves does not include.
 
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -804,6 +804,7 @@ async fn persist_effect(inner: &Inner, sequence: u64) -> Result<()> {
         &write.effect,
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeSet::new(),
     )?;
     let mut ids = provisional
         .items
@@ -825,6 +826,9 @@ async fn persist_effect(inner: &Inner, sequence: u64) -> Result<()> {
         }
     }
     let existing = history.existing_items(ids.clone()).await?;
+    let hidden_inputs = history
+        .hidden_input_identities(provisional.unresolved_inputs.iter().cloned())
+        .await?;
     let mut reserved = BTreeMap::new();
     for id in provisional.items.iter().map(|item| &item.id) {
         if !existing.contains_key(id) && !reserved.contains_key(id) {
@@ -847,10 +851,9 @@ async fn persist_effect(inner: &Inner, sequence: u64) -> Result<()> {
         &write.effect,
         &existing,
         &reserved,
+        &hidden_inputs,
     )?;
-    // 被裁剪的 input body 只有在其 durable item 已存在时才能补全；否则这条已受理事实的历史永远
-    // 无法完整落库，必须作为真实持久化错误上报，而不是写入带空洞的时间线或继续暴露旧的
-    // Running 状态。
+    // Only an explicitly durable hidden identity can replace the visible item requirement.
     projected.ensure_complete()?;
     // The durable identity indexes answer a repeated `submitPrompt` and a repeated message delivery
     // after the input/message left core state. Only minimal identities are written, and they share
@@ -1038,6 +1041,7 @@ fn terminal_input_identities(snapshot: &ThreadSnapshot) -> Vec<InputIdentityWrit
             request_digest: crate::studio::thread_projection::saved_prompt_request_digest(
                 &record.input.payload,
             ),
+            presentation: crate::studio::thread_projection::input_presentation(record),
         })
         .collect()
 }
@@ -1345,7 +1349,7 @@ mod storage_fault_tests {
         },
         thread::{
             ModelStepLimit, ThreadEffectBatch, ThreadHandle, ThreadSnapshot, TurnInput,
-            TurnOutcome,
+            TurnOutcome, TurnRecord, TurnState,
             cold::ColdStoreHandle,
             input::{InputChange, InputRecord, InputState, ThreadInput},
             task::TaskStatus,
@@ -1476,6 +1480,120 @@ mod storage_fault_tests {
             ThreadStorageSink::new(store.clone(), pl_protocol::Thread::placeholder(thread_id))
                 .await?;
         Ok((temp, store, sink))
+    }
+
+    #[tokio::test]
+    async fn hidden_consumed_input_keeps_turn_history_complete_after_body_pruning() -> Result<()> {
+        let (_temp, store, sink) = sink("hidden-input").await?;
+        let input_id = "interaction:confirmed:continuation";
+        let turn_id = "turn-after-confirmation";
+        let mut accepted = ticket("hidden-input", 1);
+        let input = InputRecord {
+            accepted_sequence: 1,
+            delivery: Default::default(),
+            input: ThreadInput {
+                id: input_id.into(),
+                payload: OpaquePayload::new(
+                    "pl.studio.interaction-continuation",
+                    1,
+                    serde_json::json!({"interactionId":"confirmed","presentation":"hidden"})
+                        .to_string(),
+                )?,
+                context: vec![ContextContent::Text {
+                    text: "answer".into(),
+                }],
+            },
+            ordinal: 1,
+            revision: 2,
+            state: InputState::Consumed {
+                turn_id: turn_id.into(),
+                attempt_id: "attempt-1".into(),
+            },
+        };
+        accepted.checkpoint.state.inputs = Arc::from([input.clone()]);
+        Arc::make_mut(&mut accepted.effect).inputs = Arc::from([InputChange::Accepted(input)]);
+        sink.admit("hidden-input", accepted)?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush("hidden-input", 1)).await??;
+        let history = store.history("hidden-input").await?;
+        assert!(history.existing_items([input_id.into()]).await?.is_empty());
+        assert!(history.input_identity(input_id).await?.is_some());
+
+        let mut later = ticket("hidden-input", 2);
+        let turn = TurnRecord {
+            elapsed_ms: None,
+            input_id: Some(input_id.into()),
+            turn_id: turn_id.into(),
+            state: TurnState::Running,
+            model_steps: 0,
+        };
+        later.checkpoint.state.turns = Arc::from([turn.clone()]);
+        Arc::make_mut(&mut later.effect).turn = Some(turn);
+        sink.admit("hidden-input", later)?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush("hidden-input", 2)).await??;
+        assert_eq!(history.watermark().await?, 2);
+        assert_eq!(sink.0.channel.subscribe().borrow().fault, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn missing_visible_input_item_still_blocks_history() -> Result<()> {
+        let (_temp, store, sink) = sink("missing-visible").await?;
+        let mut accepted = ticket("missing-visible", 1);
+        let input = InputRecord {
+            accepted_sequence: 1,
+            delivery: Default::default(),
+            input: ThreadInput {
+                id: "visible-input".into(),
+                payload: OpaquePayload::new(
+                    "pl.studio.prompt",
+                    1,
+                    serde_json::json!({"text":"hello","presentation":"visible","attachments":[]})
+                        .to_string(),
+                )?,
+                context: vec![ContextContent::Text {
+                    text: "hello".into(),
+                }],
+            },
+            ordinal: 1,
+            revision: 2,
+            state: InputState::Consumed {
+                turn_id: "visible-turn".into(),
+                attempt_id: "attempt".into(),
+            },
+        };
+        accepted.checkpoint.state.inputs = Arc::from([input.clone()]);
+        Arc::make_mut(&mut accepted.effect).inputs = Arc::from([InputChange::Accepted(input)]);
+        sink.admit("missing-visible", accepted)?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush("missing-visible", 1)).await??;
+        let history = store.history("missing-visible").await?;
+        let path = store
+            .thread_storage_dir("missing-visible")
+            .join("history.sqlite");
+        let db = Database::connect(crate::studio::paths::sqlite_url(&path)).await?;
+        db.execute_unprepared("DELETE FROM history_items WHERE item_id='visible-input'")
+            .await?;
+
+        let mut later = ticket("missing-visible", 2);
+        let turn = TurnRecord {
+            elapsed_ms: None,
+            input_id: Some("visible-input".into()),
+            turn_id: "visible-turn".into(),
+            state: TurnState::Running,
+            model_steps: 0,
+        };
+        later.checkpoint.state.turns = Arc::from([turn.clone()]);
+        Arc::make_mut(&mut later.effect).turn = Some(turn);
+        sink.admit("missing-visible", later)?;
+        let error = tokio::time::timeout(Duration::from_secs(5), sink.flush("missing-visible", 2))
+            .await?
+            .expect_err("a visible input without its item must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("missing the committed input item")
+        );
+        assert_eq!(history.watermark().await?, 1);
+        Ok(())
     }
 
     #[tokio::test]

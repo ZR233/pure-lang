@@ -55,7 +55,7 @@ pub(in crate::studio) fn project_accepted_inputs(
 /// durable pass decides from the durable item itself whether the fact is complete.
 pub(in crate::studio) struct EffectProjection {
     pub(in crate::studio) items: Vec<ThreadItem>,
-    /// Pruned input identities this effect references whose durable item the caller did not supply.
+    /// Pruned inputs without either a visible item or a proven hidden identity.
     pub(in crate::studio) unresolved_inputs: BTreeSet<String>,
     /// Calls whose producing attempt was pruned; the original invocation belongs to history.
     pub(in crate::studio) unresolved_calls: BTreeSet<String>,
@@ -96,7 +96,11 @@ pub(in crate::studio) fn project_effect_items(
     effect: &ThreadEffectBatch,
     existing: &BTreeMap<String, ThreadItem>,
     reserved: &BTreeMap<String, u64>,
+    hidden_inputs: &BTreeSet<String>,
 ) -> Result<EffectProjection, ProjectionError> {
+    if let Some(id) = hidden_inputs.iter().find(|id| existing.contains_key(*id)) {
+        return Err(ProjectionError::ContradictoryHiddenInput(id.clone()));
+    }
     let mut items = Vec::new();
     let mut input_ids = BTreeSet::new();
     let mut changed_inputs = BTreeSet::new();
@@ -126,12 +130,9 @@ pub(in crate::studio) fn project_effect_items(
             if changed_inputs.contains(id) {
                 return Err(ProjectionError::MissingInput(id.into()));
             }
-            // A Turn keeps referencing the input id whose body its consuming commit pruned from the
-            // resident state. The item itself was written by the effect that admitted or consumed it
-            // and its content never changes afterwards, so the durable item is the committed
-            // metadata: when the caller supplies it this effect leaves it untouched, and otherwise
-            // the identity is reported so `ensure_complete` can fail the incomplete fact loudly.
-            if !existing.contains_key(id) {
+            // A hidden input deliberately has no timeline item. Its committed identity carries
+            // that disposition; unknown or visible identities still require the durable item.
+            if !existing.contains_key(id) && !hidden_inputs.contains(id) {
                 unresolved_inputs.insert(id.to_string());
             }
             continue;

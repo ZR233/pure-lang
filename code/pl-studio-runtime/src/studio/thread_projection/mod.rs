@@ -3,7 +3,8 @@ mod compactions;
 mod completions;
 mod content;
 pub(in crate::studio) use content::{
-    prompt_request_digest, referenced_attachment_ids, saved_prompt_request_digest,
+    input_presentation, prompt_request_digest, referenced_attachment_ids,
+    saved_prompt_request_digest,
 };
 mod effect;
 pub(in crate::studio) use effect::{project_accepted_inputs, project_effect_items};
@@ -62,6 +63,8 @@ pub(crate) enum ProjectionError {
     MissingInput(String),
     #[error("durable history is missing the committed input item(s) {0}")]
     MissingDurableInput(String),
+    #[error("hidden input {0} also has a visible durable timeline item")]
+    ContradictoryHiddenInput(String),
     #[error("durable history is missing the accepted tool call item(s) {0}")]
     MissingDurableToolCall(String),
     #[error("timeline count exceeds the product representation")]

@@ -86,6 +86,11 @@ pub(super) fn input_content(input: &InputRecord) -> Result<InputContent, Content
     }
 }
 
+/// Unknown product payloads project as visible Raw items, not hidden omissions.
+pub(in crate::studio) fn input_presentation(input: &InputRecord) -> MessagePresentation {
+    input_content(input).map_or(MessagePresentation::Visible, |content| content.presentation)
+}
+
 /// Attachment identities the current state still references through its accepted inputs.
 ///
 /// Publishing a checkpoint that names a blob must not outrun that blob's durability, so this is the

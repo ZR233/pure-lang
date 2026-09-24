@@ -18,7 +18,7 @@ use sea_orm::{
     SqliteTransactionMode, Statement, TransactionOptions, TransactionTrait, Value,
 };
 
-const HISTORY_SCHEMA_VERSION: i64 = 2;
+const HISTORY_SCHEMA_VERSION: i64 = 3;
 /// 单页返回的总 payload 字节预算；达到预算即停止装入更多条目。
 const PAGE_BYTE_BUDGET: usize = 2 * 1024 * 1024;
 /// 单条预览预算必须小于整页预算，否则一条预览都无法落入一页。
@@ -90,6 +90,7 @@ struct HistoryStoreState {
 struct HistoryConnection {
     db: DatabaseConnection,
     database_id: String,
+    schema_version: i64,
 }
 
 /// 一条终态输入的最小身份记录，外加可重建的 host 提交摘要。
@@ -99,6 +100,7 @@ struct HistoryConnection {
 pub(crate) struct InputIdentityWrite {
     pub entry: crate::studio::storage::state::InputIdentityEntry,
     pub request_digest: Option<String>,
+    pub presentation: pl_protocol::MessagePresentation,
 }
 
 /// 持久化幂等命中：保存的最小身份加上保存的 host 提交摘要。
@@ -233,8 +235,13 @@ impl HistoryStore {
             .reader
             .get_or_try_init(|| async {
                 let db = connect_read_only(&self.state.path).await?;
-                let database_id = validate_existing(&db, &self.state.thread_id).await?;
-                Ok::<HistoryConnection, anyhow::Error>(HistoryConnection { db, database_id })
+                let (database_id, schema_version) =
+                    validate_existing(&db, &self.state.thread_id).await?;
+                Ok::<HistoryConnection, anyhow::Error>(HistoryConnection {
+                    db,
+                    database_id,
+                    schema_version,
+                })
             })
             .await?;
         Ok(Some(reader))
@@ -262,7 +269,11 @@ impl HistoryStore {
                 tokio::fs::create_dir_all(parent).await?;
                 let db = connect(crate::studio::paths::sqlite_url(&self.state.path)).await?;
                 let database_id = initialize(&db, &self.state.thread_id).await?;
-                Ok::<HistoryConnection, anyhow::Error>(HistoryConnection { db, database_id })
+                Ok::<HistoryConnection, anyhow::Error>(HistoryConnection {
+                    db,
+                    database_id,
+                    schema_version: HISTORY_SCHEMA_VERSION,
+                })
             })
             .await
     }
@@ -513,6 +524,56 @@ impl HistoryStore {
             })),
             None => Ok(None),
         }
+    }
+
+    /// Only a committed hidden disposition can discharge a pruned input without a timeline row.
+    pub(crate) async fn hidden_input_identities(
+        &self,
+        ids: impl IntoIterator<Item = String>,
+    ) -> Result<std::collections::BTreeSet<String>> {
+        let ids = ids.into_iter().collect::<std::collections::BTreeSet<_>>();
+        if ids.is_empty() {
+            return Ok(Default::default());
+        }
+        let Some(connection) = self.reader().await? else {
+            return Ok(Default::default());
+        };
+        // A cold v2 reader may page history without touching the database. An active projection
+        // needs the new proof column, so its owning writer upgrades that existing database first.
+        let connection = if connection.schema_version < HISTORY_SCHEMA_VERSION {
+            self.writer().await?
+        } else {
+            connection
+        };
+        let mut hidden = std::collections::BTreeSet::new();
+        let ids = ids.into_iter().collect::<Vec<_>>();
+        for batch in ids.chunks(400) {
+            let placeholders = vec!["?"; batch.len()].join(",");
+            let rows = connection
+                .db
+                .query_all_raw(statement(
+                    &format!(
+                        "SELECT item_id,presentation FROM history_input_identities \
+                         WHERE item_id IN ({placeholders})"
+                    ),
+                    batch.iter().cloned().map(Into::into).collect(),
+                ))
+                .await?;
+            for row in rows {
+                let id: String = row.try_get("", "item_id")?;
+                match row
+                    .try_get::<Option<String>>("", "presentation")?
+                    .as_deref()
+                {
+                    Some("hidden") => {
+                        hidden.insert(id);
+                    }
+                    Some("visible") | None => {}
+                    Some(other) => anyhow::bail!("invalid input presentation {other}"),
+                }
+            }
+        }
+        Ok(hidden)
     }
 
     /// Reads the minimal durable identity of one accepted message, if the index knows it.
@@ -1643,7 +1704,7 @@ async fn connect_read_only(path: &Path) -> Result<DatabaseConnection> {
 ///
 /// A missing identity row, an unsupported schema version, a foreign Thread or an empty database id
 /// fails closed so a cold read reports the damage instead of adopting or rebuilding the store.
-async fn validate_existing(db: &DatabaseConnection, thread_id: &str) -> Result<String> {
+async fn validate_existing(db: &DatabaseConnection, thread_id: &str) -> Result<(String, i64)> {
     let row = db
         .query_one_raw(statement(
             "SELECT schema_version,database_id,thread_id FROM history_meta WHERE id=1",
@@ -1654,7 +1715,7 @@ async fn validate_existing(db: &DatabaseConnection, thread_id: &str) -> Result<S
     let row = row.context("history database identity row is missing")?;
     let version: i64 = row.try_get("", "schema_version")?;
     ensure!(
-        version == HISTORY_SCHEMA_VERSION,
+        (2..=HISTORY_SCHEMA_VERSION).contains(&version),
         "unsupported history schema {version}; existing data preserved"
     );
     let owner: String = row.try_get("", "thread_id")?;
@@ -1667,7 +1728,7 @@ async fn validate_existing(db: &DatabaseConnection, thread_id: &str) -> Result<S
         !database_id.is_empty(),
         "history database identity is empty"
     );
-    Ok(database_id)
+    Ok((database_id, version))
 }
 
 async fn write_tool_task(
@@ -2090,6 +2151,7 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
             revision INTEGER NOT NULL,
             digest TEXT NOT NULL,
             request_digest TEXT,
+            presentation TEXT CHECK (presentation IN ('visible','hidden')),
             payload TEXT NOT NULL CHECK (json_valid(payload)),
             last_write_seq INTEGER NOT NULL
         );
@@ -2154,11 +2216,28 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
                 "history database identity is empty"
             );
             if version < HISTORY_SCHEMA_VERSION {
-                db.execute_raw(statement(
+                let tx = begin_write(db).await?;
+                if version < 3 {
+                    if let Err(error) = tx
+                        .execute_unprepared(
+                            "ALTER TABLE history_input_identities ADD COLUMN presentation TEXT \
+                         CHECK (presentation IN ('visible','hidden'))",
+                        )
+                        .await
+                    {
+                        ensure!(
+                            error.to_string().contains("duplicate column name"),
+                            "history identity index cannot add presentation: {error}"
+                        );
+                    }
+                    backfill_legacy_hidden_inputs(&tx).await?;
+                }
+                tx.execute_raw(statement(
                     "UPDATE history_meta SET schema_version=? WHERE id=1 AND schema_version=?",
                     vec![HISTORY_SCHEMA_VERSION.into(), version.into()],
                 ))
                 .await?;
+                tx.commit().await?;
             }
             Ok(database_id)
         }
@@ -2178,6 +2257,87 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
             Ok(database_id)
         }
     }
+}
+
+/// Legacy v2 rows have no presentation. Only a resolved interaction receipt that names the
+/// continuation and records a hidden product option proves why its timeline row is absent.
+async fn backfill_legacy_hidden_inputs(db: &impl ConnectionTrait) -> Result<()> {
+    use pl_core::thread::interactions::{InteractionRecord, InteractionState};
+    let mut cursor = 0_i64;
+    loop {
+        let rows = db
+            .query_all_raw(statement(
+                "SELECT rowid,payload FROM history_fact_receipts \
+             WHERE kind='interaction' AND rowid>? ORDER BY rowid LIMIT 100",
+                vec![cursor.into()],
+            ))
+            .await?;
+        if rows.is_empty() {
+            break;
+        }
+        for row in rows {
+            cursor = row.try_get("", "rowid")?;
+            let record: InteractionRecord =
+                serde_json::from_str(&row.try_get::<String>("", "payload")?)
+                    .context("legacy interaction receipt cannot be decoded")?;
+            let Some(id) = record.continuation_id.as_deref() else {
+                continue;
+            };
+            ensure!(
+                id == format!("interaction:{}:continuation", record.request.id),
+                "legacy interaction continuation identity conflicts with its receipt"
+            );
+            if !matches!(record.state, InteractionState::Resolved(_))
+                || record.request.payload.version() != 1
+            {
+                continue;
+            }
+            let hidden = match record.request.payload.format() {
+                "pl.tool.user-input" => true,
+                "pl.studio.plan-confirmation" => {
+                    let prompt: crate::plan_tool::PlanConfirmationPrompt =
+                        serde_json::from_str(record.request.payload.content())
+                            .context("legacy Plan confirmation cannot be decoded")?;
+                    prompt.presentation == pl_protocol::MessagePresentation::Hidden
+                }
+                _ => false,
+            };
+            if !hidden {
+                continue;
+            }
+            let identity = db
+                .query_one_raw(statement(
+                    "SELECT presentation FROM history_input_identities WHERE item_id=?",
+                    vec![id.to_owned().into()],
+                ))
+                .await?;
+            let Some(identity) = identity else {
+                continue;
+            };
+            let presentation: Option<String> = identity.try_get("", "presentation")?;
+            ensure!(
+                presentation
+                    .as_deref()
+                    .is_none_or(|value| value == "hidden"),
+                "legacy hidden continuation conflicts with its input identity"
+            );
+            ensure!(
+                db.query_one_raw(statement(
+                    "SELECT item_id FROM history_items WHERE item_id=?",
+                    vec![id.to_owned().into()],
+                ))
+                .await?
+                .is_none(),
+                "legacy hidden continuation has a visible timeline item"
+            );
+            db.execute_raw(statement(
+                "UPDATE history_input_identities SET presentation='hidden' WHERE item_id=?",
+                vec![id.to_owned().into()],
+            ))
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 fn statement(sql: &str, values: Vec<Value>) -> Statement {
@@ -2263,7 +2423,7 @@ async fn write_input_identity(
     let payload = serde_json::to_string(&identity.entry)?;
     let existing = db
         .query_one_raw(statement(
-            "SELECT digest FROM history_input_identities WHERE item_id=?",
+            "SELECT digest,presentation FROM history_input_identities WHERE item_id=?",
             vec![identity.entry.id.clone().into()],
         ))
         .await?;
@@ -2274,14 +2434,23 @@ async fn write_input_identity(
             "input identity {} conflicts with its durable record",
             identity.entry.id
         );
+        let presentation: Option<String> = row.try_get("", "presentation")?;
+        ensure!(
+            presentation
+                .as_deref()
+                .is_none_or(|stored| stored == presentation_label(identity.presentation)),
+            "input identity {} conflicts with its durable presentation",
+            identity.entry.id
+        );
         db.execute_raw(statement(
             "UPDATE history_input_identities
-             SET ordinal=?,revision=?,request_digest=?,payload=?,last_write_seq=?
+             SET ordinal=?,revision=?,request_digest=?,presentation=?,payload=?,last_write_seq=?
              WHERE item_id=?",
             vec![
                 integer(identity.entry.ordinal)?.into(),
                 integer(identity.entry.revision)?.into(),
                 identity.request_digest.clone().into(),
+                presentation_label(identity.presentation).into(),
                 payload.into(),
                 write_seq.into(),
                 identity.entry.id.clone().into(),
@@ -2292,21 +2461,29 @@ async fn write_input_identity(
     }
     db.execute_raw(statement(
         "INSERT INTO history_input_identities(
-            item_id,ordinal,revision,digest,request_digest,payload,last_write_seq
+            item_id,ordinal,revision,digest,request_digest,presentation,payload,last_write_seq
          )
-         VALUES(?,?,?,?,?,?,?)",
+         VALUES(?,?,?,?,?,?,?,?)",
         vec![
             identity.entry.id.clone().into(),
             integer(identity.entry.ordinal)?.into(),
             integer(identity.entry.revision)?.into(),
             identity.entry.digest.clone().into(),
             identity.request_digest.clone().into(),
+            presentation_label(identity.presentation).into(),
             payload.into(),
             write_seq.into(),
         ],
     ))
     .await?;
     Ok(())
+}
+
+fn presentation_label(presentation: pl_protocol::MessagePresentation) -> &'static str {
+    match presentation {
+        pl_protocol::MessagePresentation::Visible => "visible",
+        pl_protocol::MessagePresentation::Hidden => "hidden",
+    }
 }
 
 /// Reports whether one history database already carries the durable message identity index.
@@ -2490,6 +2667,157 @@ fn kind_label(kind: ThreadItemKind) -> &'static str {
 #[cfg(test)]
 mod storage_fault_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn legacy_plan_continuation_migrates_only_proven_hidden_identity() -> Result<()> {
+        use pl_core::{
+            context::OpaquePayload,
+            thread::{
+                input::{InputRecord, InputState, ThreadInput},
+                interactions::{
+                    InteractionRecord, InteractionRequest, InteractionResponse, InteractionState,
+                },
+            },
+        };
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("history.sqlite");
+        let store = HistoryStore::open(&path, "legacy-plan").await?;
+        let prompt = crate::plan_tool::PlanConfirmationPrompt {
+            question: pl_protocol::UserQuestion {
+                id: "plan_confirmation".into(),
+                header: "Plan".into(),
+                question: "Approved plan".into(),
+                is_other: false,
+                is_secret: false,
+                options: None,
+            },
+            expected_plan_revision: 1,
+            plan_hash: "digest".into(),
+            created_at: 1,
+            presentation: pl_protocol::MessagePresentation::Hidden,
+        };
+        let id = "interaction:plan:continuation";
+        let interaction = InteractionRecord {
+            created_at: 1,
+            updated_at: 2,
+            continuation_id: Some(id.into()),
+            request: InteractionRequest {
+                id: "plan".into(),
+                turn_id: "first-turn".into(),
+                payload: OpaquePayload::new(
+                    "pl.studio.plan-confirmation",
+                    1,
+                    serde_json::to_string(&prompt)?,
+                )?,
+            },
+            revision: 2,
+            state: InteractionState::Resolved(InteractionResponse {
+                payload: OpaquePayload::text("approved"),
+                context: vec![],
+            }),
+            extension_mutations: vec![],
+        };
+        let input = InputRecord {
+            accepted_sequence: 1,
+            delivery: Default::default(),
+            input: ThreadInput {
+                id: id.into(),
+                payload: OpaquePayload::new(
+                    "pl.studio.interaction-continuation",
+                    1,
+                    serde_json::json!({"interactionId":"plan","presentation":"hidden"}).to_string(),
+                )?,
+                context: vec![],
+            },
+            ordinal: 1,
+            revision: 2,
+            state: InputState::Consumed {
+                turn_id: "next-turn".into(),
+                attempt_id: "attempt".into(),
+            },
+        };
+        let mut unproven = input.clone();
+        unproven.input.id = "unproven-input".into();
+        unproven.ordinal = 2;
+        let identities = [
+            InputIdentityWrite {
+                entry: crate::studio::storage::state::InputIdentityEntry::new(
+                    pl_core::thread::input::input_identity(&input),
+                    1,
+                ),
+                request_digest: None,
+                presentation: pl_protocol::MessagePresentation::Hidden,
+            },
+            InputIdentityWrite {
+                entry: crate::studio::storage::state::InputIdentityEntry::new(
+                    pl_core::thread::input::input_identity(&unproven),
+                    1,
+                ),
+                request_digest: None,
+                presentation: pl_protocol::MessagePresentation::Visible,
+            },
+        ];
+        let receipts = [FactReceiptWrite {
+            item_id: "interaction:4:plan".into(),
+            revision: 2,
+            kind: "interaction",
+            payload: serde_json::to_string(&interaction)?,
+        }];
+        store
+            .commit_effect(
+                1,
+                EffectCommit {
+                    items: &[],
+                    rolled_back_turns: &Default::default(),
+                    identities: &identities,
+                    messages: &[],
+                    receipts: &receipts,
+                    tasks: &[],
+                    deliveries: &[],
+                    attempt: None,
+                },
+            )
+            .await?;
+        let db = Database::connect(crate::studio::paths::sqlite_url(&path)).await?;
+        db.execute_unprepared(
+            "ALTER TABLE history_input_identities DROP COLUMN presentation; \
+             UPDATE history_meta SET schema_version=2",
+        )
+        .await?;
+        drop(db);
+        drop(store);
+
+        let migrated = HistoryStore::open(&path, "legacy-plan").await?;
+        assert_eq!(migrated.watermark().await?, 1);
+        let old = Database::connect(crate::studio::paths::sqlite_url(&path)).await?;
+        let version = old
+            .query_one_raw(statement(
+                "SELECT schema_version FROM history_meta WHERE id=1",
+                vec![],
+            ))
+            .await?
+            .context("missing legacy metadata")?
+            .try_get::<i64>("", "schema_version")?;
+        assert_eq!(version, 2);
+        drop(old);
+        assert_eq!(
+            migrated
+                .hidden_input_identities([id.into(), "unproven-input".into()])
+                .await?,
+            [id.into()].into()
+        );
+        assert_eq!(
+            migrated
+                .reader()
+                .await?
+                .context("missing migrated history")?
+                .schema_version,
+            3
+        );
+        assert!(migrated.existing_items([id.into()]).await?.is_empty());
+        assert_eq!(migrated.watermark().await?, 1);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn session_orders_do_not_write_sqlite_reservations() -> Result<()> {
