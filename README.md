@@ -89,8 +89,9 @@ cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
 ```
 
 远程助手推荐使用 [Zig](https://ziglang.org/) 与
-[`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild) 交叉编译。Zig 同时提供目标架构的编译器、链接器和 `musl` 系统库，
-不需要分别寻找 `aarch64-linux-musl-gcc` 与 `x86_64-linux-musl-gcc`：
+[`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild) 交叉编译。Zig 提供目标架构的 C 编译器和 `musl` 系统库，
+Rust 最终链接默认使用当前工具链随附的 `rust-lld`，无需分别安装两种 musl GCC，
+也不改写 Rust 的优化参数；显式指定目标链接器时仍以指定值为准：
 
 ```powershell
 # Windows：安装 Zig 后重新打开终端，使 PATH 生效

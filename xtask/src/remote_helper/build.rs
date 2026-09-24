@@ -120,6 +120,10 @@ fn build_target(workspace_root: &Path, target: &str, builder: CargoBuilder) -> R
     let mut command = Command::new("cargo");
     if matches!(builder, CargoBuilder::Zigbuild) {
         command.arg("zigbuild");
+        let linker_env = linker_env_name(target);
+        if std::env::var_os(&linker_env).is_none_or(|value| value.is_empty()) {
+            command.env(linker_env, rust_lld_path()?);
+        }
     } else {
         command.arg("build");
         let linker = discover_linker(target)?;
@@ -200,6 +204,31 @@ fn linker_env_name(target: &str) -> String {
         "CARGO_TARGET_{}_LINKER",
         target.replace('-', "_").to_ascii_uppercase()
     )
+}
+
+fn rust_lld_path() -> Result<PathBuf> {
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let output = Command::new(&rustc)
+        .args(["--print", "target-libdir"])
+        .output()
+        .with_context(|| format!("failed to query target-libdir from {:?}", rustc))?;
+    if !output.status.success() {
+        bail!(
+            "rustc --print target-libdir failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let lib_dir = String::from_utf8(output.stdout).context("rustc target-libdir is not UTF-8")?;
+    let host_dir = Path::new(lib_dir.trim())
+        .parent()
+        .context("rustc target-libdir has no parent directory")?;
+    let linker = host_dir
+        .join("bin")
+        .join(format!("rust-lld{}", std::env::consts::EXE_SUFFIX));
+    if !linker.is_file() {
+        bail!("Rust toolchain linker is missing: {}", linker.display());
+    }
+    Ok(linker)
 }
 
 fn discover_linker(target: &str) -> Result<PathBuf> {
