@@ -469,6 +469,34 @@ impl HistoryStore {
         }))
     }
 
+    /// Finds committed deliveries that may reference one archived tool attachment.
+    ///
+    /// The delivery is the durable authority for the full resource reference. The SQL substring
+    /// only narrows candidates; the caller decodes each delivery and verifies its typed media
+    /// projection before granting access to any bytes.
+    pub(crate) async fn tool_media_deliveries(
+        &self,
+        attachment_id: &str,
+    ) -> Result<Vec<pl_core::thread::ToolDelivery>> {
+        let Some(connection) = self.reader().await? else {
+            return Ok(Vec::new());
+        };
+        let rows = connection
+            .db
+            .query_all_raw(statement(
+                "SELECT delivery_payload FROM history_tool_tasks
+                 WHERE delivery_payload IS NOT NULL AND instr(delivery_payload, ?) > 0",
+                vec![attachment_id.to_owned().into()],
+            ))
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                let payload: String = row.try_get("", "delivery_payload")?;
+                Ok(serde_json::from_str(&payload)?)
+            })
+            .collect()
+    }
+
     /// Reads the minimal identity of a previously admitted input, if the durable index knows it.
     ///
     /// This is the cross-restart idempotency lookup for `submitPrompt`: the returned record lets

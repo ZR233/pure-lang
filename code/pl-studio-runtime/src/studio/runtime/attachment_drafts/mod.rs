@@ -84,10 +84,31 @@ impl StudioRuntime {
         self.read_owned_thread(&thread_id).await?;
         if attachment_id.starts_with(RESOURCE_ID_PREFIX) {
             let facts = self.read_thread_state(&thread_id).await?;
+            let mut deliveries = facts.deliveries.to_vec();
+            // A completed delivery leaves the resident snapshot. Read pending effects first:
+            // once the writer releases an effect from this window, its full delivery is already
+            // committed in history. The following history read therefore closes that race.
+            if let Some((_, handle)) = self
+                .threads
+                .observed_threads()
+                .into_iter()
+                .find(|(id, _)| id == &thread_id)
+            {
+                for effect in handle.effects().await? {
+                    deliveries.extend(effect.deliveries.iter().cloned());
+                }
+            }
+            deliveries.extend(
+                self.store
+                    .history(&thread_id)
+                    .await?
+                    .tool_media_deliveries(&attachment_id)
+                    .await?,
+            );
             let store = FileResourceStore::new(self.store.session_resources_dir(&thread_id));
             return crate::studio::thread_projection::read_persisted_media(
                 &store,
-                &facts.deliveries,
+                &deliveries,
                 &attachment_id,
             )
             .await;

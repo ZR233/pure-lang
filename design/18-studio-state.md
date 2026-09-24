@@ -185,7 +185,8 @@ Thread runtime 的缓存统计是独立的 typed 投影 `cache_usage`，包含�
 读取入口同时支持用户附件与工具图片，但读取工具资源前必须验证 Thread 访问权以及该
 资源属于该 Thread 的持久化工具媒体引用——仅有资源 ID 前缀、摘要或一个可访问 Thread
 都不足以授权，客户端路径不能成为文件读取入口；未引用、损坏或丢失资源显式失败，不得
-用原始 workspace 文件补回。
+用原始 workspace 文件补回。已完成的工具交付从 Thread history 中的完整 delivery 读取；
+尚未落库的交付从当前未持久化 effect 读取，不能依赖已被回收的 resident snapshot。
 
 ## 18.9 顶栏操作与 VS Code 打开
 

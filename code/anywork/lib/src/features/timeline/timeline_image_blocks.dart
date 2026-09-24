@@ -272,6 +272,11 @@ class _ThreadToolImageEntryState extends ConsumerState<_ThreadToolImageEntry> {
 
   void _toggle() {
     setState(() => _expanded = !_expanded);
+    if (_expanded) {
+      context
+          .findAncestorStateOfType<_TimelineViewState>()
+          ?._revealExpandedToolImage(context);
+    }
   }
 
   @override

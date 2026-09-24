@@ -592,6 +592,21 @@ class _TimelineViewState extends State<TimelineView> {
     }
   }
 
+  /// Keep a tool image visible when its inline preview changes the timeline height.
+  void _revealExpandedToolImage(BuildContext entryContext) {
+    if (_followingBottom || !_detachedByUser) {
+      setState(() {
+        _followingBottom = false;
+        _detachedByUser = true;
+      });
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !entryContext.mounted) return;
+      Scrollable.ensureVisible(entryContext, alignment: 0.12);
+      _saveThreadState(widget.threadId);
+    });
+  }
+
   void _jumpToLatest() {
     _followingBottom = true;
     _detachedByUser = false;
