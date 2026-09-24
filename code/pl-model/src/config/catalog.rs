@@ -71,7 +71,7 @@ impl ProviderCatalogRegistry {
             preset(
                 "openai",
                 ProviderEndpoint::openai(None),
-                "gpt-5.6-sol",
+                "gpt-6-sol",
                 "openai",
                 "OPENAI_API_KEY",
                 "OpenAI models served through the Responses API.",

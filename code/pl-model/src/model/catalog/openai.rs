@@ -11,6 +11,8 @@ use crate::model::pricing::{ModelPricing, TokenPriceTier};
 
 const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &[
     "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.5",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
@@ -24,6 +26,7 @@ pub fn openai_default_model_slugs() -> &'static [&'static str] {
 pub(super) fn models() -> Vec<ModelInfo> {
     let openai = openai_family();
     let openai_gpt56 = openai_gpt56_family();
+    let openai_gpt6_sol_luna = openai_gpt6_sol_luna_family();
     vec![
         openai_gpt56.instantiate(ModelInstanceSpec {
             slug: "gpt-6-astra",
@@ -33,6 +36,24 @@ pub(super) fn models() -> Vec<ModelInfo> {
             max_context_window: 1_050_000,
             max_output_tokens: Some(128_000),
             pricing: openai_pricing(10.0, 50.0, Some(12.5)),
+        }),
+        openai_gpt6_sol_luna.instantiate(ModelInstanceSpec {
+            slug: "gpt-6-sol",
+            display_name: "GPT-6 Sol",
+            description: "Built to power complex coding and agentic workflows.",
+            context_window: 1_050_000,
+            max_context_window: 1_050_000,
+            max_output_tokens: Some(128_000),
+            pricing: openai_pricing(2.0, 10.0, Some(2.5)),
+        }),
+        openai_gpt6_sol_luna.instantiate(ModelInstanceSpec {
+            slug: "gpt-6-luna",
+            display_name: "GPT-6 Luna",
+            description: "Efficient model for focused, high-volume tasks.",
+            context_window: 1_050_000,
+            max_context_window: 1_050_000,
+            max_output_tokens: Some(128_000),
+            pricing: openai_pricing(0.1, 0.5, Some(0.125)),
         }),
         openai.instantiate(ModelInstanceSpec {
             slug: "gpt-5.5",
@@ -120,6 +141,15 @@ fn openai_gpt56_family() -> ModelFamily {
         request_profile: openai_responses_request_profile(),
         base_instructions: String::new(),
     }
+}
+
+fn openai_gpt6_sol_luna_family() -> ModelFamily {
+    let mut family = openai_gpt56_family();
+    family.id = "openai-gpt6-sol-luna-reasoning";
+    family.parameters = vec![openai_effort_parameter(&[
+        "none", "low", "medium", "high", "xhigh", "max",
+    ])];
+    family
 }
 
 fn openai_responses_request_profile() -> ModelRequestProfile {

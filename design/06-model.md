@@ -313,6 +313,7 @@ set 列表（嵌套 dot 路径 + 透传字符串值，如 `reasoning.effort`、`
 | --- | --- | --- | --- |
 | OpenAI（GPT-5.5） | `low` / `medium` / `high` / `xhigh` | `reasoning.effort` = 值 | — |
 | OpenAI（GPT-6 Astra / GPT-5.6 Sol / Terra / Luna） | `low` / `medium` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
+| OpenAI（GPT-6 Sol / Luna） | `none` / `low` / `medium` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
 | DeepSeek | `low` / `high` / `max` | `reasoning_effort` = 值（`thinking.type = enabled` 作为 base body） | — |
 | 智谱普通 | `none` / `enabled` | `thinking.type` = 值 | — |
 | GLM-5.2 | `none` / `high` / `max` | `high`/`max`：`reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false`；`none`：`thinking.type = disabled` | `none` 移除 `reasoning_effort` |
@@ -339,9 +340,12 @@ effort 选择只改变 `reasoning_effort` 值，Coding Plan 的 OpenAI Response 
 内建家族预设按供应商与模型线划分（OpenAI 各线、DeepSeek 主线与 Flash 线、MiMo、智谱文本与
 各 GLM 线、智谱 vision，以及 Coding Plan 的 GLM Responses 线），共享能力矩阵由各供应商能力
 构造复用；家族之间的差异集中在 effort 候选值域、request profile 与 typed input
-capabilities。DeepSeek V4.1 Flash 使用经过官方文档确认的 Responses image profile，V4 Pro 只
-声明 text；两者共享 effort、thinking、上下文和 Responses HTTP 规则，但计费独立保存在各自
-模型实例。通用 Chat API 的 GLM-5.3 与 GLM-5.2 复用同一条"启用思考" wire 组合，差异只在
+capabilities。GPT-6 Astra 与 GPT-6 Sol/Luna 共享 Responses transport、文本与图片输入及
+计费规则，Sol/Luna 可额外选择 `none` effort；OpenAI preset 新建 provider 时推荐 GPT-6 Sol，
+已有角色路由不因目录更新而自动改写。DeepSeek V4.1 Flash 使用经过官方文档确认的 Responses
+image profile，V4 Pro 只声明 text；两者共享 effort、thinking、上下文和 Responses HTTP 规则，
+但计费独立保存在各自模型实例。通用 Chat API 的 GLM-5.3 与 GLM-5.2 复用同一条"启用思考"
+wire 组合，差异只在
 候选值域：GLM-5.3 为 `high` / `low` / `max`，且不提供禁用思考候选；GLM-5.3-Flash 复用
 GLM-5.3 的始终思考 wire 与候选值域，并声明 image 的 local/data-url 与 remote-url/snapshot
 路线，不得从相邻视觉模型推断 video/file 能力。Coding Plan 的 GLM Responses 家族与通用家族

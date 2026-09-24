@@ -1155,6 +1155,53 @@ async fn coding_plan_uses_responses_http_and_model_effort_not_chat_thinking() {
 }
 
 #[tokio::test]
+async fn new_openai_provider_routes_gpt6_sol_none_effort_through_responses() {
+    let preset = builtin_provider_catalog()
+        .presets
+        .into_iter()
+        .find(|item| item.id.as_str() == "openai")
+        .unwrap();
+    let mut model = preset
+        .provider
+        .effective_models()
+        .unwrap()
+        .into_iter()
+        .find(|model| model.slug == preset.suggested_model)
+        .unwrap();
+    let fixture = FixtureServer::start(vec![Step::prompt(
+        Protocol::ResponsesHttp,
+        "new provider prompt",
+        0,
+        Reply::Sse(responses_text("sol result", "sol-1", "gpt-6-sol")),
+    )])
+    .await
+    .unwrap();
+    model
+        .binding
+        .set_transport(ModelTransportProfile::responses_http());
+    let runtime =
+        ModelRuntime::new(ProviderEndpoint::openai(Some(fixture.base_url())), model).unwrap();
+    let reply = runtime
+        .complete(
+            CompletionRequest::builder()
+                .messages(vec![user("new provider prompt")])
+                .reasoning(Some(ReasoningConfig {
+                    effort: Some("none".into()),
+                    summary: None,
+                }))
+                .build(),
+            ModelInvocationContext::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.content.as_deref(), Some("sol result"));
+    let records = fixture.finish().await.unwrap();
+    assert_eq!(records[0].path, "/v1/responses");
+    assert_eq!(records[0].body["model"], "gpt-6-sol");
+    assert_eq!(records[0].body["reasoning"]["effort"], "none");
+}
+
+#[tokio::test]
 async fn openai_image_is_sent_as_replayable_input_image_and_cache_usage_is_billed() {
     let bytes = tiny_png();
     let fixture = FixtureServer::start(vec![Step::prompt(
