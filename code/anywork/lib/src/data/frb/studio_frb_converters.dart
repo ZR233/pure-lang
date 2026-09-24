@@ -637,6 +637,9 @@ ModelPerformanceSnapshotView _modelPerformanceFromFrb(
   return ModelPerformanceSnapshotView(
     revision: value.revision.toInt(),
     updatedAt: updatedAt == 0 ? null : _dateFromUnix(value.updatedAt),
+    statisticsPending: value.statisticsPending,
+    statisticsGap: value.statisticsGap,
+    readFailed: value.readFailed,
     sessionCosts: [
       for (final session in value.sessionCosts)
         SessionCostView(
@@ -698,9 +701,9 @@ ModelPerformanceSnapshotView _modelPerformanceFromFrb(
           },
           reasoningEffort: sample.reasoningEffort,
           completionTokens: sample.completionTokens.toInt(),
-          ttftMillis: sample.ttftMillis.toInt(),
-          decodeMillis: sample.decodeMillis.toInt(),
-          totalResponseMillis: sample.totalResponseMillis.toInt(),
+          ttftMillis: sample.ttftMillis?.toInt(),
+          decodeMillis: sample.decodeMillis?.toInt(),
+          totalResponseMillis: sample.totalResponseMillis?.toInt(),
           tokensPerSecond: sample.tokensPerSecond,
         ),
     ],

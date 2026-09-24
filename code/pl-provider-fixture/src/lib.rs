@@ -32,6 +32,9 @@ pub const STRESS_EVENT_COUNT: usize = 20_000;
 pub const STRESS_TOKENS_PER_SECOND: u64 = 5_000;
 pub const GUI_STRESS_SESSION_COUNT: usize = 16;
 pub const GUI_STRESS_FOLLOWUP_PROMPT_PREFIX: &str = "Local GUI stress session";
+pub const GUI_STATISTICS_FAST_PROMPT: &str = "Local statistics fast response";
+pub const GUI_STATISTICS_PACED_PROMPT: &str = "Local statistics paced response";
+pub const GUI_STATISTICS_PACED_EVENTS: usize = 25;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
@@ -412,6 +415,63 @@ pub fn gui_stress_script() -> Vec<Step> {
                 Reply::Sse(responses_text(
                     &format!("Fixture Session {ordinal}"),
                     &format!("title-{ordinal}"),
+                    "fixture-model",
+                )),
+            )
+            .optional(),
+        );
+    }
+    steps
+}
+
+pub fn gui_statistics_script() -> Vec<Step> {
+    let mut steps = Vec::new();
+    for (prompt, reply) in [
+        (
+            GUI_STATISTICS_FAST_PROMPT,
+            Reply::Sse(responses_text(
+                "fixture fast ready",
+                "stats-fast",
+                "fixture-model",
+            )),
+        ),
+        (
+            GUI_STATISTICS_PACED_PROMPT,
+            Reply::PacedSse {
+                events: GUI_STATISTICS_PACED_EVENTS,
+                tokens_per_second: 25,
+            },
+        ),
+    ] {
+        let title = session_title_prompt(prompt);
+        let index = steps.len();
+        steps.push(
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                title.clone(),
+                index,
+                Reply::Sse(responses_text(
+                    "Fixture Session",
+                    "stats-title",
+                    "fixture-model",
+                )),
+            )
+            .optional(),
+        );
+        steps.push(Step::prompt(
+            Protocol::ResponsesHttp,
+            prompt,
+            index + 1,
+            reply,
+        ));
+        steps.push(
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                title,
+                index + 2,
+                Reply::Sse(responses_text(
+                    "Fixture Session",
+                    "stats-title",
                     "fixture-model",
                 )),
             )

@@ -1,7 +1,7 @@
 //! Billing uses producer receipts and committed timestamps, never current pricing.
 use super::super::ModelPerformanceOwner;
 use anyhow::Result;
-use pl_core::thread::{AttemptOutcome, ThreadEffectBatch};
+use pl_core::thread::{AttemptOutcome, ThreadEffectBatch, journal::AttemptUpdate};
 use pl_protocol::{InferenceAccounting, InferenceBillingRecord};
 
 pub(super) fn record(
@@ -44,6 +44,24 @@ pub(super) fn record(
     let Some(attempt) = &commit.attempt else {
         return Ok(());
     };
+    record_attempt(
+        owner,
+        root,
+        &commit.thread_id,
+        attempt,
+        commit.committed_at,
+        false,
+    )
+}
+
+pub(super) fn record_attempt(
+    owner: &ModelPerformanceOwner,
+    root: &str,
+    thread_id: &str,
+    attempt: &AttemptUpdate,
+    recorded_at: i64,
+    internal: bool,
+) -> Result<()> {
     let output = match &attempt.outcome {
         AttemptOutcome::Running | AttemptOutcome::Interrupted => return Ok(()),
         AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => Ok(output),
@@ -122,9 +140,13 @@ pub(super) fn record(
         prefix_changed_reason: None,
         orchestration,
         timing,
-        recorded_at: commit.committed_at,
+        recorded_at,
     };
-    owner.record_inference(root, &commit.thread_id, &billing)?;
+    if internal {
+        owner.record_auxiliary_inference(root, thread_id, &billing)?;
+    } else {
+        owner.record_inference(root, thread_id, &billing)?;
+    }
     Ok(())
 }
 fn unknown(usage: &pl_core::model::ModelUsage) -> InferenceAccounting {

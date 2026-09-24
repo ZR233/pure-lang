@@ -115,6 +115,12 @@ pub struct StudioSettingsStateSnapshot {
 pub struct StudioModelPerformanceSnapshot {
     pub revision: u64,
     pub updated_at: i64,
+    #[serde(default)]
+    pub statistics_pending: bool,
+    #[serde(default)]
+    pub statistics_gap: bool,
+    #[serde(default)]
+    pub read_failed: bool,
     pub session_costs: Vec<StudioSessionCostSnapshot>,
     pub summaries: Vec<StudioModelPerformanceSummary>,
     pub history: Vec<StudioModelPerformanceSample>,
@@ -173,10 +179,10 @@ pub struct StudioModelPerformanceSample {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
     pub completion_tokens: u64,
-    pub ttft_millis: u64,
-    pub decode_millis: u64,
-    pub total_response_millis: u64,
-    pub tokens_per_second: f64,
+    pub ttft_millis: Option<u64>,
+    pub decode_millis: Option<u64>,
+    pub total_response_millis: Option<u64>,
+    pub tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

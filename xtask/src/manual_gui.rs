@@ -6,6 +6,10 @@ use pl_model::config::{ProviderConfig, ProviderId};
 use pl_model::model::{ModelInfo, ModelTransportProfile};
 use pl_model::provider::ProviderEndpoint;
 use pl_studio_runtime::config::StudioConfig;
+use sea_orm::sqlx::{
+    Connection as _,
+    sqlite::{SqliteConnectOptions, SqliteConnection},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::{self, File};
@@ -43,6 +47,14 @@ struct StressSessionReport {
     previewed_bodies: usize,
 }
 
+#[derive(Deserialize, Serialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "camelCase")]
+struct StatisticsDbCounts {
+    model_calls: usize,
+    committed_calls: usize,
+    performance_samples: usize,
+}
+
 #[derive(Serialize)]
 struct ManualOperation {
     at_unix_ms: u128,
@@ -58,6 +70,79 @@ enum InputEvent {
 struct OwnedProcess {
     child: Child,
     stopped: bool,
+}
+
+struct StatisticsLock {
+    release: mpsc::Sender<()>,
+    worker: Option<thread::JoinHandle<Result<()>>>,
+}
+
+struct StatisticsScenario<'a> {
+    workspace: &'a Path,
+    app_dir: &'a Path,
+    home: &'a Path,
+    working: &'a Path,
+    output: &'a Path,
+    fixture_log: &'a Path,
+    requests_file: &'a Path,
+    report_file: &'a Path,
+    interrupt: &'a mpsc::Receiver<()>,
+}
+
+impl StatisticsLock {
+    fn acquire(database: &Path) -> Result<Self> {
+        let (acquired_tx, acquired_rx) = mpsc::sync_channel(1);
+        let (release, release_rx) = mpsc::channel();
+        let path = database.to_owned();
+        let worker = thread::spawn(move || -> Result<()> {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(async move {
+                let options = SqliteConnectOptions::new()
+                    .filename(path)
+                    .create_if_missing(false);
+                let mut connection = SqliteConnection::connect_with(&options).await?;
+                sea_orm::sqlx::query("BEGIN IMMEDIATE")
+                    .execute(&mut connection)
+                    .await?;
+                acquired_tx.send(()).ok();
+                release_rx
+                    .recv_timeout(Duration::from_secs(90))
+                    .context("statistics SQLite lock release timed out")?;
+                sea_orm::sqlx::query("COMMIT")
+                    .execute(&mut connection)
+                    .await?;
+                Ok(())
+            })
+        });
+        let mut lock = Self {
+            release,
+            worker: Some(worker),
+        };
+        if acquired_rx.recv_timeout(Duration::from_secs(8)).is_err() {
+            let result = lock.finish();
+            result?;
+            bail!("calls.sqlite BEGIN IMMEDIATE was not acquired");
+        }
+        Ok(lock)
+    }
+
+    fn finish(&mut self) -> Result<()> {
+        self.release.send(()).ok();
+        if let Some(worker) = self.worker.take() {
+            worker
+                .join()
+                .map_err(|_| anyhow::anyhow!("statistics SQLite holder panicked"))??;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for StatisticsLock {
+    fn drop(&mut self) {
+        let _ = self.finish();
+    }
 }
 
 impl OwnedProcess {
@@ -162,10 +247,12 @@ impl Drop for OwnedProcess {
 }
 
 pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
-    ensure!(
-        io::stdin().is_terminal(),
-        "manual-gui requires an interactive terminal"
-    );
+    if options.scenario != "statistics" {
+        ensure!(
+            io::stdin().is_terminal(),
+            "manual-gui requires an interactive terminal"
+        );
+    }
     let (interrupt_tx, interrupt_rx) = mpsc::channel();
     thread::spawn(move || {
         if let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
@@ -267,6 +354,23 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         drop(fixture);
         write_fixture_log(&fixture_log_path, &output.join("fixture.log"))?;
         return Err(error);
+    }
+
+    if options.scenario == "statistics" {
+        return run_statistics_scenario(
+            &StatisticsScenario {
+                workspace: &workspace,
+                app_dir: &app_dir,
+                home: &home,
+                working: working.path(),
+                output: &output,
+                fixture_log: &fixture_log_path,
+                requests_file: &requests_file,
+                report_file: &stress_report_file,
+                interrupt: &interrupt_rx,
+            },
+            fixture,
+        );
     }
 
     let gui_log_path = working.path().join("gui.log");
@@ -777,7 +881,7 @@ fn validate_ready(ready: &FixtureReady) -> Result<()> {
         "fixture base_url must be http://127.0.0.1:<port>/v1"
     );
     ensure!(
-        matches!(ready.scenario.as_str(), "gui" | "stress"),
+        matches!(ready.scenario.as_str(), "gui" | "stress" | "statistics"),
         "unsupported fixture scenario"
     );
     ensure!(
@@ -979,6 +1083,374 @@ fn run_stress_sessions(
         );
         thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn run_statistics_scenario(
+    context: &StatisticsScenario<'_>,
+    mut fixture: OwnedProcess,
+) -> Result<()> {
+    let StatisticsScenario {
+        workspace,
+        home,
+        working,
+        output,
+        fixture_log,
+        requests_file,
+        report_file,
+        interrupt,
+        ..
+    } = context;
+    let first_log = working.join("statistics-first-gui.log");
+    let restart_log = working.join("statistics-restart-gui.log");
+    let stage = working.join("statistics-stage");
+    let project = working.join("statistics-project");
+    let journey = (|| -> Result<()> {
+        fs::create_dir(&project)?;
+        ensure!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .arg(&project)
+                .status()?
+                .success(),
+            "failed to initialize isolated statistics project"
+        );
+        {
+            let mut gui = start_statistics_gui(workspace, home, &first_log)?;
+            let vm_url = wait_for_vm(&first_log, &mut gui, &mut fixture, interrupt)?;
+            let mut driver = start_statistics_driver(context, &vm_url, "first", &project, &stage)?;
+            wait_for_statistics_stage(
+                "ready_lock",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+                Duration::from_secs(120),
+            )?;
+            let calls_db = home.join("v2/calls/calls.sqlite");
+            ensure!(
+                calls_db.is_file(),
+                "GUI did not initialize isolated calls.sqlite"
+            );
+            let mut lock = StatisticsLock::acquire(&calls_db)?;
+            fs::write(working.join("lock-acquired"), "acquired")?;
+            wait_for_statistics_stage(
+                "lock_observed",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+                Duration::from_secs(60),
+            )?;
+            ensure!(
+                working.join("fast-submitted").is_file(),
+                "fast prompt was not submitted under SQLite lock"
+            );
+            lock.finish()?;
+            fs::write(working.join("lock-released"), "released")?;
+            wait_for_statistics_driver(
+                "first",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+            )?;
+            // The Driver's native shutdown has completed; terminate and reap the
+            // resident process group before reopening this exact isolated home.
+        }
+        let before = statistics_db_counts(home)?;
+        ensure!(
+            before.committed_calls >= 2 && before.performance_samples >= 1,
+            "statistics calls.sqlite did not record both calls: {before:?}"
+        );
+        fs::write(
+            output.join("statistics-db-before-restart.json"),
+            serde_json::to_vec_pretty(&before)?,
+        )?;
+        {
+            let mut gui = start_statistics_gui(workspace, home, &restart_log)?;
+            let vm_url = wait_for_vm(&restart_log, &mut gui, &mut fixture, interrupt)?;
+            let mut driver =
+                start_statistics_driver(context, &vm_url, "restart", &project, &stage)?;
+            wait_for_statistics_driver(
+                "restart",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+            )?;
+        }
+        let after = statistics_db_counts(home)?;
+        fs::write(
+            output.join("statistics-db-after-restart.json"),
+            serde_json::to_vec_pretty(&after)?,
+        )?;
+        ensure!(
+            before == after,
+            "calls.sqlite changed across restart: {before:?} -> {after:?}"
+        );
+        let final_state: serde_json::Value =
+            serde_json::from_slice(&fs::read(output.join("statistics-final.json"))?)?;
+        let restarted: serde_json::Value =
+            serde_json::from_slice(&fs::read(output.join("statistics-restarted.json"))?)?;
+        ensure!(
+            final_state["history"] == restarted["history"]
+                && final_state["samples"] == restarted["samples"]
+                && restarted["statisticsPending"] == false
+                && restarted["statisticsGap"] == false
+                && restarted["readFailed"] == false,
+            "statistics projection changed or remained unhealthy after restart"
+        );
+        Ok(())
+    })();
+
+    for (source, name) in [
+        (&first_log, "statistics-first-gui.log"),
+        (&restart_log, "statistics-restart-gui.log"),
+    ] {
+        if source.exists() {
+            write_sanitized_log(source, &output.join(name))?;
+        }
+    }
+    let driver_log = stage.with_extension("driver.log");
+    if driver_log.is_file() {
+        let diagnostics = fs::read_to_string(driver_log)?
+            .lines()
+            .filter(|line| {
+                [
+                    "Unhandled exception:",
+                    "Bad state:",
+                    "StateError:",
+                    "TimeoutException",
+                    "DriverError",
+                    "FormatException",
+                ]
+                .iter()
+                .any(|prefix| line.starts_with(prefix))
+                    && !line.contains("http://")
+                    && !line.contains("https://")
+            })
+            .map(|line| line.chars().take(240).collect::<String>())
+            .collect::<Vec<_>>();
+        fs::write(
+            output.join("statistics-driver-errors.txt"),
+            diagnostics.join("\n"),
+        )?;
+    }
+    if stage.is_file() {
+        let value = fs::read_to_string(&stage)?;
+        if value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            fs::write(output.join("statistics-stage.txt"), value)?;
+        }
+    }
+    let fixture_result = fixture.stop(requests_file);
+    drop(fixture);
+    write_fixture_log(fixture_log, &output.join("fixture.log"))?;
+    let requests = if requests_file.is_file() {
+        sanitize_requests(requests_file, &output.join("requests.json"))?;
+        serde_json::from_slice::<Vec<serde_json::Value>>(&fs::read(requests_file)?)?
+    } else {
+        Vec::new()
+    };
+    let accepted = requests
+        .iter()
+        .filter(|row| row["accepted"] == true)
+        .count();
+    let rejected = requests
+        .iter()
+        .filter(|row| row["accepted"] == false)
+        .count();
+    let stream: Option<pl_provider_fixture::StressReport> = if report_file.is_file() {
+        serde_json::from_slice(&fs::read(report_file)?)?
+    } else {
+        None
+    };
+    fs::write(
+        output.join("fixture-status.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "scenario": "statistics", "acceptedRequests": accepted, "rejectedRequests": rejected,
+            "emittedEvents": stream.as_ref().map(|row| row.emitted_events),
+            "elapsedMillis": stream.as_ref().map(|row| row.elapsed_millis),
+            "completed": fixture_result.as_ref().is_ok_and(|status| status.success()),
+        }))?,
+    )?;
+    let errors = [first_log, restart_log]
+        .iter()
+        .filter(|path| path.is_file())
+        .map(|path| count_gui_errors(path))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .sum::<usize>();
+    fs::write(
+        output.join("gui-health.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "unhandledErrors": errors, "humanVerdict": "pending"
+        }))?,
+    )?;
+    println!("Evidence: {} (human verdict pending)", output.display());
+    journey?;
+    ensure!(
+        fixture_result.is_ok_and(|status| status.success())
+            && accepted >= 2
+            && rejected == 0
+            && stream.as_ref().is_some_and(|row| {
+                row.emitted_events == pl_provider_fixture::GUI_STATISTICS_PACED_EVENTS
+                    && row.elapsed_millis >= 800
+            })
+            && errors == 0,
+        "statistics fixture or GUI health incomplete; human verdict pending"
+    );
+    Ok(())
+}
+
+fn start_statistics_gui(workspace: &Path, home: &Path, log_path: &Path) -> Result<OwnedProcess> {
+    let log = File::create(log_path)?;
+    let mut command = Command::new("cargo");
+    command
+        .current_dir(workspace)
+        .args(["xtask", "run-gui", "--driver"])
+        .env("ANYWORK_HOME", home)
+        .stdout(Stdio::from(log.try_clone()?))
+        .stderr(Stdio::from(log));
+    OwnedProcess::start(&mut command, false)
+}
+
+fn start_statistics_driver(
+    context: &StatisticsScenario<'_>,
+    vm_url: &str,
+    phase: &str,
+    project: &Path,
+    stage: &Path,
+) -> Result<OwnedProcess> {
+    let StatisticsScenario {
+        app_dir,
+        home,
+        output,
+        working,
+        ..
+    } = context;
+    let log = File::create(stage.with_extension("driver.log"))?;
+    let expected = if phase == "restart" {
+        let final_state: serde_json::Value =
+            serde_json::from_slice(&fs::read(output.join("statistics-final.json"))?)?;
+        final_state["history"]
+            .as_u64()
+            .context("final history count unavailable")?
+            .to_string()
+    } else {
+        "0".to_owned()
+    };
+    let mut command = Command::new("dart");
+    command
+        .current_dir(app_dir)
+        .args(["run", "test_driver/statistics_journey.dart", phase, vm_url])
+        .arg(project)
+        .arg(output)
+        .arg(working)
+        .arg(expected)
+        .env("ANYWORK_HOME", home)
+        .stdout(Stdio::from(log.try_clone()?))
+        .stderr(Stdio::from(log));
+    OwnedProcess::start(&mut command, false)
+}
+
+fn wait_for_statistics_stage(
+    expected: &str,
+    stage: &Path,
+    driver: &mut OwnedProcess,
+    gui: &mut OwnedProcess,
+    fixture: &mut OwnedProcess,
+    interrupt: &mpsc::Receiver<()>,
+    timeout: Duration,
+) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if stage.is_file() && fs::read_to_string(stage)? == expected {
+            return Ok(());
+        }
+        if let Some(status) = driver.child.try_wait()? {
+            bail!("statistics Driver exited before {expected}: {status}");
+        }
+        ensure!(!gui.exited()?, "GUI exited before {expected}");
+        ensure!(
+            !fixture.exited()?,
+            "provider fixture exited before {expected}"
+        );
+        ensure!(
+            interrupt.try_recv().is_err(),
+            "statistics journey cancelled"
+        );
+        ensure!(
+            Instant::now() < deadline,
+            "statistics Driver timed out before {expected}"
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn wait_for_statistics_driver(
+    phase: &str,
+    stage: &Path,
+    driver: &mut OwnedProcess,
+    gui: &mut OwnedProcess,
+    fixture: &mut OwnedProcess,
+    interrupt: &mpsc::Receiver<()>,
+) -> Result<()> {
+    let expected = if phase == "restart" {
+        "restart_shutdown"
+    } else {
+        "first_shutdown"
+    };
+    wait_for_statistics_stage(
+        expected,
+        stage,
+        driver,
+        gui,
+        fixture,
+        interrupt,
+        Duration::from_secs(240),
+    )?;
+    let status = driver.child.wait()?;
+    driver.stopped = true;
+    ensure!(
+        status.success(),
+        "statistics Driver failed after {expected}"
+    );
+    Ok(())
+}
+
+fn statistics_db_counts(home: &Path) -> Result<StatisticsDbCounts> {
+    let database = home.join("v2/calls/calls.sqlite");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let options = SqliteConnectOptions::new()
+            .filename(&database)
+            .read_only(true);
+        let mut connection = SqliteConnection::connect_with(&options).await?;
+        let (rows, committed, samples): (i64, i64, i64) = sea_orm::sqlx::query_as(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(CASE WHEN terminal=1 AND status='committed' THEN 1 ELSE 0 END),0),
+                    COALESCE(SUM(CASE WHEN terminal=1 AND status='committed' AND decode_millis>0
+                        AND output_tokens IS NOT NULL THEN 1 ELSE 0 END),0)
+             FROM model_calls",
+        )
+        .fetch_one(&mut connection)
+        .await
+        .with_context(|| format!("failed to count model calls in {}", database.display()))?;
+        Ok(StatisticsDbCounts {
+            model_calls: rows.try_into()?,
+            committed_calls: committed.try_into()?,
+            performance_samples: samples.try_into()?,
+        })
+    })
 }
 
 fn write_sanitized_log(source: &Path, destination: &Path) -> Result<()> {

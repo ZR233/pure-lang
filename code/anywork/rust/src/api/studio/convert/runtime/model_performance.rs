@@ -12,6 +12,9 @@ pub(crate) fn bridge_model_performance(
     BridgeModelPerformanceSnapshot {
         revision: value.revision,
         updated_at: value.updated_at,
+        statistics_pending: value.statistics_pending,
+        statistics_gap: value.statistics_gap,
+        read_failed: value.read_failed,
         session_costs: value
             .session_costs
             .into_iter()

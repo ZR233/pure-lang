@@ -581,7 +581,35 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsStatisticsAllModels => 'All models';
 
   @override
-  String get settingsStatisticsEmpty => 'No complete performance samples yet.';
+  String get settingsStatisticsEmpty => 'No call history yet.';
+
+  @override
+  String get settingsStatisticsSummaryEmpty =>
+      'No model performance summaries yet.';
+
+  @override
+  String get settingsStatisticsFilteredEmpty => 'No calls match these filters.';
+
+  @override
+  String get settingsStatisticsPendingTitle => 'Statistics pending write';
+
+  @override
+  String get settingsStatisticsPendingBody =>
+      'Recent calls are still being written to statistics and may not appear yet.';
+
+  @override
+  String get settingsStatisticsGapTitle => 'Statistics have gaps';
+
+  @override
+  String get settingsStatisticsGapBody =>
+      'Some calls could not be recorded; summaries and history may be incomplete.';
+
+  @override
+  String get settingsStatisticsReadFailedTitle => 'Could not read statistics';
+
+  @override
+  String get settingsStatisticsReadFailedBody =>
+      'The displayed data may be unavailable or out of date.';
 
   @override
   String get settingsStatisticsMismatchesOnly => 'Mismatches only';
@@ -613,6 +641,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statisticsModelLegacyUnknown => 'Not collected';
+
+  @override
+  String get statisticsMetricNotCollected => 'Not collected';
 
   @override
   String get statisticsModelUnavailable => 'Unavailable';

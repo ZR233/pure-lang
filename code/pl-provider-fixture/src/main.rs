@@ -2,7 +2,9 @@ use std::{fs, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use pl_provider_fixture::{FixtureServer, ReadyFile, gui_script, gui_stress_script};
+use pl_provider_fixture::{
+    FixtureServer, ReadyFile, gui_script, gui_statistics_script, gui_stress_script,
+};
 
 #[derive(Parser)]
 struct Args {
@@ -22,6 +24,7 @@ async fn main() -> Result<()> {
     let steps = match args.scenario.as_str() {
         "gui" => gui_script(),
         "stress" => gui_stress_script(),
+        "statistics" => gui_statistics_script(),
         value => bail!("unknown fixture scenario: {value}"),
     };
     let fixture = FixtureServer::start(steps).await?;

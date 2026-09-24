@@ -473,9 +473,6 @@ async fn recover_skipped_billing(
     const BILLING_PAGE: usize = 256;
     // Statistics may lag or be lost; never wait for their queue on the history recovery path.
     let calls = projector.store.calls();
-    if calls.admitted_ticket() > calls.durable_ticket() {
-        calls.mark_statistics_gap();
-    }
     let root = product.root_thread_id.clone();
     let mut after = skipped.start().saturating_sub(1);
     loop {
@@ -488,94 +485,24 @@ async fn recover_skipped_billing(
         let read = facts.len();
         for fact in facts {
             after = after.max(fact.revision);
-            let Some(billing) = durable_billing(&fact) else {
+            if !fact.terminal {
                 continue;
-            };
-            if fact.retention.as_deref() == Some("internal") {
-                projector
-                    .performance
-                    .record_auxiliary_inference(&root, id, &billing)?;
-            } else {
-                projector
-                    .performance
-                    .record_inference(&root, id, &billing)?;
             }
+            let attempt = calls.read_attempt_fact(&fact).await?;
+            billing::record_attempt(
+                &projector.performance,
+                &root,
+                id,
+                &attempt,
+                fact.finished_at.unwrap_or(fact.started_at),
+                fact.retention.as_deref() == Some("internal"),
+            )?;
         }
         if read < BILLING_PAGE {
             break;
         }
     }
     Ok(())
-}
-
-/// Rebuilds one billing record from its durable call fact, or `None` when the fact has no identity.
-fn durable_billing(
-    fact: &crate::studio::storage::calls::ModelCallFact,
-) -> Option<pl_protocol::InferenceBillingRecord> {
-    if fact.call_id.is_empty() {
-        return None;
-    }
-    let estimated = match (fact.cost_currency.clone(), fact.cost_amount) {
-        (Some(currency), Some(amount)) => Some(pl_protocol::RuntimeCostAmount { currency, amount }),
-        _ => None,
-    };
-    let pricing = match estimated {
-        Some(cost) => pl_protocol::PricingOutcome::Estimated {
-            cost,
-            cache_savings: None,
-        },
-        // 无价格但已被标记为未知价格时保留"不可定价"；其余情况是当时的定价策略是关闭的。
-        None if fact.has_unpriced_usage => pl_protocol::PricingOutcome::Unpriced {
-            reason: pl_protocol::UnpricedReason::MissingUsage,
-        },
-        None => pl_protocol::PricingOutcome::Disabled,
-    };
-    let timing = match (fact.ttft_millis, fact.decode_millis, fact.response_millis) {
-        (Some(ttft_millis), Some(decode_millis), Some(total_millis)) => {
-            Some(pl_protocol::InferenceTiming {
-                ttft_millis,
-                decode_millis,
-                total_millis,
-            })
-        }
-        _ => None,
-    };
-    let provider = fact.provider_instance_id.clone().unwrap_or_default();
-    Some(pl_protocol::InferenceBillingRecord {
-        inference_id: fact.call_id.clone(),
-        purpose: fact.purpose.clone(),
-        provider_instance_id: provider.clone(),
-        provider,
-        model: fact.sent_model.clone().unwrap_or_default(),
-        model_observation: fact.sent_model.as_ref().map(|sent_model| {
-            pl_protocol::InferenceModelObservation {
-                configured_model: fact.configured_model.clone().unwrap_or_default(),
-                sent_model: sent_model.clone(),
-                reported_model: fact.reported_model.clone(),
-            }
-        }),
-        reasoning_effort: fact.reasoning_effort.clone(),
-        context_window: None,
-        accounting: pl_protocol::InferenceAccounting {
-            usage: pl_protocol::UsageReport {
-                input_tokens: fact.input_tokens,
-                output_tokens: fact.output_tokens,
-                cache_read_tokens: fact.cache_read_tokens,
-                cache_write_tokens: fact.cache_write_tokens,
-                reasoning_tokens: fact.reasoning_tokens,
-                total_tokens: fact.total_tokens,
-            },
-            pricing,
-            price_snapshot: None,
-            request_started_at: None,
-        },
-        prompt_generation: None,
-        prompt_cache_policy: None,
-        prefix_changed_reason: None,
-        orchestration: Default::default(),
-        timing,
-        recorded_at: fact.started_at,
-    })
 }
 
 /// Reconstructs the runtime core terminal Turn state from the durable protocol Turn state.

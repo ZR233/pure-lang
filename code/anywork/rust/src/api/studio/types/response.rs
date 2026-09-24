@@ -36,6 +36,9 @@ pub struct BridgeStudioStateSnapshot {
 pub struct BridgeModelPerformanceSnapshot {
     pub revision: u64,
     pub updated_at: i64,
+    pub statistics_pending: bool,
+    pub statistics_gap: bool,
+    pub read_failed: bool,
     pub session_costs: Vec<BridgeSessionCostSnapshot>,
     pub summaries: Vec<BridgeModelPerformanceSummary>,
     pub history: Vec<BridgeModelPerformanceSample>,
@@ -88,10 +91,10 @@ pub struct BridgeModelPerformanceSample {
     pub model_match_state: BridgeModelMatchState,
     pub reasoning_effort: Option<String>,
     pub completion_tokens: u64,
-    pub ttft_millis: u64,
-    pub decode_millis: u64,
-    pub total_response_millis: u64,
-    pub tokens_per_second: f64,
+    pub ttft_millis: Option<u64>,
+    pub decode_millis: Option<u64>,
+    pub total_response_millis: Option<u64>,
+    pub tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

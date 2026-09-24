@@ -557,7 +557,31 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsStatisticsAllModels => '全部模型';
 
   @override
-  String get settingsStatisticsEmpty => '暂无完整性能样本。';
+  String get settingsStatisticsEmpty => '暂无调用历史。';
+
+  @override
+  String get settingsStatisticsSummaryEmpty => '暂无模型性能汇总。';
+
+  @override
+  String get settingsStatisticsFilteredEmpty => '当前筛选条件下没有调用记录。';
+
+  @override
+  String get settingsStatisticsPendingTitle => '统计待写入';
+
+  @override
+  String get settingsStatisticsPendingBody => '近期调用仍在写入统计，当前数据可能尚未包含这些记录。';
+
+  @override
+  String get settingsStatisticsGapTitle => '统计存在缺口';
+
+  @override
+  String get settingsStatisticsGapBody => '部分调用记录未能写入，汇总和历史可能不完整。';
+
+  @override
+  String get settingsStatisticsReadFailedTitle => '统计读取失败';
+
+  @override
+  String get settingsStatisticsReadFailedBody => '当前显示的数据可能已过期或不可用。';
 
   @override
   String get settingsStatisticsMismatchesOnly => '仅看不一致';
@@ -588,6 +612,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statisticsModelLegacyUnknown => '未采集';
+
+  @override
+  String get statisticsMetricNotCollected => '未采集';
 
   @override
   String get statisticsModelUnavailable => '无';

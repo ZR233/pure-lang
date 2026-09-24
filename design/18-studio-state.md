@@ -35,6 +35,9 @@ directory command 发布 canonical delta。
 
 全量 snapshot resync 按领域 revision 合并 `modelPerformance`，与增量事件使用同一 canonical
 状态；本地已有快照不能遮蔽服务端更新，旧全量快照也不能覆盖已收到的新事件。
+模型统计属于尽力而为的数据库投影：读取已提交数据与发布其展示 revision 串行化，
+待写事实的早期空读不能占用最终落库结果的版本。写入结论到达后发布新快照；读取失败
+保留上次可用数据并显式标记失败，待写与统计缺口也分别可见。
 
 ## 18.3 Activation
 

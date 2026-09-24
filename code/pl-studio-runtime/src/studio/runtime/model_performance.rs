@@ -51,6 +51,8 @@ pub(crate) struct ModelPerformanceOwner {
     persisted_revision: Arc<AtomicU64>,
     /// 串行化产品对象写入，避免刷新任务与显式快照并发写同一 revision。
     persist_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Serializes reads and assigns revisions after the queried projection is known.
+    presentation: Arc<tokio::sync::Mutex<StudioModelPerformanceSnapshot>>,
 }
 
 /// 最近 inference 身份窗口（固定上限、不持久化）。
@@ -152,6 +154,9 @@ impl ModelPerformanceOwner {
             billing_ticket: Arc::new(AtomicU64::new(0)),
             persisted_revision: Arc::new(AtomicU64::new(0)),
             persist_lock: Arc::new(tokio::sync::Mutex::new(())),
+            presentation: Arc::new(tokio::sync::Mutex::new(
+                StudioModelPerformanceSnapshot::default(),
+            )),
         }
     }
 
@@ -170,30 +175,41 @@ impl ModelPerformanceOwner {
                 restored.version
             )));
         }
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        *state = ModelPerformanceState {
-            version: CACHE_VERSION,
-            revision: restored.revision,
-            updated_at: restored.updated_at,
-            recent: RecentIdentities::default(),
-        };
+        {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            *state = ModelPerformanceState {
+                version: CACHE_VERSION,
+                revision: restored.revision,
+                updated_at: restored.updated_at,
+                recent: RecentIdentities::default(),
+            };
+        }
         self.persisted_revision
             .store(restored.revision, Ordering::Release);
+        self.presentation.lock().await.revision = restored.revision;
         Ok(())
     }
 
     /// 产品快照：历史、汇总与会话费用来自调用库查询/聚合投影。
     pub(crate) async fn snapshot(&self) -> StudioModelPerformanceSnapshot {
+        let mut previous = self.presentation.lock().await;
         match self.read_snapshot().await {
-            Ok(snapshot) => snapshot,
+            Ok(mut snapshot) => {
+                snapshot.revision = previous.revision.saturating_add(1);
+                *previous = snapshot.clone();
+                snapshot
+            }
             Err(error) => {
                 tracing::warn!(error = %error, "model performance snapshot read failed");
-                let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-                StudioModelPerformanceSnapshot {
-                    revision: state.revision,
-                    updated_at: state.updated_at,
-                    ..StudioModelPerformanceSnapshot::default()
-                }
+                let mut snapshot = previous.clone();
+                snapshot.revision = snapshot.revision.saturating_add(1);
+                snapshot.read_failed = true;
+                let calls = self.store.calls();
+                snapshot.statistics_pending =
+                    self.billing_ticket.load(Ordering::Acquire) > calls.durable_ticket();
+                snapshot.statistics_gap = calls.statistics_gap();
+                *previous = snapshot.clone();
+                snapshot
             }
         }
     }
@@ -283,9 +299,11 @@ impl ModelPerformanceOwner {
             .ok();
         {
             let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            state
-                .recent
-                .insert(root_thread_id, &billing.inference_id, fingerprint);
+            if ticket.is_some() {
+                state
+                    .recent
+                    .insert(root_thread_id, &billing.inference_id, fingerprint);
+            }
             state.revision = state.revision.saturating_add(1);
             state.updated_at = unix_seconds();
         }
@@ -314,6 +332,8 @@ impl ModelPerformanceOwner {
 
     async fn read_snapshot(&self) -> Result<StudioModelPerformanceSnapshot, PureError> {
         let calls = self.store.calls();
+        let settled_before_read = calls.durable_ticket();
+        let admitted = self.billing_ticket.load(Ordering::Acquire);
         // Statistics are an eventual, lossy projection: reads never wait for its writer.
         // 产品对象只保留有界 revision/更新时间缓存；写盘失败不影响本次统计读取。
         if let Err(error) = self.persist_state().await {
@@ -337,6 +357,9 @@ impl ModelPerformanceOwner {
         Ok(StudioModelPerformanceSnapshot {
             revision,
             updated_at,
+            statistics_pending: admitted > settled_before_read,
+            statistics_gap: calls.statistics_gap(),
+            read_failed: false,
             session_costs: costs
                 .iter()
                 .filter(|rollup| !archived.contains(&rollup.root_thread_id))
@@ -380,11 +403,8 @@ impl ModelPerformanceOwner {
             .collect()
     }
 
-    /// 待调用写入 durable 后重新读取调用库并发布 canonical 快照。
-    ///
-    /// 事件载荷是调用库查询结果，而不是本地增量账本；慢消费者可从 `read_state` 重新同步。
-    /// 同一时刻只允许一个刷新任务，避免每次推理都重复整库聚合；若刷新期间又有新事实，
-    /// 任务按 revision 收敛再退出。
+    /// Publish an initial projection, then follow the accepted billing ticket until settled.
+    /// The writer's progress is a wakeup, not proof that a rejected mutation was committed.
     fn emit_snapshot_after_flush(&self) {
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
             return;
@@ -394,24 +414,50 @@ impl ModelPerformanceOwner {
         }
         let owner = self.clone();
         handle.spawn(async move {
+            let calls = owner.store.calls();
+            let mut durable = calls.subscribe_durable_ticket();
+            let mut published = None;
             loop {
-                let observed = owner.revision();
-                // 刷新只等待本 owner 已受理的调用事实 durable；`read_snapshot` 内部同样收敛。
-                match owner.read_snapshot().await {
-                    // 广播发生在 `emit` 内部并返回 envelope；刷新任务只关心副作用，显式丢弃返回值。
-                    Ok(snapshot) => {
-                        let _ = owner.product_events.emit_model_performance_state(snapshot);
-                    }
-                    Err(error) => {
-                        tracing::warn!(error = %error, "model performance snapshot read failed");
-                        break;
-                    }
+                let state = (
+                    owner.revision(),
+                    owner.billing_ticket.load(Ordering::Acquire),
+                    *durable.borrow_and_update(),
+                    calls.statistics_gap(),
+                );
+                if published != Some(state) {
+                    let snapshot = owner.snapshot().await;
+                    let _ = owner.product_events.emit_model_performance_state(snapshot);
+                    published = Some(state);
                 }
-                if owner.revision() == observed {
+                let now = (
+                    owner.revision(),
+                    owner.billing_ticket.load(Ordering::Acquire),
+                    calls.durable_ticket(),
+                    calls.statistics_gap(),
+                );
+                if now != state {
+                    continue;
+                }
+                if now.1 <= now.2 {
                     break;
+                }
+                tokio::select! {
+                    change = durable.changed() => {
+                        if change.is_err() { break; }
+                    }
+                    () = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
                 }
             }
             owner.refreshing.store(false, Ordering::Release);
+            let state = (
+                owner.revision(),
+                owner.billing_ticket.load(Ordering::Acquire),
+                calls.durable_ticket(),
+                calls.statistics_gap(),
+            );
+            if published != Some(state) {
+                owner.emit_snapshot_after_flush();
+            }
         });
     }
 
@@ -497,7 +543,10 @@ fn history_sample(row: &PerformanceSampleRow) -> StudioModelPerformanceSample {
         ttft_millis: row.ttft_millis,
         decode_millis: row.decode_millis,
         total_response_millis: row.response_millis,
-        tokens_per_second: throughput(row.completion_tokens, row.decode_millis),
+        tokens_per_second: row
+            .decode_millis
+            .filter(|value| *value > 0)
+            .map(|value| throughput(row.completion_tokens, value)),
     }
 }
 

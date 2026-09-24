@@ -63,8 +63,8 @@ pub(crate) struct ToolOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub(crate) struct ManualGuiOptions {
-    /// Run the regular or paced 20,000-event provider fixture.
-    #[arg(long, default_value = "gui", value_parser = ["gui", "stress"])]
+    /// Run the regular, stress, or isolated call-statistics acceptance journey.
+    #[arg(long, default_value = "gui", value_parser = ["gui", "stress", "statistics"])]
     pub(crate) scenario: String,
     /// Directory for sanitized evidence (defaults to target/manual-gui/<timestamp>-<pid>).
     #[arg(long, value_name = "DIR")]

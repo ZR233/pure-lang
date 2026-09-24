@@ -2870,6 +2870,7 @@ dependencies = [
  "pl-remote-helper",
  "pl-skill-core",
  "pl-studio-runtime",
+ "sea-orm",
  "semver",
  "serde",
  "serde_json",

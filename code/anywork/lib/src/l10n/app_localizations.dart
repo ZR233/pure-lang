@@ -1133,8 +1133,56 @@ abstract class AppLocalizations {
   /// No description provided for @settingsStatisticsEmpty.
   ///
   /// In en, this message translates to:
-  /// **'No complete performance samples yet.'**
+  /// **'No call history yet.'**
   String get settingsStatisticsEmpty;
+
+  /// No description provided for @settingsStatisticsSummaryEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No model performance summaries yet.'**
+  String get settingsStatisticsSummaryEmpty;
+
+  /// No description provided for @settingsStatisticsFilteredEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No calls match these filters.'**
+  String get settingsStatisticsFilteredEmpty;
+
+  /// No description provided for @settingsStatisticsPendingTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Statistics pending write'**
+  String get settingsStatisticsPendingTitle;
+
+  /// No description provided for @settingsStatisticsPendingBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent calls are still being written to statistics and may not appear yet.'**
+  String get settingsStatisticsPendingBody;
+
+  /// No description provided for @settingsStatisticsGapTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Statistics have gaps'**
+  String get settingsStatisticsGapTitle;
+
+  /// No description provided for @settingsStatisticsGapBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Some calls could not be recorded; summaries and history may be incomplete.'**
+  String get settingsStatisticsGapBody;
+
+  /// No description provided for @settingsStatisticsReadFailedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not read statistics'**
+  String get settingsStatisticsReadFailedTitle;
+
+  /// No description provided for @settingsStatisticsReadFailedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The displayed data may be unavailable or out of date.'**
+  String get settingsStatisticsReadFailedBody;
 
   /// No description provided for @settingsStatisticsMismatchesOnly.
   ///
@@ -1195,6 +1243,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Not collected'**
   String get statisticsModelLegacyUnknown;
+
+  /// No description provided for @statisticsMetricNotCollected.
+  ///
+  /// In en, this message translates to:
+  /// **'Not collected'**
+  String get statisticsMetricNotCollected;
 
   /// No description provided for @statisticsModelUnavailable.
   ///

@@ -373,6 +373,9 @@ cargo xtask verify-gui
 # 隔离 Studio home 与本地模拟供应商，启动原生 GUI 并收集人工验收证据
 cargo xtask manual-gui
 
+# 固定快速/流式响应、统计页自动刷新及重启后的隔离数据验收
+cargo xtask manual-gui --scenario statistics
+
 # 20,000 条混合事件、约 5,000 token/s 的原生 profile/AOT 压力证据
 cargo xtask manual-gui --scenario stress
 
@@ -400,6 +403,8 @@ cargo xtask run-gui --demo
 固定提示词返回固定 HTTP/SSE 或 WebSocket 消息流，未知请求明确失败。`manual-gui` 运行
 非 demo 原生桥：在 GUI 中发送 `Reply with exactly: fixture ready`，在终端逐行记录
 动作代码，输入 `done` 后采集脱敏请求、截图、快照和日志；运行完成不构成人工通过结论。
+`--scenario statistics` 使用隔离的调用库与真实 GUI Bridge 检查统计待写、落库后刷新、
+缺失计时显示及重启读取；证据的人工结论仍默认为待评审。
 本地模拟不能证明真实供应商接口兼容，也不再自动覆盖 Studio、工具、远端进程或发布流程行为。
 
 `collaboration_observe` 使用现有 provider、model、effort 和凭据解析，在隔离 Studio home

@@ -5775,10 +5775,10 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSa
             <crate::api::studio::types::response::BridgeModelMatchState>::sse_decode(deserializer);
         let mut var_reasoningEffort = <Option<String>>::sse_decode(deserializer);
         let mut var_completionTokens = <u64>::sse_decode(deserializer);
-        let mut var_ttftMillis = <u64>::sse_decode(deserializer);
-        let mut var_decodeMillis = <u64>::sse_decode(deserializer);
-        let mut var_totalResponseMillis = <u64>::sse_decode(deserializer);
-        let mut var_tokensPerSecond = <f64>::sse_decode(deserializer);
+        let mut var_ttftMillis = <Option<u64>>::sse_decode(deserializer);
+        let mut var_decodeMillis = <Option<u64>>::sse_decode(deserializer);
+        let mut var_totalResponseMillis = <Option<u64>>::sse_decode(deserializer);
+        let mut var_tokensPerSecond = <Option<f64>>::sse_decode(deserializer);
         return crate::api::studio::types::response::BridgeModelPerformanceSample {
             completed_at: var_completedAt,
             provider_instance_id: var_providerInstanceId,
@@ -5803,6 +5803,9 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSn
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_revision = <u64>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
+        let mut var_statisticsPending = <bool>::sse_decode(deserializer);
+        let mut var_statisticsGap = <bool>::sse_decode(deserializer);
+        let mut var_readFailed = <bool>::sse_decode(deserializer);
         let mut var_sessionCosts = <Vec<
             crate::api::studio::types::response::BridgeSessionCostSnapshot,
         >>::sse_decode(deserializer);
@@ -5815,6 +5818,9 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSn
         return crate::api::studio::types::response::BridgeModelPerformanceSnapshot {
             revision: var_revision,
             updated_at: var_updatedAt,
+            statistics_pending: var_statisticsPending,
+            statistics_gap: var_statisticsGap,
+            read_failed: var_readFailed,
             session_costs: var_sessionCosts,
             summaries: var_summaries,
             history: var_history,
@@ -13852,6 +13858,9 @@ impl flutter_rust_bridge::IntoDart
         [
             self.revision.into_into_dart().into_dart(),
             self.updated_at.into_into_dart().into_dart(),
+            self.statistics_pending.into_into_dart().into_dart(),
+            self.statistics_gap.into_into_dart().into_dart(),
+            self.read_failed.into_into_dart().into_dart(),
             self.session_costs.into_into_dart().into_dart(),
             self.summaries.into_into_dart().into_dart(),
             self.history.into_into_dart().into_dart(),
@@ -20638,10 +20647,10 @@ impl SseEncode for crate::api::studio::types::response::BridgeModelPerformanceSa
         );
         <Option<String>>::sse_encode(self.reasoning_effort, serializer);
         <u64>::sse_encode(self.completion_tokens, serializer);
-        <u64>::sse_encode(self.ttft_millis, serializer);
-        <u64>::sse_encode(self.decode_millis, serializer);
-        <u64>::sse_encode(self.total_response_millis, serializer);
-        <f64>::sse_encode(self.tokens_per_second, serializer);
+        <Option<u64>>::sse_encode(self.ttft_millis, serializer);
+        <Option<u64>>::sse_encode(self.decode_millis, serializer);
+        <Option<u64>>::sse_encode(self.total_response_millis, serializer);
+        <Option<f64>>::sse_encode(self.tokens_per_second, serializer);
     }
 }
 
@@ -20650,6 +20659,9 @@ impl SseEncode for crate::api::studio::types::response::BridgeModelPerformanceSn
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <u64>::sse_encode(self.revision, serializer);
         <i64>::sse_encode(self.updated_at, serializer);
+        <bool>::sse_encode(self.statistics_pending, serializer);
+        <bool>::sse_encode(self.statistics_gap, serializer);
+        <bool>::sse_encode(self.read_failed, serializer);
         <Vec<crate::api::studio::types::response::BridgeSessionCostSnapshot>>::sse_encode(
             self.session_costs,
             serializer,

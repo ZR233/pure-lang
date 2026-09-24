@@ -269,10 +269,10 @@ class BridgeModelPerformanceSample {
   final BridgeModelMatchState modelMatchState;
   final String? reasoningEffort;
   final BigInt completionTokens;
-  final BigInt ttftMillis;
-  final BigInt decodeMillis;
-  final BigInt totalResponseMillis;
-  final double tokensPerSecond;
+  final BigInt? ttftMillis;
+  final BigInt? decodeMillis;
+  final BigInt? totalResponseMillis;
+  final double? tokensPerSecond;
 
   const BridgeModelPerformanceSample({
     required this.completedAt,
@@ -285,10 +285,10 @@ class BridgeModelPerformanceSample {
     required this.modelMatchState,
     this.reasoningEffort,
     required this.completionTokens,
-    required this.ttftMillis,
-    required this.decodeMillis,
-    required this.totalResponseMillis,
-    required this.tokensPerSecond,
+    this.ttftMillis,
+    this.decodeMillis,
+    this.totalResponseMillis,
+    this.tokensPerSecond,
   });
 
   @override
@@ -332,6 +332,9 @@ class BridgeModelPerformanceSample {
 class BridgeModelPerformanceSnapshot {
   final BigInt revision;
   final PlatformInt64 updatedAt;
+  final bool statisticsPending;
+  final bool statisticsGap;
+  final bool readFailed;
   final List<BridgeSessionCostSnapshot> sessionCosts;
   final List<BridgeModelPerformanceSummary> summaries;
   final List<BridgeModelPerformanceSample> history;
@@ -339,6 +342,9 @@ class BridgeModelPerformanceSnapshot {
   const BridgeModelPerformanceSnapshot({
     required this.revision,
     required this.updatedAt,
+    required this.statisticsPending,
+    required this.statisticsGap,
+    required this.readFailed,
     required this.sessionCosts,
     required this.summaries,
     required this.history,
@@ -348,6 +354,9 @@ class BridgeModelPerformanceSnapshot {
   int get hashCode =>
       revision.hashCode ^
       updatedAt.hashCode ^
+      statisticsPending.hashCode ^
+      statisticsGap.hashCode ^
+      readFailed.hashCode ^
       sessionCosts.hashCode ^
       summaries.hashCode ^
       history.hashCode;
@@ -359,6 +368,9 @@ class BridgeModelPerformanceSnapshot {
           runtimeType == other.runtimeType &&
           revision == other.revision &&
           updatedAt == other.updatedAt &&
+          statisticsPending == other.statisticsPending &&
+          statisticsGap == other.statisticsGap &&
+          readFailed == other.readFailed &&
           sessionCosts == other.sessionCosts &&
           summaries == other.summaries &&
           history == other.history;

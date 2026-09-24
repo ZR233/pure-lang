@@ -6171,10 +6171,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       modelMatchState: dco_decode_bridge_model_match_state(arr[7]),
       reasoningEffort: dco_decode_opt_String(arr[8]),
       completionTokens: dco_decode_u_64(arr[9]),
-      ttftMillis: dco_decode_u_64(arr[10]),
-      decodeMillis: dco_decode_u_64(arr[11]),
-      totalResponseMillis: dco_decode_u_64(arr[12]),
-      tokensPerSecond: dco_decode_f_64(arr[13]),
+      ttftMillis: dco_decode_opt_box_autoadd_u_64(arr[10]),
+      decodeMillis: dco_decode_opt_box_autoadd_u_64(arr[11]),
+      totalResponseMillis: dco_decode_opt_box_autoadd_u_64(arr[12]),
+      tokensPerSecond: dco_decode_opt_box_autoadd_f_64(arr[13]),
     );
   }
 
@@ -6184,14 +6184,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return BridgeModelPerformanceSnapshot(
       revision: dco_decode_u_64(arr[0]),
       updatedAt: dco_decode_i_64(arr[1]),
-      sessionCosts: dco_decode_list_bridge_session_cost_snapshot(arr[2]),
-      summaries: dco_decode_list_bridge_model_performance_summary(arr[3]),
-      history: dco_decode_list_bridge_model_performance_sample(arr[4]),
+      statisticsPending: dco_decode_bool(arr[2]),
+      statisticsGap: dco_decode_bool(arr[3]),
+      readFailed: dco_decode_bool(arr[4]),
+      sessionCosts: dco_decode_list_bridge_session_cost_snapshot(arr[5]),
+      summaries: dco_decode_list_bridge_model_performance_summary(arr[6]),
+      history: dco_decode_list_bridge_model_performance_sample(arr[7]),
     );
   }
 
@@ -12795,10 +12798,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_modelMatchState = sse_decode_bridge_model_match_state(deserializer);
     var var_reasoningEffort = sse_decode_opt_String(deserializer);
     var var_completionTokens = sse_decode_u_64(deserializer);
-    var var_ttftMillis = sse_decode_u_64(deserializer);
-    var var_decodeMillis = sse_decode_u_64(deserializer);
-    var var_totalResponseMillis = sse_decode_u_64(deserializer);
-    var var_tokensPerSecond = sse_decode_f_64(deserializer);
+    var var_ttftMillis = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_decodeMillis = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_totalResponseMillis = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_tokensPerSecond = sse_decode_opt_box_autoadd_f_64(deserializer);
     return BridgeModelPerformanceSample(
       completedAt: var_completedAt,
       providerInstanceId: var_providerInstanceId,
@@ -12824,6 +12827,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_revision = sse_decode_u_64(deserializer);
     var var_updatedAt = sse_decode_i_64(deserializer);
+    var var_statisticsPending = sse_decode_bool(deserializer);
+    var var_statisticsGap = sse_decode_bool(deserializer);
+    var var_readFailed = sse_decode_bool(deserializer);
     var var_sessionCosts = sse_decode_list_bridge_session_cost_snapshot(
       deserializer,
     );
@@ -12836,6 +12842,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return BridgeModelPerformanceSnapshot(
       revision: var_revision,
       updatedAt: var_updatedAt,
+      statisticsPending: var_statisticsPending,
+      statisticsGap: var_statisticsGap,
+      readFailed: var_readFailed,
       sessionCosts: var_sessionCosts,
       summaries: var_summaries,
       history: var_history,
@@ -20617,10 +20626,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bridge_model_match_state(self.modelMatchState, serializer);
     sse_encode_opt_String(self.reasoningEffort, serializer);
     sse_encode_u_64(self.completionTokens, serializer);
-    sse_encode_u_64(self.ttftMillis, serializer);
-    sse_encode_u_64(self.decodeMillis, serializer);
-    sse_encode_u_64(self.totalResponseMillis, serializer);
-    sse_encode_f_64(self.tokensPerSecond, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.ttftMillis, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.decodeMillis, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.totalResponseMillis, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.tokensPerSecond, serializer);
   }
 
   @protected
@@ -20631,6 +20640,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_64(self.revision, serializer);
     sse_encode_i_64(self.updatedAt, serializer);
+    sse_encode_bool(self.statisticsPending, serializer);
+    sse_encode_bool(self.statisticsGap, serializer);
+    sse_encode_bool(self.readFailed, serializer);
     sse_encode_list_bridge_session_cost_snapshot(self.sessionCosts, serializer);
     sse_encode_list_bridge_model_performance_summary(
       self.summaries,

@@ -25,6 +25,7 @@ class _StatisticsTabState extends State<StatisticsTab> {
     super.didUpdateWidget(oldWidget);
     final filter = _filter;
     if (filter != null &&
+        !widget.snapshot.history.any((item) => item.filterKey == filter) &&
         !widget.snapshot.summaries.any((item) => item.filterKey == filter)) {
       _filter = null;
     }
@@ -42,6 +43,10 @@ class _StatisticsTabState extends State<StatisticsTab> {
                     item.modelMatchState == ModelMatchState.mismatched))
               item,
         ];
+        final hasProjectionIssue =
+            widget.snapshot.statisticsPending ||
+            widget.snapshot.statisticsGap ||
+            widget.snapshot.readFailed;
         return SettingsPageLayout(
           maxWidth: 1120,
           header: SettingsHeader(
@@ -51,6 +56,42 @@ class _StatisticsTabState extends State<StatisticsTab> {
           child: CustomScrollView(
             key: StudioDriverKeys.statisticsHistory,
             slivers: [
+              if (hasProjectionIssue)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Column(
+                      children: [
+                        if (widget.snapshot.readFailed)
+                          SettingsEmptyMessage(
+                            icon: Icons.error_outline,
+                            title:
+                                context.l10n.settingsStatisticsReadFailedTitle,
+                            body: context.l10n.settingsStatisticsReadFailedBody,
+                          ),
+                        if (widget.snapshot.readFailed &&
+                            (widget.snapshot.statisticsGap ||
+                                widget.snapshot.statisticsPending))
+                          const SizedBox(height: 8),
+                        if (widget.snapshot.statisticsGap)
+                          SettingsEmptyMessage(
+                            icon: Icons.warning_amber_rounded,
+                            title: context.l10n.settingsStatisticsGapTitle,
+                            body: context.l10n.settingsStatisticsGapBody,
+                          ),
+                        if (widget.snapshot.statisticsGap &&
+                            widget.snapshot.statisticsPending)
+                          const SizedBox(height: 8),
+                        if (widget.snapshot.statisticsPending)
+                          SettingsEmptyMessage(
+                            icon: Icons.schedule_rounded,
+                            title: context.l10n.settingsStatisticsPendingTitle,
+                            body: context.l10n.settingsStatisticsPendingBody,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
               SliverToBoxAdapter(
                 child: _SummarySection(
                   compact: compact,
@@ -61,6 +102,7 @@ class _StatisticsTabState extends State<StatisticsTab> {
                 padding: const EdgeInsets.symmetric(vertical: 20),
                 sliver: SliverToBoxAdapter(
                   child: _HistoryHeader(
+                    history: widget.snapshot.history,
                     summaries: widget.snapshot.summaries,
                     value: _filter,
                     onChanged: (value) => setState(() => _filter = value),
@@ -70,15 +112,24 @@ class _StatisticsTabState extends State<StatisticsTab> {
                   ),
                 ),
               ),
-              if (history.isEmpty)
-                SliverToBoxAdapter(
-                  child: _EmptyState(
-                    label: _mismatchesOnly
-                        ? context.l10n.settingsStatisticsMismatchEmpty
-                        : context.l10n.settingsStatisticsEmpty,
+              if (history.isEmpty) ...[
+                if (_filter != null ||
+                    _mismatchesOnly ||
+                    widget.snapshot.history.isNotEmpty ||
+                    !hasProjectionIssue)
+                  SliverToBoxAdapter(
+                    child: _EmptyState(
+                      label:
+                          widget.snapshot.history.isEmpty &&
+                              _filter == null &&
+                              !_mismatchesOnly
+                          ? context.l10n.settingsStatisticsEmpty
+                          : _mismatchesOnly
+                          ? context.l10n.settingsStatisticsMismatchEmpty
+                          : context.l10n.settingsStatisticsFilteredEmpty,
+                    ),
                   ),
-                )
-              else ...[
+              ] else ...[
                 if (!compact) SliverToBoxAdapter(child: _WideHistoryHeader()),
                 SliverList.builder(
                   itemCount: history.length,
@@ -121,7 +172,7 @@ class _SummarySection extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16),
             child: Text(
-              context.l10n.settingsStatisticsEmpty,
+              context.l10n.settingsStatisticsSummaryEmpty,
               style: Theme.of(context).textTheme.bodyMedium
                   ?.copyWith(color: context.colors.onSurfaceVariant),
             ),
@@ -196,8 +247,9 @@ class _CompactSummaryCard extends StatelessWidget {
       summary.model,
       summary.reasoningEffort,
     ),
-    title: summary.model,
-    subtitle: '${summary.providerDisplayName} · ${summary.providerInstanceId}',
+    title: _identityLabel(context, summary.model),
+    subtitle:
+        '${_identityLabel(context, summary.providerDisplayName)} · ${_identityLabel(context, summary.providerInstanceId)}',
     children: [
       Wrap(
         spacing: 16,
@@ -244,9 +296,13 @@ class _ModelLabel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(summary.model, maxLines: 1, overflow: TextOverflow.ellipsis),
         Text(
-          '${summary.providerDisplayName} · ${summary.providerInstanceId}',
+          _identityLabel(context, summary.model),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        Text(
+          '${_identityLabel(context, summary.providerDisplayName)} · ${_identityLabel(context, summary.providerInstanceId)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.labelSmall
@@ -259,6 +315,7 @@ class _ModelLabel extends StatelessWidget {
 
 class _HistoryHeader extends StatelessWidget {
   const _HistoryHeader({
+    required this.history,
     required this.summaries,
     required this.value,
     required this.onChanged,
@@ -266,6 +323,7 @@ class _HistoryHeader extends StatelessWidget {
     required this.onMismatchesOnlyChanged,
   });
 
+  final List<ModelPerformanceSampleView> history;
   final List<ModelPerformanceSummaryView> summaries;
   final String? value;
   final ValueChanged<String?> onChanged;
@@ -276,6 +334,7 @@ class _HistoryHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final seen = <String>{};
         final filterWidth = constraints.maxWidth < 240
             ? constraints.maxWidth
             : 240.0;
@@ -285,9 +344,10 @@ class _HistoryHeader extends StatelessWidget {
               ?.copyWith(fontWeight: FontWeight.w600),
         );
         final filter = SizedBox(
+          key: StudioDriverKeys.statisticsFilter,
           width: filterWidth,
           child: DropdownButtonFormField<String?>(
-            key: StudioDriverKeys.statisticsFilter,
+            key: ValueKey(value),
             initialValue: value,
             isExpanded: true,
             decoration: const InputDecoration(isDense: true),
@@ -295,14 +355,36 @@ class _HistoryHeader extends StatelessWidget {
               DropdownMenuItem<String?>(
                 child: Text(context.l10n.settingsStatisticsAllModels),
               ),
-              for (final summary in summaries)
-                DropdownMenuItem<String?>(
-                  value: summary.filterKey,
-                  child: Text(
-                    _formatPerformanceIdentity(context, summary),
-                    overflow: TextOverflow.ellipsis,
+              for (final sample in history)
+                if (seen.add(sample.filterKey))
+                  DropdownMenuItem<String?>(
+                    value: sample.filterKey,
+                    child: Text(
+                      _formatPerformanceIdentity(
+                        context,
+                        sample.providerDisplayName,
+                        sample.providerInstanceId,
+                        sample.model,
+                        sample.reasoningEffort,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
+              for (final summary in summaries)
+                if (seen.add(summary.filterKey))
+                  DropdownMenuItem<String?>(
+                    value: summary.filterKey,
+                    child: Text(
+                      _formatPerformanceIdentity(
+                        context,
+                        summary.providerDisplayName,
+                        summary.providerInstanceId,
+                        summary.model,
+                        summary.reasoningEffort,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
             ],
             onChanged: onChanged,
           ),
@@ -388,10 +470,10 @@ class _WideHistoryRow extends StatelessWidget {
         _ModelIdentity(sample: sample),
         Text(_formatReasoningEffort(context, sample.reasoningEffort)),
         Text('${sample.completionTokens}'),
-        Text(_formatMillis(sample.ttftMillis.toDouble())),
-        Text(_formatMillis(sample.decodeMillis.toDouble())),
-        Text(_formatMillis(sample.totalResponseMillis.toDouble())),
-        Text(context.tokenThroughputLabel(sample.tokensPerSecond)),
+        Text(_formatSampleMillis(context, sample.ttftMillis)),
+        Text(_formatSampleMillis(context, sample.decodeMillis)),
+        Text(_formatSampleMillis(context, sample.totalResponseMillis)),
+        Text(_formatSampleSpeed(context, sample.tokensPerSecond)),
       ],
     );
   }
@@ -455,9 +537,9 @@ class _CompactHistoryCard extends StatelessWidget {
         container: true,
         label: description,
         child: SettingsResourceRow(
-          title: sample.displayModel,
+          title: _identityLabel(context, sample.displayModel),
           subtitle:
-              '${sample.providerDisplayName} · ${sample.providerInstanceId} · ${_formatCompletedAt(context, sample.completedAt)}',
+              '${_identityLabel(context, sample.providerDisplayName)} · ${_identityLabel(context, sample.providerInstanceId)} · ${_formatCompletedAt(context, sample.completedAt)}',
           status: _ModelStatusChip(sample: sample),
           children: [
             Wrap(
@@ -467,12 +549,13 @@ class _CompactHistoryCard extends StatelessWidget {
                 if (configuredDiffers)
                   SettingsMetric(
                     context.l10n.statisticsConfiguredModel,
-                    sample.configuredModel!,
+                    _identityLabel(context, sample.configuredModel!),
                   ),
                 SettingsMetric(
                   context.l10n.statisticsReportedModel,
-                  sample.reportedModel ??
-                      context.l10n.statisticsModelUnavailable,
+                  sample.reportedModel == null
+                      ? context.l10n.statisticsModelUnavailable
+                      : _identityLabel(context, sample.reportedModel!),
                 ),
                 SettingsMetric(
                   context.l10n.statisticsReasoningEffort,
@@ -480,7 +563,7 @@ class _CompactHistoryCard extends StatelessWidget {
                 ),
                 SettingsMetric(
                   context.l10n.statisticsSpeed,
-                  context.tokenThroughputLabel(sample.tokensPerSecond),
+                  _formatSampleSpeed(context, sample.tokensPerSecond),
                 ),
                 SettingsMetric(
                   context.l10n.statisticsOutputTokens,
@@ -488,15 +571,15 @@ class _CompactHistoryCard extends StatelessWidget {
                 ),
                 SettingsMetric(
                   'TTFT',
-                  _formatMillis(sample.ttftMillis.toDouble()),
+                  _formatSampleMillis(context, sample.ttftMillis),
                 ),
                 SettingsMetric(
                   context.l10n.statisticsDecode,
-                  _formatMillis(sample.decodeMillis.toDouble()),
+                  _formatSampleMillis(context, sample.decodeMillis),
                 ),
                 SettingsMetric(
                   context.l10n.statisticsTotalResponse,
-                  _formatMillis(sample.totalResponseMillis.toDouble()),
+                  _formatSampleMillis(context, sample.totalResponseMillis),
                 ),
               ],
             ),
@@ -529,7 +612,7 @@ class _ModelIdentity extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              sample.displayModel,
+              _identityLabel(context, sample.displayModel),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -539,7 +622,7 @@ class _ModelIdentity extends StatelessWidget {
             ],
             if (configuredDiffers)
               Text(
-                '${context.l10n.statisticsConfiguredModel}: ${sample.configuredModel}',
+                '${context.l10n.statisticsConfiguredModel}: ${_identityLabel(context, sample.configuredModel!)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: context.text.labelSmall?.copyWith(
@@ -547,7 +630,7 @@ class _ModelIdentity extends StatelessWidget {
                 ),
               ),
             Text(
-              '${sample.providerDisplayName} · ${sample.providerInstanceId}',
+              '${_identityLabel(context, sample.providerDisplayName)} · ${_identityLabel(context, sample.providerInstanceId)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: context.text.labelSmall?.copyWith(
@@ -624,6 +707,22 @@ String _formatMillis(double millis) {
   return '${(millis / 1_000).toStringAsFixed(1)} s';
 }
 
+String _formatSampleMillis(BuildContext context, int? millis) {
+  return millis == null
+      ? context.l10n.statisticsMetricNotCollected
+      : _formatMillis(millis.toDouble());
+}
+
+String _formatSampleSpeed(BuildContext context, double? tokensPerSecond) {
+  return tokensPerSecond == null
+      ? context.l10n.statisticsMetricNotCollected
+      : context.tokenThroughputLabel(tokensPerSecond);
+}
+
+String _identityLabel(BuildContext context, String value) {
+  return value.isEmpty ? context.l10n.statisticsMetricNotCollected : value;
+}
+
 String _formatReasoningEffort(BuildContext context, String? effort) {
   return effort ?? context.l10n.statisticsReasoningEffortUnspecified;
 }
@@ -640,22 +739,25 @@ String _modelIdentityDescription(
   };
   final unavailable = context.l10n.statisticsModelUnavailable;
   return [
-    '${context.l10n.statisticsConfiguredModel}: ${sample.configuredModel ?? unavailable}',
-    '${context.l10n.statisticsSentModel}: ${sample.sentModel ?? unavailable}',
-    '${context.l10n.statisticsReportedModel}: ${sample.reportedModel ?? unavailable}',
+    '${context.l10n.statisticsConfiguredModel}: ${sample.configuredModel == null ? unavailable : _identityLabel(context, sample.configuredModel!)}',
+    '${context.l10n.statisticsSentModel}: ${sample.sentModel == null ? unavailable : _identityLabel(context, sample.sentModel!)}',
+    '${context.l10n.statisticsReportedModel}: ${sample.reportedModel == null ? unavailable : _identityLabel(context, sample.reportedModel!)}',
     status,
   ].join('\n');
 }
 
 String _formatPerformanceIdentity(
   BuildContext context,
-  ModelPerformanceSummaryView summary,
+  String providerDisplayName,
+  String providerInstanceId,
+  String model,
+  String? reasoningEffort,
 ) {
   return [
-    summary.providerDisplayName,
-    summary.providerInstanceId,
-    summary.model,
-    _formatReasoningEffort(context, summary.reasoningEffort),
+    _identityLabel(context, providerDisplayName),
+    _identityLabel(context, providerInstanceId),
+    _identityLabel(context, model),
+    _formatReasoningEffort(context, reasoningEffort),
   ].join(' · ');
 }
 

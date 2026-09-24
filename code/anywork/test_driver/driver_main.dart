@@ -79,6 +79,42 @@ Future<String> _handleDriverData(String? message) async {
       };
       if (state != null) StudioDriverState.publishState(state);
       return StudioDriverState.snapshotJson();
+    case 'statistics':
+      final state = switch (_container.read(studioControllerProvider)) {
+        AsyncData(:final value) => value,
+        _ => null,
+      };
+      final performance = state?.modelPerformance;
+      return jsonEncode({
+        'revision': performance?.revision,
+        'statisticsPending': performance?.statisticsPending,
+        'statisticsGap': performance?.statisticsGap,
+        'readFailed': performance?.readFailed,
+        'summaries': [
+          for (final summary in performance?.summaries ?? const [])
+            {
+              'providerInstanceId': summary.providerInstanceId,
+              'model': summary.model,
+              'effort': summary.reasoningEffort,
+              'samples': summary.sampleCount,
+              'tokens': summary.completionTokens,
+              'tokensPerSecond': summary.tokensPerSecond,
+            },
+        ],
+        'history': [
+          for (final sample in performance?.history ?? const [])
+            {
+              'providerInstanceId': sample.providerInstanceId,
+              'model': sample.model,
+              'effort': sample.reasoningEffort,
+              'tokens': sample.completionTokens,
+              'ttftMillis': sample.ttftMillis,
+              'decodeMillis': sample.decodeMillis,
+              'responseMillis': sample.totalResponseMillis,
+              'tokensPerSecond': sample.tokensPerSecond,
+            },
+        ],
+      });
     case 'thread-current':
       final state = switch (_container.read(studioControllerProvider)) {
         AsyncData(:final value) => value,

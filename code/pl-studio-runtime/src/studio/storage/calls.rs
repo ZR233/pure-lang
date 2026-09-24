@@ -130,6 +130,7 @@ pub(crate) struct ModelCallFact {
     pub(crate) has_unpriced_usage: bool,
     pub(crate) started_at: i64,
     pub(crate) finished_at: Option<i64>,
+    pub(crate) body_ref: Option<String>,
 }
 
 /// 单个 root 会话的费用聚合投影（由调用库 SQL 聚合得到）。
@@ -149,7 +150,7 @@ pub(crate) struct PurposeCostRollup {
     pub(crate) has_unpriced_usage: bool,
 }
 
-/// 一条性能历史样本；只有形成正 decode 时长的已终态调用才产生样本。
+/// 一条成功调用；未测得的时延不能伪装成零时延。
 #[derive(Debug, Clone)]
 pub(crate) struct PerformanceSampleRow {
     pub(crate) completed_at: i64,
@@ -160,9 +161,9 @@ pub(crate) struct PerformanceSampleRow {
     pub(crate) reported_model: Option<String>,
     pub(crate) reasoning_effort: Option<String>,
     pub(crate) completion_tokens: u64,
-    pub(crate) ttft_millis: u64,
-    pub(crate) decode_millis: u64,
-    pub(crate) response_millis: u64,
+    pub(crate) ttft_millis: Option<u64>,
+    pub(crate) decode_millis: Option<u64>,
+    pub(crate) response_millis: Option<u64>,
 }
 
 /// 按（provider instance、实际发送模型、reasoning effort）的数据库聚合分组。
@@ -291,8 +292,8 @@ impl CallsStore {
         tokio::fs::create_dir_all(&blobs_dir).await?;
         let mut options = ConnectOptions::new(crate::studio::paths::sqlite_url(path));
         options
-            .max_connections(1)
-            .min_connections(1)
+            .max_connections(2)
+            .min_connections(2)
             .connect_timeout(Duration::from_secs(8))
             .acquire_timeout(Duration::from_secs(8))
             .map_sqlx_sqlite_opts(|options| {
@@ -369,6 +370,10 @@ impl CallsStore {
     /// 当前已落库的最高 ticket，作为调用库 durable sequence 的观测值。
     pub(crate) fn durable_ticket(&self) -> u64 {
         *self.writer.durable_ticket.borrow()
+    }
+
+    pub(crate) fn subscribe_durable_ticket(&self) -> watch::Receiver<u64> {
+        self.writer.durable_ticket.subscribe()
     }
 
     /// 排队 mutation 的编码字节数合计，作为调用库 pending bytes 的观测值。
@@ -532,6 +537,26 @@ impl CallsStore {
         rows.iter().map(model_fact).collect()
     }
 
+    /// Recover the exact accepted attempt, including its provider receipt and timing.
+    pub(crate) async fn read_attempt_fact(&self, fact: &ModelCallFact) -> Result<AttemptUpdate> {
+        let reference = fact
+            .body_ref
+            .as_deref()
+            .context("model call body is missing")?;
+        let name = blob_file_name(reference).context("invalid model call body reference")?;
+        let body = tokio::fs::read(self.writer.blobs_dir.join(name)).await?;
+        ensure!(
+            pl_core::context::content_hash(&body) == reference,
+            "model call body hash mismatch"
+        );
+        let attempt: AttemptUpdate = serde_json::from_slice(&body)?;
+        ensure!(
+            attempt.attempt_id == fact.call_id && attempt.turn_id == fact.turn_id,
+            "model call body identity mismatch"
+        );
+        Ok(attempt)
+    }
+
     /// 按 root 会话聚合费用；调用库是唯一事实源，不依赖进程内缓存。
     pub(crate) async fn session_cost_rollups(&self) -> Result<Vec<SessionCostRollup>> {
         let mut rollups: Vec<SessionCostRollup> = Vec::new();
@@ -623,7 +648,7 @@ impl CallsStore {
         Ok(rollups)
     }
 
-    /// 读取最近性能历史样本（新到旧），供产品快照读取。
+    /// 读取最近的成功调用（新到旧），包含尚无有效性能计时的记录。
     pub(crate) async fn recent_performance_samples(
         &self,
         limit: u32,
@@ -633,12 +658,13 @@ impl CallsStore {
             .db
             .query_all_raw(statement(
                 "SELECT COALESCE(finished_at, started_at) AS completed_at,
-                        provider_instance_id, provider_display_name, configured_model,
-                        sent_model, reported_model, reasoning_effort, output_tokens,
+                        COALESCE(provider_instance_id, '') AS provider_instance_id,
+                        COALESCE(provider_display_name, '') AS provider_display_name,
+                        configured_model, COALESCE(sent_model, '') AS sent_model,
+                        reported_model, reasoning_effort, output_tokens,
                         ttft_millis, decode_millis, response_millis
                  FROM model_calls
-                 WHERE terminal=1 AND provider_instance_id IS NOT NULL
-                   AND sent_model IS NOT NULL AND decode_millis IS NOT NULL AND decode_millis > 0
+                 WHERE terminal=1 AND status='committed'
                  ORDER BY finished_at DESC, started_at DESC, call_id DESC
                  LIMIT ?",
                 vec![i64::from(limit).into()],
@@ -663,8 +689,9 @@ impl CallsStore {
                         COALESCE(SUM(decode_millis), 0) AS total_decode_millis,
                         COALESCE(SUM(response_millis), 0) AS total_response_millis
                  FROM model_calls
-                 WHERE terminal=1 AND provider_instance_id IS NOT NULL
-                   AND sent_model IS NOT NULL AND decode_millis IS NOT NULL AND decode_millis > 0
+                 WHERE terminal=1 AND status='committed' AND provider_instance_id IS NOT NULL
+                   AND sent_model IS NOT NULL AND decode_millis > 0
+                   AND output_tokens IS NOT NULL
                  GROUP BY provider_instance_id, sent_model, reasoning_effort
                  ORDER BY provider_instance_id, sent_model,
                           reasoning_effort IS NOT NULL, reasoning_effort",
@@ -1569,6 +1596,7 @@ fn model_fact(row: &QueryResult) -> Result<ModelCallFact> {
         has_unpriced_usage: row.try_get::<i64>("", "has_unpriced_usage")? != 0,
         started_at: row.try_get("", "started_at")?,
         finished_at: row.try_get("", "finished_at")?,
+        body_ref: row.try_get("", "body_ref")?,
     })
 }
 
@@ -1582,9 +1610,18 @@ fn performance_sample_row(row: &QueryResult) -> Result<PerformanceSampleRow> {
         reported_model: row.try_get("", "reported_model")?,
         reasoning_effort: row.try_get("", "reasoning_effort")?,
         completion_tokens: required_u64(row, "output_tokens")?,
-        ttft_millis: required_u64(row, "ttft_millis")?,
-        decode_millis: required_u64(row, "decode_millis")?,
-        response_millis: required_u64(row, "response_millis")?,
+        ttft_millis: row
+            .try_get::<Option<i64>>("", "ttft_millis")?
+            .map(u64::try_from)
+            .transpose()?,
+        decode_millis: row
+            .try_get::<Option<i64>>("", "decode_millis")?
+            .map(u64::try_from)
+            .transpose()?,
+        response_millis: row
+            .try_get::<Option<i64>>("", "response_millis")?
+            .map(u64::try_from)
+            .transpose()?,
     })
 }
 

@@ -149,10 +149,10 @@ class ModelPerformanceSampleView {
   final ModelMatchState modelMatchState;
   final String? reasoningEffort;
   final int completionTokens;
-  final int ttftMillis;
-  final int decodeMillis;
-  final int totalResponseMillis;
-  final double tokensPerSecond;
+  final int? ttftMillis;
+  final int? decodeMillis;
+  final int? totalResponseMillis;
+  final double? tokensPerSecond;
 
   String get filterKey =>
       jsonEncode(<Object?>[providerInstanceId, model, reasoningEffort]);
@@ -167,6 +167,9 @@ class ModelPerformanceSnapshotView {
     this.sessionCosts = const [],
     this.summaries = const [],
     this.history = const [],
+    this.statisticsPending = false,
+    this.statisticsGap = false,
+    this.readFailed = false,
   });
 
   final int revision;
@@ -174,6 +177,9 @@ class ModelPerformanceSnapshotView {
   final List<SessionCostView> sessionCosts;
   final List<ModelPerformanceSummaryView> summaries;
   final List<ModelPerformanceSampleView> history;
+  final bool statisticsPending;
+  final bool statisticsGap;
+  final bool readFailed;
 
   SessionCostView? sessionCost(String? rootThreadId) {
     if (rootThreadId == null) return null;
