@@ -181,6 +181,7 @@ Studio schema 不保存 SSH 服务器表；远端项目以可空 `projects.ssh_a
 
 helper 构建为 stripped 静态 musl 资产（aarch64 与 x86_64 两种 Linux 架构），在 GUI 构建
 Rust bridge 时以 zstd 压缩资产嵌入同一个应用二进制，不作为独立安装文件或网络资产；
+原生 GUI 预备并验证两种 helper 资产，纯 Dart demo 不加载 bridge，也不需要 helper 资产。
 helper target 由 `uname -s/-m` 穷尽映射，未知平台明确失败。core 先探测架构，再请求宿主
 adapter 解压唯一匹配的 helper bytes，并按内容摘要上传到版本化远端目录；同一摘要已有
 可执行文件时直接复用，不重复传输；未匹配架构保持压缩状态，也不产生本地解压文件；远端

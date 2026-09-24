@@ -1,9 +1,11 @@
-use crate::cli::{BridgeConfiguration, BuildGuiOptions, LogLevel, RunGuiOptions};
+use crate::cli::{BuildGuiOptions, LogLevel, RunGuiOptions};
 use crate::paths;
 use crate::process;
 use crate::pubspec_lock::{self, LockfileChange};
 use crate::remote_helper;
-use crate::rust_bridge::{self, BRIDGE_DEBUG_SYMBOLS_ENV, BRIDGE_LIBRARY_ENV, RustBridgeArtifacts};
+use crate::rust_bridge::{
+    self, BRIDGE_DEBUG_SYMBOLS_ENV, BRIDGE_LIBRARY_ENV, BridgeConfiguration, RustBridgeArtifacts,
+};
 use crate::studio_version;
 use anyhow::{Context, Result, bail, ensure};
 use sha2::{Digest, Sha256};
@@ -32,12 +34,6 @@ enum DemoMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DriverMode {
-    Disabled,
-    Enabled,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FlutterProcessMode {
     Batch,
     ResidentDriver,
@@ -55,23 +51,6 @@ struct FlutterInvocation<'a> {
 enum DistCleanMode {
     Clean,
     KeepExisting,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GeneratedSourcesPolicy {
-    UseCurrent,
-    RegenerateAndCheck,
-}
-
-impl GeneratedSourcesPolicy {
-    fn prepare(self, workspace_root: &Path, app_dir: &Path) -> Result<()> {
-        match self {
-            Self::UseCurrent => Ok(()),
-            Self::RegenerateAndCheck => {
-                codegen::check_gui_generated_sources(workspace_root, app_dir)
-            }
-        }
-    }
 }
 
 impl DesktopTarget {
@@ -131,7 +110,7 @@ pub(crate) fn verify_gui() -> Result<()> {
     let workspace_root = paths::workspace_root()?;
     let app_dir = paths::studio_app_dir(&workspace_root);
     print_context(&workspace_root, &app_dir);
-    GeneratedSourcesPolicy::RegenerateAndCheck.prepare(&workspace_root, &app_dir)?;
+    codegen::check_gui_generated_sources(&workspace_root, &app_dir)?;
     run_tool("cargo", &["fmt", "--all", "--check"], &workspace_root)?;
     run_tool(
         "dart",
@@ -191,28 +170,16 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let preflight_started = std::time::Instant::now();
     ensure_desktop_build_environment(target)?;
     ensure_flutter_dependencies(&workspace_root, &app_dir)?;
-    GeneratedSourcesPolicy::UseCurrent.prepare(&workspace_root, &app_dir)?;
     println!(
         "startup_stage=development_preflight elapsed_ms={}",
         preflight_started.elapsed().as_millis()
     );
-    let helper_started = std::time::Instant::now();
-    remote_helper::prepare_for_embedding(&workspace_root)?;
-    println!(
-        "startup_stage=build_remote_helpers elapsed_ms={}",
-        helper_started.elapsed().as_millis()
-    );
-
     let demo_mode = if options.demo {
         DemoMode::Demo
     } else {
         DemoMode::Native
     };
-    let driver_mode = if options.driver {
-        DriverMode::Enabled
-    } else {
-        DriverMode::Disabled
-    };
+    prepare_remote_helpers(&workspace_root, demo_mode)?;
     let driver_attachment_define = options
         .driver_attachment
         .as_ref()
@@ -234,17 +201,17 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let run_args = run_gui_args(
         target,
         &version_define,
-        driver_mode,
+        options.driver,
         options.profile,
         driver_attachment_define.as_deref(),
     );
-    let process_mode = match driver_mode {
-        DriverMode::Disabled => FlutterProcessMode::Batch,
-        DriverMode::Enabled => FlutterProcessMode::ResidentDriver,
+    let process_mode = if options.driver {
+        FlutterProcessMode::ResidentDriver
+    } else {
+        FlutterProcessMode::Batch
     };
     let bridge_artifacts = prepare_bridge_artifacts(
         &workspace_root,
-        target,
         demo_mode,
         if options.profile {
             BridgeConfiguration::Profile
@@ -268,12 +235,12 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
 fn run_gui_args<'a>(
     target: DesktopTarget,
     version_define: &'a str,
-    driver_mode: DriverMode,
+    driver: bool,
     profile: bool,
     driver_attachment_define: Option<&'a str>,
 ) -> Vec<&'a str> {
     let mut args = Vec::new();
-    if matches!(driver_mode, DriverMode::Enabled) {
+    if driver {
         args.push("--print-dtd");
     }
     args.extend([
@@ -286,7 +253,7 @@ fn run_gui_args<'a>(
     if profile {
         args.push("--profile");
     }
-    if matches!(driver_mode, DriverMode::Enabled) {
+    if driver {
         args.extend([
             "-t",
             "test_driver/driver_main.dart",
@@ -320,22 +287,19 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     print_context(&workspace_root, &app_dir);
     ensure_desktop_build_environment(target)?;
     ensure_flutter_dependencies(&workspace_root, &app_dir)?;
-    generated_sources_policy(options.check_generated).prepare(&workspace_root, &app_dir)?;
-    remote_helper::prepare_for_embedding(&workspace_root)?;
-
+    if options.check_generated {
+        codegen::check_gui_generated_sources(&workspace_root, &app_dir)?;
+    }
     let version_define = format!("--dart-define=ANYWORK_VERSION={app_version}");
-    let args = build_gui_args(target, &version_define, options.demo);
     let demo_mode = if options.demo {
         DemoMode::Demo
     } else {
         DemoMode::Native
     };
-    let bridge_artifacts = prepare_bridge_artifacts(
-        &workspace_root,
-        target,
-        demo_mode,
-        BridgeConfiguration::Release,
-    )?;
+    prepare_remote_helpers(&workspace_root, demo_mode)?;
+    let args = build_gui_args(target, &version_define);
+    let bridge_artifacts =
+        prepare_bridge_artifacts(&workspace_root, demo_mode, BridgeConfiguration::Release)?;
     run_flutter_with_process_mode(
         &workspace_root,
         &app_dir,
@@ -358,26 +322,14 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     copy_release_artifacts(&artifact_dir, &dist_dir, clean_mode)
 }
 
-fn generated_sources_policy(check_generated: bool) -> GeneratedSourcesPolicy {
-    if check_generated {
-        GeneratedSourcesPolicy::RegenerateAndCheck
-    } else {
-        GeneratedSourcesPolicy::UseCurrent
-    }
-}
-
-fn build_gui_args(target: DesktopTarget, version_define: &str, demo: bool) -> Vec<&str> {
-    let mut args = vec![
+fn build_gui_args(target: DesktopTarget, version_define: &str) -> Vec<&str> {
+    vec![
         "build",
         target.flutter_name(),
         "--release",
         version_define,
         "--no-pub",
-    ];
-    if demo {
-        args.push("--dart-define=ANYWORK_DEMO=true");
-    }
-    args
+    ]
 }
 
 fn ensure_flutter_dependencies(workspace_root: &Path, app_dir: &Path) -> Result<()> {
@@ -397,7 +349,10 @@ fn ensure_flutter_dependencies(workspace_root: &Path, app_dir: &Path) -> Result<
     let lock_path = app_dir.join("pubspec.lock");
     let original_lock = pubspec_lock::read_optional(&lock_path)?;
     let resolution_result = (|| {
-        prepare_pubspec_lock_for_active_hosted_url(&lock_path, hosted_url.as_deref())?;
+        if let Some(hosted_url) = hosted_url.as_deref() {
+            // Pub treats the hosted URL as part of a package's source identity.
+            pubspec_lock::rewrite_hosted_urls(&lock_path, hosted_url)?;
+        }
         run_flutter(workspace_root, app_dir, &["pub", "get"], DemoMode::Native)?;
         match pubspec_lock::classify_change(&lock_path, original_lock.as_deref())? {
             LockfileChange::Unchanged => {}
@@ -425,20 +380,6 @@ fn ensure_flutter_dependencies(workspace_root: &Path, app_dir: &Path) -> Result<
         .with_context(|| format!("failed to create {}", stamp_dir.display()))?;
     fs::write(&stamp_path, format!("{fingerprint}\n"))
         .with_context(|| format!("failed to write {}", stamp_path.display()))
-}
-
-fn prepare_pubspec_lock_for_active_hosted_url(
-    lock_path: &Path,
-    hosted_url: Option<&str>,
-) -> Result<()> {
-    let Some(hosted_url) = hosted_url else {
-        return Ok(());
-    };
-
-    // Pub treats the hosted URL as part of a package's source identity. Align the
-    // temporary lockfile before resolution so switching mirrors does not upgrade
-    // otherwise locked dependencies.
-    pubspec_lock::rewrite_hosted_urls(lock_path, hosted_url)
 }
 
 fn flutter_dependency_fingerprint(app_dir: &Path, hosted_url: Option<&str>) -> Result<String> {
@@ -487,13 +428,24 @@ fn print_context(workspace_root: &Path, app_dir: &Path) {
     println!("Studio app dir: {}", app_dir.display());
 }
 
+fn prepare_remote_helpers(workspace_root: &Path, demo_mode: DemoMode) -> Result<()> {
+    if matches!(demo_mode, DemoMode::Native) {
+        let started = std::time::Instant::now();
+        remote_helper::prepare_for_embedding(workspace_root)?;
+        println!(
+            "startup_stage=build_remote_helpers elapsed_ms={}",
+            started.elapsed().as_millis()
+        );
+    }
+    Ok(())
+}
+
 fn prepare_bridge_artifacts(
     workspace_root: &Path,
-    target: DesktopTarget,
     demo_mode: DemoMode,
     configuration: BridgeConfiguration,
 ) -> Result<Option<RustBridgeArtifacts>> {
-    if needs_bridge_artifacts(target, demo_mode) {
+    if matches!(demo_mode, DemoMode::Native) {
         let started = std::time::Instant::now();
         let result =
             rust_bridge::build_workspace_artifacts(workspace_root, configuration).map(Some);
@@ -504,15 +456,6 @@ fn prepare_bridge_artifacts(
         return result;
     }
     Ok(None)
-}
-
-fn needs_bridge_artifacts(target: DesktopTarget, demo_mode: DemoMode) -> bool {
-    // Native 模式在所有桌面平台都需要预构建桥库；Demo 模式纯 Dart 运行。
-    matches!(demo_mode, DemoMode::Native)
-        && matches!(
-            target,
-            DesktopTarget::Windows | DesktopTarget::Linux | DesktopTarget::Macos
-        )
 }
 
 fn run_flutter(

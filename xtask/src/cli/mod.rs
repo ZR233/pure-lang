@@ -41,8 +41,6 @@ pub(crate) enum Command {
         #[command(subcommand)]
         action: ReleaseGuiOptions,
     },
-    /// Build and copy Windows Rust bridge artifacts.
-    BuildRustBridge(BuildRustBridgeOptions),
     /// Cross-compile the minimal Linux SSH remote helper.
     BuildRemoteHelper(BuildRemoteHelperOptions),
     /// Refresh bundled upstream preset Skills inside pl-studio-runtime.
@@ -149,22 +147,6 @@ pub(crate) enum ReleaseGuiOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
-pub(crate) struct BuildRustBridgeOptions {
-    /// Pure-Lang workspace root.
-    #[arg(long)]
-    pub(crate) workspace_root: PathBuf,
-    /// Cargo bridge build configuration.
-    #[arg(long, value_enum)]
-    pub(crate) configuration: BridgeConfiguration,
-    /// Directory that receives bridge DLL/PDB artifacts.
-    #[arg(long)]
-    pub(crate) output_dir: PathBuf,
-    /// Optional Cargo target directory.
-    #[arg(long)]
-    pub(crate) target_dir: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub(crate) struct BuildRemoteHelperOptions {
     /// Rust target triple for one helper artifact.
     #[arg(long, value_name = "TARGET", conflicts_with = "all_targets")]
@@ -172,22 +154,6 @@ pub(crate) struct BuildRemoteHelperOptions {
     /// Build every supported helper target.
     #[arg(long, conflicts_with = "target")]
     pub(crate) all_targets: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub(crate) enum BridgeConfiguration {
-    #[value(name = "Debug")]
-    Debug,
-    #[value(name = "Profile")]
-    Profile,
-    #[value(name = "Release")]
-    Release,
-}
-
-impl BridgeConfiguration {
-    pub(crate) fn uses_release_profile(self) -> bool {
-        matches!(self, Self::Profile | Self::Release)
-    }
 }
 
 pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<ParseOutcome> {

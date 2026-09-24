@@ -42,7 +42,7 @@ impl NativeTools {
         let missing = required
             .iter()
             .copied()
-            .filter(|program| find_program(program).is_none())
+            .filter(|program| which::which(program).is_err())
             .collect::<Vec<_>>();
         if !missing.is_empty() {
             bail!("{}", missing_programs_diagnostic(&missing));
@@ -176,19 +176,5 @@ fn probe_failure_diagnostic(stage: &str, command: &str, raw_output: &str) -> Str
 }
 
 fn required_program(program: &str) -> Result<PathBuf> {
-    find_program(program).with_context(|| format!("{program} disappeared from PATH during probe"))
-}
-
-fn find_program(program: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|directory| directory.join(program))
-        .find(|candidate| is_executable(candidate))
-}
-
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-
-    path.metadata()
-        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    which::which(program).with_context(|| format!("{program} disappeared from PATH during probe"))
 }

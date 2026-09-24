@@ -1,7 +1,5 @@
-use crate::cli::{BridgeConfiguration, BuildRustBridgeOptions};
 use crate::paths;
 use crate::process;
-use crate::remote_helper;
 use anyhow::{Context, Result, bail};
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -12,6 +10,19 @@ pub(crate) const BRIDGE_DEBUG_SYMBOLS_ENV: &str = "ANYWORK_BRIDGE_DEBUG_SYMBOLS"
 
 const BRIDGE_PACKAGE_NAME: &str = "pl-studio-bridge";
 const BRIDGE_TARGET_NAME: &str = "pl_studio_bridge";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BridgeConfiguration {
+    Debug,
+    Profile,
+    Release,
+}
+
+impl BridgeConfiguration {
+    fn uses_release_profile(self) -> bool {
+        matches!(self, Self::Profile | Self::Release)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RustBridgeArtifacts {
@@ -29,23 +40,22 @@ impl RustBridgeArtifacts {
     }
 }
 
-pub(crate) fn build(options: BuildRustBridgeOptions) -> Result<()> {
-    let workspace_root = resolve_workspace_root(&options.workspace_root)?;
-    remote_helper::prepare_for_embedding(&workspace_root)?;
-    let artifacts = build_artifacts(
-        &workspace_root,
-        options.configuration,
-        options.target_dir.as_deref(),
-    )?;
-    copy_artifacts(&artifacts, &options.output_dir)
-}
-
 pub(crate) fn build_workspace_artifacts(
     workspace_root: &Path,
     configuration: BridgeConfiguration,
 ) -> Result<RustBridgeArtifacts> {
     let workspace_root = resolve_workspace_root(workspace_root)?;
-    build_artifacts(&workspace_root, configuration, None)
+    let artifact_target_dir = resolve_cargo_target_dir(
+        &workspace_root,
+        std::env::var_os("CARGO_TARGET_DIR").as_deref(),
+    );
+    let args = cargo_build_args(configuration);
+    let display = process::display_command("cargo", &args);
+    let mut command = process::path_command("cargo", &args);
+    command.current_dir(&workspace_root);
+    process::run_checked(&mut command, &display)?;
+
+    locate_built_artifacts(&artifact_target_dir, configuration)
 }
 
 fn resolve_workspace_root(workspace_root: &Path) -> Result<PathBuf> {
@@ -59,29 +69,7 @@ fn resolve_workspace_root(workspace_root: &Path) -> Result<PathBuf> {
     Ok(workspace_root)
 }
 
-fn build_artifacts(
-    workspace_root: &Path,
-    configuration: BridgeConfiguration,
-    target_dir: Option<&Path>,
-) -> Result<RustBridgeArtifacts> {
-    let artifact_target_dir = resolve_cargo_target_dir(
-        workspace_root,
-        target_dir,
-        std::env::var_os("CARGO_TARGET_DIR").as_deref(),
-    );
-    let args = cargo_build_args(configuration, target_dir);
-    let display = process::display_command("cargo", &args);
-    let mut command = process::path_command("cargo", &args);
-    command.current_dir(workspace_root);
-    process::run_checked(&mut command, &display)?;
-
-    locate_built_artifacts(&artifact_target_dir, configuration)
-}
-
-fn cargo_build_args(
-    configuration: BridgeConfiguration,
-    target_dir: Option<&Path>,
-) -> Vec<OsString> {
+fn cargo_build_args(configuration: BridgeConfiguration) -> Vec<OsString> {
     let mut args = vec![
         OsString::from("build"),
         OsString::from("-p"),
@@ -92,21 +80,15 @@ fn cargo_build_args(
     if configuration.uses_release_profile() {
         args.push(OsString::from("--release"));
     }
-    if let Some(target_dir) = target_dir {
-        args.push(OsString::from("--target-dir"));
-        args.push(target_dir.as_os_str().to_owned());
-    }
     args
 }
 
 fn resolve_cargo_target_dir(
     workspace_root: &Path,
-    command_target_dir: Option<&Path>,
     environment_target_dir: Option<&OsStr>,
 ) -> PathBuf {
-    let configured_target_dir = command_target_dir
-        .map(Path::to_path_buf)
-        .or_else(|| environment_target_dir.map(PathBuf::from))
+    let configured_target_dir = environment_target_dir
+        .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("target"));
     if configured_target_dir.is_absolute() {
         configured_target_dir
@@ -163,28 +145,6 @@ fn validate_artifact_path(path: &Path, artifact_kind: &str) -> Result<PathBuf> {
         );
     }
     Ok(path.to_path_buf())
-}
-
-fn copy_artifacts(artifacts: &RustBridgeArtifacts, output_dir: &Path) -> Result<()> {
-    fs::create_dir_all(output_dir)
-        .with_context(|| format!("failed to create {}", output_dir.display()))?;
-    copy_artifact(artifacts.dynamic_library(), output_dir)?;
-    if let Some(debug_symbols) = artifacts.debug_symbols() {
-        copy_artifact(debug_symbols, output_dir)?;
-    }
-    Ok(())
-}
-
-fn copy_artifact(source: &Path, output_dir: &Path) -> Result<()> {
-    let file_name = source.file_name().with_context(|| {
-        format!(
-            "Rust bridge artifact has no file name: {}",
-            source.display()
-        )
-    })?;
-    fs::copy(source, output_dir.join(file_name))
-        .with_context(|| format!("failed to copy {}", source.display()))?;
-    Ok(())
 }
 
 #[cfg(target_os = "windows")]

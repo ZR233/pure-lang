@@ -34,7 +34,6 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
             cli::Command::RunGui(options) => flutter::run_gui(options),
             cli::Command::BuildGui(options) => flutter::build_gui(options),
             cli::Command::ReleaseGui { action } => release::run(action),
-            cli::Command::BuildRustBridge(options) => rust_bridge::build(options),
             cli::Command::BuildRemoteHelper(options) => remote_helper::build(options),
             cli::Command::SyncSkills => sync_skills::run(),
         },
