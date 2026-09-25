@@ -352,6 +352,24 @@ impl CallsStore {
         self.writer.durable_ticket.subscribe()
     }
 
+    /// Reads the committed effect watermark for one Thread, independently of global queue tickets.
+    pub(crate) async fn durable_effect_sequence(&self, thread_id: &str) -> Result<u64> {
+        let row = self
+            .writer
+            .db
+            .query_one_raw(statement(
+                "SELECT durable_write_seq FROM call_watermarks WHERE thread_id=?",
+                vec![thread_id.into()],
+            ))
+            .await?;
+        row.map(|row| {
+            let value: i64 = row.try_get("", "durable_write_seq")?;
+            u64::try_from(value).map_err(Into::into)
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(0))
+    }
+
     /// 排队 mutation 的编码字节数合计，作为调用库 pending bytes 的观测值。
     pub(crate) fn pending_bytes(&self) -> usize {
         let queue = self

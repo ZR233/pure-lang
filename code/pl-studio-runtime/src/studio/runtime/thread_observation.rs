@@ -358,10 +358,19 @@ async fn rebuild_skipped_facts(
     snapshot: &ThreadSnapshot,
     folded: &[Arc<ThreadEffectBatch>],
     skipped: std::ops::RangeInclusive<u64>,
+    recovered_through: u64,
 ) -> Result<()> {
+    let skipped_start = *skipped.start();
+    let skipped_end = *skipped.end();
     let mut known = folded
         .iter()
-        .filter_map(|effect| effect.turn.as_ref().map(|turn| turn.turn_id.clone()))
+        .filter_map(|effect| {
+            effect
+                .turn
+                .as_ref()
+                .filter(|turn| turn.state != pl_core::thread::TurnState::Running)
+                .map(|turn| turn.turn_id.clone())
+        })
         .collect::<std::collections::BTreeSet<_>>();
     let product = projector
         .store
@@ -374,8 +383,7 @@ async fn rebuild_skipped_facts(
         projector.store.calls().mark_statistics_gap();
         tracing::warn!(thread_id = id, %error, "skipped billing statistics could not be recovered");
     }
-    // 有界恢复：按 ordinal 游标逐页读取 durable 的终态 Turn，既不全表扫描，也不因为丢失 effect
-    // 而静默跳过 continuation。历史只保存协议形态，这里映射回 runtime 的 core 形态再发出报告。
+    // 只读取丢失的 effect 区间；历史条目的 ordinal 是展示顺序，不能代替通知身份的 write_seq。
     let history = projector.store.history(id).await?;
     // 根 Thread 没有父可唤醒，但产品目录与终态派生同样必须来自 durable terminal 事实，而不是
     // 可能已裁剪或仍显示 Running 的 snapshot。这里只读最新一条终态 Turn（ordinal 主键逆序
@@ -410,17 +418,17 @@ async fn rebuild_skipped_facts(
         return Ok(());
     }
     const TERMINAL_TURN_PAGE: usize = 256;
-    let mut after_ordinal = 0_u64;
+    let mut after = (skipped_start, 0);
     loop {
         let page = history
-            .terminal_turns_after(after_ordinal, TERMINAL_TURN_PAGE)
+            .terminal_turns_in_effect_range(after, skipped_end, TERMINAL_TURN_PAGE)
             .await?;
         if page.is_empty() {
             break;
         }
         let read = page.len();
-        for item in page {
-            after_ordinal = after_ordinal.max(item.ordinal);
+        for (sequence, item) in page {
+            after = (sequence, item.ordinal);
             let pl_protocol::ThreadItemState::Turn(turn) = item.state() else {
                 continue;
             };
@@ -438,8 +446,15 @@ async fn rebuild_skipped_facts(
                 state,
                 model_steps: 0,
             };
-            reports::publish_terminal(projector, &product, snapshot, &record, item.ordinal, false)
-                .await?;
+            reports::publish_terminal(
+                projector,
+                &product,
+                snapshot,
+                &record,
+                sequence,
+                sequence > recovered_through,
+            )
+            .await?;
         }
         if read < TERMINAL_TURN_PAGE {
             break;
@@ -646,8 +661,15 @@ async fn project(
                     head,
                     "Thread product observer rebuilding terminal facts the live window no longer retains"
                 );
-                rebuild_skipped_facts(projector, id, snapshot, &effects, after + 1..=head - 1)
-                    .await?;
+                rebuild_skipped_facts(
+                    projector,
+                    id,
+                    snapshot,
+                    &effects,
+                    after + 1..=head - 1,
+                    recovered_through,
+                )
+                .await?;
                 after = head - 1;
                 continue;
             }

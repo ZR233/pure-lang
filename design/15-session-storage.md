@@ -246,7 +246,11 @@ CREATE TABLE history_items (
 
 CREATE INDEX history_items_by_turn            ON history_items(turn_id, ordinal);
 CREATE INDEX history_items_by_kind_lifecycle  ON history_items(kind, lifecycle, ordinal);
+CREATE INDEX history_terminal_turns_by_write_seq ON history_items(last_write_seq, ordinal)
+    WHERE kind='turn' AND lifecycle='terminal';
 CREATE INDEX history_items_by_kind            ON history_items(kind, ordinal);
+
+-- 终态 Turn 首次提交的 last_write_seq 是通知身份，后续修订不得改写该序号。
 
 CREATE TABLE history_turns (
     turn_id         TEXT PRIMARY KEY,
@@ -359,6 +363,11 @@ ID。大正文使用内容寻址 blob 引用。另有一张 `call_watermarks(thr
 durable_write_seq)` 记录每个 Thread 的调用队列水位，供 `flush_through` 固定目标与续跑对齐。
 调用记录不参与 Thread 恢复或 Timeline 排序；Thread 关闭不等待可丢调用队列，更不等待
 其他 Thread 的统计。统计行缺失必须明确标记，不能显示为零。
+
+逐 Thread 的调用已接纳/已落库水位均使用该 Thread 的 effect 序号，不混用全局调用队列
+ticket；已落库水位只在调用库事务成功后推进，并在重新激活时从调用库恢复。队列明确
+拒绝的 ticket 不是已落库事实。调用库提交后独立通知诊断观察者，不能依赖后续 history
+effect 才刷新最后一次调用的水位。
 
 同一调用身份重试写入幂等，冲突明确失败；未结束调用可以更新为终态，但终态不可被较旧观察
 覆盖。计费和性能统计从调用库或其明确产品投影读取，不扫描会话历史。

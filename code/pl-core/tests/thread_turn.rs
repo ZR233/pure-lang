@@ -4,9 +4,12 @@ mod tool_support;
 
 use std::sync::{Arc, Mutex};
 
-use pl_core::context::{ContextContent, ContextSource};
+use pl_core::context::{ContextContent, ContextSource, OpaquePayload};
 use pl_core::model::DynModelSession;
-use pl_core::thread::{ThreadHandle, TurnOutcome, TurnState};
+use pl_core::thread::{
+    ModelStepLimit, ThreadError, ThreadHandle, TurnOutcome, TurnState, inbox::ThreadMessage,
+    input::InputDriverOptions,
+};
 
 use support::{ScriptedModel, turn};
 use tool_support::tool;
@@ -70,5 +73,59 @@ async fn a_turn_commits_user_model_and_tool_facts_in_call_order() {
             turn.turn_id == "question" && turn.state == TurnState::Finished(TurnOutcome::Completed)
         })
     }));
+    thread.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_durable_message_receipt_wakes_only_its_unconsumed_message() {
+    let (model, requests) = ScriptedModel::new(&[]);
+    let thread = ThreadHandle::start("parent".into(), DynModelSession::new(model)).unwrap();
+    let message = ThreadMessage {
+        id: "child-report".into(),
+        source_id: "child".into(),
+        payload: OpaquePayload::text("finished"),
+        context: vec![support::text("finished")],
+    };
+    let sequence = thread.send_message(message).await.unwrap();
+    let options = InputDriverOptions {
+        max_model_steps: ModelStepLimit::Limited(2.try_into().unwrap()),
+    };
+    assert!(matches!(
+        thread
+            .wake_accepted_message("other", sequence, options)
+            .await,
+        Err(ThreadError::InvalidIdentity)
+    ));
+    assert_eq!(thread.snapshot().inbox.len(), 1);
+    assert!(
+        thread
+            .wake_accepted_message("child-report", sequence, options)
+            .await
+            .unwrap()
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while thread.snapshot().consumed_messages < sequence {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        !thread
+            .wake_accepted_message("child-report", sequence, options)
+            .await
+            .unwrap()
+    );
+    assert_eq!(thread.snapshot().inbox_sequence, sequence);
+    {
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].records.iter().any(|record| {
+            record.source
+                == ContextSource::Runtime {
+                    source_id: "child".into(),
+                }
+        }));
+    }
     thread.close().await.unwrap();
 }

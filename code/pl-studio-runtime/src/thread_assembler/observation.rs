@@ -105,6 +105,26 @@ impl StudioThreadAssembler {
         thread_id: &str,
         message: &pl_core::thread::inbox::ThreadMessage,
     ) -> Result<DeliveryDisposition, ThreadAssemblyError> {
+        match self
+            .durable_message_identity(thread_id, &message.id)
+            .await?
+        {
+            None => Ok(DeliveryDisposition::New),
+            Some(DurableMessageIdentity::Proven { sequence, digest })
+                if digest == message.digest() =>
+            {
+                Ok(DeliveryDisposition::Receipt(sequence))
+            }
+            Some(DurableMessageIdentity::Proven { .. }) => Ok(DeliveryDisposition::Conflict),
+            Some(DurableMessageIdentity::Unverifiable) => Ok(DeliveryDisposition::Unverifiable),
+        }
+    }
+
+    async fn durable_message_identity(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+    ) -> Result<Option<DurableMessageIdentity>, ThreadAssemblyError> {
         // Resolve the callback before awaiting: the registry lock only guards the synchronous state
         // read, so no `MutexGuard` is ever held across the durable query (this may run on a spawned
         // `Send` future).
@@ -115,18 +135,9 @@ impl StudioThreadAssembler {
             .as_ref()
             .and_then(|observation| observation.2.clone());
         let Some(lookup) = lookup else {
-            return Ok(DeliveryDisposition::New);
+            return Ok(None);
         };
-        match lookup(thread_id.to_owned(), message.id.clone()).await? {
-            None => Ok(DeliveryDisposition::New),
-            Some(DurableMessageIdentity::Proven { sequence, digest })
-                if digest == message.digest() =>
-            {
-                Ok(DeliveryDisposition::Receipt(sequence))
-            }
-            Some(DurableMessageIdentity::Proven { .. }) => Ok(DeliveryDisposition::Conflict),
-            Some(DurableMessageIdentity::Unverifiable) => Ok(DeliveryDisposition::Unverifiable),
-        }
+        lookup(thread_id.to_owned(), message_id.to_owned()).await
     }
     pub(crate) async fn notify_parent(
         &self,
@@ -153,21 +164,22 @@ impl StudioThreadAssembler {
         let Some((thread, execution)) = target else {
             return Ok(());
         };
-        // Cross-window/cross-restart idempotency: the target's durable history is the authority for
-        // "this message identity was already committed with this body". The live inbox snapshot
-        // below only covers the resident window, so an identity that left it must not be re-delivered
-        // as new work, and an identity whose accepted body cannot be proven must fail closed instead.
-        match self.adjudicate_message(id, &message).await? {
-            // An identical repeat is already committed: there is nothing left to deliver.
-            DeliveryDisposition::Receipt(_) => return Ok(()),
-            // The identity is proven accepted but this body cannot be verified (pre-index history).
-            // Fail closed means "never re-deliver", so the notification is dropped instead of being
-            // replayed as a new message.
-            DeliveryDisposition::Unverifiable => return Ok(()),
-            DeliveryDisposition::Conflict => {
-                return Err(ThreadAssemblyError::MessageConflict(message.id.clone()));
+        // A terminal event's child write sequence is its identity. Its report includes observation-
+        // time fields, so regenerating it after a restart need not reproduce the first accepted
+        // body. The parent's durable receipt owns that body; a repeated event only wakes its still
+        // pending message. Ordinary authored messages retain strict body-digest adjudication.
+        match self.durable_message_identity(id, &message.id).await? {
+            Some(DurableMessageIdentity::Proven { sequence, .. }) => {
+                if wake {
+                    thread
+                        .wake_accepted_message(&message.id, sequence, execution)
+                        .await?;
+                }
+                return Ok(());
             }
-            DeliveryDisposition::New => {}
+            // Older history proves acceptance without a receipt. Never admit a second copy.
+            Some(DurableMessageIdentity::Unverifiable) => return Ok(()),
+            None => {}
         }
         // The committed inbox already owns this immutable terminal watermark. In particular,
         // replay must not resend a migrated, previously consumed notification with a new body.

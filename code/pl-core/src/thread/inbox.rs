@@ -189,6 +189,32 @@ impl Owner {
         }
     }
 
+    pub(super) fn wake_accepted_message(
+        &mut self,
+        id: &str,
+        sequence: u64,
+        options: input::InputDriverOptions,
+    ) -> Result<bool, ThreadError> {
+        if self.state.lifecycle != ThreadLifecycle::Open || self.interrupt.is_closing() {
+            return Err(ThreadError::Closed);
+        }
+        if sequence <= self.state.consumed_messages {
+            return Ok(false);
+        }
+        if !self
+            .state
+            .inbox
+            .iter()
+            .any(|record| record.sequence == sequence && record.message.id == id)
+        {
+            return Err(ThreadError::InvalidIdentity);
+        }
+        self.request_message_wakeup(sequence, Some(options));
+        self.publish();
+        self.publish_snapshot();
+        Ok(true)
+    }
+
     pub(super) fn message_context(&self, turn_id: &str) -> (Vec<ContextRecord>, u64) {
         let mut watermark = self.state.consumed_messages;
         let records = self

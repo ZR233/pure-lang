@@ -377,6 +377,31 @@ impl ThreadHandle {
         response.await.map_err(|_| ThreadError::Closed)?
     }
 
+    /// Wakes an already accepted, still unconsumed message without admitting another copy.
+    /// Returns false if the message has since been consumed. The host must first prove the
+    /// identity and sequence against durable history; an unknown pending identity fails closed.
+    ///
+    /// # Errors
+    /// Rejects closed owners and pending identities that do not match the accepted message.
+    pub async fn wake_accepted_message(
+        &self,
+        id: &str,
+        sequence: u64,
+        options: input::InputDriverOptions,
+    ) -> Result<bool, ThreadError> {
+        let (reply, response) = oneshot::channel();
+        self.mailbox
+            .send(super::mailbox::MailboxCommand::WakeAcceptedMessage {
+                id: id.to_owned(),
+                sequence,
+                options,
+                reply,
+            })
+            .await
+            .map_err(|_| ThreadError::Closed)?;
+        response.await.map_err(|_| ThreadError::Closed)?
+    }
+
     /// Accepts a parent-authored message, interrupts active work and continues after cleanup.
     /// Duplicate identities return the original receipt without restarting execution.
     ///

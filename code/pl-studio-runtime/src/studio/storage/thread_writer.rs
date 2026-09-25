@@ -451,6 +451,13 @@ struct Inner {
     history: tokio::sync::OnceCell<crate::studio::storage::history::HistoryStore>,
     channel: Arc<HistoryChannel>,
     changed: Arc<tokio::sync::Notify>,
+    call_observer_stop: tokio::sync::watch::Sender<bool>,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        self.call_observer_stop.send_replace(true);
+    }
 }
 
 /// Cloneable sink attached to one core owner incarnation.
@@ -613,6 +620,7 @@ impl ThreadStorageSink {
     pub(crate) async fn new(store: StudioStore, thread: pl_protocol::Thread) -> Result<Self> {
         let chat = store.chat_session(&thread.id).await?;
         chat.initialize_order_allocator().await?;
+        let (call_observer_stop, mut stop_observer) = tokio::sync::watch::channel(false);
         let owner = NEXT_WRITER_INCARNATION.fetch_add(1, Ordering::Relaxed);
         let channel = store.thread_persistence().history_channel(&thread.id);
         let inner = Arc::new(Inner {
@@ -623,6 +631,7 @@ impl ThreadStorageSink {
             history: tokio::sync::OnceCell::new(),
             changed: channel.changed.clone(),
             channel,
+            call_observer_stop,
         });
         // Bind this incarnation before it reports anything: a superseded writer must never clear or
         // fail the watermarks of the writer that replaced it, and this one must be freed from the
@@ -635,6 +644,21 @@ impl ThreadStorageSink {
             let progress = lock_progress(&inner);
             report(&inner, &progress);
         }
+        let observer = Arc::downgrade(&inner);
+        let calls = inner.store.calls().clone();
+        tokio::spawn(async move {
+            let mut durable_tickets = calls.subscribe_durable_ticket();
+            loop {
+                tokio::select! {
+                    () = refresh_call_watermark(&calls, &observer) => {},
+                    _ = stop_observer.changed() => break,
+                }
+                tokio::select! {
+                    Ok(()) = durable_tickets.changed() => {},
+                    _ = stop_observer.changed() => break,
+                }
+            }
+        });
         let detach = DetachGuard {
             store: inner.store.clone(),
             thread_id: inner.thread.id.clone(),
@@ -725,6 +749,36 @@ impl ThreadStorageSink {
             }
         });
         Ok(Self(inner))
+    }
+}
+
+async fn refresh_call_watermark(
+    calls: &crate::studio::storage::calls::CallsStore,
+    observer: &std::sync::Weak<Inner>,
+) {
+    let Some(inner) = observer.upgrade() else {
+        return;
+    };
+    let id = inner.thread.id.clone();
+    let store = inner.store.clone();
+    drop(inner);
+    match calls.durable_effect_sequence(&id).await {
+        Ok(sequence) => {
+            let Some(inner) = observer.upgrade() else {
+                return;
+            };
+            let mut progress = lock_progress(&inner);
+            if sequence > progress.calls_durable {
+                progress.calls_durable = sequence;
+                progress.calls_admitted = progress.calls_admitted.max(sequence);
+                report(&inner, &progress);
+            }
+        }
+        Err(error) => {
+            calls.mark_statistics_gap();
+            tracing::warn!(thread_id = id, %error, "call watermark could not be read");
+            store.thread_persistence().report_calls(calls.metrics());
+        }
     }
 }
 
@@ -1852,6 +1906,23 @@ mod storage_fault_tests {
         let status = sink.0.channel.subscribe().borrow().clone();
         assert_eq!(status.queued_records, 0);
         assert_eq!(status.fault, None);
+        let mut persistence = store.thread_persistence().subscribe();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let row = store
+                    .thread_persistence()
+                    .queue_snapshot()
+                    .threads
+                    .into_iter()
+                    .find(|row| row.thread_id == "lost-ack")
+                    .context("missing live Thread persistence row")?;
+                if row.calls_admitted_sequence == Some(1) && row.calls_durable_sequence == Some(1) {
+                    break Ok::<_, anyhow::Error>(());
+                }
+                persistence.changed().await?;
+            }
+        })
+        .await??;
         Ok(())
     }
 

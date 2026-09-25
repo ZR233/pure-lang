@@ -90,6 +90,12 @@ pub(super) enum MailboxCommand {
         Option<input::InputDriverOptions>,
         oneshot::Sender<Result<u64, ThreadError>>,
     ),
+    WakeAcceptedMessage {
+        id: String,
+        sequence: u64,
+        options: input::InputDriverOptions,
+        reply: oneshot::Sender<Result<bool, ThreadError>>,
+    },
 }
 
 impl Owner {
@@ -360,6 +366,14 @@ impl Owner {
                     self.receive_message(message, drive)
                 };
                 let _ = reply.send(result);
+            }
+            MailboxCommand::WakeAcceptedMessage {
+                id,
+                sequence,
+                options,
+                reply,
+            } => {
+                let _ = reply.send(self.wake_accepted_message(&id, sequence, options));
             }
         }
     }

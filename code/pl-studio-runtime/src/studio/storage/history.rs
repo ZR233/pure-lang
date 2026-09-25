@@ -732,28 +732,45 @@ impl HistoryStore {
         }
     }
 
-    /// Reads at most `limit` durable terminal Turn items after `after_ordinal`, in ordinal order.
+    /// Reads terminal Turns from one missing effect window, keyed by their original write sequence.
     ///
     /// Live product observation uses this only to reconstruct terminal facts after its bounded
-    /// effect window lost the effects that produced them, so a lagged observer still reports every
-    /// terminal Turn instead of silently advancing past it. Both the ordinal cursor and the row
-    /// limit bound one read, so recovery pages forward instead of scanning the whole timeline.
-    pub(crate) async fn terminal_turns_after(
+    /// effect window lost the effects that produced them. The original write sequence is also the
+    /// terminal notification identity; an item's ordinal is only its presentation order.
+    pub(crate) async fn terminal_turns_in_effect_range(
         &self,
-        after_ordinal: u64,
+        after: (u64, u64),
+        through_sequence: u64,
         limit: usize,
-    ) -> Result<Vec<ThreadItem>> {
+    ) -> Result<Vec<(u64, ThreadItem)>> {
         let Some(connection) = self.reader().await? else {
             return Ok(Vec::new());
         };
-        query_items(
-            &connection.db,
-            "SELECT payload FROM history_items
-             WHERE kind='turn' AND lifecycle='terminal' AND ordinal > ?
-             ORDER BY ordinal ASC LIMIT ?",
-            vec![integer(after_ordinal)?.into(), integer(limit)?.into()],
-        )
-        .await
+        let rows = connection
+            .db
+            .query_all_raw(statement(
+                "SELECT last_write_seq,ordinal,payload FROM history_items
+                 WHERE kind='turn' AND lifecycle='terminal'
+                   AND (last_write_seq > ? OR (last_write_seq = ? AND ordinal > ?))
+                   AND last_write_seq <= ?
+                 ORDER BY last_write_seq ASC,ordinal ASC LIMIT ?",
+                vec![
+                    integer(after.0)?.into(),
+                    integer(after.0)?.into(),
+                    integer(after.1)?.into(),
+                    integer(through_sequence)?.into(),
+                    integer(limit)?.into(),
+                ],
+            ))
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok((
+                    u64::try_from(row.try_get::<i64>("", "last_write_seq")?)?,
+                    serde_json::from_str(&row.try_get::<String>("", "payload")?)?,
+                ))
+            })
+            .collect()
     }
 
     pub(crate) async fn watermark(&self) -> Result<u64> {
@@ -781,7 +798,7 @@ impl HistoryStore {
         let revision = integer(item.revision)?;
         let existing = db
             .query_one_raw(statement(
-                "SELECT ordinal,turn_id,kind,revision,lifecycle,created_at,payload
+                "SELECT ordinal,turn_id,kind,revision,lifecycle,created_at,payload,last_write_seq
                  FROM history_items WHERE item_id=?",
                 vec![item.id.clone().into()],
             ))
@@ -800,6 +817,7 @@ impl HistoryStore {
             let old_lifecycle: String = row.try_get("", "lifecycle")?;
             let old_created_at: i64 = row.try_get("", "created_at")?;
             let old_payload: String = row.try_get("", "payload")?;
+            let old_write_seq: i64 = row.try_get("", "last_write_seq")?;
             ensure!(
                 (old_turn == item.turn_id || old_turn.is_empty()) && old_kind == kind,
                 "history item identity fields changed"
@@ -825,6 +843,11 @@ impl HistoryStore {
             ensure!(
                 old_lifecycle != "terminal" || item.is_terminal(),
                 "terminal history item was revised"
+            );
+            ensure!(
+                old_kind != "turn" || old_lifecycle != "terminal" || old_write_seq == write_seq,
+                "terminal Turn notification sequence changed for {}",
+                item.id
             );
             db.execute_raw(statement(
                 "UPDATE history_items SET
@@ -2153,10 +2176,11 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
         );
         CREATE INDEX IF NOT EXISTS history_items_by_turn
             ON history_items(turn_id, ordinal);
-        -- 终态 Turn 定位（`latest_terminal_turn`/`terminal_turns_after`）按 kind/lifecycle 过滤再
-        -- 按 ordinal 排序取数；覆盖索引让空库与稀疏历史都不做全表逆扫+排序。
+        -- 最新终态按 ordinal 排序；缺口恢复另按原始 write_seq 范围读取。
         CREATE INDEX IF NOT EXISTS history_items_by_kind_lifecycle
             ON history_items(kind, lifecycle, ordinal);
+        CREATE INDEX IF NOT EXISTS history_terminal_turns_by_write_seq
+            ON history_items(last_write_seq,ordinal) WHERE kind='turn' AND lifecycle='terminal';
         -- `agent_page` 的 text-only 稀疏过滤同样带 ordinal 方向，单独一条 (kind, ordinal) 索引
         -- 才能同时满足过滤与排序。
         CREATE INDEX IF NOT EXISTS history_items_by_kind
@@ -2695,6 +2719,52 @@ fn kind_label(kind: ThreadItemKind) -> &'static str {
 #[cfg(test)]
 mod storage_fault_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn terminal_recovery_uses_effect_sequence_instead_of_item_order() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = HistoryStore::open(&directory.path().join("history.sqlite"), "child").await?;
+        let terminal = |id: &str, ordinal: u64| {
+            ThreadItem::new(
+                format!("turn:{id}"),
+                "child".into(),
+                id.into(),
+                ordinal,
+                1,
+                1,
+                1,
+                ThreadItemState::Turn(pl_protocol::ThreadTurnItem::new(
+                    pl_protocol::TurnState::Completed(pl_protocol::CompletedTurnState::new(
+                        Some(1),
+                        1,
+                        pl_protocol::TurnCompletion::Normal,
+                    )),
+                )),
+            )
+        };
+        store.commit(30, &[terminal("first", 1)], &[]).await?;
+        store
+            .commit(80, &[terminal("second", 2), terminal("third", 3)], &[])
+            .await?;
+
+        let missing = store.terminal_turns_in_effect_range((31, 0), 80, 1).await?;
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].0, 80);
+        assert_eq!(missing[0].1.turn_id, "second");
+        let next = store.terminal_turns_in_effect_range((80, 2), 80, 1).await?;
+        assert_eq!(next.len(), 1);
+        assert_eq!(next[0].1.turn_id, "third");
+        assert!(
+            store
+                .terminal_turns_in_effect_range((31, 0), 79, 1)
+                .await?
+                .is_empty()
+        );
+        let mut revised = terminal("second", 2);
+        revised.revision = 2;
+        assert!(store.commit(90, &[revised], &[]).await.is_err());
+        Ok(())
+    }
 
     #[tokio::test]
     async fn legacy_plan_continuation_migrates_only_proven_hidden_identity() -> Result<()> {
