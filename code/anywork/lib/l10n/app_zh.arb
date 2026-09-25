@@ -1,6 +1,6 @@
 {
   "promptAccepted": "已受理",
-  "composerInterruptHint": "发送将打断并继续 · Esc 停止",
+  "composerEscStopHint": "Esc 停止",
   "composerSendAndContinue": "发送并继续",
   "appTitle": "糊来帮",
   "sidebarProjects": "项目",

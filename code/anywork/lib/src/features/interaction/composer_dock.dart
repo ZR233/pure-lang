@@ -508,7 +508,7 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                context.l10n.composerInterruptHint,
+                context.l10n.composerEscStopHint,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),

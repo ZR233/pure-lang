@@ -1,6 +1,6 @@
 {
   "promptAccepted": "Accepted",
-  "composerInterruptHint": "Send to interrupt and continue · Esc to stop",
+  "composerEscStopHint": "Esc to stop",
   "composerSendAndContinue": "Send and continue",
   "appTitle": "anywork",
   "sidebarProjects": "Projects",

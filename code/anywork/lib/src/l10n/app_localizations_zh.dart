@@ -13,7 +13,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get promptAccepted => '已受理';
 
   @override
-  String get composerInterruptHint => '发送将打断并继续 · Esc 停止';
+  String get composerEscStopHint => 'Esc 停止';
 
   @override
   String get composerSendAndContinue => '发送并继续';

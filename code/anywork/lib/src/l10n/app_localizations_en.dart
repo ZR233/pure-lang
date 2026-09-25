@@ -13,8 +13,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get promptAccepted => 'Accepted';
 
   @override
-  String get composerInterruptHint =>
-      'Send to interrupt and continue · Esc to stop';
+  String get composerEscStopHint => 'Esc to stop';
 
   @override
   String get composerSendAndContinue => 'Send and continue';

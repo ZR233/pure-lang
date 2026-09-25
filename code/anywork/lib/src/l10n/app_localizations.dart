@@ -104,11 +104,11 @@ abstract class AppLocalizations {
   /// **'Accepted'**
   String get promptAccepted;
 
-  /// No description provided for @composerInterruptHint.
+  /// No description provided for @composerEscStopHint.
   ///
   /// In en, this message translates to:
-  /// **'Send to interrupt and continue · Esc to stop'**
-  String get composerInterruptHint;
+  /// **'Esc to stop'**
+  String get composerEscStopHint;
 
   /// No description provided for @composerSendAndContinue.
   ///
