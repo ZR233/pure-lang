@@ -9,7 +9,9 @@ class AgentWorkspacePane extends ConsumerStatefulWidget {
 
 class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
   static const _todoPanelWidth = 304.0;
-  static const _planPanelWidth = 424.0;
+  static const _defaultPlanPanelWidth = 560.0;
+  static const _minimumPlanPanelWidth = 320.0;
+  static const _maximumPlanPanelWidth = 720.0;
   static const _minimumTimelineWidth = 560.0;
   static const _minimumPlanTimelineWidth = 600.0;
   static const _maximumFooterFraction = 0.5;
@@ -18,6 +20,7 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
   final Map<String, bool> _todoExpandedByThread = {};
   final Map<String, String> _expandedPlanByThread = {};
   final Map<String, String> _autoOpenedPlanByThread = {};
+  double? _planPanelWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -44,15 +47,22 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
             if (plan == null) {
               _expandedPlanByThread.remove(threadId);
             }
+            // 覆盖与否只取决于窗口能否并排放置默认宽度面板与最小对话区，
+            // 不受用户当前目标宽度影响，避免拖拽跨阈值时布局跳变打断手势。
             final planOverlaysTimeline =
                 constraints.maxWidth <
-                _planPanelWidth + _minimumPlanTimelineWidth;
+                _defaultPlanPanelWidth + _minimumPlanTimelineWidth;
             final planExpanded =
                 plan != null &&
                 _expandedPlanByThread[threadId] == plan.interactionId;
-            final planOverlayWidth = constraints.maxWidth < _planPanelWidth
+            // 并排保留对话区最小可用宽度；窄窗覆盖时面板可占满可用宽度。
+            final planMaximumWidth = planOverlaysTimeline
                 ? constraints.maxWidth
-                : _planPanelWidth;
+                : constraints.maxWidth - _minimumPlanTimelineWidth;
+            final planPanelWidth = _clampPlanPanelWidth(
+              _planPanelWidth ?? _defaultPlanPanelWidth,
+              planMaximumWidth,
+            );
             final todoInDrawer =
                 constraints.maxWidth < _todoPanelWidth + _minimumTimelineWidth;
             final todoExpanded = _todoExpandedByThread[threadId] ?? false;
@@ -187,12 +197,12 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                                               top: 0,
                                               right: 0,
                                               bottom: 0,
-                                              width: planOverlayWidth,
-                                              child: PlanDetailPanel(
+                                              width: planPanelWidth,
+                                              child: _buildPlanPanel(
                                                 plan: plan,
+                                                threadId: threadId,
+                                                maximumWidth: planMaximumWidth,
                                                 overlay: true,
-                                                onClose: () =>
-                                                    _closePlan(threadId),
                                               ),
                                             ),
                                         ],
@@ -225,10 +235,12 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                                   plan != null &&
                                   planExpanded)
                                 SizedBox(
-                                  width: _planPanelWidth,
-                                  child: PlanDetailPanel(
+                                  width: planPanelWidth,
+                                  child: _buildPlanPanel(
                                     plan: plan,
-                                    onClose: () => _closePlan(threadId),
+                                    threadId: threadId,
+                                    maximumWidth: planMaximumWidth,
+                                    overlay: false,
                                   ),
                                 ),
                               if (!planExpanded &&
@@ -273,6 +285,141 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
 
   void _closePlan(String threadId) {
     setState(() => _expandedPlanByThread.remove(threadId));
+  }
+
+  /// 计划详情面板：左边缘分隔条 + 内容。并排与覆盖共用，避免语义偏差。
+  Widget _buildPlanPanel({
+    required PlanConfirmationView plan,
+    required String threadId,
+    required double maximumWidth,
+    required bool overlay,
+  }) {
+    return Row(
+      children: [
+        _PlanResizeHandle(
+          key: StudioDriverKeys.planResizeHandle,
+          label: context.l10n.planResize,
+          onDelta: (delta) => _applyPlanPanelDelta(delta, maximumWidth),
+          onReset: _resetPlanPanelWidth,
+        ),
+        Expanded(
+          child: PlanDetailPanel(
+            plan: plan,
+            overlay: overlay,
+            onClose: () => _closePlan(threadId),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 在当前目标宽度基础上累计增量，而非从本次 build 的宽度重算：
+  /// 先把当前状态收敛到当前限制，再加 delta 并再次收敛，确保连续拖拽或连按
+  /// 方向键的增量逐步累加，不会相互覆盖。
+  void _applyPlanPanelDelta(double delta, double maximumWidth) {
+    setState(() {
+      final base = _clampPlanPanelWidth(
+        _planPanelWidth ?? _defaultPlanPanelWidth,
+        maximumWidth,
+      );
+      _planPanelWidth = _clampPlanPanelWidth(base + delta, maximumWidth);
+    });
+  }
+
+  void _resetPlanPanelWidth() {
+    setState(() => _planPanelWidth = _defaultPlanPanelWidth);
+  }
+
+  /// 将期望宽度收敛到 [最小值, 可用空间]；可用空间极小时直接填满，避免溢出窗口。
+  static double _clampPlanPanelWidth(double desired, double available) {
+    final maximum = available < _minimumPlanPanelWidth
+        ? available
+        : available.clamp(_minimumPlanPanelWidth, _maximumPlanPanelWidth);
+    final minimum = maximum < _minimumPlanPanelWidth
+        ? maximum
+        : _minimumPlanPanelWidth;
+    return desired.clamp(minimum, maximum);
+  }
+}
+
+/// 计划详情面板左边缘分隔条（design/13-plan.md §13）。
+///
+/// 拖拽或方向键调整宽度，Home 复位；宽度只属于当前 GUI 的临时视图状态，
+/// 不写入 Plan 状态机或持久化。
+const double _planResizeHandleWidth = 5.0;
+const double _planResizeStep = 24.0;
+
+class _PlanResizeHandle extends StatefulWidget {
+  const _PlanResizeHandle({
+    required this.label,
+    required this.onDelta,
+    required this.onReset,
+    super.key,
+  });
+
+  /// 无障碍语义与 tooltip 文案。
+  final String label;
+
+  /// 宽度增量，正值加宽、负值收窄。
+  final ValueChanged<double> onDelta;
+
+  /// 恢复到默认宽度。
+  final VoidCallback onReset;
+
+  @override
+  State<_PlanResizeHandle> createState() => _PlanResizeHandleState();
+}
+
+class _PlanResizeHandleState extends State<_PlanResizeHandle> {
+  bool _hovering = false;
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = _hovering || _focused;
+    final color = active
+        ? context.colors.primary.withValues(alpha: 0.6)
+        : context.colors.outlineVariant.withValues(alpha: 0.5);
+    return Semantics(
+      label: widget.label,
+      child: Tooltip(
+        message: widget.label,
+        child: Focus(
+          onFocusChange: (value) => setState(() => _focused = value),
+          onKeyEvent: (_, event) {
+            if (event is! KeyDownEvent) {
+              return KeyEventResult.ignored;
+            }
+            final key = event.logicalKey;
+            if (key == LogicalKeyboardKey.home) {
+              widget.onReset();
+              return KeyEventResult.handled;
+            }
+            if (key == LogicalKeyboardKey.arrowLeft) {
+              widget.onDelta(_planResizeStep);
+              return KeyEventResult.handled;
+            }
+            if (key == LogicalKeyboardKey.arrowRight) {
+              widget.onDelta(-_planResizeStep);
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: MouseRegion(
+            cursor: SystemMouseCursors.resizeColumn,
+            onEnter: (_) => setState(() => _hovering = true),
+            onExit: (_) => setState(() => _hovering = false),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragUpdate: (event) =>
+                  widget.onDelta(-event.delta.dx),
+              onDoubleTap: widget.onReset,
+              child: Container(width: _planResizeHandleWidth, color: color),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -3965,6 +3965,12 @@ abstract class AppLocalizations {
   /// **'Resize sidebar; use arrows, Home to reset'**
   String get sidebarResize;
 
+  /// No description provided for @planResize.
+  ///
+  /// In en, this message translates to:
+  /// **'Resize plan details; use arrows, Home to reset'**
+  String get planResize;
+
   /// No description provided for @sidebarLocal.
   ///
   /// In en, this message translates to:

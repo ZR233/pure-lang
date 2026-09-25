@@ -1166,6 +1166,7 @@
   "sidebarUnpin": "Unpin",
   "sidebarNavigation": "Project navigation",
   "sidebarResize": "Resize sidebar; use arrows, Home to reset",
+  "planResize": "Resize plan details; use arrows, Home to reset",
   "sidebarLocal": "Local",
   "sidebarNotChecked": "Not checked",
   "sidebarConnectionSaved": "Configuration saved; connection failed. Edit or retry",

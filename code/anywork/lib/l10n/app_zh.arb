@@ -779,6 +779,7 @@
   "sidebarUnpin": "取消置顶",
   "sidebarNavigation": "项目导航",
   "sidebarResize": "调整侧栏宽度；方向键调整，Home 恢复默认",
+  "planResize": "调整计划详情宽度；方向键调整，Home 恢复默认",
   "sidebarLocal": "本地",
   "sidebarNotChecked": "未检测",
   "sidebarConnectionSaved": "配置已保存；连接失败，可修改后重试",

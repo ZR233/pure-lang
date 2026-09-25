@@ -2098,6 +2098,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarResize => '调整侧栏宽度；方向键调整，Home 恢复默认';
 
   @override
+  String get planResize => '调整计划详情宽度；方向键调整，Home 恢复默认';
+
+  @override
   String get sidebarLocal => '本地';
 
   @override

@@ -2182,6 +2182,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sidebarResize => 'Resize sidebar; use arrows, Home to reset';
 
   @override
+  String get planResize => 'Resize plan details; use arrows, Home to reset';
+
+  @override
   String get sidebarLocal => 'Local';
 
   @override
