@@ -905,13 +905,26 @@ async fn cold_seed(
     {
         turn_ids.push(newest.turn_id.clone());
     }
-    if turn_ids.is_empty() {
+    if turn_ids.is_empty() && snapshot.inbox.is_empty() && snapshot.inputs.is_empty() {
         return Ok((Vec::new(), std::collections::BTreeSet::new()));
     }
     let history = projector.store.history(id).await?;
     let mut items = Vec::new();
     for turn_id in &turn_ids {
         items.extend(history.items_for_turn(turn_id).await?);
+    }
+    // Pending parent messages have no Turn yet. Their already-published identity/version
+    // must survive activation just as it survives the live projection's retained window.
+    let pending_messages =
+        history
+            .existing_items(snapshot.inbox.iter().map(|record| {
+                crate::studio::thread_projection::order::message_id(&record.message.id)
+            }))
+            .await?;
+    for (id, item) in pending_messages {
+        if !items.iter().any(|existing| existing.id == id) {
+            items.push(item);
+        }
     }
     let mut input_ids = snapshot
         .inputs

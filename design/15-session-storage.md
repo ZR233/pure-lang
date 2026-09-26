@@ -503,6 +503,11 @@ core 在接管输入或收到 provider 的原始展示条目时分配顺序键�
 输入与消息身份回执仍与该 effect 在同一事务生效。结果不持久化 token 事件日志，checkpoint
 必须继续等待 writer fence。
 
+父代理消息在受理时即形成可见条目，首次模型消费时才绑定 Turn。实时投影必须在消息仍被
+收件箱引用期间保留其 canonical 正文、顺序与内容版本；文本已完整并不代表关联元数据已终结。
+消费绑定只更新原条目并递增内容版本，不能因缓存释放而重新从初始版本发布同一身份。
+冷恢复同样按收件箱的稳定消息身份加载已有条目，不重新分配顺序或修改消息正文。
+
 ## 15.6 SQL 分页与 cursor
 
 HistoryReader 提供 `Latest`、`Before`、`After`、`Around`（`TimelineQuery`，`item_id` 既接受

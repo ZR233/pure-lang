@@ -1804,6 +1804,14 @@ impl LiveProjection {
             .map(|task| super::order::tool_id(&task.call_id))
             .collect::<BTreeSet<_>>();
         referenced.extend(state.inputs.iter().map(|record| record.input.id.clone()));
+        // A complete parent message is still mutable placement: its first model consumption
+        // binds it to a Turn. Keep its canonical payload and version until the inbox releases it.
+        let inbox_items = state
+            .inbox
+            .iter()
+            .map(|record| super::order::message_id(&record.message.id))
+            .collect::<BTreeSet<_>>();
+        referenced.extend(inbox_items.iter().cloned());
         for attempt in state.attempts.iter() {
             referenced.insert(super::order::response_id(&attempt.attempt_id, "inference"));
             for channel in ["reasoning", "text"] {
@@ -1860,7 +1868,9 @@ impl LiveProjection {
             // updated by a later effect, the newest Turn's tool items are re-projected by a late
             // delivery, and everything else keeps placement metadata only.
             retained
-                && (!item.state().is_terminal() || item.kind() == pl_protocol::ThreadItemKind::Tool)
+                && (!item.state().is_terminal()
+                    || item.kind() == pl_protocol::ThreadItemKind::Tool
+                    || inbox_items.contains(id))
         });
         // A Turn that opened more identities than the window is still bounded here: the oldest
         // non-terminal bodies and tool facts are dropped by canonical placement, and the identity

@@ -2518,6 +2518,104 @@ mod storage_fault_tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn parent_message_keeps_identity_until_consumed_and_saved() -> Result<()> {
+        use pl_core::thread::inbox::{InboxRecord, ThreadMessage};
+
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let id = "child-message";
+        let mut thread = pl_protocol::Thread::placeholder(id);
+        thread.parent_thread_id = Some("parent".into());
+        let sink = ThreadStorageSink::new(store.clone(), thread).await?;
+        let chat = store.chat_session(id).await?;
+        let mut projection = live_projection();
+        let record = InboxRecord {
+            sequence: 1,
+            message: ThreadMessage {
+                id: "initial:spawn".into(),
+                source_id: "agent:parent".into(),
+                payload: OpaquePayload::text("implement the assigned task"),
+                context: Vec::new(),
+            },
+        };
+        let item_id = crate::studio::thread_projection::order::message_id(&record.message.id);
+        let mut accepted = ticket(id, 1);
+        accepted.checkpoint.state.inbox = Arc::from([record.clone()]);
+        Arc::make_mut(&mut accepted.effect).inbox = Arc::from([record.clone()]);
+        drive_live_projection(&mut projection, &chat, &sink, id, accepted.clone())?;
+        let original = chat
+            .read_item(&item_id)
+            .await?
+            .context("accepted message")?;
+        // Re-observation before consumption must not invent a new content version.
+        projection.advance(
+            &chat,
+            &sink.0.thread,
+            &accepted.effect,
+            &accepted.checkpoint.state,
+        )?;
+        assert_eq!(
+            chat.read_item(&item_id).await?.unwrap().revision,
+            original.revision
+        );
+
+        let (attempt, update) = committed_parts_attempt("child-turn", "child-attempt", 1)?;
+        let mut consumed = ticket(id, 2);
+        consumed.checkpoint.state.consumed_messages = 1;
+        consumed.checkpoint.state.inbox = Arc::from([record]);
+        consumed.checkpoint.state.attempts = Arc::from([attempt]);
+        Arc::make_mut(&mut consumed.effect).attempt = Some(update);
+        Arc::make_mut(&mut consumed.effect).consumed_messages = Some(1);
+        drive_live_projection(&mut projection, &chat, &sink, id, consumed)?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush(id, 2)).await??;
+        let history = store.history(id).await?;
+        let saved = history.existing_items([item_id.clone()]).await?;
+        let item = saved.get(&item_id).context("saved parent message")?;
+        assert_eq!(item.ordinal, original.order);
+        assert_eq!(item.turn_id, "child-turn");
+        assert!(item.revision > original.revision);
+        assert!(
+            matches!(item.state(), pl_protocol::ThreadItemState::Text(text)
+            if text.channel() == pl_protocol::ThreadTextChannel::ParentAgent
+                && text.text() == "implement the assigned task")
+        );
+        assert_eq!(history.watermark().await?, 2);
+        assert_eq!(sink.0.channel.subscribe().borrow().fault, None);
+
+        // A saved but unconsumed follow-up has no Turn. Reinstall the projection from its
+        // durable identity before consuming it, as activation does for an idle child.
+        let mut followup = ticket(id, 3);
+        followup.checkpoint.state.consumed_messages = 1;
+        let mut record = accepted.checkpoint.state.inbox[0].clone();
+        record.sequence = 2;
+        record.message.id = "followup".into();
+        followup.checkpoint.state.inbox = Arc::from([record.clone()]);
+        Arc::make_mut(&mut followup.effect).inbox = Arc::from([record.clone()]);
+        drive_live_projection(&mut projection, &chat, &sink, id, followup)?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush(id, 3)).await??;
+        let followup_id = crate::studio::thread_projection::order::message_id(&record.message.id);
+        let saved = history.existing_items([followup_id.clone()]).await?;
+        let original = saved[&followup_id].clone();
+        projection = live_projection();
+        projection.seed(saved.into_values().collect(), Default::default());
+        let (attempt, update) = committed_parts_attempt("next-turn", "next-attempt", 1)?;
+        let mut consumed = ticket(id, 4);
+        consumed.checkpoint.state.consumed_messages = 2;
+        consumed.checkpoint.state.inbox = Arc::from([record]);
+        consumed.checkpoint.state.attempts = Arc::from([attempt]);
+        Arc::make_mut(&mut consumed.effect).attempt = Some(update);
+        Arc::make_mut(&mut consumed.effect).consumed_messages = Some(2);
+        drive_live_projection(&mut projection, &chat, &sink, id, consumed)?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush(id, 4)).await??;
+        let saved = history.existing_items([followup_id.clone()]).await?;
+        assert_eq!(saved[&followup_id].ordinal, original.ordinal);
+        assert_eq!(saved[&followup_id].turn_id, "next-turn");
+        assert!(saved[&followup_id].revision > original.revision);
+        assert_eq!(history.watermark().await?, 4);
+        Ok(())
+    }
+
     /// A live Turn survives a retained window smaller than the response it produced.
     ///
     /// The live projection is a bounded observation owner: it releases a Turn's oldest facts by
