@@ -20,7 +20,7 @@ pub(in crate::studio) use live::{
 #[cfg(test)]
 pub(in crate::studio) use live::LIVE_ITEM_WINDOW;
 mod runtime;
-pub(in crate::studio) use runtime::fold_effect_accounting;
+pub(in crate::studio) use runtime::{fold_effect_accounting, project_runtime};
 mod snapshot;
 pub(in crate::studio) use snapshot::{project_snapshot, saved_mode, status, storage_state};
 pub(in crate::studio) mod order;

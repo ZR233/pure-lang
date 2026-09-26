@@ -28,9 +28,9 @@ use pl_core::{
 use pl_protocol::{
     InteractionRequest, SkillActivationCause, SkillActivationResourceBase, ThreadAgentItem,
     ThreadAgentState, ThreadAttachment, ThreadContentLifecycle, ThreadInferenceItem,
-    ThreadInferenceState, ThreadItem, ThreadItemState, ThreadRawItem, ThreadRuntimeSnapshot,
-    ThreadSkillItem, ThreadTextChannel, ThreadTextItem, ThreadThinkingItem, ThreadToolItem,
-    ThreadToolOutput, ThreadToolState, Turn, TurnPhase,
+    ThreadInferenceState, ThreadItem, ThreadItemState, ThreadRawItem, ThreadSkillItem,
+    ThreadTextChannel, ThreadTextItem, ThreadThinkingItem, ThreadToolItem, ThreadToolOutput,
+    ThreadToolState, Turn, TurnPhase,
 };
 
 use super::ProjectionError;
@@ -85,12 +85,11 @@ pub(in crate::studio) enum TurnEvent {
 /// committed body and streaming preview into the shared chat session, and the GUI reads them from
 /// that one content window; a second content frame on the status feed would be the same bytes on a
 /// parallel carrier. The status feed therefore only carries the facts the window does not own —
-/// Turn lifecycle, interactions and runtime snapshots — and no subscriber ever projects content.
+/// Turn lifecycle and interactions — and no subscriber ever projects content.
 #[derive(Debug, Clone)]
 pub(in crate::studio) enum LiveEvent {
     Turn { turn: Turn, event: TurnEvent },
     Interaction(Box<InteractionRequest>),
-    Runtime(Box<ThreadRuntimeSnapshot>),
 }
 
 /// One in-flight streaming preview's resident fact.
@@ -824,7 +823,6 @@ impl LiveProjection {
         &mut self,
         chat: &Session,
         thread: &pl_protocol::Thread,
-        usage: &pl_core::thread::UsageSummary,
         effect: &ThreadEffectBatch,
         state: &ThreadSnapshot,
     ) -> Result<(Vec<LiveEvent>, Arc<PreparedEffect>), ProjectionError> {
@@ -837,7 +835,7 @@ impl LiveProjection {
             .map_err(|error| ProjectionError::History(error.to_string()))?;
         }
         let mut events = Vec::new();
-        self.emit_frames(usage, thread, effect, state, &mut events)?;
+        self.emit_frames(thread, effect, state, &mut events)?;
         self.retain(state);
         Ok((events, prepared))
     }
@@ -1507,13 +1505,12 @@ impl LiveProjection {
         }
     }
 
-    /// Emits the Turn, interaction and runtime frames one committed effect produced.
+    /// Emits the Turn and interaction frames one committed effect produced.
     ///
     /// The frames are derived from the same effect-matched state the content was projected from, so
     /// a live subscriber and durable history describe one commit rather than two drifting views.
     fn emit_frames(
         &mut self,
-        usage: &pl_core::thread::UsageSummary,
         thread: &pl_protocol::Thread,
         effect: &ThreadEffectBatch,
         state: &ThreadSnapshot,
@@ -1585,22 +1582,6 @@ impl LiveProjection {
                 state,
             ) {
                 events.push(LiveEvent::Interaction(Box::new(interaction)));
-            }
-        }
-        if effect.attempt.is_some() || effect.runtime_facts.is_some() || effect.lifecycle.is_some()
-        {
-            // 该 effect 自己的累计事实也在本地折叠一次，使实时 runtime 帧与 writer 落库后的
-            // checkpoint 摘要完全一致，而不是等 writer 追上才更新。
-            let mut summary = usage.clone();
-            if super::runtime::fold_effect_accounting(&mut summary, effect).is_ok()
-                && let Ok(runtime) = super::runtime::project_runtime(
-                    &thread.id,
-                    state,
-                    effect.committed_at,
-                    &summary,
-                )
-            {
-                events.push(LiveEvent::Runtime(Box::new(runtime)));
             }
         }
         let mut active_inputs = state

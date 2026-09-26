@@ -43,7 +43,7 @@ pub(in crate::studio) enum ThreadLiveEvent {
     ///
     /// The vocabulary is deliberately content-free: the projection owner writes every body into the
     /// shared session and the GUI reads it from that one content window, so the status feed carries
-    /// only Turn lifecycle, interaction and runtime facts. A subscriber therefore never projects or
+    /// only Turn lifecycle and interaction facts. A subscriber therefore never projects or
     /// republishes content.
     Committed {
         sequence: u64,
@@ -52,6 +52,10 @@ pub(in crate::studio) enum ThreadLiveEvent {
     /// The projection owner could not prove continuity for `dropped` commits and re-seeded; every
     /// subscriber must resynchronize from the database window.
     Rebase { dropped: u64 },
+    /// Current runtime facts, including live model availability (absent from checkpoints).
+    Runtime {
+        runtime: Arc<pl_protocol::ThreadRuntimeSnapshot>,
+    },
     /// Current execution activity of the Thread; `None` means no activity.
     ///
     /// The activity is an independent typed projection of the same owner state (it never carries a
@@ -585,6 +589,7 @@ struct LiveOwner {
     activity: crate::studio::thread_projection::ActivityProjection,
     /// Last activity already broadcast, so an unchanged projection does not produce a frame.
     activity_published: Option<pl_protocol::ThreadActivity>,
+    runtime_published: Option<pl_protocol::ThreadRuntimeSnapshot>,
     /// Last typed storage state this owner published to its feed.
     ///
     /// The owner derives it from the owner snapshot plus the coordinator's typed watch, so a
@@ -630,6 +635,7 @@ impl LiveOwner {
             projection,
             activity,
             activity_published,
+            runtime_published: None,
             storage_published,
             channel,
             chat,
@@ -708,13 +714,9 @@ impl LiveOwner {
     fn project_write(&mut self, write: &ThreadWrite) -> Result<()> {
         let effect = &write.effect;
         crate::studio::thread_projection::fold_effect_accounting(&mut self.usage, effect)?;
-        let projected = self.projection.advance(
-            &self.chat,
-            &self.thread,
-            &self.usage,
-            effect,
-            &write.checkpoint.state,
-        );
+        let projected =
+            self.projection
+                .advance(&self.chat, &self.thread, effect, &write.checkpoint.state);
         let (changes, prepared) = match projected {
             Ok(projected) => projected,
             Err(error) => {
@@ -790,14 +792,41 @@ impl LiveOwner {
     /// Projects the uncommitted streaming preview of the current owner snapshot.
     ///
     /// The preview is written into the shared session — the one content window — and emits no
-    /// content frame; only the activity it implies can produce a frame.
+    /// content frame; current activity and runtime facts are published separately.
     async fn stream(&mut self, snapshot: &ThreadSnapshot) -> Result<()> {
         self.projection
             .stream(&self.chat, &self.thread, snapshot, snapshot.commit_sequence)
             .await
             .map_err(|error| anyhow::anyhow!("live Thread preview failed: {error}"))?;
+        self.observe_runtime(snapshot)?;
         self.observe_activity(snapshot);
         self.publish_retained();
+        Ok(())
+    }
+
+    /// Model availability is live-only: transfer checkpoints deliberately clear it.
+    /// Derive runtime from the latest owner snapshot after folding all admitted usage,
+    /// never from an effect's storage checkpoint. Stable timestamps allow deduplication.
+    fn observe_runtime(&mut self, snapshot: &ThreadSnapshot) -> Result<()> {
+        let at = self
+            .runtime_published
+            .as_ref()
+            .map_or(self.thread.updated_at, |runtime| runtime.updated_at);
+        let mut runtime = crate::studio::thread_projection::project_runtime(
+            &self.thread.id,
+            snapshot,
+            at,
+            &self.usage,
+        )?;
+        if self.runtime_published.as_ref() == Some(&runtime) {
+            return Ok(());
+        }
+        runtime.updated_at = crate::studio::unix_seconds();
+        runtime.usage.updated_at = runtime.updated_at;
+        self.runtime_published = Some(runtime.clone());
+        self.feed.publish(ThreadLiveEvent::Runtime {
+            runtime: Arc::new(runtime),
+        });
         Ok(())
     }
 

@@ -2503,7 +2503,6 @@ mod storage_fault_tests {
         projection: &mut crate::studio::thread_projection::LiveProjection,
         chat: &pl_core::chat::Session,
         sink: &ThreadStorageSink,
-        usage: &pl_core::thread::UsageSummary,
         thread_id: &str,
         write: ThreadWrite,
     ) -> Result<()> {
@@ -2513,13 +2512,8 @@ mod storage_fault_tests {
             .channel
             .next_unprojected()
             .context("the admitted fact is owed a projection")?;
-        let (_, prepared) = projection.advance(
-            chat,
-            &sink.0.thread,
-            usage,
-            &write.effect,
-            &write.checkpoint.state,
-        )?;
+        let (_, prepared) =
+            projection.advance(chat, &sink.0.thread, &write.effect, &write.checkpoint.state)?;
         assert!(sink.0.channel.prepare(prepared));
         Ok(())
     }
@@ -2560,7 +2554,6 @@ mod storage_fault_tests {
         let input_id = "input-under-the-window";
         let chat = store.chat_session(thread_id).await?;
         let mut projection = live_projection();
-        let usage = pl_core::thread::UsageSummary::default();
 
         // Commit 1: the Turn's own opening input. Every later commit's checkpoint has pruned the
         // consumed body from `state.inputs` and keeps only the minimal `turns[].input_id`.
@@ -2572,7 +2565,7 @@ mod storage_fault_tests {
         Arc::make_mut(&mut opening.effect).inputs = Arc::from([InputChange::Accepted(input)]);
         Arc::make_mut(&mut opening.effect).turn =
             Some(turn_record(turn_id, input_id, TurnState::Running));
-        drive_live_projection(&mut projection, &chat, &sink, &usage, thread_id, opening)?;
+        drive_live_projection(&mut projection, &chat, &sink, thread_id, opening)?;
 
         // Commit 2: one model step whose receipt itemizes more provider parts than the window holds.
         // That pushes the Turn's own oldest facts out of the ordinal window.
@@ -2583,7 +2576,7 @@ mod storage_fault_tests {
             Arc::from([turn_record(turn_id, input_id, TurnState::Running)]);
         step.checkpoint.state.attempts = Arc::from([attempt.clone()]);
         Arc::make_mut(&mut step.effect).attempt = Some(update);
-        drive_live_projection(&mut projection, &chat, &sink, &usage, thread_id, step)?;
+        drive_live_projection(&mut projection, &chat, &sink, thread_id, step)?;
 
         // Commit 3: the Turn's terminal effect. Its checkpoint names the input without carrying its
         // body, and it re-projects the Turn item, so both the input identity and the Turn's content
@@ -2599,7 +2592,7 @@ mod storage_fault_tests {
         terminal.checkpoint.state.turns = Arc::from([finished()]);
         terminal.checkpoint.state.attempts = Arc::from([attempt]);
         Arc::make_mut(&mut terminal.effect).turn = Some(finished());
-        drive_live_projection(&mut projection, &chat, &sink, &usage, thread_id, terminal)?;
+        drive_live_projection(&mut projection, &chat, &sink, thread_id, terminal)?;
 
         // Every fact is handed over, so the durable barrier reaches the terminal commit with no
         // fault, and the rows a long Turn produced are complete instead of a hole or a revision
@@ -2669,7 +2662,6 @@ mod storage_fault_tests {
         let input_id = "cold-input";
         let chat = store.chat_session(thread_id).await?;
         let mut projection = live_projection();
-        let usage = pl_core::thread::UsageSummary::default();
 
         // A Thread whose history was never written reads as "no finished Turn" instead of creating a
         // database, so this cold read can never make the live path wait on the writer.
@@ -2692,7 +2684,7 @@ mod storage_fault_tests {
         Arc::make_mut(&mut opening.effect).inputs = Arc::from([InputChange::Accepted(input)]);
         Arc::make_mut(&mut opening.effect).turn =
             Some(turn_record(turn_id, input_id, TurnState::Running));
-        drive_live_projection(&mut projection, &chat, &sink, &usage, thread_id, opening)?;
+        drive_live_projection(&mut projection, &chat, &sink, thread_id, opening)?;
         tokio::time::timeout(Duration::from_secs(30), sink.flush(thread_id, 1)).await??;
         assert!(
             store
@@ -2721,7 +2713,7 @@ mod storage_fault_tests {
             &terminal.effect,
         )
         .context("the live projection must carry the finished Turn")?;
-        drive_live_projection(&mut projection, &chat, &sink, &usage, thread_id, terminal)?;
+        drive_live_projection(&mut projection, &chat, &sink, thread_id, terminal)?;
         tokio::time::timeout(Duration::from_secs(30), sink.flush(thread_id, 2)).await??;
 
         let cold = store

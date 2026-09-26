@@ -60,8 +60,8 @@ extension on _TimelineViewState {
     );
   }
 
-  String _anchorItemId(String rowId) {
-    final row = widget.rows.where((row) => row.id == rowId).firstOrNull;
+  String _anchorItemId(String rowId, List<TimelineRow> rows) {
+    final row = rows.where((row) => row.id == rowId).firstOrNull;
     return row?.part?.id ??
         row?.toolGroup?.items.firstOrNull?.id ??
         row?.reasoningGroup?.parts.firstOrNull?.id ??
@@ -185,7 +185,7 @@ extension on _TimelineViewState {
   /// 记录的偏移量是**内容自身**的偏移：短内容整体贴底时整段内容被
   /// [_BottomAlignedSliver] 下移了 `_bottomSlack`，这里减掉它，锚点就与
   /// 视口是否贴底无关。恢复位置仍然只用 `-offset`，不需要知道当前留白。
-  TimelineAnchor? _captureAnchor() {
+  TimelineAnchor? _captureAnchor({List<TimelineRow>? rows}) {
     final viewport = _viewportKey.currentContext?.findRenderObject();
     if (viewport is! RenderBox || !viewport.hasSize) return null;
     String? id;
@@ -203,7 +203,7 @@ extension on _TimelineViewState {
     return id == null
         ? null
         : TimelineAnchor(
-            _anchorItemId(id),
+            _anchorItemId(id, rows ?? widget.rows),
             offset! - _bottomSlack,
             followingBottom:
                 _followingBottom && !_detachedByUser && !widget.hasNewer,
@@ -215,25 +215,29 @@ extension on _TimelineViewState {
     _prefetchScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prefetchScheduled = false;
-      if (!mounted ||
-          !_controller.hasClients ||
-          widget.isLoadingOlder ||
-          widget.isLoadingNewer) {
+      if (!mounted || widget.isLoadingOlder || widget.isLoadingNewer) {
         return;
       }
-      final position = _controller.position;
-      final underfull = position.maxScrollExtent - position.minScrollExtent < 1;
-      final threshold = 1.5 * position.viewportDimension;
-      if (_detachedByUser &&
-          (_scrollingOlder || underfull) &&
-          position.extentBefore < threshold &&
+      final position = _controller.hasClients ? _controller.position : null;
+      // 隐藏条目或折叠分组可能让一整页不足一屏，甚至没有可布局的行。
+      // 此时无法先滚动脱离底部，仍须沿阅读方向补页；到端后不反向加载，
+      // 否则有界窗口会在旧页和新页之间反复淘汰、重载。
+      final underfull = position == null
+          ? widget.rows.isEmpty
+          : position.maxScrollExtent - position.minScrollExtent < 1;
+      final threshold = 1.5 * (position?.viewportDimension ?? 0);
+      if (_scrollingOlder &&
+          (_detachedByUser || underfull) &&
+          (underfull ||
+              (position?.extentBefore ?? double.infinity) < threshold) &&
           widget.onLoadOlder != null &&
           widget.olderError == null &&
           !_olderLoadRequested) {
         _olderLoadRequested = true;
         widget.onLoadOlder!();
-      } else if ((!_scrollingOlder || underfull) &&
-          position.extentAfter < threshold &&
+      } else if (!_scrollingOlder &&
+          (underfull ||
+              (position?.extentAfter ?? double.infinity) < threshold) &&
           widget.onLoadNewer != null &&
           widget.newerError == null &&
           !_newerLoadRequested) {

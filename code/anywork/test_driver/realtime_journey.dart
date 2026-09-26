@@ -394,7 +394,19 @@ class RealtimeJourney {
     await stageFile.writeAsString(value);
   }
 
-  Future<Map<String, dynamic>> snapshot() => driver.readSnapshot();
+  Future<Map<String, dynamic>> snapshot() async {
+    final state = await driver.readSnapshot();
+    final workspace = state['workspace'] as Map?;
+    final route = workspace?['modelRoute'] as Map?;
+    if (route != null && workspace?['isBusy'] == true) {
+      // The fixture binding stays valid across calls, provider errors and cancel.
+      // A transfer checkpoint must never turn it into an unavailable GUI route.
+      checks['modelBindingAvailableDuringCalls'] =
+          checks['modelBindingAvailableDuringCalls'] != false &&
+          route['available'] == true;
+    }
+    return state;
+  }
 
   Future<Map<String, dynamic>> waitFor(
     bool Function(Map<String, dynamic>) predicate,
@@ -1153,6 +1165,9 @@ class RealtimeJourney {
   Future<void> _uiContracts() async {
     await mark('ui_contracts');
     final settled = await snapshot();
+    checks['modelBindingAvailableAfterCalls'] =
+        ((settled['workspace'] as Map?)?['modelRoute'] as Map?)?['available'] ==
+        true;
     await shot('user-assistant-bubbles');
 
     // The activity bar is projected only while a turn is active, so the settled

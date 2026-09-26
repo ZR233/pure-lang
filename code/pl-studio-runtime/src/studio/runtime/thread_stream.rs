@@ -365,6 +365,11 @@ impl LiveSubscription {
                     self.push(change);
                 }
             }
+            ThreadLiveEvent::Runtime { runtime } => {
+                self.enqueue(ThreadNotification::ThreadRuntimeUpdated {
+                    runtime: Box::new((*runtime).clone()),
+                });
+            }
             ThreadLiveEvent::Activity { activity } => {
                 if activity.as_deref() != self.activity.as_ref() {
                     self.activity = activity.as_deref().cloned();
@@ -422,7 +427,6 @@ impl LiveSubscription {
             LiveEvent::Interaction(interaction) => {
                 ThreadNotification::InteractionChanged { interaction }
             }
-            LiveEvent::Runtime(runtime) => ThreadNotification::ThreadRuntimeUpdated { runtime },
         };
         self.enqueue(notification);
     }

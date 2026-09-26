@@ -834,11 +834,13 @@ class StudioController extends _$StudioController {
     await _ensureThreadOpen(threadId);
     final current = state.value;
     if (current == null || current.selectedThreadId != threadId) return;
-    state = AsyncData(jumpTimelineToLatest(current, threadId));
     if (_chatWindowThreadId == threadId && _chatWindow != null) {
+      // 原生窗口直接交回 canonical Latest。先清空会让已在 Latest 的幂等
+      // focus 提前返回后留下空白，也会在异步聚焦期间丢掉正在显示的正文。
       await _focusChatWindow(threadId, null);
       return;
     }
+    state = AsyncData(jumpTimelineToLatest(current, threadId));
     await _reloadTimelineWindow(
       threadId,
       _threadCoordinator.generation,

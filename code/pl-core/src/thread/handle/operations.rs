@@ -156,6 +156,7 @@ impl ThreadHandle {
             task_commands: mailbox.downgrade(),
             id,
             model,
+            preparing_model_available: false,
             state,
             publish,
             tools,

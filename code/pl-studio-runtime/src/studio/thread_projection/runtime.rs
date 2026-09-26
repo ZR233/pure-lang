@@ -6,7 +6,7 @@ use pl_protocol::{
 };
 use std::sync::Arc;
 
-pub(super) fn project_runtime(
+pub(in crate::studio) fn project_runtime(
     thread_id: &str,
     state: &ThreadSnapshot,
     updated_at: i64,

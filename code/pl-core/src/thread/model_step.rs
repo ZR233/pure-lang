@@ -358,8 +358,10 @@ impl Owner {
         // before any provider call exists, so this is still preparation, not a wait for output.
         self.enter_model_execution(ModelExecutionPhase::PreparingRequest);
         let mut model = self.model.take().ok_or(ThreadError::Closed)?;
+        self.preparing_model_available = model.is_available();
         let prepared = self.await_with_mailbox(model.prepare(request)).await;
         self.model = Some(model);
+        self.preparing_model_available = false;
         self.publish_snapshot();
         let prepared = match prepared {
             Err(error)

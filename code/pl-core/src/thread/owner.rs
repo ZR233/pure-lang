@@ -43,6 +43,9 @@ pub(super) struct Owner {
     pub(super) interrupt: cancellation::InterruptHandle,
     pub(super) id: String,
     pub(super) model: Option<DynModelSession>,
+    /// Availability while prepare temporarily borrows the session out of `model`.
+    /// Cleared before publishing its result, so poison/close still comes from the session.
+    pub(super) preparing_model_available: bool,
     pub(super) capacity: ContextCapacity,
     pub(super) effect_window: Arc<EffectWindow>,
     pub(super) pending_effects: std::collections::VecDeque<PendingEffect>,
@@ -484,10 +487,10 @@ impl Owner {
         } else {
             input::InputExecution::Paused
         };
-        snapshot.model_available = self
-            .model
-            .as_ref()
-            .is_some_and(DynModelSession::is_available);
+        snapshot.model_available = self.model.as_ref().map_or(
+            self.preparing_model_available,
+            DynModelSession::is_available,
+        );
         snapshot.pending_tool_commits = self.uncommitted_tools.keys().cloned().collect();
         if snapshot.lifecycle == ThreadLifecycle::Closed
             && snapshot.persistence.attached

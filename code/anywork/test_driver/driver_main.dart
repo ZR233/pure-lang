@@ -13,6 +13,8 @@ import 'package:flutter_driver/driver_extension.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'raw_tap_extension.dart';
+import 'pointer_scroll_extension.dart';
+import 'key_press_extension.dart';
 
 /// Native-only Driver entrypoint. Product and release builds use lib/main.dart.
 void main() {
@@ -21,7 +23,11 @@ void main() {
   }
   enableFlutterDriverExtension(
     handler: _handleDriverData,
-    commands: <CommandExtension>[RawTapCommandExtension()],
+    commands: <CommandExtension>[
+      RawTapCommandExtension(),
+      PointerScrollCommandExtension(),
+      KeyPressCommandExtension(),
+    ],
   );
   SchedulerBinding.instance.addTimingsCallback(_recordFrameTimings);
   _container = ProviderContainer();

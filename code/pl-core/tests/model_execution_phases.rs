@@ -171,6 +171,18 @@ async fn preparing_the_request_is_not_reported_as_the_running_call() {
         thread.snapshot().model_execution,
         Some(ModelExecutionPhase::PreparingRequest)
     );
+    // A mailbox commit republishes the snapshot while prepare owns the session.
+    // Borrowing it for preparation must not look like a missing model binding.
+    thread
+        .send_message(pl_core::thread::inbox::ThreadMessage {
+            id: "during-prepare".into(),
+            source_id: "observer".into(),
+            payload: pl_core::context::OpaquePayload::text("status update"),
+            context: Vec::new(),
+        })
+        .await
+        .unwrap();
+    assert!(thread.snapshot().model_available);
 
     prepare_gate.send(()).expect("prepare gate must be open");
     execute_wait.await.expect("execute must be entered");
@@ -178,6 +190,7 @@ async fn preparing_the_request_is_not_reported_as_the_running_call() {
         thread.snapshot().model_execution,
         Some(ModelExecutionPhase::Running)
     );
+    assert!(thread.snapshot().model_available);
 
     execute_gate.send(()).expect("execute gate must be open");
     let completion = runner.await.unwrap().unwrap();
