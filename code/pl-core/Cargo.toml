@@ -24,7 +24,10 @@ hex = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-tokio = { workspace = true }
+# `test-util` (dev only) provides the paused clock (`start_paused` / `time::advance`) the window
+# tests use to prove the coalescing deadline is fixed deterministically instead of with real sleeps.
+# Production dependencies keep tokio's workspace feature set unchanged.
+tokio = { workspace = true, features = ["test-util"] }
 
 [[test]]
 name = "sqlite_persistence"

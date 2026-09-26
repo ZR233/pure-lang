@@ -17,16 +17,7 @@ import 'turn_models.dart';
 
 // Canonical workspace values are replaced by reducers. UI-only anchor/composer
 // changes must not rebuild all row projections; old entries are weakly held.
-final _timelineRowsByWorkspace =
-    Expando<({bool detached, List<TimelineRow> rows})>();
-final _timelineHistoryPrefix = Expando<_TimelineHistoryProjection>();
-
-class _TimelineHistoryProjection {
-  const _TimelineHistoryProjection(this.split, this.turns, this.rows);
-  final int split;
-  final Map<String, TimelineTurnView> turns;
-  final List<TimelineRow> rows;
-}
+final _timelineRowsByWorkspace = Expando<List<TimelineRow>>();
 
 class _StudioStateUnset {
   const _StudioStateUnset();
@@ -229,84 +220,10 @@ class StudioState {
   List<TimelineRow> get selectedTimelineRows {
     final workspace = selectedWorkspace;
     if (workspace == null) return const [];
-    final detached = selectedWorkspaceUi.history.detached;
     final cached = _timelineRowsByWorkspace[workspace];
-    if (cached != null && cached.detached == detached) return cached.rows;
-    final rows = _projectTimelineRows(workspace, detached);
-    _timelineRowsByWorkspace[workspace] = (detached: detached, rows: rows);
-    return rows;
-  }
-
-  List<TimelineRow> _projectTimelineRows(
-    ThreadWorkspace workspace,
-    bool detached,
-  ) {
-    final history = workspace.historyItems;
-    final historicalIds = {for (final item in history) item.id};
-    final overlay = detached
-        ? workspace.liveItems.values
-              .where((item) => historicalIds.contains(item.id))
-              .toList()
-        : workspace.liveItems.values.toList();
-    if (overlay.isEmpty) {
-      return _historyPrefixRows(workspace, history.length);
-    }
-    final firstOrdinal = overlay
-        .map((item) => item.ordinal)
-        .reduce((a, b) => a < b ? a : b);
-    var split = history.length;
-    while (split > 0 && history[split - 1].ordinal >= firstOrdinal) {
-      split--;
-    }
-    // A tool/reasoning group straddling the SQL/overlay boundary is projected
-    // together so its group identity and display order stay stable.
-    final first = overlay.where((item) => item.ordinal == firstOrdinal).first;
-    if (first.kind == ThreadItemKind.toolCall ||
-        first.kind == ThreadItemKind.reasoning) {
-      while (split > 0 &&
-          history[split - 1].kind == first.kind &&
-          history[split - 1].turnId == first.turnId) {
-        split--;
-      }
-    }
-    final prefix = _historyPrefixRows(workspace, split);
-    final overlayById = {for (final item in overlay) item.id: item};
-    final tail = timelineRowsFromThreadItems([
-      for (final item in history.skip(split))
-        if (!overlayById.containsKey(item.id)) item,
-      ...overlay,
-    ], turns: workspace.timelineTurns);
-    final rows = [...prefix, ...tail];
-    if (prefix.isEmpty ||
-        tail.isEmpty ||
-        prefix.last.sequence < tail.first.sequence) {
-      return rows;
-    }
-    return rows..sort((a, b) {
-      final sequence = a.sequence.compareTo(b.sequence);
-      if (sequence != 0) return sequence;
-      final order = a.order.compareTo(b.order);
-      return order != 0 ? order : a.id.compareTo(b.id);
-    });
-  }
-
-  List<TimelineRow> _historyPrefixRows(ThreadWorkspace workspace, int split) {
-    final history = workspace.historyItems;
-    final cached = _timelineHistoryPrefix[history];
-    if (cached != null &&
-        cached.split == split &&
-        identical(cached.turns, workspace.timelineTurns)) {
-      return cached.rows;
-    }
-    final rows = timelineRowsFromThreadItems(
-      history.take(split).toList(),
-      turns: workspace.timelineTurns,
-    );
-    _timelineHistoryPrefix[history] = _TimelineHistoryProjection(
-      split,
-      workspace.timelineTurns,
-      rows,
-    );
+    if (cached != null) return cached;
+    final rows = timelineRowsFromThreadItems(workspace.items);
+    _timelineRowsByWorkspace[workspace] = rows;
     return rows;
   }
 

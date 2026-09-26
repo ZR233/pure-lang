@@ -1,18 +1,20 @@
+mod activity;
 mod interaction;
 
+pub(crate) use activity::activity_detail as bridge_activity_detail;
 pub(crate) use interaction::interaction as bridge_interaction;
 
 use anyhow::Result;
 use pl_protocol::{
     BudgetLimitKind, BudgetLimitSnapshot, McpAvailabilityDescriptor, McpHealthSnapshot,
     McpServerDescriptor, PromptPrefixChangedReason, RuntimeCostAmount, Thread, ThreadAgentState,
-    ThreadAttachment, ThreadContentLifecycle, ThreadInferenceState, ThreadItem, ThreadItemDelta,
-    ThreadItemDeltaState, ThreadItemState, ThreadNotification, ThreadNotificationEnvelope,
-    ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot, ThreadStatus,
-    ThreadSubscriptionUpdate, ThreadTextChannel, ThreadToolFailureKind, ThreadToolOutput,
-    ThreadToolState, TodoItem, TodoListSnapshot, TodoStatus, TokenUsageSnapshot, Turn,
-    TurnCancellationCause, TurnCompletion, TurnPhase, TurnRolloverOutcome, TurnState,
-    WorkflowRunLifecycle, WorkflowRuntimeRunSnapshot, WorkflowRuntimeSnapshot,
+    ThreadAttachment, ThreadContentLifecycle, ThreadInferenceState, ThreadItem, ThreadItemState,
+    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
+    ThreadSnapshot, ThreadStatus, ThreadSubscriptionUpdate, ThreadTextChannel,
+    ThreadToolFailureKind, ThreadToolOutput, ThreadToolState, TodoItem, TodoListSnapshot,
+    TodoStatus, TokenUsageSnapshot, Turn, TurnCancellationCause, TurnCompletion, TurnPhase,
+    TurnRolloverOutcome, TurnState, WorkflowRunLifecycle, WorkflowRuntimeRunSnapshot,
+    WorkflowRuntimeSnapshot,
 };
 
 use crate::api::studio::types::*;
@@ -51,25 +53,6 @@ fn thread_notification(
                 turn: Box::new(bridge_turn(value)),
             }
         }
-        ThreadNotification::ItemStarted { item: value } => {
-            let Some(item) = bridge_thread_item(*value)? else {
-                return Ok(None);
-            };
-            BridgeThreadNotification::ItemStarted {
-                item: Box::new(item),
-            }
-        }
-        ThreadNotification::ItemDelta { delta } => BridgeThreadNotification::ItemDelta {
-            delta: Box::new(item_delta(delta)),
-        },
-        ThreadNotification::ItemCompleted { item: value } => {
-            let Some(item) = bridge_thread_item(*value)? else {
-                return Ok(None);
-            };
-            BridgeThreadNotification::ItemCompleted {
-                item: Box::new(item),
-            }
-        }
         ThreadNotification::InteractionChanged { interaction: value } => {
             BridgeThreadNotification::InteractionChanged {
                 interaction: Box::new(interaction::interaction(*value)?),
@@ -78,6 +61,16 @@ fn thread_notification(
         ThreadNotification::ThreadRuntimeUpdated { runtime: value } => {
             BridgeThreadNotification::ThreadRuntimeUpdated {
                 runtime: Box::new(runtime_snapshot(*value)),
+            }
+        }
+        ThreadNotification::ActivityChanged { activity: value } => {
+            BridgeThreadNotification::ActivityChanged {
+                activity: value.map(|current| Box::new(activity::activity(*current))),
+            }
+        }
+        ThreadNotification::StorageChanged { storage: value } => {
+            BridgeThreadNotification::StorageChanged {
+                storage: value.map(|current| Box::new(activity::storage(*current))),
             }
         }
         ThreadNotification::Lagged { dropped } => BridgeThreadNotification::Lagged { dropped },
@@ -109,6 +102,8 @@ pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThre
             .map(interaction::interaction)
             .collect::<Result<Vec<_>>>()?,
         runtime: value.runtime.map(runtime_snapshot),
+        activity: value.activity.map(activity::activity),
+        storage: value.storage.map(activity::storage),
         runtime_availability,
     })
 }
@@ -516,28 +511,6 @@ fn tool_output(value: &ThreadToolOutput) -> Result<BridgeThreadToolOutput> {
             .collect::<Result<Vec<_>>>()?,
         exit_code: value.exit_code(),
     })
-}
-
-fn item_delta(value: ThreadItemDelta) -> BridgeThreadItemDelta {
-    BridgeThreadItemDelta {
-        item_id: value.item_id,
-        revision: value.revision,
-        delta: match value.delta {
-            ThreadItemDeltaState::Text { delta } => BridgeThreadItemDeltaState::Text { delta },
-            ThreadItemDeltaState::ThinkingSummary { chunk_index, delta } => {
-                BridgeThreadItemDeltaState::ThinkingSummary { chunk_index, delta }
-            }
-            ThreadItemDeltaState::ThinkingContent { chunk_index, delta } => {
-                BridgeThreadItemDeltaState::ThinkingContent { chunk_index, delta }
-            }
-            ThreadItemDeltaState::ToolArguments { delta } => {
-                BridgeThreadItemDeltaState::ToolArguments { delta }
-            }
-            ThreadItemDeltaState::ToolResult { delta } => {
-                BridgeThreadItemDeltaState::ToolResult { delta }
-            }
-        },
-    }
 }
 
 pub(crate) fn runtime_snapshot(value: ThreadRuntimeSnapshot) -> BridgeThreadRuntimeSnapshot {

@@ -21,6 +21,8 @@ pub enum ModelStreamEvent {
         id: String,
         kind: ModelBlockKind,
         provider_metadata: Option<serde_json::Value>,
+        /// Provider item/part identity carried by the event that created this block.
+        provider: Option<ProviderBlockIdentity>,
     },
     BlockDelta {
         id: String,
@@ -28,17 +30,26 @@ pub enum ModelStreamEvent {
         field: ModelBlockField,
         delta: String,
         section_index: Option<u32>,
+        provider: Option<ProviderBlockIdentity>,
     },
     BlockClosed {
         id: String,
         kind: ModelBlockKind,
         authoritative_content: Option<ModelBlockContent>,
         provider_metadata: Option<serde_json::Value>,
+        provider: Option<ProviderBlockIdentity>,
     },
     ReasoningRawDelta {
         id: String,
         content_index: u32,
         delta: String,
+        /// Provider item/part identity carried by the source event when the adapter knows it.
+        ///
+        /// Raw reasoning is one provider part like any other, so a delta that reports the item it
+        /// belongs to keeps observing the same identity its terminal item finalizes. `None` means
+        /// the adapter reports no provider item boundaries at all (chat-style `reasoning_content`),
+        /// which is observed as the request-scoped raw reasoning channel instead of a fake item.
+        provider: Option<ProviderBlockIdentity>,
     },
     ToolInputStarted {
         stream_id: Option<String>,
@@ -105,6 +116,18 @@ pub enum ModelBlockKind {
     ReasoningSummary,
 }
 
+/// Provider identity of the item part a block streams.
+///
+/// The adapter that opened the block reads these fields from the source event (the provider item id
+/// plus the content-part index). Consumers use them verbatim as the observation identity and never
+/// parse the block `id` to recover identity; the part kind is implied by [`ModelBlockKind`]
+/// (`Text` streams `OutputText`, `ReasoningSummary` streams `SummaryText`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderBlockIdentity {
+    pub item_id: String,
+    pub content_index: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelBlockField {
     Text,
@@ -169,21 +192,32 @@ impl ModelStreamEvent {
         }
     }
 
-    pub fn text_started(id: String, channel: TraceTextChannel) -> Self {
+    pub fn text_started(
+        id: String,
+        channel: TraceTextChannel,
+        provider: Option<ProviderBlockIdentity>,
+    ) -> Self {
         Self::BlockOpened {
             id,
             kind: ModelBlockKind::Text { channel },
             provider_metadata: None,
+            provider,
         }
     }
 
-    pub fn text_delta(id: String, channel: TraceTextChannel, delta: String) -> Self {
+    pub fn text_delta(
+        id: String,
+        channel: TraceTextChannel,
+        delta: String,
+        provider: Option<ProviderBlockIdentity>,
+    ) -> Self {
         Self::BlockDelta {
             id,
             kind: ModelBlockKind::Text { channel },
             field: ModelBlockField::Text,
             delta,
             section_index: None,
+            provider,
         }
     }
 
@@ -191,33 +225,43 @@ impl ModelStreamEvent {
         id: String,
         channel: TraceTextChannel,
         authoritative_text: Option<String>,
+        provider: Option<ProviderBlockIdentity>,
     ) -> Self {
         Self::BlockClosed {
             id,
             kind: ModelBlockKind::Text { channel },
             authoritative_content: authoritative_text.map(ModelBlockContent::Text),
             provider_metadata: None,
+            provider,
         }
     }
 
     pub fn reasoning_summary_started(
         id: String,
         provider_metadata: Option<serde_json::Value>,
+        provider: Option<ProviderBlockIdentity>,
     ) -> Self {
         Self::BlockOpened {
             id,
             kind: ModelBlockKind::ReasoningSummary,
             provider_metadata,
+            provider,
         }
     }
 
-    pub fn reasoning_summary_delta(id: String, section_index: u32, delta: String) -> Self {
+    pub fn reasoning_summary_delta(
+        id: String,
+        section_index: u32,
+        delta: String,
+        provider: Option<ProviderBlockIdentity>,
+    ) -> Self {
         Self::BlockDelta {
             id,
             kind: ModelBlockKind::ReasoningSummary,
             field: ModelBlockField::ReasoningSummary,
             delta,
             section_index: Some(section_index),
+            provider,
         }
     }
 
@@ -225,12 +269,14 @@ impl ModelStreamEvent {
         id: String,
         provider_metadata: Option<serde_json::Value>,
         authoritative_summary: Option<Vec<String>>,
+        provider: Option<ProviderBlockIdentity>,
     ) -> Self {
         Self::BlockClosed {
             id,
             kind: ModelBlockKind::ReasoningSummary,
             authoritative_content: authoritative_summary.map(ModelBlockContent::ReasoningSummary),
             provider_metadata,
+            provider,
         }
     }
 }

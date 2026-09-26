@@ -1,3 +1,4 @@
+pub(crate) mod chat_window;
 pub(crate) mod event;
 pub(crate) mod records;
 pub(crate) mod runtime;

@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use pl_protocol::{PureError, Result};
 
-use super::event::{ModelBlockKind, ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
+use super::event::{
+    ModelBlockKind, ModelStreamEvent, ProviderBlockIdentity, ToolInputDeltaPayload,
+    ToolInputPayloadKind,
+};
 
 pub(crate) struct StreamLifecycle {
     open_blocks: BTreeMap<String, OpenBlock>,
@@ -14,6 +17,7 @@ pub(crate) struct StreamLifecycle {
 struct OpenBlock {
     id: String,
     kind: ModelBlockKind,
+    provider: Option<ProviderBlockIdentity>,
 }
 
 struct OpenToolInput {
@@ -38,6 +42,7 @@ impl StreamLifecycle {
                 id,
                 kind,
                 provider_metadata,
+                provider,
             } => {
                 let key = block_key(kind, &id);
                 if self.closed_blocks.contains(&key) {
@@ -55,12 +60,14 @@ impl StreamLifecycle {
                     OpenBlock {
                         id: id.clone(),
                         kind,
+                        provider: provider.clone(),
                     },
                 );
                 vec![ModelStreamEvent::BlockOpened {
                     id,
                     kind,
                     provider_metadata,
+                    provider,
                 }]
             }
             ModelStreamEvent::BlockDelta {
@@ -69,6 +76,7 @@ impl StreamLifecycle {
                 field,
                 delta,
                 section_index,
+                provider,
             } => {
                 let key = block_key(kind, &id);
                 if self.open_blocks.contains_key(&key) {
@@ -78,6 +86,7 @@ impl StreamLifecycle {
                         field,
                         delta,
                         section_index,
+                        provider,
                     }]
                 } else if self.closed_blocks.contains(&key) {
                     return Err(PureError::LlmError(format!(
@@ -94,6 +103,7 @@ impl StreamLifecycle {
                 kind,
                 authoritative_content,
                 provider_metadata,
+                provider,
             } => {
                 let key = block_key(kind, &id);
                 if self.open_blocks.remove(&key).is_some() {
@@ -103,6 +113,7 @@ impl StreamLifecycle {
                         kind,
                         authoritative_content,
                         provider_metadata,
+                        provider,
                     }]
                 } else if self.closed_blocks.contains(&key) {
                     return Err(PureError::LlmError(format!(
@@ -118,10 +129,12 @@ impl StreamLifecycle {
                 id,
                 content_index,
                 delta,
+                provider,
             } => vec![ModelStreamEvent::ReasoningRawDelta {
                 id,
                 content_index,
                 delta,
+                provider,
             }],
             ModelStreamEvent::ToolInputStarted {
                 stream_id,
@@ -306,6 +319,7 @@ impl StreamLifecycle {
                     kind: block.kind,
                     authoritative_content: None,
                     provider_metadata: None,
+                    provider: block.provider,
                 }
             })
             .collect()

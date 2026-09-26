@@ -140,7 +140,13 @@ fn state(
     })
 }
 
-fn phase(snapshot: &ThreadSnapshot, turn_id: &str) -> TurnPhase {
+/// Canonical phase of a running Turn, derived from the live facts of the snapshot.
+///
+/// The phase is a projection of the running tasks and the newest attempt outcome, so it changes
+/// whenever a tool task starts or finishes and whenever an attempt commits — neither of which
+/// rewrites the Turn record. Live projection therefore re-derives it after every effect instead of
+/// relying on a Turn record update.
+pub(super) fn phase(snapshot: &ThreadSnapshot, turn_id: &str) -> TurnPhase {
     if snapshot.tasks.values().any(|task| {
         task.turn_id == turn_id && task.status == pl_core::thread::task::TaskStatus::Running
     }) {

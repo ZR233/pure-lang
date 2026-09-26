@@ -8,14 +8,13 @@ import '../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 
-import 'types/attachment.dart';
 import 'types/error.dart';
 import 'types/event.dart';
 import 'types/response.dart';
 import 'types/runtime.dart';
 import 'types/settings.dart';
+import 'types/thread_activity.dart';
 import 'types/thread_stream.dart';
-import 'types/thread_stream/item.dart';
 import 'types/updater.dart';
 part 'subscription.freezed.dart';
 
@@ -23,13 +22,16 @@ part 'subscription.freezed.dart';
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeSubscriptionInner`, `BridgeSubscriptionKind`, `BridgeTaskRegistry`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`
 
-Future<BridgeEventSubscription> subscribeThread({
-  required String threadId,
-  required bool stateOnly,
-}) => RustLib.instance.api.crateApiStudioSubscriptionSubscribeThread(
-  threadId: threadId,
-  stateOnly: stateOnly,
-);
+/// 订阅一个 Thread 的**状态流**：Turn、活动、交互、运行时与 lagged 帧。
+///
+/// 内容不在状态流里：条目与流式正文只由 ChatView 窗口交付。内容帧的过滤发生在生产端
+/// （runtime 的状态流不再转发 `Item*`/`Delta`），所以这里没有“末端丢弃内容帧”的开关，客户端
+/// 也不会再因为过滤内容帧而看到 revision 空洞。状态流的 envelope `revision` 只按状态帧递增，
+/// 与 ChatView 窗口的内容 revision 相互独立。
+Future<BridgeEventSubscription> subscribeThread({required String threadId}) =>
+    RustLib.instance.api.crateApiStudioSubscriptionSubscribeThread(
+      threadId: threadId,
+    );
 
 Future<BridgeEventSubscription> createProductSubscription() =>
     RustLib.instance.api.crateApiStudioSubscriptionCreateProductSubscription();

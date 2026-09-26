@@ -115,8 +115,23 @@ impl ToolStream {
         Ok(calls)
     }
 
+    /// Stable accumulator key one tool-input event resolves to, without mutating the stream.
+    ///
+    /// The model stream charges the incoming argument bytes against its reliable output domain
+    /// *before* they are appended, so it needs the exact identity the append will land on rather
+    /// than a second guess that could double-charge a Responses call whose `added` event exposes an
+    /// item id while its deltas carry the call id.
+    pub(crate) fn resolved_key(
+        &self,
+        stream_id: Option<&String>,
+        call_id: Option<&String>,
+        item_id: &str,
+    ) -> String {
+        self.resolve_key(stream_id, call_id, item_id)
+    }
+
     fn resolve_key(
-        &mut self,
+        &self,
         stream_id: Option<&String>,
         call_id: Option<&String>,
         item_id: &str,
@@ -174,6 +189,27 @@ impl ToolStream {
         self.accumulators
             .entry(key.to_string())
             .or_insert_with(|| ToolCallAccumulator::new(key, call_id, item_id, payload()))
+    }
+
+    /// Reserves one tool-input event's identity and returns its stable accumulator key.
+    ///
+    /// The live progress projection charges the argument bytes of the same events the canonical
+    /// accumulator copies, so it has to key them by the exact identity the append will land on. It
+    /// keeps no payload here; reserving the identity is enough for the following `delta` that omits
+    /// the call id, or the `completed` that only carries the call id, to resolve onto the one call
+    /// the start opened instead of being charged as a second, unrelated one.
+    pub(crate) fn reserve_identity(
+        &mut self,
+        stream_id: Option<&String>,
+        call_id: Option<&String>,
+        item_id: &str,
+    ) -> String {
+        let key = self.resolve_key(stream_id, call_id, item_id);
+        self.get_or_insert_accumulator(&key, call_id, item_id, || {
+            ToolCallPayloadAccumulator::FunctionArguments(String::new())
+        })
+        .merge_metadata(item_id, call_id, None);
+        key
     }
 }
 
@@ -353,7 +389,7 @@ fn trace_tool_part_id(call_id: Option<&String>, id: &str, fallback_id: &str) -> 
         .unwrap_or_else(|| fallback_id.to_string())
 }
 
-fn tool_call_accumulator_key(
+pub(crate) fn tool_call_accumulator_key(
     stream_id: Option<&String>,
     call_id: Option<&String>,
     item_id: &str,

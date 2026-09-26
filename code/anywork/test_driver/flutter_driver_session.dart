@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter_driver/flutter_driver.dart';
 
+import 'raw_tap.dart';
+
 typedef FlutterDriverConnector = Future<FlutterDriverClient> Function(
   String vmServiceUrl,
 );
@@ -29,11 +31,32 @@ abstract interface class FlutterDriverClient {
     Duration? timeout,
   });
 
+  /// Scrolls a scrollable by a fixed pixel delta without targeting an item.
+  Future<void> scrollBy(
+    SerializableFinder scrollable,
+    double dy, {
+    Duration? timeout,
+  });
+
   Future<void> tap(SerializableFinder finder, {Duration? timeout});
+
+  Future<void> rawTap(SerializableFinder finder, {Duration? timeout});
 
   Future<void> enterText(String text);
 
   Future<String> getText(SerializableFinder finder);
+
+  /// The finder's top-left corner in global (window) logical pixels.
+  Future<DriverOffset> getTopLeft(
+    SerializableFinder finder, {
+    Duration? timeout,
+  });
+
+  /// The finder's bottom-right corner in global (window) logical pixels.
+  Future<DriverOffset> getBottomRight(
+    SerializableFinder finder, {
+    Duration? timeout,
+  });
 
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout});
 
@@ -88,6 +111,10 @@ class FlutterDriverSession {
     Duration(seconds: 1),
   ];
   static const tapDeadline = Duration(seconds: 30);
+
+  /// Deadline for the read-only geometry commands. A widget that is not laid out
+  /// must report a read failure quickly instead of holding a Driver command.
+  static const geometryDeadline = Duration(seconds: 5);
 
   final String _vmServiceUrl;
   final FlutterDriverConnector _connector;
@@ -203,11 +230,36 @@ class FlutterDriverSession {
     );
   }
 
+  /// Scrolls a scrollable by a fixed pixel delta without targeting an item.
+  Future<void> scrollBy(
+    SerializableFinder scrollable,
+    double dy, {
+    Duration? timeout,
+  }) {
+    return _runSideEffectWithDeadline(
+      _client.scrollBy(scrollable, dy, timeout: timeout),
+      name: 'scrollBy',
+      timeout: timeout,
+    );
+  }
+
   Future<void> tap(SerializableFinder finder, {Duration? timeout}) {
     final effectiveTimeout = timeout ?? tapDeadline;
     return _runSideEffectWithDeadline(
       _client.tap(finder, timeout: effectiveTimeout),
       name: 'tap',
+      timeout: effectiveTimeout,
+    );
+  }
+
+  /// Dispatches a pointer event at the finder's center without the stock
+  /// `hitTestable()` pre-filter, which yields no candidates on the Linux
+  /// desktop embedder. Shares the single-tap deadline and never reconnects.
+  Future<void> rawTap(SerializableFinder finder, {Duration? timeout}) {
+    final effectiveTimeout = timeout ?? tapDeadline;
+    return _runSideEffectWithDeadline(
+      _client.rawTap(finder, timeout: effectiveTimeout),
+      name: 'rawTap',
       timeout: effectiveTimeout,
     );
   }
@@ -238,6 +290,31 @@ class FlutterDriverSession {
   Future<void> enterText(String text) => _client.enterText(text);
 
   Future<String> getText(SerializableFinder finder) => _client.getText(finder);
+
+  /// Reads a widget's top-left corner through the Driver's own geometry command.
+  ///
+  /// Read-only and bounded: the deadline is always applied so a finder that is
+  /// not laid out reports a failure instead of waiting on the extension.
+  Future<DriverOffset> getTopLeft(
+    SerializableFinder finder, {
+    Duration? timeout,
+  }) {
+    final effectiveTimeout = timeout ?? geometryDeadline;
+    return _client
+        .getTopLeft(finder, timeout: effectiveTimeout)
+        .timeout(effectiveTimeout);
+  }
+
+  /// Reads a widget's bottom-right corner through the Driver geometry command.
+  Future<DriverOffset> getBottomRight(
+    SerializableFinder finder, {
+    Duration? timeout,
+  }) {
+    final effectiveTimeout = timeout ?? geometryDeadline;
+    return _client
+        .getBottomRight(finder, timeout: effectiveTimeout)
+        .timeout(effectiveTimeout);
+  }
 
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout}) {
     return _client.waitUntilNoTransientCallbacks(timeout: timeout);
@@ -396,14 +473,50 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
   }
 
   @override
+  Future<void> scrollBy(
+    SerializableFinder scrollable,
+    double dy, {
+    Duration? timeout,
+  }) {
+    return _driver.scroll(
+      scrollable,
+      0,
+      dy,
+      const Duration(milliseconds: 150),
+      timeout: timeout,
+    );
+  }
+
+  @override
   Future<void> tap(SerializableFinder finder, {Duration? timeout}) =>
       _driver.tap(finder, timeout: timeout);
+
+  @override
+  Future<void> rawTap(SerializableFinder finder, {Duration? timeout}) async {
+    await _driver.sendCommand(RawTap(finder, timeout: timeout));
+  }
 
   @override
   Future<void> enterText(String text) => _driver.enterText(text);
 
   @override
   Future<String> getText(SerializableFinder finder) => _driver.getText(finder);
+
+  @override
+  Future<DriverOffset> getTopLeft(
+    SerializableFinder finder, {
+    Duration? timeout,
+  }) {
+    return _driver.getTopLeft(finder, timeout: timeout);
+  }
+
+  @override
+  Future<DriverOffset> getBottomRight(
+    SerializableFinder finder, {
+    Duration? timeout,
+  }) {
+    return _driver.getBottomRight(finder, timeout: timeout);
+  }
 
   @override
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout}) {

@@ -53,7 +53,6 @@ pub(in crate::thread) enum Command {
         cold::ColdStoreHandle,
         oneshot::Sender<Result<(), ThreadError>>,
     ),
-    Flush(oneshot::Sender<Result<(), ThreadError>>),
     Turn(
         TurnInput,
         oneshot::Sender<Result<TurnCompletion, ThreadError>>,
@@ -107,7 +106,7 @@ impl Command {
             Self::ReplaceContext(_, reply) => closed(reply),
             Self::Execute(_, _, reply) => closed(reply),
             Self::Step(_, reply) => closed(reply),
-            Self::Flush(reply) | Self::Close(reply) => closed(reply),
+            Self::Close(reply) => closed(reply),
         }
     }
 }

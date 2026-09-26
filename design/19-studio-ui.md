@@ -131,6 +131,10 @@ Studio locale 的说明文案，`local` 会话不显示该图标。图标只表�
 与文字，已有正文的刷新保留正文并显示轻量进度；失败显示原因与重试入口。正常持久化排队
 与写入不显示诊断横条；只有保存降级、恢复中、阻塞或存储压力暂停新推理时才显示诊断。
 所有状态由 canonical snapshot 或实际初始化操作推进，不用延时或虚假百分比推测进度。
+诊断横条里的“重试保存”与“继续”是两个动作：重试只把积压事实写下去，绝不自动恢复模型/工具
+调用；硬故障重试成功仍保持暂停，只有后端把 `ThreadStorageState.canResume` 报为真时“继续”入口
+才可用，点击后后端仍按故障代数与目标 durable 水位重查，代数过期或水位未达即拒绝。短暂压力
+（队列/字节预算）在安全间隙自动等待并自动恢复，不显示“继续”，也不改写检查以外的事实。
 
 主页、会话、详情与全部设置固定采用同一暹罗浅色主题：奶油底色、海豹棕主操作、少量眼眸蓝
 点缀。不提供深色主题或跟随系统选项，操作系统切换外观不会改变 Studio。侧栏布局与响应式
@@ -295,54 +299,83 @@ attachment，不由 Flutter 解析 opaque 工具载荷；实时、历史分页�
 
 Turn 的失败、取消与预算限制从历史中持久化的 typed Turn item 派生，在该轮内容末尾显示
 终态提示；不能因活动 Turn 清空而丢失。活动 Turn 与最近 Turn 分别表达：活动 Turn 清空
-后仍保留 canonical 最近终态及原因；同一 Turn 的旧 revision 不得覆盖终态，新 Turn 不受
+后仍保留 canonical 最近终态及原因；订阅建立或重订阅时，后端会把 owner 保留的最新终态 Turn 以
+同一 `turnCompleted` 事实补发（见 [07](./07-streaming.md) §7.2），界面因此不依赖“当时在场”，
+也不缓存自己见过的 `running` 状态；owner 首次安装/进程回收后冷恢复时，该保留值由后端按持久化
+终态索引读出最近一条 durable Turn 记录播种（不读消息正文），retired 子会话没有 owner 时订阅同样
+补发这条 `turnCompleted`，因此重开或慢恢复都能看到最近终态；同一 Turn 的旧 revision 不得覆盖终态，新 Turn 不受
 旧 Turn 迟到事件覆盖；不同 Turn 同秒更新时按 canonical revision 判定较新的 Turn。GUI 和
 Driver 使用同一 typed Turn 数据源，不缓存最后看到的
-running 状态来推测最近 Turn。计划摘要与活动块按内容高度参与滚动布局，短内容贴底的
+running 状态来推测最近 Turn。运行中 Turn 的阶段来自 canonical `turnUpdated` 帧：任务启动/结束
+与模型 attempt 提交都会补发阶段帧，活动行因此不依赖 Timeline 窗口是否已加载当前行的
+工具细节。当前活动行本身取自 typed `ThreadActivity`（同一 Thread 唯一 observer 的纯内存投影，
+含阶段、稳定 activity 身份与并行工具数量/最近开始摘要，见 [18](./18-studio-state.md) §18.8.1），
+可选的完整工具/正文详情按活动身份按需读取而不是每帧物化。计划摘要与活动块按内容高度参与滚动布局，短内容贴底的
 空白不压缩真实内容；不用固定高度或裁剪隐藏溢出。最终文本只解析一次，保留真实换行与
 代码中的字面反斜杠。
 
 ## 19.10 连续历史阅读
 
-每 Thread 独立持有最多 500 条的 SQL 阅读窗口；不保留 400 条独立实时尾部，也不维护第二份
-`cachedItems` 正文缓存。分页每页默认 100 条，支持 latest、around、before、after；大 Turn
-可跨页，终态提示只属于包含该 Turn 末条的覆盖范围。完整 Turn 历史消费者保留原查询接口。
+历史正文仍走 `history.sqlite` 的 keyset 分页（`latest`/`around`/`before`/`after`，大 Turn
+可跨页；窗口上限与页缓存见 [17](./17-studio-storage.md) §17.4），终态提示只属于包含该 Turn
+末条的覆盖范围。完整 Turn 历史消费者保留原查询接口。
 
-Timeline workspace 由 SQL 阅读窗口和实时 overlay 组成，并渲染为同一单列视图：SQL 窗口只由
-HistoryReader page 替换或扩展；overlay 只保存运行中 Item 以及 writer 尚未用同 item
-ID/revision 确认的终态 Item。新订阅快照更新 canonical 运行状态与活动预览，不把实时数据
-写成另一个历史尾部队列。订阅代次、窗口代次与单次历史请求分别判旧；同 Thread 只允许一个
-历史请求在途。重同步重新建立订阅并消费首帧，不并行回灌单次快照；显式跳最新时重新读取
-SQL `Latest` 首窗并合并 overlay，作废旧窗口请求。阅读历史时实时事件只更新内容与新内容
-提示，不抢占当前阅读锚点或跟随底部状态；窗口外终态由 SQL 页按身份和 revision
-确认后释放其 overlay 正文，后台确认不替换正在阅读的页面。
+Timeline 的唯一 body owner 是 ChatView：runtime 内部按 Thread 同时持有 history（`history.sqlite`
+的 keyset 页）与 pending（尚未落盘的运行中条目），并由**同一个 view** 交付一个 typed 窗口；Dart
+只消费该窗口的 typed 条目与差量，不自行读 SQL、不合并实时 overlay，也不维护第二份
+`cachedItems` 正文缓存或独立实时尾部队列。职责按「内容窗口」与「状态流」分开：正文只由内容窗口
+（窗口版本 + `UpdateItem` 差量）交付，状态流的 `epoch`/`base_revision` 只判状态事实的新旧与
+连续性，不携带正文。订阅快照只更新 canonical 运行状态与活动预览，不把实时数据写成另一个历史
+尾部队列。
+
+打开正在运行的 Thread 时窗口直接包含尚未保存的 pending 条目（可见即可读），不等待 writer
+保存水位、checkpoint 或数据库确认；保存只推进 `saved`/durable 水位，不改变身份、顺序、内容
+revision 与执行终态。重同步重新建立订阅并消费首帧（`epoch` 递增）以作废旧代次的窗口请求；
+显式跳到最新时由同一个 view 交付该 Thread 的权威窗口（`Reset`），不在 Dart 侧读 SQL `Latest`
+首窗再拼 overlay。阅读历史时实时事件只更新内容与新内容提示，不抢占当前阅读锚点或跟随底部状态。
 
 历史页只走 `history.sqlite` 的 keyset 分页（latest/around/before/after），不经过 Thread owner、
-不读取驻留内存历史；增量事件按版本化封套（`epoch`/`base_revision`/`revision`）判连续，item
-delta 还要求命中当前未终态 Item 且 revision 严格递增，缺口或 `lagged` 时重新订阅并从数据库窗口
-重建（见 [07](./07-streaming.md)、[17](./17-studio-storage.md) §17.4）。
+不读取驻留内存历史。增量事件按版本化封套（`epoch`/`base_revision`/`revision`）判连续；正文本身
+不由状态流交付，而是由**唯一内容窗口**交付：同一 item 的全部字段变化合批为一次 `UpdateItem`
+（`expected_revision` 一次基线校验、`revision` 一次内容版本提交，`omitted_bytes` 与保存水位
+`saved` 随批提交），字段按稳定 `ChatField` 身份输出 `Append`/`Replace`/`Remove`/`Unchanged`，
+正文按具体文本字段应用而不是向 JSON 字符串追加字节；缺口或 `lagged` 时重新订阅并从数据库窗口重建
+（见 [07](./07-streaming.md) §7.4、[17](./17-studio-storage.md) §17.4）。
 
-运行中以及 writer 未确认终态的 overlay Item 在内存保存完整流式正文，按 item/revision 追加
-delta；Rust 实时 FRB 传输发送完整 delta，客户端不为 transport 截断正文。后续 HistoryReader
-页或既有按身份读回返回同 item ID/revision 后，该终态才算 SQL 确认；非可见正文此时可释放，
-之后需要时再走历史回源。已完成且非可见的正文可使用现有
-`kTimelineItemBodyBudget = 8 * 1024` 客户端预览；SQL 页继续使用 `TimelineItemPreview`
-的单条预览预算。超大正文经 canonical item identity 显式回源：`loadItemBody` 通过
-`readTimelineItem` 读取完整条目（测试替身退化为围绕该身份的 `around` 一页），按同一
-database identity 与水位合并，窗口过期时重读权威窗口而不是拼接旧载荷。回源请求已发出
-但正文尚未 durable 时，条目进入
-`pendingItemBodyIds`：仍然可见、可为重试，不当作身份缺席。
+ChatView 是 pending/live/history 的唯一 body owner：未落盘的流式条目与已落盘历史条目在同一个
+canonical 条目集合里按 ordinal 排序，宿主只消费窗口差量，不维护第二份 `cachedItems` 正文缓存、
+也不维护终态正文覆盖层。窗口条目按有界预览交付（`omitted_bytes` 记录省略字节），需要完整正文时用
+**同一个 view** 的按身份读取（`expand`/`readComplete`）请求，成功后交出的仍是该窗口的权威快照，
+宿主直接把它当成一次 `Reset` 应用；客户端不再有 `kTimelineItemBodyBudget` 之类的截断策略，也不
+在窗口过期时拼接旧载荷。同一个 view 复用同一个 `Session`，因此回源不会另开实例、也不会读到别的
+Thread 的条目；请求已发出但正文尚未可读时条目保持可见并可重试，不当作身份缺席。
+
+四个事实互不替代：item 内容 `revision`、窗口 `version`、保存水位 `saved` 与执行终态
+`ChatLifecycle`。终态只由执行事实决定，迟到预览不能把终态条目拉回流式；保存确认只翻 `saved`，
+不改变身份、顺序、内容 revision、正文或执行终态，所以终态条目可以尚未保存、已保存条目仍可继续
+增量。后续 HistoryReader 页或按身份读回返回同 item ID/revision 后，该终态才算 SQL 确认，非可见
+正文此时即可释放，之后需要时再走同一窗口回源。
 
 沿滚动方向距边缘 1.5 个视口时预取；不足一屏自动补齐，直到填满、到端或失败。向旧加载
 淘汰远端新条目，向新加载淘汰远端旧条目；可见条目与阅读锚点优先保留。失败保留正文，
 在对应边缘提供显式重试，另一方向不受影响；超过 150ms 才显示不占正文高度的加载提示。
 
 位置由 item 身份、条目内偏移和跟随末尾状态表达。切回优先显示缓存，插入、淘汰、窗口
-变化和图片展开均按同一可见锚点校正，不根据总滚动高度差猜测。GUI 只保留 SQL 窗口内当前
-可见页、前后少量预取页，以及运行中和 writer 未确认终态的 overlay；同一终态被 SQL 同
-ID/revision 确认后，非可见正文即可释放，远离窗口的 page 与非选中 Thread workspace 也可
-释放。历史浏览只提示新内容，流式末尾跟随按帧合并渲染，不逐 token 查询 SQL，也不反复
-启动动画。Markdown 展示可按内容版本复用，不改变原始文本。
+变化和图片展开均按同一可见锚点校正，不根据总滚动高度差猜测。GUI 只保留当前窗口的可见页
+与前后少量预取页（pending 与尚未确认的终态同样由该窗口交付，Dart 不另存覆盖层）；非可见
+正文按窗口淘汰释放，远离窗口的页与非选中 Thread workspace 也可释放。历史浏览只提示新内容，
+流式末尾跟随按帧合并渲染，不逐 token 查询 SQL，也不反复
+启动动画。Markdown 展示可按内容版本复用，不改变原始文本。超长纯文本正文（单段也可能达
+数十万字符）在**有界测量窗**内按同一 style/宽度/`TextScaler`/方向/locale 量出的**真实行
+起点**切成有界块：已稳定的块复用同一个 `Text` 实例、只有仍在增长的尾块重新布局；复用前对
+已封存前缀**逐块逐字精确校验**，同 identity 的 Replace 改动任何位置都会重建，不做首尾采样
+也不做哈希近似。断点只取行起点、各块按顺序拼接仍等于原文，因此复制的文本与可见换行按 SDK
+契约（`getSelectedContent` 顺序拼接各 Selectable、不插分隔）不变，仍需实机确认。只有 `ltr`
+且本次 canonical 正文无 RTL/bidi 控制字符时才启用，否则清掉已封存块、整体退回单个 `Text`；
+测量窗内量不出安全断点（超长无空白 run、CJK 无空格断行、缩进续行）时只是不再新增块，保留
+已封存前缀 + 单个尾块，仍以真实行起点分块而不是整体回退。收益是有条件的：逐帧追加时每帧只
+重排尾块，一次性换入超大正文的那一帧仍与整段布局同阶（与优化前同级），后续帧继续按批封存。
+不为指标切分普通短句，也不引入第二份正文事实源。
 
 ## 19.11 运行中发送消息
 

@@ -7,42 +7,6 @@ use pl_protocol::{ThreadItem, ThreadItemState, ThreadRawItem, ThreadTurnItem};
 
 use super::{ProjectionError, order};
 
-/// Projects only newly accepted visible input from this effect. Admission cannot wait
-/// for a history reader; later state transitions and old identities are resolved by
-/// the durable writer against the canonical history.
-pub(in crate::studio) fn project_accepted_inputs(
-    thread_id: &str,
-    state: &ThreadSnapshot,
-    effect: &ThreadEffectBatch,
-) -> Result<Vec<ThreadItem>, ProjectionError> {
-    let mut items = Vec::new();
-    for change in effect.inputs.iter() {
-        let InputChange::Accepted(record) = change else {
-            continue;
-        };
-        if record.accepted_sequence != effect.sequence {
-            return Err(ProjectionError::MissingInput(record.input.id.clone()));
-        }
-        let input = state
-            .inputs
-            .iter()
-            .find(|input| input.input.id == record.input.id)
-            .ok_or_else(|| ProjectionError::MissingInput(record.input.id.clone()))?;
-        if let Some(item) = super::inputs::project_input(
-            thread_id,
-            state,
-            input,
-            0,
-            effect.committed_at,
-            effect.sequence,
-            effect.committed_at,
-        )? {
-            items.push(item);
-        }
-    }
-    Ok(items)
-}
-
 /// Timeline items one committed effect contributes, plus the identities it references but cannot
 /// materialize from the state that effect carried.
 ///
@@ -261,8 +225,20 @@ pub(in crate::studio) fn project_effect_items(
     for delivery in effect.deliveries.iter() {
         call_ids.insert(delivery.call_id.as_str());
     }
+    // A repaired archive names an already-committed call, so it re-projects that one identity to add
+    // the durable reference it stored. The supplement carries no second delivery and no second fact:
+    // it only touches the resource metadata of the result the call already owns.
+    for repair in effect.delivery_repairs.iter() {
+        call_ids.insert(repair.call_id.as_str());
+    }
 
     for call_id in call_ids {
+        let repaired: Vec<pl_core::context::ResourceReference> = effect
+            .delivery_repairs
+            .iter()
+            .filter(|repair| repair.call_id == call_id)
+            .map(|repair| repair.reference.clone())
+            .collect();
         let saved_call = state
             .attempts
             .iter()
@@ -275,7 +251,27 @@ pub(in crate::studio) fn project_effect_items(
                 _ => None,
             });
         let tool_id = order::tool_id(call_id);
-        let (turn_id, mut projected) = if let Some((turn_id, call)) = saved_call {
+        // A repair lands after its result was committed, so the delivery that carried the original
+        // projection has already left resident state and cannot describe the terminal result here.
+        // The already-projected terminal item is the authority for everything but the repaired
+        // references, so the supplement keeps its text, outcome, order and identity untouched.
+        let repaired_target = (!repaired.is_empty())
+            .then(|| existing.get(&tool_id))
+            .flatten()
+            .filter(|saved| {
+                matches!(saved.state(), ThreadItemState::Tool(tool) if tool.terminal_output().is_some())
+            });
+        let (turn_id, mut projected) = if let Some(saved) = repaired_target {
+            (
+                saved.turn_id.as_str(),
+                super::tools::project_repaired_tool_call(
+                    &thread.id,
+                    saved,
+                    &repaired,
+                    effect.committed_at,
+                )?,
+            )
+        } else if let Some((turn_id, call)) = saved_call {
             let (ordinal, created_at) = stamp(existing, reserved, &tool_id, effect.committed_at);
             (
                 turn_id,

@@ -10,6 +10,14 @@ pub(super) struct ToolExecutionCompletion {
 
 pub(super) type ToolExecutionFuture = futures::future::BoxFuture<'static, ToolExecutionCompletion>;
 
+/// Reliable output reservation identity of one tool call.
+///
+/// It is exactly the caller key the tool's task is stored under, so the mailbox progress handler
+/// finds the call's quota from the caller identity it already has instead of parsing it back out.
+pub(super) fn tool_output_operation(call_id: &str) -> String {
+    format!("task:{call_id}")
+}
+
 impl Owner {
     pub(super) async fn execute_tool(
         &mut self,
@@ -23,7 +31,20 @@ impl Owner {
             .ok_or(ThreadError::MissingCall)?
             .executor
             .requires_foreground_execution();
-        let mut execution = self.begin_tool_execution(id.clone(), cancellation.clone())?;
+        // The call may only start once the reliable budget really funds the output it will stream;
+        // this waits at a storage safety point instead of starting a tool whose result could not be
+        // retained. The quota is held until the call's result is committed.
+        let operation = tool_output_operation(&id);
+        self.reserve_operation_output(&operation, &cancellation)
+            .await?;
+        let mut execution = match self.begin_tool_execution(id.clone(), cancellation.clone()) {
+            Ok(execution) => execution,
+            Err(error) => {
+                // The call never started, so hand its unused quota straight back; nothing was lost.
+                self.finish_operation_output(&operation);
+                return Err(error);
+            }
+        };
         if foreground {
             let completion = self.await_with_mailbox(execution).await;
             return self
@@ -117,6 +138,7 @@ impl Owner {
         completion: ToolExecutionCompletion,
     ) -> Result<crate::tool::ToolOutput, ThreadError> {
         let id = completion.call.call.call_id.clone();
+        let operation = tool_output_operation(&id);
         let previous = self.state.clone();
         let result = self.stage_tool_execution(completion.clone());
         let terminal =
@@ -125,11 +147,23 @@ impl Owner {
             self.uncommitted_tools.remove(&id);
             self.permission_leases.remove(&format!("permission:{id}"));
             self.task_tokens.remove(&format!("task:{id}"));
+            // The result being committed is exactly the output this call reserved budget for, so the
+            // store transfers that reservation onto the fact instead of charging it a second time.
+            self.pending_output_claim = Some(operation.clone());
             self.publish();
+            // The call returned and its result is now enrolled by the same `publish`/`admit` the
+            // ordinary path uses, so the transient ceiling can be given back — but only once that
+            // hand-over really completed. Handing it back before the result was enrolled would let a
+            // new operation take budget the retained bytes still need, so a backpressured admission
+            // defers the release to the boundary the queue drains at.
+            self.settle_operation_output(&operation);
         } else {
             self.state = previous;
             self.uncommitted_tools.insert(id, completion);
             self.publish_snapshot();
+            // The completion stays resident here until a retry commit hands it over, so its
+            // reservation stays charged: the retained bytes are real memory, and releasing the
+            // ceiling now would make the Thread look drained while still holding them.
         }
         result
     }
@@ -144,6 +178,149 @@ impl Owner {
                 return Err(ThreadError::PendingToolCommit);
             }
         }
+        Ok(())
+    }
+
+    /// Accepts one increment of a running tool call's live output under its reliable output quota.
+    ///
+    /// The increment is charged against the call's reservation *before* it becomes resident: an
+    /// increment the quota cannot hold is refused, the call is cancelled with the bytes it already
+    /// accepted, and the earlier output is kept instead of being replaced by a larger one. The typed
+    /// fault is latched right here, before the call can finish, so a Thread that truncated a tool
+    /// never quietly starts more work while the tool is still wrapping up.
+    ///
+    /// The producer sends only what changed, so this path never re-reads or re-copies the accumulated
+    /// output: the owner appends one shared chunk, or takes the producer's bounded window as a whole
+    /// replacement, and publishes the newer snapshot by cloning `Arc`s.
+    ///
+    /// Two distinct ceilings can refuse an increment, and both cancel the call with the bytes already
+    /// accepted and latch a typed pressure fault, but they bound different things:
+    ///
+    /// - The [`crate::model::MAX_TOOL_PROGRESS_BYTES`] live-window ceiling and the
+    ///   [`crate::model::MAX_TOOL_PROGRESS_PARTS`] identity ceiling bound the *observed* window this
+    ///   session holds. A producer that would exceed them is not rolling its window over as the port
+    ///   requires, so it is cancelled rather than allowed to keep producing output the owner would
+    ///   silently drop. This never charges or releases the durable reservation.
+    /// - The call's reliable output reservation (`OutputBudget`) bounds the bytes the durable queue
+    ///   may retain. Its accounting is owned by the writer, not by this path.
+    pub(super) fn report_tool_progress(
+        &mut self,
+        caller: String,
+        executor: crate::tool::opaque::ExecutionAuthority,
+        update: crate::model::ToolProgressUpdate,
+    ) -> Result<(), ThreadError> {
+        if self.state.lifecycle != ThreadLifecycle::Open || self.interrupt.is_closing() {
+            return Err(ThreadError::Closed);
+        }
+        if !self
+            .state
+            .tasks
+            .get(&caller)
+            .is_some_and(|task| task.status == task::TaskStatus::Running)
+        {
+            return Err(ThreadError::TaskAccessExpired);
+        }
+        if !executor.remains_authorized(&self.tools) {
+            return Err(ThreadError::ToolPermissionRevoked);
+        }
+        let accepted = match self.state.tool_progress.get(&caller) {
+            Some(current) => current.bytes_after(&update),
+            None => crate::model::ToolProgress::default().bytes_after(&update),
+        };
+        let parts = match self.state.tool_progress.get(&caller) {
+            Some(current) => current.parts_after(&update),
+            None => 1,
+        };
+        if accepted > crate::model::MAX_TOOL_PROGRESS_BYTES
+            || parts > crate::model::MAX_TOOL_PROGRESS_PARTS
+        {
+            // The live-output window this session can observe is exhausted: the producer is emitting
+            // more than the owner can hold. This is a core semantic ceiling on the *observed* window,
+            // distinct from the reliable output budget (a reservation this path never charges or
+            // releases, and whose canonical/archive accounting belongs to the writer). A tool that
+            // keeps producing output the owner can no longer accept must not be quietly ignored, so
+            // cancel the call with the bytes already accepted — they stay resident — and latch the
+            // same typed output-pressure fault the reliable-budget refusal uses, so the Thread fails
+            // closed and pauses further admission instead of letting a runaway producer run on.
+            if let Some(token) = self.task_tokens.get(&caller) {
+                token.cancel();
+            }
+            let limit = if accepted > crate::model::MAX_TOOL_PROGRESS_BYTES {
+                crate::model::MAX_TOOL_PROGRESS_BYTES
+            } else {
+                crate::model::MAX_TOOL_PROGRESS_PARTS as u64
+            };
+            let resident = self
+                .state
+                .tool_progress
+                .get(&caller)
+                .map_or(0, crate::model::ToolProgress::bytes);
+            self.latch_output_budget_fault(&caller, resident, limit);
+            return Err(ThreadError::InvalidOutput);
+        }
+        let refused = match self.operation_budgets.get(&caller) {
+            Some(budget) => budget.charge(accepted).is_err(),
+            // No reservation to charge: this backend has no reliable budget, and the preview is
+            // still bounded by the producer's own process-side output cap.
+            None => false,
+        };
+        if refused {
+            // Cancel the operation with the bytes it already accepted; the earlier preview stays.
+            if let Some(token) = self.task_tokens.get(&caller) {
+                token.cancel();
+            }
+            // Publish the typed fault the moment the preview is refused. A tool that keeps wrapping
+            // up after this must not hold the fault — and the admission block that goes with it —
+            // invisible until it happens to commit; the owner is the single publisher, so this rides
+            // the same latch the release path uses and repeating it there is a no-op.
+            let refusal = self
+                .operation_budgets
+                .get(&caller)
+                .and_then(|budget| budget.refusal());
+            if let Some((accepted, limit)) = refusal {
+                self.latch_output_budget_fault(&caller, accepted, limit);
+            }
+            return Err(ThreadError::InvalidOutput);
+        }
+        let next = match self.state.tool_progress.get(&caller) {
+            Some(current) => current.applied(&update),
+            None => crate::model::ToolProgress::default().applied(&update),
+        };
+        self.state.tool_progress.insert(caller, next);
+        self.publish_snapshot();
+        Ok(())
+    }
+
+    /// Latches a producer's typed reliable-output failure the moment the tool reports it.
+    ///
+    /// A capture write or archive that could not be stored is a fact about accepted output, not about
+    /// the call's final result: reporting it through the running call's own reliable channel latches
+    /// the fault — and blocks other model/tool admission — before the call returns, instead of waiting
+    /// for `execute` to unwind. The obligation the fault carries is kept under this generation, so the
+    /// pause stays until that same obligation is retried and its bytes really stored. The latch is
+    /// idempotent, so a producer that reports the same fault again (or the return path that sees it a
+    /// second time) is a no-op.
+    pub(super) fn report_tool_output_storage_fault(
+        &mut self,
+        caller: String,
+        executor: crate::tool::opaque::ExecutionAuthority,
+        fault: Arc<cold::OutputStorageFault>,
+    ) -> Result<(), ThreadError> {
+        if self.state.lifecycle != ThreadLifecycle::Open || self.interrupt.is_closing() {
+            return Err(ThreadError::Closed);
+        }
+        if !self
+            .state
+            .tasks
+            .get(&caller)
+            .is_some_and(|task| task.status == task::TaskStatus::Running)
+        {
+            return Err(ThreadError::TaskAccessExpired);
+        }
+        if !executor.remains_authorized(&self.tools) {
+            return Err(ThreadError::ToolPermissionRevoked);
+        }
+        self.latch_storage_fault(fault.kind, fault.source.clone(), fault.obligation.clone());
         Ok(())
     }
 
@@ -190,6 +367,17 @@ impl Owner {
                 (output, ToolOutcome::Failed(error))
             }
         };
+        // A producer that could not store the output it was streaming reports its own typed storage
+        // failure through the tool boundary. Latch the exact category it named before the failure is
+        // delivered, so the Thread pauses further admission instead of continuing as if the capture
+        // had succeeded; the accepted output still rides along with the failed result.
+        if let ToolOutcome::Failed(error) = &outcome
+            && let Some(fault) = error
+                .source
+                .downcast_ref::<crate::thread::cold::OutputStorageFault>()
+        {
+            self.latch_storage_fault(fault.kind, fault.source.clone(), fault.obligation.clone());
+        }
         if cancellation.is_cancelled() {
             outcome = ToolOutcome::Cancelled;
         }

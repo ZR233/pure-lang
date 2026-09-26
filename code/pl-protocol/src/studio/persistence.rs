@@ -16,6 +16,70 @@ pub enum HistoryFault {
     BlobFailed,
 }
 
+/// 存储安全间隙下 Thread 的执行阶段。
+///
+/// 它是 core 存储执行阶段的 typed 投影：暂停不是失败，也不是 Turn 终态，只说明新的推理准入在
+/// 安全间隙上停住，直到存储重新可用。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadStorageExecution {
+    #[default]
+    Running,
+    Pausing,
+    Paused,
+}
+
+/// Thread 的存储状态：typed 故障、水位与恢复阶段。
+///
+/// 每个字段都必须来自 typed 事实（runtime 持久化协调器的 typed fault/水位，或 core 的存储执行
+/// 阶段）；**不得**从错误文本推断故障类别。`None` 一律表示未知，不表示零，也不表示健康。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadStorageState {
+    /// 当前已记录的存储故障类别；缺失表示没有已记录的故障事实。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fault: Option<HistoryFault>,
+    /// 手动恢复命令需要匹配的故障代数。
+    ///
+    /// 保存重试（`retry_thread_history`）与显式继续（`resume_thread_history`）都按它命名自己要
+    /// 恢复的那次故障；代数不匹配即拒绝，旧决定不能解除新故障。
+    #[serde(default)]
+    pub fault_generation: u64,
+    /// 已接纳的提交水位；缺失表示未知。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted_sequence: Option<u64>,
+    /// 已落盘的提交水位；缺失表示未知。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable_sequence: Option<u64>,
+    /// 存储安全间隙下的执行阶段。
+    #[serde(default)]
+    pub execution: ThreadStorageExecution,
+    /// 是否因存储压力暂停了新推理准入。
+    #[serde(default)]
+    pub pressure_paused: bool,
+    /// 是否必须由用户显式继续（`resume_thread_history`）才恢复新模型/工具准入。
+    ///
+    /// `pressure_paused` 是自动恢复的短暂背压；本字段是**硬故障**留下的显式闸门：即使重试保存后
+    /// 故障类别已清空、也不再有压力，`true` 仍表示准入被闩住，只有一次核验过的显式继续才解除。
+    /// `execution == Paused` 且 `resume_required == false` 且 `pressure_paused == false` 表示已恢复正常。
+    #[serde(default)]
+    pub resume_required: bool,
+    /// 现在显式继续是否真的会被后端接受。
+    ///
+    /// 与 `resume_required` 的区别是**就绪性**：`resume_required` 只说明硬故障闩住了准入；本字段还要
+    /// 求恢复已被核验（保存重试的目标水位已 durable、没有仍在报告的硬故障、没有未上交的批次、也没有
+    /// 字节阈值挡住）。只有一个计算点：core 安全点从自己的 typed 事实算出这份就绪性，后端命名代数时
+    /// 还要求该后端自己核验过同一代次（该核验经 `StoragePressure::recovered_generation` 进入 owner，
+    /// 不是并列的第二份状态）；投影直接采用它，writer 无从提供可被 OR 进来的第二份就绪位，否则旧代次
+    /// writer 的成功会在 core 仍有新故障时代替 owner 点亮继续入口。它不是错误文本推断，也不等同于
+    /// “没有故障”。UI 只能用本字段启用继续按钮；后端仍会重查以防竞态。
+    #[serde(default)]
+    pub can_resume: bool,
+    /// core 提供的原始错误文本（若存在）。它**不是**故障类别的来源，仅用于诊断显示。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
 /// One Thread's persistence watermarks and queue pressure.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]

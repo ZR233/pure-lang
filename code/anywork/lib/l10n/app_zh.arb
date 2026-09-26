@@ -53,7 +53,34 @@
   "runtimeFatalRetry": "重试",
   "persistenceDegraded": "保存暂时不可用，尚有 {count} 项更改未保存；可以继续会话。",
   "persistenceRecovering": "保存已恢复，正在补存此前未保存的 {count} 项更改；可以继续会话。",
-  "persistenceBlocked": "保存已阻塞，仍有 {count} 项更改未保存，需要处理；可以继续会话。",
+  "persistenceBlocked": "保存已阻塞，仍有 {count} 项更改未保存，需要处理。",
+  "persistenceExecutionPaused": "保存失败，执行已暂停。",
+  "persistenceSavingBackpressure": "存储压力较高，正在等待保存。",
+  "persistenceNewWorkPaused": "保存失败，新工作已暂停，进行中的工作正在收束。",
+  "persistenceResumeReadyOtherSession": "另一个会话「{session}」已保存，等待继续执行。",
+  "@persistenceResumeReadyOtherSession": {
+    "placeholders": {
+      "session": {
+        "type": "String"
+      }
+    }
+  },
+  "persistenceExecutionPausedOtherSession": "另一个会话「{session}」保存失败，执行已暂停。",
+  "@persistenceExecutionPausedOtherSession": {
+    "placeholders": {
+      "session": {
+        "type": "String"
+      }
+    }
+  },
+  "persistenceNewWorkPausedOtherSession": "另一个会话「{session}」保存失败，新工作已暂停，进行中的工作正在收束。",
+  "@persistenceNewWorkPausedOtherSession": {
+    "placeholders": {
+      "session": {
+        "type": "String"
+      }
+    }
+  },
   "persistenceRetry": "重试保存",
   "threadUnopenedTitle": "会话尚未打开",
   "threadUnopenedBody": "当前仅选中该会话。打开后会读取当前状态与历史；在你发送消息之前不会恢复任何执行。",
@@ -72,10 +99,14 @@
   "persistenceQueuePressurePaused": "存储压力下已暂停新的推理准入。",
   "persistenceQueueError": "最近错误：{message}",
   "persistenceQueueRefresh": "刷新诊断",
+  "persistenceQueueShowDetails": "展开诊断",
+  "persistenceQueueHideDetails": "收起诊断",
   "persistenceHistoryPaused": "会话历史保存已暂停",
   "persistenceHistoryQueueFull": "历史队列已满",
   "persistenceHistoryWriteFailed": "历史保存失败",
-  "persistenceHistoryRetry": "重试保存并继续",
+  "persistenceHistoryRetrySave": "重试保存",
+  "persistenceHistoryResume": "继续执行",
+  "persistenceHistoryResumeHint": "重试保存成功后即可继续",
   "persistenceStatisticsGap": "调用统计不完整；缺失的用量未知，不能按零计算。",
   "recoveryGlobalWarning": "有 {count} 个恢复问题需要处理",
   "recoveryArchiveNotice": "迁移无法继续，旧数据已归档。糊来帮现以初始配置运行；归档位置：",
@@ -872,5 +903,13 @@
   "workspaceLoading": "正在加载会话历史…",
   "recoveryChecking": "正在检查历史会话和工作区…",
   "recoveryCheckFailed": "历史会话和工作区检查未完成",
-  "agentRoleRetired": "该子代理角色已停用，仅可查看历史记录。"
+  "agentRoleRetired": "该子代理角色已停用，仅可查看历史记录。",
+  "conversationActivityPreparing": "准备中",
+  "conversationActivityRunningTool": "执行中",
+  "conversationActivitySaveFailed": "保存故障",
+  "conversationActivitySavePaused": "保存已暂停",
+  "conversationActivityStoragePressure": "存储受限",
+  "conversationActivityResumeReady": "已保存，等待继续执行",
+  "conversationActivityResumeRequired": "等待保存恢复",
+  "conversationActivityStopping": "停止中"
 }

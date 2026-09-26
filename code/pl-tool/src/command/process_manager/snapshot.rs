@@ -68,6 +68,7 @@ impl CommandTerminationReason {
         match self {
             Self::TimedOut => "timed out",
             Self::Cancelled => "was cancelled",
+            Self::OutputFailed => "output capture could not continue",
         }
     }
 }

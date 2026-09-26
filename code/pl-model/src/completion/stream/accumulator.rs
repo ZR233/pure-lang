@@ -18,7 +18,9 @@ use crate::completion::{
     CompletionTraceContext, ToolCall,
 };
 
-use super::event::{ModelBlockContent, ModelBlockField, ModelBlockKind, ModelStreamEvent};
+use super::event::{
+    ModelBlockContent, ModelBlockField, ModelBlockKind, ModelStreamEvent, ToolInputDeltaPayload,
+};
 use super::lifecycle::{self, StreamLifecycle};
 use super::state::{CompletedStream, FailedStream, StreamAccumulatorState};
 use super::tool_stream::{self, ToolStream};
@@ -40,6 +42,15 @@ pub(crate) struct StreamCompletionAccumulator {
     presentation_sizes: Vec<usize>,
     presentation_bytes: usize,
     text_output_bytes: usize,
+    /// Charged high-water of each tool call's argument bytes, keyed by the accumulator identity the
+    /// stream resolves an event to.
+    ///
+    /// Tool arguments join the same `MAX_OUTPUT_BYTES` domain as text and reasoning, so one provider
+    /// response cannot accumulate unbounded text *and* unbounded tool input. The high-water is kept
+    /// per call rather than recomputed from the stream: an equal-length `completed` that re-sends
+    /// the arguments must not charge a second time, and a later append after a shorter replacement
+    /// must not be under-charged because the resident body shrank.
+    tool_output_bytes: HashMap<String, usize>,
     tool_stream: ToolStream,
     lifecycle: StreamLifecycle,
     final_usage: Option<UsageReport>,
@@ -70,6 +81,7 @@ impl StreamCompletionAccumulator {
             presentation_sizes: Vec::new(),
             presentation_bytes: 0,
             text_output_bytes: 0,
+            tool_output_bytes: HashMap::new(),
             tool_stream: ToolStream::new(),
             lifecycle: StreamLifecycle::new(),
             final_usage: None,
@@ -152,6 +164,7 @@ impl StreamCompletionAccumulator {
                 field: ModelBlockField::ReasoningSummary,
                 delta,
                 section_index,
+                ..
             } => {
                 self.charge_text_output(0, delta.len())?;
                 self.reasoning_summary_parts.push(delta.clone());
@@ -215,6 +228,7 @@ impl StreamCompletionAccumulator {
                 id,
                 content_index,
                 delta,
+                ..
             } => {
                 self.charge_text_output(0, delta.len())?;
                 self.raw_reasoning_parts.push(delta.clone());
@@ -227,6 +241,8 @@ impl StreamCompletionAccumulator {
                 name,
                 payload_kind,
             } => {
+                // A start carries no argument bytes (its payload kind only names the shape), so it
+                // reserves the identity but nothing is charged until the first real delta arrives.
                 let snapshot = self.tool_stream.start_input(
                     stream_id.as_ref(),
                     item_id,
@@ -243,6 +259,21 @@ impl StreamCompletionAccumulator {
                 name,
                 payload_delta,
             } => {
+                // Charge the incoming argument bytes against the same output domain as text and
+                // reasoning *before* they are appended, so a response that overruns the domain is
+                // refused with exactly the arguments already accepted instead of after copying the
+                // new chunk in. The model stream path already charged the live reservation first;
+                // this is the collector's own ceiling for a caller driving it without that sender.
+                let key =
+                    self.tool_stream
+                        .resolved_key(stream_id.as_ref(), call_id.as_ref(), &item_id);
+                let next = self
+                    .tool_output_bytes
+                    .get(&key)
+                    .copied()
+                    .unwrap_or_default()
+                    .saturating_add(payload_delta.text().len());
+                self.charge_tool_output(&key, next)?;
                 let snapshot = self.tool_stream.append_delta(
                     stream_id.as_ref(),
                     item_id,
@@ -259,6 +290,7 @@ impl StreamCompletionAccumulator {
                 name,
                 payload,
             } => {
+                self.charge_tool_payload(&stream_id, &call_id, &item_id, payload.as_ref())?;
                 self.tool_stream.complete_input(
                     stream_id.as_ref(),
                     call_id.as_ref(),
@@ -274,6 +306,7 @@ impl StreamCompletionAccumulator {
                 name,
                 payload,
             } => {
+                self.charge_tool_payload(&stream_id, &call_id, &item_id, payload.as_ref())?;
                 if let Some(mut call) = self.tool_stream.finish_ready(
                     stream_id.as_ref(),
                     call_id.as_ref(),
@@ -364,9 +397,55 @@ impl StreamCompletionAccumulator {
         let next = next
             .checked_add(new)
             .filter(|&bytes| bytes <= MAX_OUTPUT_BYTES)
-            .ok_or_else(|| PureError::MemoryError("provider text output exceeds 16 MiB".into()))?;
+            .ok_or_else(|| {
+                PureError::MemoryError(
+                    "provider output (text, reasoning and tool input) exceeds 16 MiB".into(),
+                )
+            })?;
         self.text_output_bytes = next;
         Ok(())
+    }
+
+    /// Charges one tool call's argument high-water against the shared output domain.
+    ///
+    /// Tool arguments are part of the same `MAX_OUTPUT_BYTES` total as text and reasoning: the
+    /// charge is the difference between the call's previously charged high-water and its new total,
+    /// so a repeated or shorter `completed` adds nothing and a later append after a shorter
+    /// replacement still advances the total by exactly the new bytes.
+    fn charge_tool_output(&mut self, key: &str, next: usize) -> Result<()> {
+        let previous = self.tool_output_bytes.get(key).copied().unwrap_or_default();
+        if next <= previous {
+            return Ok(());
+        }
+        self.charge_text_output(previous, next)?;
+        self.tool_output_bytes.insert(key.to_string(), next);
+        Ok(())
+    }
+
+    /// Charges the authoritative argument payload of a completed/ready tool call under its identity.
+    ///
+    /// A `None` payload leaves the call's charged total unchanged, and a payload that does not exceed
+    /// the already-accepted high-water (a re-sent `completed`, or a shorter replacement) is a no-op.
+    fn charge_tool_payload(
+        &mut self,
+        stream_id: &Option<String>,
+        call_id: &Option<String>,
+        item_id: &str,
+        payload: Option<&ToolInputDeltaPayload>,
+    ) -> Result<()> {
+        let Some(payload) = payload else {
+            return Ok(());
+        };
+        let key = self
+            .tool_stream
+            .resolved_key(stream_id.as_ref(), call_id.as_ref(), item_id);
+        let next = self
+            .tool_output_bytes
+            .get(&key)
+            .copied()
+            .unwrap_or_default()
+            .max(payload.text().len());
+        self.charge_tool_output(&key, next)
     }
 
     fn record_presentation_item(&mut self, item: CompletionPresentationItem) -> Result<()> {

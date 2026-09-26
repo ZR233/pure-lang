@@ -9,8 +9,10 @@ pub(crate) use pl_protocol::*;
 // dependency on the execution kernel to name them.
 pub use pl_core::chat::Direction as ChatDirection;
 pub use pl_core::chat::{
-    ChatError, ChatFocus, ChatItem, ChatSnapshot, ChatUpdate, ChatUpdates, ChatView, ViewChange,
+    ChatError, ChatField, ChatFocus, ChatItem, ChatLifecycle, ChatSnapshot, ChatUpdate,
+    ChatUpdates, ChatView, ViewChange,
 };
+pub use pl_core::model::ContentBlock;
 mod hash;
 
 pub mod agent;
@@ -73,11 +75,12 @@ pub use provider_usage::{
     ZhipuToolUsageDetail, provider_usage_records, zhipu_limit_by_window,
 };
 pub use studio::{
-    AttachmentRecord, PersistenceState, PersistenceStateSnapshot, ProductEventBus, ProjectRecord,
-    ProviderUsageStateData, ProviderUsageStateSnapshot, SkillSearchResult, SkillsStateSnapshot,
-    StudioDatabaseError, StudioHostKind, StudioRecoveryIssue, StudioRecoveryIssueAction,
-    StudioRecoveryIssueCategory, StudioRecoveryIssueScope, StudioRecoveryWorktreeOwner,
-    StudioRuntime, StudioRuntimeLifecycleState, StudioRuntimeOptions, StudioRuntimeSnapshot,
+    AttachmentRecord, ChatWindowHandle, ChatWindowStream, PersistenceState,
+    PersistenceStateSnapshot, ProductEventBus, ProjectRecord, ProviderUsageStateData,
+    ProviderUsageStateSnapshot, SkillSearchResult, SkillsStateSnapshot, StudioDatabaseError,
+    StudioHostKind, StudioRecoveryIssue, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
+    StudioRecoveryIssueScope, StudioRecoveryWorktreeOwner, StudioRuntime,
+    StudioRuntimeLifecycleState, StudioRuntimeOptions, StudioRuntimeSnapshot,
     StudioRuntimeStateKind, StudioStartNewThreadResponse, StudioStore, StudioThreadSubscription,
     StudioUpdateStateSnapshot, StudioWorktreeRecoveryPreview, ThreadRecord,
 };

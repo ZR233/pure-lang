@@ -1,37 +1,26 @@
 part of 'timeline_view.dart';
 
-class _ToolGroupPart extends StatefulWidget {
+/// 历史上的工具组：按发生顺序保留、默认折叠，展开态按 group 身份保存在 Timeline 状态里。
+///
+/// 当前正在执行的工具不再在这里高亮/搬动；那属于输入框上方固定活动条的职责。
+class _ToolGroupPart extends StatelessWidget {
   const _ToolGroupPart({
     required this.threadId,
     required this.group,
-    required this.isCurrentActivity,
+    required this.expanded,
+    required this.onToggle,
     super.key,
   });
 
   final String threadId;
   final TimelineToolGroup group;
-  final bool isCurrentActivity;
-
-  @override
-  State<_ToolGroupPart> createState() => _ToolGroupPartState();
-}
-
-class _ToolGroupPartState extends State<_ToolGroupPart> {
-  bool expanded = false;
-
-  void _toggleExpanded() {
-    setState(() => expanded = !expanded);
-  }
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
-    final group = widget.group;
     final imageEntries = _toolImageEntries(group.items);
-    final activityLabel = _toolGroupActivityLabel(
-      context,
-      group,
-      activeOnly: widget.isCurrentActivity,
-    );
+    final activityLabel = _toolGroupActivityLabel(context, group);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -39,25 +28,22 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
           key: StudioDriverKeys.timelineToolGroupSummary(group.id),
           container: true,
           button: true,
-          liveRegion: widget.isCurrentActivity,
           expanded: expanded,
           label: activityLabel,
-          onTap: _toggleExpanded,
+          onTap: onToggle,
           excludeSemantics: true,
           child: Material(
             key: const ValueKey('timeline-tool-group-summary'),
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(StudioRadii.xs),
-              onTap: _toggleExpanded,
+              onTap: onToggle,
               excludeFromSemantics: true,
               child: _TimelineActivitySummary(
                 icon: _toolGroupIcon(group),
                 label: activityLabel,
-                isCurrentActivity: widget.isCurrentActivity,
                 isIssue: group.issueCount > 0,
                 expanded: expanded,
-                showWaitPulse: widget.isCurrentActivity && !expanded,
               ),
             ),
           ),
@@ -65,7 +51,7 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
         if (imageEntries.isNotEmpty) ...[
           const SizedBox(height: 8),
           _ThreadImageGallery(
-            threadId: widget.threadId,
+            threadId: threadId,
             entries: imageEntries,
             groupId: group.id,
           ),
@@ -86,15 +72,8 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
                 children: [
                   for (final item in group.items)
                     _isWebSearch(item)
-                        ? _WebSearchToolCard(
-                            item: item,
-                            embedded: true,
-                            showActivePulse: widget.isCurrentActivity,
-                          )
-                        : _ToolGroupItemRow(
-                            item: item,
-                            showActivePulse: widget.isCurrentActivity,
-                          ),
+                        ? _WebSearchToolCard(item: item, embedded: true)
+                        : _ToolGroupItemRow(item: item),
                 ],
               ),
             ),
@@ -105,21 +84,11 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
 
   String _toolGroupActivityLabel(
     BuildContext context,
-    TimelineToolGroup group, {
-    required bool activeOnly,
-  }) {
-    final candidateItems = activeOnly
-        ? group.items.where(_isActiveToolItem).toList(growable: false)
-        : group.items;
-    final items = candidateItems.isEmpty ? group.items : candidateItems;
-    final visibleItems = items.take(3).toList();
-    final labels = [
-      for (final item in visibleItems)
-        activeOnly
-            ? _activeToolTitle(context, item)
-            : _toolTitle(context, item),
-    ];
-    final hiddenCount = items.length - visibleItems.length;
+    TimelineToolGroup group,
+  ) {
+    final visibleItems = group.items.take(3).toList();
+    final labels = [for (final item in visibleItems) _toolTitle(context, item)];
+    final hiddenCount = group.items.length - visibleItems.length;
     if (hiddenCount > 0) {
       labels.add(context.l10n.timelineToolGroupSummary(hiddenCount));
     }
@@ -131,37 +100,6 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
         ? context.l10n.timelineToolGroupTitle
         : labels.join(' · ');
   }
-}
-
-bool _isActiveToolItem(TimelineToolGroupItem item) {
-  return const {
-    'queued',
-    'cancelling',
-    'awaitingApproval',
-    'started',
-    'streaming',
-    'approved',
-    'running',
-  }.contains(item.status);
-}
-
-/// 工具处于真正执行/流式中，可展示紧凑脉冲；等待授权不作为模型思考展示。
-bool _isExecutingToolItem(TimelineToolGroupItem item) {
-  return const {
-    'cancelling',
-    'started',
-    'streaming',
-    'approved',
-    'running',
-  }.contains(item.status);
-}
-
-String _activeToolTitle(BuildContext context, TimelineToolGroupItem item) {
-  final title = _toolTitle(context, item);
-  final detail = [item.summary, item.tool?.workingDirectory]
-      .whereType<String>()
-      .firstWhere((value) => value.trim().isNotEmpty, orElse: () => '');
-  return detail.isEmpty ? title : '$title — $detail';
 }
 
 IconData _toolGroupIcon(TimelineToolGroup group) {
@@ -206,15 +144,10 @@ bool _isWebSearch(TimelineToolGroupItem item) {
 }
 
 class _WebSearchToolCard extends StatelessWidget {
-  const _WebSearchToolCard({
-    required this.item,
-    this.embedded = false,
-    this.showActivePulse = false,
-  });
+  const _WebSearchToolCard({required this.item, this.embedded = false});
 
   final TimelineToolGroupItem item;
   final bool embedded;
-  final bool showActivePulse;
 
   @override
   Widget build(BuildContext context) {
@@ -243,12 +176,6 @@ class _WebSearchToolCard extends StatelessWidget {
                   ),
                 ),
               ),
-              if (showActivePulse && _isExecutingToolItem(item)) ...[
-                const SizedBox(width: 8),
-                TimelineWaitIndicator(
-                  key: ValueKey('timeline-tool-item-pulse:${item.id}'),
-                ),
-              ],
               _StatusPill(label: context.toolStatusLabel(item.status)),
             ],
           ),
@@ -454,10 +381,9 @@ void _collectWebLinks(Object? value, Set<String> links) {
 }
 
 class _ToolGroupItemRow extends StatelessWidget {
-  const _ToolGroupItemRow({required this.item, this.showActivePulse = false});
+  const _ToolGroupItemRow({required this.item});
 
   final TimelineToolGroupItem item;
-  final bool showActivePulse;
 
   @override
   Widget build(BuildContext context) {
@@ -506,11 +432,6 @@ class _ToolGroupItemRow extends StatelessWidget {
             color: context.colors.onSurface,
           ),
         ),
-        trailing: showActivePulse && _isExecutingToolItem(item)
-            ? TimelineWaitIndicator(
-                key: ValueKey('timeline-tool-item-pulse:${item.id}'),
-              )
-            : null,
         subtitle: detailLines.isEmpty
             ? null
             : Text(

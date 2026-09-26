@@ -67,11 +67,38 @@
       }
     }
   },
-  "persistenceBlocked": "Saving is blocked with {count} pending update(s) and needs attention. You can continue the conversation.",
+  "persistenceBlocked": "Saving is blocked with {count} pending update(s) and needs attention.",
   "@persistenceBlocked": {
     "placeholders": {
       "count": {
         "type": "int"
+      }
+    }
+  },
+  "persistenceExecutionPaused": "Saving failed; execution is paused.",
+  "persistenceSavingBackpressure": "Storage is under pressure; saving is waiting.",
+  "persistenceNewWorkPaused": "Saving failed; new work is paused while in-flight work winds down.",
+  "persistenceResumeReadyOtherSession": "Another session “{session}” is saved and waiting to resume.",
+  "@persistenceResumeReadyOtherSession": {
+    "placeholders": {
+      "session": {
+        "type": "String"
+      }
+    }
+  },
+  "persistenceExecutionPausedOtherSession": "Another session “{session}” failed to save; its execution is paused.",
+  "@persistenceExecutionPausedOtherSession": {
+    "placeholders": {
+      "session": {
+        "type": "String"
+      }
+    }
+  },
+  "persistenceNewWorkPausedOtherSession": "Another session “{session}” failed to save; its new work is paused while in-flight work winds down.",
+  "@persistenceNewWorkPausedOtherSession": {
+    "placeholders": {
+      "session": {
+        "type": "String"
       }
     }
   },
@@ -124,10 +151,14 @@
     }
   },
   "persistenceQueueRefresh": "Refresh diagnostics",
+  "persistenceQueueShowDetails": "Show diagnostics",
+  "persistenceQueueHideDetails": "Hide diagnostics",
   "persistenceHistoryPaused": "Session history saving is paused",
   "persistenceHistoryQueueFull": "History queue full",
   "persistenceHistoryWriteFailed": "History save failed",
-  "persistenceHistoryRetry": "Retry saving and continue",
+  "persistenceHistoryRetrySave": "Retry saving",
+  "persistenceHistoryResume": "Resume execution",
+  "persistenceHistoryResumeHint": "Retry saving to enable resume",
   "persistenceStatisticsGap": "Call statistics are incomplete; missing usage is unknown, not zero.",
   "recoveryGlobalWarning": "{count} recovery issue(s) need attention",
   "recoveryArchiveNotice": "Migration could not continue. Previous data was archived and anywork started with default settings. Archive:",
@@ -1259,5 +1290,13 @@
   "workspaceLoading": "Loading conversation history…",
   "recoveryChecking": "Checking conversation history and workspaces…",
   "recoveryCheckFailed": "Conversation and workspace check did not complete",
-  "agentRoleRetired": "This subagent role has been retired. History is read-only."
+  "agentRoleRetired": "This subagent role has been retired. History is read-only.",
+  "conversationActivityPreparing": "Preparing",
+  "conversationActivityRunningTool": "Running",
+  "conversationActivitySaveFailed": "Save failed",
+  "conversationActivitySavePaused": "Saving paused",
+  "conversationActivityStoragePressure": "Storage pressure",
+  "conversationActivityResumeReady": "Saved, waiting to resume",
+  "conversationActivityResumeRequired": "Waiting for save recovery",
+  "conversationActivityStopping": "Stopping"
 }

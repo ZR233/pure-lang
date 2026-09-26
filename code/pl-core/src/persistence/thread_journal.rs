@@ -2,12 +2,50 @@
 use super::SqliteSessionStore;
 use crate::thread::cold::{ColdStore, ColdStoreError, ThreadWrite};
 
+/// Typed category of a plain SQLite store failure.
+///
+/// The category comes from the error variant the writer already recorded, never from its message, so
+/// the owner's storage latch cannot be moved by error text.
+fn storage_fault_kind(error: &super::SessionStoreError) -> crate::thread::cold::StorageFaultKind {
+    use super::SessionStoreError;
+    use crate::thread::cold::StorageFaultKind;
+    match error {
+        SessionStoreError::Stopped | SessionStoreError::Panicked => {
+            StorageFaultKind::WriterUnavailable
+        }
+        // A rejected write is reported by its variant alone. Transient queue backpressure is the
+        // owner's own byte budget (`QueueFull` from the reliable queue), not a message scrape.
+        SessionStoreError::Conflict { .. }
+        | SessionStoreError::Database(_)
+        | SessionStoreError::Io(_)
+        | SessionStoreError::Codec(_)
+        | SessionStoreError::Replay(_)
+        | SessionStoreError::Invalid(_)
+        | SessionStoreError::UnsupportedSchema { .. }
+        | SessionStoreError::InitializationCleanup { .. } => StorageFaultKind::WriteFailed,
+    }
+}
+
 impl ColdStore for SqliteSessionStore {
     fn pressure(&self, thread_id: &str) -> crate::thread::cold::StoragePressure {
         let (thread_bytes, store_bytes) = self.pending_bytes(thread_id);
         crate::thread::cold::StoragePressure {
             thread_bytes,
             store_bytes,
+            // Typed durability receipt: the plain SQLite backend reports how far this Thread's
+            // commits are saved, so its owner releases the live effect window on a normal save
+            // exactly like the product backend does.
+            durable_sequence: self.thread_durable_sequence(thread_id),
+            // Typed fault category: the writer already holds a typed store failure, so the owner
+            // mirrors a category instead of parsing the error text. This backend has no per-fault
+            // generation (that is the Studio coordinator's recovery ticket), so it reports `0`.
+            fault: self.persistence().error.as_deref().map(storage_fault_kind),
+            fault_generation: 0,
+            // Every fault this backend names is generation `0`, so its own recovery receipt is
+            // "generation 0 is healthy again": the writer retries inside this store, and once it
+            // holds no error the one generation it ever reports is recovered. Without this the
+            // owner would wait for a verdict a generation-less backend can never address.
+            recovered_generation: self.persistence().error.is_none().then_some(0),
             error: self.persistence().error.map(|source| {
                 std::sync::Arc::new(ColdStoreError {
                     source: Box::new(source),

@@ -4,6 +4,7 @@ import 'agent_workspace_view.dart';
 import 'interaction_models.dart';
 import 'runtime_models.dart';
 import 'studio_enums.dart';
+import 'thread_activity_models.dart';
 import 'thread_directory_models.dart';
 import 'timeline_models.dart';
 import 'turn_models.dart';
@@ -51,35 +52,69 @@ class ThreadAttachmentView {
   final int byteSize;
 }
 
-sealed class ThreadItemDeltaStateView {
-  const ThreadItemDeltaStateView();
+/// 内容字段身份（与后端 `BridgeContentField` 一一对应）。
+///
+/// 身份只由字段判别式决定，**不**从内容字符串推断：正文落在哪个 domain 字段完全由这里
+/// 指定。推理分块用逻辑 `chunkIndex` 保持块身份，删除一块不会让其它块移动。
+sealed class ThreadContentFieldView {
+  const ThreadContentFieldView();
 }
 
-final class ThreadTextDeltaView extends ThreadItemDeltaStateView {
-  const ThreadTextDeltaView(this.delta);
-  final String delta;
+final class ThreadTextFieldView extends ThreadContentFieldView {
+  const ThreadTextFieldView();
 }
 
-final class ThreadThinkingSummaryDeltaView extends ThreadItemDeltaStateView {
-  const ThreadThinkingSummaryDeltaView(this.chunkIndex, this.delta);
+final class ThreadThinkingSummaryFieldView extends ThreadContentFieldView {
+  const ThreadThinkingSummaryFieldView(this.chunkIndex);
   final int chunkIndex;
-  final String delta;
 }
 
-final class ThreadThinkingContentDeltaView extends ThreadItemDeltaStateView {
-  const ThreadThinkingContentDeltaView(this.chunkIndex, this.delta);
+final class ThreadThinkingContentFieldView extends ThreadContentFieldView {
+  const ThreadThinkingContentFieldView(this.chunkIndex);
   final int chunkIndex;
-  final String delta;
 }
 
-final class ThreadToolArgumentsDeltaView extends ThreadItemDeltaStateView {
-  const ThreadToolArgumentsDeltaView(this.delta);
-  final String delta;
+final class ThreadToolArgumentsFieldView extends ThreadContentFieldView {
+  const ThreadToolArgumentsFieldView();
 }
 
-final class ThreadToolResultDeltaView extends ThreadItemDeltaStateView {
-  const ThreadToolResultDeltaView(this.delta);
-  final String delta;
+final class ThreadToolResultFieldView extends ThreadContentFieldView {
+  const ThreadToolResultFieldView();
+}
+
+/// 一个字段的 typed 变化（与后端 `BridgeFieldChange` 一一对应）。
+///
+/// [`Append`] 只在前缀仍有效时到达，追加到本地已交付末尾；[`Replace`] 是权威替换（含
+/// 预览升级为完整正文）；[`Remove`] 丢弃该字段的本地副本；[`Unchanged`] 正文不动，但所属
+/// 条目的 revision / omitted / 保存水位仍要在整组应用后提交。
+sealed class ThreadFieldChangeView {
+  const ThreadFieldChangeView();
+}
+
+final class UnchangedThreadFieldChangeView extends ThreadFieldChangeView {
+  const UnchangedThreadFieldChangeView();
+}
+
+final class AppendThreadFieldChangeView extends ThreadFieldChangeView {
+  const AppendThreadFieldChangeView(this.text);
+  final String text;
+}
+
+final class ReplaceThreadFieldChangeView extends ThreadFieldChangeView {
+  const ReplaceThreadFieldChangeView(this.text);
+  final String text;
+}
+
+final class RemoveThreadFieldChangeView extends ThreadFieldChangeView {
+  const RemoveThreadFieldChangeView();
+}
+
+/// 同一 item 的一个字段变化；一次 `UpdateItem` 携带整组，**原子应用后一次提交**版本。
+class ThreadFieldUpdateView {
+  const ThreadFieldUpdateView({required this.field, required this.change});
+
+  final ThreadContentFieldView field;
+  final ThreadFieldChangeView change;
 }
 
 sealed class ThreadContentLifecycleView {
@@ -522,7 +557,7 @@ class ThreadItemView {
     required this.state,
     this.contextDisposition = ThreadContextDisposition.active,
     this.bodyOmittedUnits = 0,
-    this.bodyLoaded = false,
+    this.executionTerminal = false,
     this.saved = true,
   });
 
@@ -539,14 +574,17 @@ class ThreadItemView {
   /// 正文被客户端预算省略的 code units；0 表示内存里的正文是完整的。
   final int bodyOmittedUnits;
 
-  /// 只有用户显式回源（`loadItemBody`）后为 true：完整正文才会驻留并整篇渲染。
-  final bool bodyLoaded;
+  /// 窗口条目的执行终态事实（后端 `BridgeChatLifecycle`）。
+  ///
+  /// 与保存水位 [saved] 严格独立：终态可以尚未保存，已保存也仍可继续增量。终态身份
+  /// 拒绝任何迟到的流式字段变化，只接受保存/省略量的版本帧。
+  final bool executionTerminal;
 
   /// Execution completion and history durability are independent.
   final bool saved;
 
-  /// 条目正文超过预算、只以有界预览驻留：需要显式回源完整正文。
-  bool get bodyPreviewed => bodyOmittedUnits > 0 && !bodyLoaded;
+  /// 条目正文只以数据源声明的有界预览驻留：需要按身份补齐完整正文。
+  bool get bodyPreviewed => bodyOmittedUnits > 0;
 
   ThreadItemKind get kind => switch (state) {
     ThreadTextItemStateView(:final channel) =>
@@ -777,119 +815,165 @@ class ThreadItemView {
     _ => null,
   };
 
-  ThreadItemView? appendDelta({
-    required ThreadItemDeltaStateView delta,
-    required int nextRevision,
+  /// 原子应用一帧 `BridgeViewChange::UpdateItem` 的整组字段变化。
+  ///
+  /// 语义（与后端/core 契约一致）：
+  /// 1. 本地 `revision` 必须等于 [expectedRevision]，否则基线不连续 → 返回 null 让调用方
+  ///    重建权威窗口，**不逐字段升版本**。
+  /// 2. 逐个应用 `fields`：`Append` 追加到本地字段末尾、`Replace` 整体替换、`Remove` 丢弃本地
+  ///    副本（推理块按 `chunkIndex` 删除，不移动其它块身份）、`Unchanged` 正文不动。
+  /// 3. 全部字段应用完成后**一次**提交 [revision]、[omittedUnits] 与保存水位 [saved]；即使
+  ///    字段全为 `Unchanged`（仅版本推进 / 仅保存确认）也要提交，不能当成空帧丢弃。
+  ///
+  /// 终态身份（[executionTerminal]）区分两类帧：
+  /// - **执行内容更新**（流式 `Append` / `Remove` / 新 revision 的正文推进）一律拒绝，终态
+  ///   不再改变执行内容。
+  /// - **显示完整性升级**允许一次：同 identity、同 `revision`，且 [omittedUnits] 严格小于本地
+  ///   省略量、字段只用 `Replace`（可含 `Unchanged`）携带权威完整正文。core `read_complete`
+  ///   可能先 notify 一帧同 revision 的 preview→full `Replace`，再让 `expand` 重新对齐快照；
+  ///   这条合法性不能靠 Reset 绕过。终态真正的迟到 `Append` / 新 revision 仍被拒绝。
+  ThreadItemView? applyFieldUpdates({
+    required List<ThreadFieldUpdateView> fields,
+    required int expectedRevision,
+    required int revision,
+    required int omittedUnits,
+    required bool saved,
+    required bool terminal,
   }) {
-    if (nextRevision <= revision) {
-      return this;
-    }
-    ThreadItemStateView? nextState;
-    var nextOmittedUnits = bodyOmittedUnits;
-    switch ((state, delta)) {
-      case (
-        ThreadTextItemStateView(
-          :final channel,
-          :final text,
-          :final attachments,
-          lifecycle: StreamingThreadContentView(),
-        ),
-        ThreadTextDeltaView(:final delta),
-      ):
-        nextState = ThreadTextItemStateView(
-          channel: channel,
-          text: '$text$delta',
-          attachments: attachments,
-          lifecycle: const StreamingThreadContentView(),
-        );
-      case (
-        ThreadThinkingItemStateView(
-          :final summary,
-          :final content,
-          :final summaryChunkBase,
-          :final contentChunkBase,
-          lifecycle: StreamingThreadContentView(),
-        ),
-        ThreadThinkingSummaryDeltaView(:final chunkIndex, :final delta),
-      ):
-        final bounded = _boundedReasoningAppend(
-          summary: summary,
-          summaryChunkBase: summaryChunkBase,
-          content: content,
-          contentChunkBase: contentChunkBase,
-          toSummary: true,
-          chunkIndex: chunkIndex,
-          delta: delta,
-          omittedUnits: bodyOmittedUnits,
-        );
-        nextState = ThreadThinkingItemStateView(
-          summary: bounded.summary,
-          content: bounded.content,
-          summaryChunkBase: bounded.summaryChunkBase,
-          contentChunkBase: bounded.contentChunkBase,
-          lifecycle: const StreamingThreadContentView(),
-        );
-        nextOmittedUnits = bounded.omittedUnits;
-      case (
-        ThreadThinkingItemStateView(
-          :final summary,
-          :final content,
-          :final summaryChunkBase,
-          :final contentChunkBase,
-          lifecycle: StreamingThreadContentView(),
-        ),
-        ThreadThinkingContentDeltaView(:final chunkIndex, :final delta),
-      ):
-        final bounded = _boundedReasoningAppend(
-          summary: summary,
-          summaryChunkBase: summaryChunkBase,
-          content: content,
-          contentChunkBase: contentChunkBase,
-          toSummary: false,
-          chunkIndex: chunkIndex,
-          delta: delta,
-          omittedUnits: bodyOmittedUnits,
-        );
-        nextState = ThreadThinkingItemStateView(
-          summary: bounded.summary,
-          content: bounded.content,
-          summaryChunkBase: bounded.summaryChunkBase,
-          contentChunkBase: bounded.contentChunkBase,
-          lifecycle: const StreamingThreadContentView(),
-        );
-        nextOmittedUnits = bounded.omittedUnits;
-      case (
-        ThreadToolItemStateView(
-          :final invocation,
-          lifecycle: StartedThreadToolView() || StreamingThreadToolView(),
-        ),
-        ThreadToolArgumentsDeltaView(:final delta),
-      ):
-        nextState = ThreadToolItemStateView(
-          invocation: invocation.withArguments('${invocation.arguments}$delta'),
-          lifecycle: const StreamingThreadToolView(),
-        );
-      case (
-        ThreadToolItemStateView(
-          :final invocation,
-          lifecycle: RunningThreadToolView(:final streamedOutput),
-        ),
-        ThreadToolResultDeltaView(:final delta),
-      ):
-        nextState = ThreadToolItemStateView(
-          invocation: invocation,
-          lifecycle: RunningThreadToolView('$streamedOutput$delta'),
-        );
-      default:
-        nextState = null;
-    }
-    return nextState == null
-        ? null
-        : copyWith(
-            revision: nextRevision,
-            state: nextState,
-            bodyOmittedUnits: nextOmittedUnits,
+    if (this.revision != expectedRevision) return null;
+    if (terminal) {
+      final unchangedOnly = fields.every(
+        (update) => update.change is UnchangedThreadFieldChangeView,
+      );
+      // 仅保存确认帧：正文、revision 与省略量都不变，只翻转保存水位。
+      final savedOnly =
+          unchangedOnly &&
+          revision == this.revision &&
+          omittedUnits == bodyOmittedUnits;
+      // 一次性的显示完整性升级：同 revision、省略量严格减少、只用权威 Replace 携带完整正文。
+      final completenessUpgrade =
+          revision == this.revision &&
+          omittedUnits < bodyOmittedUnits &&
+          fields.any(
+            (update) => update.change is ReplaceThreadFieldChangeView,
+          ) &&
+          fields.every(
+            (update) =>
+                update.change is ReplaceThreadFieldChangeView ||
+                update.change is UnchangedThreadFieldChangeView,
           );
+      if (!savedOnly && !completenessUpgrade) return null;
+    }
+    var nextState = state;
+    var nextOmitted = omittedUnits;
+    for (final update in fields) {
+      final applied = _applyFieldChange(
+        nextState,
+        update.field,
+        update.change,
+        nextOmitted,
+      );
+      if (applied == null) return null;
+      nextState = applied.state;
+      nextOmitted = applied.omittedUnits;
+    }
+    return copyWith(
+      revision: revision,
+      state: nextState,
+      bodyOmittedUnits: nextOmitted,
+      saved: saved,
+      executionTerminal: terminal,
+    );
+  }
+
+  /// 把一个 typed 字段变化落进当前条目状态；返回 null 表示字段身份与条目不匹配（重同步）。
+  ({ThreadItemStateView state, int omittedUnits})? _applyFieldChange(
+    ThreadItemStateView current,
+    ThreadContentFieldView field,
+    ThreadFieldChangeView change,
+    int omittedUnits,
+  ) {
+    switch (current) {
+      case ThreadTextItemStateView(
+        :final channel,
+        :final text,
+        :final attachments,
+        :final lifecycle,
+      ):
+        if (field is! ThreadTextFieldView) return null;
+        return (
+          state: ThreadTextItemStateView(
+            channel: channel,
+            text: _applyTextChange(text, change),
+            attachments: attachments,
+            lifecycle: lifecycle,
+          ),
+          omittedUnits: omittedUnits,
+        );
+      case ThreadThinkingItemStateView(
+        :final summary,
+        :final content,
+        :final summaryChunkBase,
+        :final contentChunkBase,
+        :final lifecycle,
+      ):
+        final addressed = switch (field) {
+          ThreadThinkingSummaryFieldView(:final chunkIndex) => (
+            isSummary: true,
+            chunkIndex: chunkIndex,
+          ),
+          ThreadThinkingContentFieldView(:final chunkIndex) => (
+            isSummary: false,
+            chunkIndex: chunkIndex,
+          ),
+          _ => null,
+        };
+        if (addressed == null) return null;
+        final isSummary = addressed.isSummary;
+        final chunkIndex = addressed.chunkIndex;
+        final changed = _applyChunkChange(
+          isSummary ? summary : content,
+          isSummary ? summaryChunkBase : contentChunkBase,
+          chunkIndex,
+          change,
+        );
+        if (changed == null) return null;
+        return (
+          state: ThreadThinkingItemStateView(
+            summary: isSummary ? changed.chunks : summary,
+            content: isSummary ? content : changed.chunks,
+            summaryChunkBase: summaryChunkBase,
+            contentChunkBase: contentChunkBase,
+            lifecycle: lifecycle,
+          ),
+          omittedUnits: omittedUnits,
+        );
+      case ThreadToolItemStateView(:final invocation, :final lifecycle):
+        switch (field) {
+          case ThreadToolArgumentsFieldView():
+            return (
+              state: ThreadToolItemStateView(
+                invocation: invocation.withArguments(
+                  _applyTextChange(invocation.arguments, change),
+                ),
+                lifecycle: lifecycle,
+              ),
+              omittedUnits: omittedUnits,
+            );
+          case ThreadToolResultFieldView():
+            return (
+              state: ThreadToolItemStateView(
+                invocation: invocation,
+                lifecycle: _applyToolOutput(lifecycle, change),
+              ),
+              omittedUnits: omittedUnits,
+            );
+          default:
+            return null;
+        }
+      default:
+        return null;
+    }
   }
 
   ThreadItemView copyWith({
@@ -899,7 +983,7 @@ class ThreadItemView {
     ThreadItemStateView? state,
     ThreadContextDisposition? contextDisposition,
     int? bodyOmittedUnits,
-    bool? bodyLoaded,
+    bool? executionTerminal,
     bool? saved,
   }) {
     return ThreadItemView(
@@ -913,7 +997,7 @@ class ThreadItemView {
       state: state ?? this.state,
       contextDisposition: contextDisposition ?? this.contextDisposition,
       bodyOmittedUnits: bodyOmittedUnits ?? this.bodyOmittedUnits,
-      bodyLoaded: bodyLoaded ?? this.bodyLoaded,
+      executionTerminal: executionTerminal ?? this.executionTerminal,
       saved: saved ?? this.saved,
     );
   }
@@ -923,15 +1007,15 @@ class ThreadWorkspace {
   const ThreadWorkspace({
     required this.thread,
     required this.revision,
-    required List<ThreadItemView> items,
+    required this.items,
     required this.interactions,
     required this.runtime,
     this.activeTurn,
     this.latestTurn,
-    this.liveItems = const {},
-    this.timelineTurns = const {},
     this.todo,
-  }) : historyItems = items;
+    this.activity,
+    this.storage,
+  });
 
   /// Thread 身份；由 Thread directory 重绑，不作为 mode/role/status 的事实源。
   final StudioThread thread;
@@ -939,27 +1023,9 @@ class ThreadWorkspace {
   /// 当前状态 revision（snapshot 与实时事件共用）；历史页 watermark 不属于它。
   final int revision;
 
-  /// SQL-backed reading window. Live frames never change this page.
-  final List<ThreadItemView> historyItems;
-  final Map<String, ThreadItemView> liveItems;
-
-  /// Current visible history plus the live overlay, keyed by canonical item ID.
-  List<ThreadItemView> get items {
-    if (liveItems.isEmpty) return historyItems;
-    final merged = <String, ThreadItemView>{
-      for (final item in historyItems) item.id: item,
-    };
-    for (final item in liveItems.values) {
-      final existing = merged[item.id];
-      if (existing == null || item.revision >= existing.revision) {
-        merged[item.id] = item;
-      }
-    }
-    return merged.values.toList()..sort((a, b) {
-      final order = a.ordinal.compareTo(b.ordinal);
-      return order != 0 ? order : a.id.compareTo(b.id);
-    });
-  }
+  /// 消息窗口的唯一正文：canonical 有界窗口（由 ChatView 交付），不叠加任何 state
+  /// snapshot 正文或第二份 live overlay。
+  final List<ThreadItemView> items;
 
   final List<PendingInteraction> interactions;
   final ThreadRuntimeView runtime;
@@ -967,12 +1033,16 @@ class ThreadWorkspace {
   /// 当前执行中的 Turn；Terminal Turn 不留在当前状态里。
   final StudioTurnView? activeTurn;
 
-  /// 最近一次已知 Turn 事实（live turn 通知或历史页 turn 摘要）。
+  /// 最近一次已知 Turn 事实（live turn 通知）。
   final StudioTurnView? latestTurn;
 
-  /// 窗口覆盖的 Turn 摘要（来自历史页），用于行投影与终态行去重。
-  final Map<String, TimelineTurnView> timelineTurns;
   final TimelineTodoListUpdate? todo;
+
+  /// 后端 typed 当前活动投影；`null` 表示当前没有活动。独立于消息窗口。
+  final ThreadActivityView? activity;
+
+  /// 后端 typed 存储状态；`null` 表示没有可报告的存储事实（不是“健康”）。
+  final ThreadStorageStateView? storage;
 
   /// 最近 Turn 事实：当前执行的 Turn 不早于已观测到的终态 Turn。
   StudioTurnView? get lastTurn {
@@ -991,16 +1061,14 @@ class ThreadWorkspace {
     ThreadRuntimeView? runtime,
     Object? activeTurn = _workspaceUnset,
     Object? latestTurn = _workspaceUnset,
-    Map<String, ThreadItemView>? liveItems,
-    Map<String, TimelineTurnView>? timelineTurns,
     Object? todo = _workspaceUnset,
+    Object? activity = _workspaceUnset,
+    Object? storage = _workspaceUnset,
   }) {
     return ThreadWorkspace(
       thread: thread ?? this.thread,
       revision: revision ?? this.revision,
-      items: items ?? historyItems,
-      liveItems: liveItems ?? this.liveItems,
-      timelineTurns: timelineTurns ?? this.timelineTurns,
+      items: items ?? this.items,
       interactions: interactions ?? this.interactions,
       runtime: runtime ?? this.runtime,
       activeTurn: identical(activeTurn, _workspaceUnset)
@@ -1012,6 +1080,12 @@ class ThreadWorkspace {
       todo: identical(todo, _workspaceUnset)
           ? this.todo
           : todo as TimelineTodoListUpdate?,
+      activity: identical(activity, _workspaceUnset)
+          ? this.activity
+          : activity as ThreadActivityView?,
+      storage: identical(storage, _workspaceUnset)
+          ? this.storage
+          : storage as ThreadStorageStateView?,
     );
   }
 }
@@ -1023,6 +1097,7 @@ class WorkspaceUiState {
     this.loadError,
     this.subscriptionGeneration = 0,
     this.history = const ThreadHistoryWindow(),
+    this.activityDetail = const ThreadActivityDetailState(),
   });
 
   final ComposerThreadState composer;
@@ -1031,12 +1106,16 @@ class WorkspaceUiState {
   final int subscriptionGeneration;
   final ThreadHistoryWindow history;
 
+  /// 按活动身份缓存的完整详情读取状态；身份变化即失效。
+  final ThreadActivityDetailState activityDetail;
+
   WorkspaceUiState copyWith({
     ComposerThreadState? composer,
     AgentWorkspaceSyncState? syncState,
     String? loadError,
     int? subscriptionGeneration,
     ThreadHistoryWindow? history,
+    ThreadActivityDetailState? activityDetail,
   }) {
     return WorkspaceUiState(
       composer: composer ?? this.composer,
@@ -1049,6 +1128,56 @@ class WorkspaceUiState {
       subscriptionGeneration:
           subscriptionGeneration ?? this.subscriptionGeneration,
       history: history ?? this.history,
+      activityDetail: activityDetail ?? this.activityDetail,
+    );
+  }
+}
+
+/// 固定活动条展开详情的一次按需读取状态。
+///
+/// 以活动身份 + 版本为键：同一身份内版本前进即视为需要刷新；身份变化即失效。
+/// 读取在途时只保留一个请求（调用方合并），旧身份的迟到结果不得覆盖新身份。
+class ThreadActivityDetailState {
+  const ThreadActivityDetailState({
+    this.identity,
+    this.revision = 0,
+    this.loading = false,
+    this.detail,
+    this.error,
+  });
+
+  final String? identity;
+  final int revision;
+  final bool loading;
+  final ThreadActivityDetail? detail;
+  final String? error;
+
+  bool matches(String identity) => this.identity == identity;
+
+  /// 当前缓存是否已对同一身份的最新版本有效（无需重读）。
+  bool covers(String identity, int revision) {
+    if (identity.isEmpty || this.identity != identity) return false;
+    if (loading) return true;
+    return (detail != null || error != null) && this.revision >= revision;
+  }
+
+  ThreadActivityDetailState copyWith({
+    Object? identity = _workspaceUnset,
+    int? revision,
+    bool? loading,
+    Object? detail = _workspaceUnset,
+    Object? error = _workspaceUnset,
+  }) {
+    return ThreadActivityDetailState(
+      identity: identical(identity, _workspaceUnset)
+          ? this.identity
+          : identity as String?,
+      revision: revision ?? this.revision,
+      loading: loading ?? this.loading,
+      detail: identical(detail, _workspaceUnset)
+          ? this.detail
+          : detail as ThreadActivityDetail?,
+      error: identical(error, _workspaceUnset) ? this.error : error as String?,
     );
   }
 }
@@ -1189,31 +1318,17 @@ const _workspaceUnset = Object();
 
 /// 把一条从历史页/流进入客户端的条目收敛到客户端预算。
 ///
-/// [previewOmittedUnits] 是该页声明的既有省略量（协议单条预览）：正文本身没有
-/// 超过预算时它归零（该页已给出完整正文），超过预算时保留尾部并按实际丢弃量累计。
-/// 已由用户显式回源（`bodyLoaded`）的条目保持完整正文，绝不被再次压缩。
+/// 文本正文（智能体 / 用户 / parentAgent 消息）**永不折叠**：客户端不再按预算截断它，
+/// 只有数据源声明的省略量（[previewOmittedUnits]，例如 durable history 的单条预览）
+/// 会保留下来，作为“按身份展开完整正文”的依据（窗口的 `omittedBytes`）。推理与工具载荷
+/// 仍收敛到客户端预算，它们的折叠语义由分组行表达。
 ThreadItemView boundThreadItemBody(
   ThreadItemView item, {
   int previewOmittedUnits = 0,
 }) {
-  if (item.bodyLoaded) return item;
   switch (item.state) {
-    case ThreadTextItemStateView(
-      :final channel,
-      :final text,
-      :final attachments,
-      :final lifecycle,
-    ):
-      final bounded = _boundedTail(text, previewOmittedUnits);
-      return item.copyWith(
-        state: ThreadTextItemStateView(
-          channel: channel,
-          text: bounded.text,
-          attachments: attachments,
-          lifecycle: lifecycle,
-        ),
-        bodyOmittedUnits: bounded.omittedUnits,
-      );
+    case ThreadTextItemStateView():
+      return item.copyWith(bodyOmittedUnits: previewOmittedUnits);
     case ThreadThinkingItemStateView(
       :final summary,
       :final content,
@@ -1323,73 +1438,6 @@ ThreadItemView boundThreadItemBody(
 }
 
 /// 实时推理正文按 chunkIndex 完整追加；历史页的预算另行处理。
-({
-  List<String> summary,
-  int summaryChunkBase,
-  List<String> content,
-  int contentChunkBase,
-  int omittedUnits,
-})
-_boundedReasoningAppend({
-  required List<String> summary,
-  required int summaryChunkBase,
-  required List<String> content,
-  required int contentChunkBase,
-  required bool toSummary,
-  required int chunkIndex,
-  required String delta,
-  required int omittedUnits,
-}) {
-  var nextSummary = summary;
-  var nextContent = content;
-  var omitted = omittedUnits;
-  final appended = _appendChunkAt(
-    toSummary ? summary : content,
-    toSummary ? summaryChunkBase : contentChunkBase,
-    chunkIndex,
-    delta,
-  );
-  if (appended == null) {
-    omitted += delta.length;
-  } else if (toSummary) {
-    nextSummary = appended;
-  } else {
-    nextContent = appended;
-  }
-  return (
-    summary: nextSummary,
-    summaryChunkBase: summaryChunkBase,
-    content: nextContent,
-    contentChunkBase: contentChunkBase,
-    omittedUnits: omitted,
-  );
-}
-
-/// 把 delta 写入逻辑 [chunkIndex] 对应的本地分块。
-///
-/// 返回 null 表示该逻辑分块已不在保留窗口内（内容只累计省略量）；逻辑下标超出本地
-/// 列表尾部意味着生产者真的缺块，仍抛出以保持既有缺口保护。
-List<String>? _appendChunkAt(
-  List<String> chunks,
-  int chunkBase,
-  int chunkIndex,
-  String delta,
-) {
-  final local = chunkIndex - chunkBase;
-  if (local < 0) return null;
-  if (local > chunks.length) {
-    throw StateError('Thread Item delta skipped an earlier chunk');
-  }
-  if (local == chunks.length) {
-    return [...chunks, delta];
-  }
-  return [
-    ...chunks.take(local),
-    '${chunks[local]}$delta',
-    ...chunks.skip(local + 1),
-  ];
-}
-
 /// summary 与 content 合计不得超过 [kTimelineItemBodyBudget]。
 ///
 /// 超出时从保留内容更多的一侧先丢弃最旧内容（整块优先，再裁首块头部），两个通道
@@ -1478,3 +1526,94 @@ int _chunksLength(List<String> chunks) {
 
 /// 代理对不能被切开：按 code unit 截断时跳过落在低位代理上的起点。
 bool _isLowSurrogate(int codeUnit) => codeUnit >= 0xDC00 && codeUnit <= 0xDFFF;
+
+/// 把一个字段变化作用在单段正文上（文本正文 / 工具参数 / 工具输出）。
+///
+/// `Append` 只在前缀仍有效时到达，直接拼接；`Replace` 是权威替换（含预览升级完整正文）；
+/// `Remove` 丢弃本地副本（空串）；`Unchanged` 不动。
+String _applyTextChange(String current, ThreadFieldChangeView change) {
+  return switch (change) {
+    UnchangedThreadFieldChangeView() => current,
+    AppendThreadFieldChangeView(:final text) => '$current$text',
+    ReplaceThreadFieldChangeView(:final text) => text,
+    RemoveThreadFieldChangeView() => '',
+  };
+}
+
+/// 把字段变化作用在推理分块列表的逻辑 [logicalIndex] 上。
+///
+/// 逻辑下标 < 已保留窗口时该块本地副本已被省略，丢弃即可；下标超出本地尾部意味着生产者
+/// 真的缺块，返回 null 让调用方重同步；删除块只清空该逻辑下标，**不移动**其它块身份。
+({List<String> chunks})? _applyChunkChange(
+  List<String> chunks,
+  int chunkBase,
+  int logicalIndex,
+  ThreadFieldChangeView change,
+) {
+  if (change is UnchangedThreadFieldChangeView) return (chunks: chunks);
+  final local = logicalIndex - chunkBase;
+  if (local < 0) return (chunks: chunks);
+  if (local > chunks.length) return null;
+  if (local == chunks.length) {
+    return switch (change) {
+      AppendThreadFieldChangeView(:final text) ||
+      ReplaceThreadFieldChangeView(:final text) => (chunks: [...chunks, text]),
+      RemoveThreadFieldChangeView() ||
+      UnchangedThreadFieldChangeView() => (chunks: chunks),
+    };
+  }
+  final applied = switch (change) {
+    AppendThreadFieldChangeView(:final text) => '${chunks[local]}$text',
+    ReplaceThreadFieldChangeView(:final text) => text,
+    RemoveThreadFieldChangeView() => '',
+    UnchangedThreadFieldChangeView() => chunks[local],
+  };
+  return (chunks: [...chunks.take(local), applied, ...chunks.skip(local + 1)]);
+}
+
+/// 把工具输出的字段变化落进工具生命周期：运行/取消沿用原变体；已成功/失败重建输出对象；
+/// 尚无输出载体的变体在收到 `Append`/`Replace` 时进入运行态。
+ThreadToolLifecycleView _applyToolOutput(
+  ThreadToolLifecycleView lifecycle,
+  ThreadFieldChangeView change,
+) {
+  if (change is UnchangedThreadFieldChangeView) return lifecycle;
+  switch (lifecycle) {
+    case RunningThreadToolView(:final streamedOutput):
+      return RunningThreadToolView(_applyTextChange(streamedOutput, change));
+    case CancellingThreadToolView(:final streamedOutput):
+      return CancellingThreadToolView(_applyTextChange(streamedOutput, change));
+    case SucceededThreadToolView(:final completedAt, :final output):
+      return SucceededThreadToolView(
+        completedAt,
+        _withToolResult(output, _applyTextChange(output.result, change)),
+      );
+    case FailedThreadToolView(:final failedAt, :final failure, :final output):
+      return FailedThreadToolView(
+        failedAt,
+        failure,
+        output == null
+            ? ThreadToolOutputView(
+                result: _applyTextChange('', change),
+                attachments: const [],
+                outputArtifacts: const [],
+              )
+            : _withToolResult(output, _applyTextChange(output.result, change)),
+      );
+    default:
+      if (change is RemoveThreadFieldChangeView) return lifecycle;
+      return RunningThreadToolView(_applyTextChange('', change));
+  }
+}
+
+ThreadToolOutputView _withToolResult(
+  ThreadToolOutputView output,
+  String result,
+) {
+  return ThreadToolOutputView(
+    result: result,
+    attachments: output.attachments,
+    outputArtifacts: output.outputArtifacts,
+    exitCode: output.exitCode,
+  );
+}

@@ -1,11 +1,12 @@
 //! One immutable projection per terminal Turn; no separate delivery state or mutable report store.
 use super::ObservationServices;
+use crate::studio::thread_projection::TurnResult;
 use anyhow::Result;
 use pl_core::{
     context::{ContextContent, OpaquePayload},
     thread::{ThreadSnapshot, TurnRecord},
 };
-use pl_protocol::{Thread, ThreadTextChannel};
+use pl_protocol::Thread;
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,17 +39,15 @@ pub(super) async fn publish_terminal(
     turn: &TurnRecord,
     sequence: u64,
     wake: bool,
+    result: &TurnResult,
 ) -> Result<()> {
     let Some(parent) = thread.parent_thread_id.as_deref() else {
         return Ok(());
     };
-    let items = services
-        .store
-        .history(&thread.id)
-        .await?
-        .items_for_turn(&turn.turn_id)
-        .await?;
-    let report = report(thread, turn, snapshot, &items)?;
+    // The result facts come from the reliable in-memory projection that owns this Thread's live
+    // facts; the hot path never reads them back from history, and a Turn that committed its visible
+    // output over many effects reports all of it rather than only the effect that finished it.
+    let report = report(thread, turn, snapshot, result)?;
     let content = serde_json::to_string(&report)?;
     let message_id = format!(
         "studio.child.{}:{}:{}",
@@ -79,22 +78,11 @@ fn report<'a>(
     thread: &'a Thread,
     turn: &'a TurnRecord,
     snapshot: &'a ThreadSnapshot,
-    items: &[pl_protocol::ThreadItem],
+    result: &'a TurnResult,
 ) -> Result<TurnReport<'a>> {
-    let mut finals = Vec::new();
-    let mut commentary = Vec::new();
-    for item in items {
-        if let Some(text) = item.text() {
-            match text.channel() {
-                ThreadTextChannel::Final => finals.push(text.text()),
-                ThreadTextChannel::Commentary => commentary.push(text.text()),
-                _ => {}
-            }
-        }
-    }
-    let mut message = finals.join("\n\n");
+    let mut message = result.final_text().unwrap_or_default();
     let last_tool = if message.is_empty() {
-        items.iter().rev().find_map(|item| item.tool().cloned())
+        result.last_tool().cloned()
     } else {
         None
     };
@@ -102,12 +90,11 @@ fn report<'a>(
         message = format!(
             "本轮已停止，未提交最终总结。实际状态：{:?}。\n\n本轮已有可见输出：\n{}",
             turn.state,
-            commentary.join("\n\n")
+            result.commentary()
         );
     }
-    let message_item_ids = items
-        .iter()
-        .map(|item| item.id.as_str())
+    let message_item_ids = result
+        .identities()
         .collect::<std::collections::BTreeSet<_>>();
     let through = snapshot
         .wake_messages_through

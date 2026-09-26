@@ -185,6 +185,38 @@ pub(crate) fn recent_effect_fact<T>(
     window.batches.iter().rev().find_map(|batch| select(batch))
 }
 
+/// Explicit phase of the model execution driver for the newest step.
+///
+/// The owner sets this at the actual call boundaries of one attempt, so a live projection can tell
+/// genuine context preparation (which may itself run a compaction model), request construction,
+/// provider admission/wait and the running call apart, instead of inferring "preparing" from a
+/// missing fact. It is cleared as soon as the step returns, so it never describes a finished step.
+///
+/// The phases describe *where the driver is in the model call*, not how far the response has
+/// streamed: streaming progress is observed separately through the model progress sender. Only
+/// [`Self::Running`] means the prepared provider call is executing, so it is the only phase that may
+/// be read as "waiting for the model implementation"; every earlier phase is still local
+/// preparation or admission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelExecutionPhase {
+    /// The context-preparation hook is running; it is the only step that may replace or compact the
+    /// context, so it is the one phase that may genuinely run a separate preparation model. Running
+    /// the hook does not by itself prove that a compaction or preparation model ran.
+    PreparingContext,
+    /// Message/steering/tool records and the immutable model request are being assembled.
+    BuildingRequest,
+    /// The model implementation is preparing the request (freezing, encoding, estimating) before the
+    /// provider call exists. No provider output can be pending yet.
+    PreparingRequest,
+    /// The driver is waiting for capacity and storage admission before it may build or dispatch the
+    /// prepared call. Admission is not a provider wait.
+    Admitting,
+    /// The prepared provider call is executing and may stream output. Until an observation arrives
+    /// this is the only phase that means the driver is waiting on the model implementation.
+    Running,
+}
+
 /// Current owner state published after each accepted request or model-output commit.
 ///
 /// A snapshot holds only the facts that current logical execution and live observation still
@@ -202,9 +234,18 @@ pub(crate) fn recent_effect_fact<T>(
 pub struct ThreadSnapshot {
     #[serde(skip)]
     pub model_progress: Option<crate::model::ActiveModelProgress>,
-    /// Ephemeral producer previews for running tasks; never persisted or used as model context.
+    /// Explicit phase of the current model execution driver; `None` when no step is between its
+    /// first boundary and its completion. Never persisted: it describes live execution only.
     #[serde(skip)]
-    pub tool_progress: std::collections::BTreeMap<String, Vec<ContextContent>>,
+    pub model_execution: Option<ModelExecutionPhase>,
+    /// Ephemeral producer previews for running tasks; never persisted or used as model context.
+    ///
+    /// One entry per running call, each holding the producer's own opaque output identities and
+    /// shared immutable content blocks. Publishing only clones the `Arc`s, so the owner never keeps
+    /// a second full copy of an output that is still streaming, and a slow consumer reads the
+    /// newest bounded window instead of a replayed delta queue.
+    #[serde(skip)]
+    pub tool_progress: std::collections::BTreeMap<String, crate::model::ToolProgress>,
     /// Permission state that is still owned by a live task; finished approvals are history.
     #[serde(default)]
     pub permissions: std::collections::BTreeMap<String, permissions::PermissionRecord>,
@@ -275,6 +316,14 @@ pub struct ThreadSnapshot {
     /// Commit-export buffer for context replacements; never resident across a published commit.
     #[serde(skip)]
     pub context_replacements: Arc<[ContextReplacement]>,
+    /// Commit-export buffer of durable resource supplements for already-committed tool results.
+    ///
+    /// A failed archive re-saved after its result was committed names the same call identity, so the
+    /// reference supplements that one result instead of a second delivery. The batch is consumed by
+    /// the commit that publishes it, so it is never resident across a published commit and the
+    /// resident snapshot never grows with repairs.
+    #[serde(skip)]
+    pub delivery_repairs: Arc<[cold::OutputRepair]>,
     /// Complete current fact set, one entry per stable host source.
     pub runtime_facts: Arc<[RuntimeFact]>,
     /// Current opaque application records; superseded revisions are history.
@@ -404,6 +453,7 @@ impl ThreadSnapshot {
     /// keeps them so a history writer can project its own effect.
     pub(crate) fn clear_ephemeral(&mut self) {
         self.model_progress = None;
+        self.model_execution = None;
         self.tool_progress.clear();
         self.model_available = false;
         self.pending_tool_commits.clear();
@@ -424,6 +474,7 @@ impl ThreadSnapshot {
         self.extension_changes = Default::default();
         self.interaction_changes = Default::default();
         self.context_replacements = Default::default();
+        self.delivery_repairs = Default::default();
 
         let newest_usage = self
             .attempts
@@ -968,6 +1019,21 @@ pub enum ThreadError {
     Storage(#[source] Arc<cold::ColdStoreError>),
     #[error("new model execution is paused by cold-storage pressure")]
     StoragePressure,
+    #[error(
+        "storage recovery generation {requested} does not match the recorded fault generation {recorded}"
+    )]
+    StaleStorageRecovery { requested: u64, recorded: u64 },
+    #[error(
+        "storage recovery is not durable yet: durable sequence {durable} has not reached the required fence {required}"
+    )]
+    StorageRecoveryPending { durable: u64, required: u64 },
+    /// The backend that reported this fault generation has not verified its recovery yet.
+    ///
+    /// A generation the backend itself named is only recovered once that same backend reports the
+    /// generation's own recovery: a retry that landed for an older generation, or a queue that
+    /// merely stopped reporting an error, must never stand in for the newer fault.
+    #[error("storage recovery of generation {generation} is not verified by the backend yet")]
+    StorageRecoveryUnverified { generation: u64 },
     #[error("model did not provide an estimate with the required accuracy")]
     UnknownCapacity,
     #[error("model input estimate {estimate:?} exceeds capacity {limit}")]

@@ -1,4 +1,8 @@
-part of 'timeline_view.dart';
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../../app/theme/studio_tokens.dart';
 
 /// Timeline 专用的小型“活时间线”脉冲。
 ///

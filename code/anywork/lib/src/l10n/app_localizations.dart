@@ -347,8 +347,44 @@ abstract class AppLocalizations {
   /// No description provided for @persistenceBlocked.
   ///
   /// In en, this message translates to:
-  /// **'Saving is blocked with {count} pending update(s) and needs attention. You can continue the conversation.'**
+  /// **'Saving is blocked with {count} pending update(s) and needs attention.'**
   String persistenceBlocked(int count);
+
+  /// No description provided for @persistenceExecutionPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving failed; execution is paused.'**
+  String get persistenceExecutionPaused;
+
+  /// No description provided for @persistenceSavingBackpressure.
+  ///
+  /// In en, this message translates to:
+  /// **'Storage is under pressure; saving is waiting.'**
+  String get persistenceSavingBackpressure;
+
+  /// No description provided for @persistenceNewWorkPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving failed; new work is paused while in-flight work winds down.'**
+  String get persistenceNewWorkPaused;
+
+  /// No description provided for @persistenceResumeReadyOtherSession.
+  ///
+  /// In en, this message translates to:
+  /// **'Another session “{session}” is saved and waiting to resume.'**
+  String persistenceResumeReadyOtherSession(String session);
+
+  /// No description provided for @persistenceExecutionPausedOtherSession.
+  ///
+  /// In en, this message translates to:
+  /// **'Another session “{session}” failed to save; its execution is paused.'**
+  String persistenceExecutionPausedOtherSession(String session);
+
+  /// No description provided for @persistenceNewWorkPausedOtherSession.
+  ///
+  /// In en, this message translates to:
+  /// **'Another session “{session}” failed to save; its new work is paused while in-flight work winds down.'**
+  String persistenceNewWorkPausedOtherSession(String session);
 
   /// No description provided for @persistenceRetry.
   ///
@@ -458,6 +494,18 @@ abstract class AppLocalizations {
   /// **'Refresh diagnostics'**
   String get persistenceQueueRefresh;
 
+  /// No description provided for @persistenceQueueShowDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Show diagnostics'**
+  String get persistenceQueueShowDetails;
+
+  /// No description provided for @persistenceQueueHideDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide diagnostics'**
+  String get persistenceQueueHideDetails;
+
   /// No description provided for @persistenceHistoryPaused.
   ///
   /// In en, this message translates to:
@@ -476,11 +524,23 @@ abstract class AppLocalizations {
   /// **'History save failed'**
   String get persistenceHistoryWriteFailed;
 
-  /// No description provided for @persistenceHistoryRetry.
+  /// No description provided for @persistenceHistoryRetrySave.
   ///
   /// In en, this message translates to:
-  /// **'Retry saving and continue'**
-  String get persistenceHistoryRetry;
+  /// **'Retry saving'**
+  String get persistenceHistoryRetrySave;
+
+  /// No description provided for @persistenceHistoryResume.
+  ///
+  /// In en, this message translates to:
+  /// **'Resume execution'**
+  String get persistenceHistoryResume;
+
+  /// No description provided for @persistenceHistoryResumeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry saving to enable resume'**
+  String get persistenceHistoryResumeHint;
 
   /// No description provided for @persistenceStatisticsGap.
   ///
@@ -4342,6 +4402,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This subagent role has been retired. History is read-only.'**
   String get agentRoleRetired;
+
+  /// No description provided for @conversationActivityPreparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing'**
+  String get conversationActivityPreparing;
+
+  /// No description provided for @conversationActivityRunningTool.
+  ///
+  /// In en, this message translates to:
+  /// **'Running'**
+  String get conversationActivityRunningTool;
+
+  /// No description provided for @conversationActivitySaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Save failed'**
+  String get conversationActivitySaveFailed;
+
+  /// No description provided for @conversationActivitySavePaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving paused'**
+  String get conversationActivitySavePaused;
+
+  /// No description provided for @conversationActivityStoragePressure.
+  ///
+  /// In en, this message translates to:
+  /// **'Storage pressure'**
+  String get conversationActivityStoragePressure;
+
+  /// No description provided for @conversationActivityResumeReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved, waiting to resume'**
+  String get conversationActivityResumeReady;
+
+  /// No description provided for @conversationActivityResumeRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for save recovery'**
+  String get conversationActivityResumeRequired;
+
+  /// No description provided for @conversationActivityStopping.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopping'**
+  String get conversationActivityStopping;
 }
 
 class _AppLocalizationsDelegate

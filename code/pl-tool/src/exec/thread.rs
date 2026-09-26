@@ -2,6 +2,10 @@
 use std::{fmt, future::Future, sync::Arc, time::Duration};
 
 use pl_core::context::{ContextContent, OpaquePayload, ResourceReference};
+use pl_core::thread::cold::{
+    ColdStoreError, OutputRepair, OutputRetryFuture, OutputRetryObligation, OutputRetryOutcome,
+    OutputStorageFault, StorageFaultKind,
+};
 use pl_core::tool::{
     ToolOutput,
     opaque::{CallContext, Registration, RegistryError, Tool, ToolError},
@@ -13,8 +17,8 @@ use super::{DEFAULT_TIMEOUT_SECS, ExecInput, MAX_MODEL_OUTPUT_CHARS};
 use crate::command::{
     CommandBackend,
     process_manager::{
-        CommandOutputSnapshot, CommandProcessFinalResult, CommandProcessManager,
-        CommandStartRequest,
+        CaptureRepair, CommandCaptureFailure, CommandOutputSnapshot, CommandProcessFinalResult,
+        CommandProcessManager, CommandStartRequest,
     },
 };
 
@@ -97,6 +101,130 @@ impl<B: CommandBackend, A: CommandOutputArchive> ThreadExecTool<B, A> {
     /// Returns an invalid tool identity error before registration.
     pub fn registration(self, declaration: OpaquePayload) -> Result<Registration, RegistryError> {
         Registration::new(super::TOOL_EXEC.into(), declaration, self)
+    }
+}
+
+/// Typed obligation that re-saves a command capture the archive could not store.
+///
+/// It first re-materializes any accepted bytes a failed capture append could not write — truncating
+/// the fragment back to the offset it was at before the failed append and re-appending exactly that
+/// chunk — so a retry never archives a short fragment as if it were whole. It then re-runs the *same*
+/// archive call with the *same* capture snapshot, so retrying re-saves the exact accepted bytes under
+/// their stable content-addressed identity: it never reruns the command, and a repeated retry
+/// produces the same reference instead of a duplicate. A successful retry also names the committed
+/// tool result — by the same call id it was committed under — so the durable reference reaches that
+/// result instead of becoming an orphan the UI and cold recovery cannot locate.
+#[derive(Debug)]
+struct ArchiveRetentionObligation<A: CommandOutputArchive, B: CommandBackend> {
+    archive: Arc<A>,
+    backend: Arc<B>,
+    thread_id: String,
+    call_id: String,
+    snapshot: CommandOutputSnapshot,
+    repair: Option<CaptureRepair>,
+    kind: StorageFaultKind,
+}
+
+impl<A: CommandOutputArchive, B: CommandBackend> ArchiveRetentionObligation<A, B> {
+    fn new(
+        archive: Arc<A>,
+        backend: Arc<B>,
+        thread_id: &str,
+        call_id: &str,
+        snapshot: CommandOutputSnapshot,
+        kind: StorageFaultKind,
+    ) -> Self {
+        // The repair is taken from the snapshot itself: it names exactly the accepted bytes the failed
+        // append could not write, at the offset the fragment was at before it tried.
+        let repair = snapshot.capture_repair().cloned();
+        Self {
+            archive,
+            backend,
+            thread_id: thread_id.to_owned(),
+            call_id: call_id.to_owned(),
+            snapshot,
+            repair,
+            kind,
+        }
+    }
+}
+
+impl<A: CommandOutputArchive, B: CommandBackend> OutputRetryObligation
+    for ArchiveRetentionObligation<A, B>
+{
+    fn identity(&self) -> String {
+        // The capture path is the stable identity of one operation's accepted output: the live report
+        // and the return path both name the same fragment, so the owner attaches one obligation even
+        // when the failure is reported twice, and two parallel operations (different paths) keep
+        // separate obligations instead of one overwriting the other.
+        self.snapshot.capture_file.display().to_string()
+    }
+    fn retry(&self) -> OutputRetryFuture<'_> {
+        Box::pin(async move {
+            // Re-materialize every accepted chunk the failed capture did not store, in acceptance
+            // order, before archiving: one truncation back to the confirmed offset, then each chunk
+            // re-appended with its own framing. So the archive stores exactly the bytes that were
+            // accepted — including the other stream's chunk the first failing append never saw —
+            // instead of a short fragment.
+            if let Some(repair) = &self.repair {
+                let mut committed_len = repair.committed_len;
+                for chunk in &repair.chunks {
+                    committed_len = self
+                        .backend
+                        .repair_output_chunk(
+                            &self.snapshot.capture_file,
+                            chunk.stream,
+                            committed_len,
+                            &chunk.pending,
+                        )
+                        .await
+                        .map_err(|error| ColdStoreError {
+                            source: Box::new(std::io::Error::other(error.to_string())),
+                        })?;
+                }
+            }
+            let reference = self
+                .archive
+                .retain(&self.thread_id, &self.snapshot)
+                .await
+                .map_err(|error| ColdStoreError {
+                    source: Box::new(error),
+                })?;
+            // The stored reference belongs to the already-committed tool result of this same call:
+            // name that identity so the owner attaches the reference to it instead of leaving an
+            // orphan blob the UI and cold recovery can never locate.
+            Ok(OutputRetryOutcome::StoredWithRepair(OutputRepair {
+                call_id: self.call_id.clone(),
+                reference,
+            }))
+        })
+    }
+
+    fn received_bytes(&self) -> u64 {
+        // The bytes this operation really accepted: the fragment the backend last confirmed writing,
+        // plus every accepted chunk still owed. Both are facts the obligation already carries, so the
+        // reported size never depends on a fragment-length read that could fail and understate it.
+        let committed = self.snapshot.capture_committed_len;
+        let pending: u64 = self
+            .snapshot
+            .capture_repair()
+            .map(|repair| {
+                repair
+                    .chunks
+                    .iter()
+                    .map(|chunk| chunk.pending.len() as u64)
+                    .sum()
+            })
+            .unwrap_or(0);
+        committed.saturating_add(pending)
+    }
+
+    fn location(&self) -> String {
+        self.snapshot.capture_file.display().to_string()
+    }
+
+    fn kind(&self) -> StorageFaultKind {
+        self.kind
     }
 }
 
@@ -186,7 +314,11 @@ impl<B: CommandBackend, A: CommandOutputArchive> Tool for ThreadExecTool<B, A> {
             return Err(ToolError::new(ExecFailure::InvalidLimit));
         }
         let task_id = safe_identity(&context.call_id);
-        let (observer, previews) = super::progress::CommandPreview::channel();
+        let max_output_chars = input
+            .max_output_chars
+            .unwrap_or(MAX_MODEL_OUTPUT_CHARS)
+            .min(MAX_MODEL_OUTPUT_CHARS);
+        let (observer, previews, failures) = super::progress::ExecOutputObserver::channel();
         let execution = self.processes.run_task(
             &task_id,
             CommandStartRequest {
@@ -201,10 +333,7 @@ impl<B: CommandBackend, A: CommandOutputArchive> Tool for ThreadExecTool<B, A> {
                 },
                 timeout: Duration::from_secs(input.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECS)),
                 yield_time: Duration::ZERO,
-                max_output_chars: input
-                    .max_output_chars
-                    .unwrap_or(MAX_MODEL_OUTPUT_CHARS)
-                    .min(MAX_MODEL_OUTPUT_CHARS),
+                max_output_chars,
                 session_id: safe_identity(&context.thread_id),
                 tool_id: task_id.clone(),
                 call_id: task_id.clone(),
@@ -212,32 +341,241 @@ impl<B: CommandBackend, A: CommandOutputArchive> Tool for ThreadExecTool<B, A> {
                 output_observer: Some(observer),
             },
         );
+        // Report a capture failure through the running call's reliable channel the moment the reader
+        // observes it — before the process tree finishes terminating and draining — so other
+        // model/tool admission is blocked while this call is still in flight, not only when `drive`
+        // returns. The same obligation is reported again on the return path below, so stopping this
+        // task here can never lose the report.
+        let reporter = tokio::spawn({
+            let processes = self.processes.clone();
+            let archive = self.archive.clone();
+            let thread_id = context.thread_id.clone();
+            let call_id = context.call_id.clone();
+            let tasks = context.tasks.clone();
+            // The reporter needs its own handle: `task_id` is still borrowed by the running
+            // `execution` future below, so it cannot be moved into this task.
+            let report_task_id = task_id.clone();
+            async move {
+                let mut failures = failures;
+                while let Some(failure) = failures.recv().await {
+                    let Some(snapshot) =
+                        processes.snapshot(&report_task_id, max_output_chars).await
+                    else {
+                        continue;
+                    };
+                    let fault = capture_output_fault(
+                        &failure,
+                        archive.clone(),
+                        processes.backend(),
+                        &thread_id,
+                        &call_id,
+                        &snapshot,
+                    );
+                    report_output_storage_fault(tasks.as_ref(), &fault).await;
+                }
+            }
+        });
         let snapshot = super::progress::drive(execution, previews, context.tasks.as_ref())
             .await
             .map_err(ToolError::new)?;
-        let retained = self
-            .archive
-            .retain(&context.thread_id, &snapshot)
-            .await
-            .and_then(|resource| {
-                resource.validate().map_err(ToolError::new)?;
-                Ok(resource)
-            });
+        reporter.abort();
+        // Build the typed output fault the moment the capture failed and report it through the running
+        // call's reliable channel *before* the archive and projection, so other model/tool admission is
+        // blocked immediately instead of only when this call unwinds. A write or read failure keeps its
+        // retriable obligation (re-save the accepted capture); a bounded-capture truncation does not,
+        // because its accepted bytes are retained in the fragment and the reliable writer saves them.
+        let capture_fault = snapshot.output_failure.clone().map(|failure| {
+            capture_output_fault(
+                &failure,
+                self.archive.clone(),
+                self.processes.backend(),
+                &context.thread_id,
+                &context.call_id,
+                &snapshot,
+            )
+        });
+        if let Some(fault) = &capture_fault {
+            report_output_storage_fault(context.tasks.as_ref(), fault).await;
+        }
+        let retained = self.retain_capture(&context.thread_id, &snapshot).await;
         let output = projection(&snapshot, retained.as_ref().ok())?;
         if let Err(error) = retained {
+            // The archive itself could not store the capture: keep the retriable obligation on the
+            // typed fault and report it through the running call's reliable channel as well, so the
+            // pause is in force before this call returns.
+            let error = attach_archive_obligation(
+                error,
+                self.archive.clone(),
+                self.processes.backend(),
+                &context.thread_id,
+                &context.call_id,
+                &snapshot,
+            );
+            if let Some(fault) = error
+                .source
+                .downcast_ref::<OutputStorageFault>()
+                .map(|fault| Arc::new(fault.clone()))
+            {
+                report_output_storage_fault(context.tasks.as_ref(), &fault).await;
+            }
             return Err(error.with_output(output));
         }
         match snapshot.state.final_result() {
-            Some(CommandProcessFinalResult::Succeeded { .. }) => Ok(output),
+            // A user cancellation wins over a capture failure: the process was stopped on purpose, so
+            // the result stays cancelled even if a concurrent capture write also failed.
             Some(CommandProcessFinalResult::Cancelled) => {
                 Err(ToolError::new(pl_core::thread::ThreadError::Cancelled).with_output(output))
             }
+            // A capture failure outranks a healthy exit. The process may have exited before its last
+            // capture write or flush failed, so checking the typed reason (not only `Failed`) keeps a
+            // truncated capture from being reported as success.
+            _ if capture_fault.is_some() => {
+                // The command's durable capture could not continue. Report it through the typed
+                // storage boundary core owns instead of as a plain tool error, so the Thread latches
+                // the exact category and pauses further admission; the bytes already captured ride
+                // along as the observed output.
+                let fault = capture_fault.expect("checked to be present");
+                Err(ToolError::new((*fault).clone()).with_output(output))
+            }
+            Some(CommandProcessFinalResult::Succeeded { .. }) => Ok(output),
             Some(
                 CommandProcessFinalResult::Failed { .. } | CommandProcessFinalResult::TimedOut,
             )
             | None => {
                 Err(ToolError::new(ExecFailure::Process(snapshot.message)).with_output(output))
             }
+        }
+    }
+}
+
+impl<B: CommandBackend, A: CommandOutputArchive> ThreadExecTool<B, A> {
+    /// Archives the accepted capture, re-materializing any bytes the failed capture did not store.
+    ///
+    /// A failed capture append may have left the fragment short of the bytes already accepted and
+    /// published live, and the other stream's reader may already have accepted a following chunk.
+    /// Repairing first — truncating back to the backend-confirmed offset and re-appending every
+    /// accepted chunk in order through the same backend — makes the archive store the exact accepted
+    /// bytes under their stable identity instead of a short fragment it would report as `Stored`. A
+    /// repair that itself cannot write is reported as a typed output-storage fault, so the obligation
+    /// (which repeats the whole repair) stays owed and the short fragment is never archived as whole.
+    async fn retain_capture(
+        &self,
+        thread_id: &str,
+        snapshot: &CommandOutputSnapshot,
+    ) -> Result<ResourceReference, ToolError> {
+        if let Some(repair) = snapshot.capture_repair() {
+            let mut committed_len = repair.committed_len;
+            for chunk in &repair.chunks {
+                committed_len = self
+                    .processes
+                    .backend()
+                    .repair_output_chunk(
+                        &snapshot.capture_file,
+                        chunk.stream,
+                        committed_len,
+                        &chunk.pending,
+                    )
+                    .await
+                    .map_err(|error| {
+                        let source = ColdStoreError {
+                            source: Box::new(std::io::Error::other(format!(
+                                "command output capture repair failed: {error}"
+                            ))),
+                        };
+                        ToolError::new(OutputStorageFault::new(
+                            StorageFaultKind::WriteFailed,
+                            Arc::new(source),
+                        ))
+                    })?;
+            }
+        }
+        let reference = self.archive.retain(thread_id, snapshot).await?;
+        reference.validate().map_err(ToolError::new)?;
+        Ok(reference)
+    }
+}
+
+/// Builds the typed storage fault for one capture failure, with its retriable obligation when owed.
+///
+/// The category travels as a value, so core never parses the diagnostic text to classify it. A
+/// bounded-capture truncation with every accepted chunk on disk keeps no obligation: its accepted
+/// bytes are retained in the fragment and the reliable pause releases once the durability fence lands.
+/// A write or read failure, or any failure that left accepted chunks the capture did not store, carries
+/// the obligation that re-materializes the exact plan — so a fault that also kept a repair is never
+/// classified as a plain budget stop that could archive a short fragment as whole.
+fn capture_output_fault<A: CommandOutputArchive, B: CommandBackend>(
+    failure: &CommandCaptureFailure,
+    archive: Arc<A>,
+    backend: Arc<B>,
+    thread_id: &str,
+    call_id: &str,
+    snapshot: &CommandOutputSnapshot,
+) -> Arc<OutputStorageFault> {
+    let owes_repair = snapshot.capture_repair().is_some();
+    let kind = match failure {
+        CommandCaptureFailure::Exhausted { .. } if !owes_repair => StorageFaultKind::QueueFull,
+        _ => StorageFaultKind::WriteFailed,
+    };
+    let source = ColdStoreError {
+        source: Box::new(std::io::Error::other(failure.message())),
+    };
+    let fault = OutputStorageFault::new(kind, Arc::new(source));
+    if matches!(failure, CommandCaptureFailure::Exhausted { .. }) && !owes_repair {
+        Arc::new(fault)
+    } else {
+        Arc::new(
+            fault.with_obligation(Arc::new(ArchiveRetentionObligation::new(
+                archive,
+                backend,
+                thread_id,
+                call_id,
+                snapshot.clone(),
+                kind,
+            ))),
+        )
+    }
+}
+
+/// Attaches the archive's retriable obligation to an archive failure that named it.
+///
+/// Only a failure that already arrived as a typed [`OutputStorageFault`] is rebuilt with the
+/// obligation; any other archive error (invalid media, integrity, a plain policy refusal) is returned
+/// unchanged, because it is not a reliable-output storage obligation the owner could retry.
+fn attach_archive_obligation<A: CommandOutputArchive, B: CommandBackend>(
+    error: ToolError,
+    archive: Arc<A>,
+    backend: Arc<B>,
+    thread_id: &str,
+    call_id: &str,
+    snapshot: &CommandOutputSnapshot,
+) -> ToolError {
+    let Some(fault) = error.source.downcast_ref::<OutputStorageFault>() else {
+        return error;
+    };
+    let kind = fault.kind;
+    let source = fault.source.clone();
+    let obligation: Arc<dyn OutputRetryObligation> = Arc::new(ArchiveRetentionObligation::new(
+        archive,
+        backend,
+        thread_id,
+        call_id,
+        snapshot.clone(),
+        kind,
+    ));
+    ToolError::new(OutputStorageFault::new(kind, source).with_obligation(obligation))
+}
+
+/// Reports one typed output fault through the running call's reliable channel, if it has one.
+async fn report_output_storage_fault(
+    tasks: Option<&pl_core::thread::TaskAccess>,
+    fault: &Arc<OutputStorageFault>,
+) {
+    if let Some(tasks) = tasks {
+        // A closed owner or a revoked executor still blocks admission through the return path below,
+        // so a refused notification is not the only report; but it must never be silently dropped, so
+        // the exact reason is surfaced instead of being discarded.
+        if let Err(error) = tasks.report_output_storage_fault(fault.clone()).await {
+            tracing::warn!(%error, "the running call could not report its output storage fault early");
         }
     }
 }

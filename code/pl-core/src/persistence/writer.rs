@@ -53,6 +53,14 @@ pub(super) struct WriterState {
     resources: BTreeMap<(String, String), crate::storage::SessionEntry>,
     queue: VecDeque<Pending>,
     resource_admissions: BTreeMap<(String, String), u64>,
+    /// Newest durable Thread commit sequence per Thread.
+    ///
+    /// The writer's own `durable` watermark counts every resource of every session, so it cannot
+    /// answer "how far is one Thread saved". A Thread commit entry is registered under
+    /// `pl.resource.thread-commit.<sequence>`; recording its sequence as it becomes durable is what
+    /// lets the plain SQLite backend report the same typed durability receipt the product backend
+    /// does, so a Thread releases its live effect window on a normal save here too.
+    thread_durable: BTreeMap<String, u64>,
     admitted: u64,
     durable: u64,
     error: Option<Arc<SessionStoreError>>,
@@ -170,6 +178,7 @@ impl SqliteSessionStore {
                 resources,
                 queue: VecDeque::new(),
                 resource_admissions: BTreeMap::new(),
+                thread_durable: BTreeMap::new(),
                 admitted: 0,
                 durable: 0,
                 error: None,
@@ -215,6 +224,23 @@ impl SqliteSessionStore {
                     store.saturating_add(pending.retained_bytes),
                 )
             })
+    }
+
+    /// Newest durable Thread commit sequence the writer has confirmed for one Thread.
+    ///
+    /// This is the plain SQLite backend's typed durability receipt: the owner folds it at a storage
+    /// safety point so a normally saving Thread releases the live effect window without asking for
+    /// an explicit flush.
+    pub(crate) fn thread_durable_sequence(&self, thread_id: &str) -> u64 {
+        self.owner
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .thread_durable
+            .get(thread_id)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Subscribes to writer progress and failures.
@@ -505,6 +531,16 @@ impl SqliteSessionStore {
     }
 }
 
+/// Effect sequence carried by one durable Thread commit entry, if the resource is one.
+///
+/// The Thread journal registers each commit as `pl.resource.thread-commit.<sequence>`; its sequence
+/// is the effect sequence the durability receipt reports.
+fn thread_commit_sequence(resource_id: &str) -> Option<u64> {
+    resource_id
+        .strip_prefix("pl.resource.thread-commit.")
+        .and_then(|sequence| sequence.parse().ok())
+}
+
 fn check_progress(snapshot: &SessionPersistenceSnapshot) -> Result<(), Arc<SessionStoreError>> {
     if let Some(error) = &snapshot.error {
         return Err(error.clone());
@@ -605,6 +641,13 @@ async fn run(shared: &Shared) {
                 for (sequence, operation) in batch {
                     state.queue.pop_front();
                     state.durable = sequence;
+                    if let Some(sequence) = thread_commit_sequence(&operation.id) {
+                        let durable = state
+                            .thread_durable
+                            .entry(operation.session_id.clone())
+                            .or_insert(0);
+                        *durable = (*durable).max(sequence);
+                    }
                     state
                         .resource_admissions
                         .remove(&(operation.session_id.clone(), operation.id.clone()));

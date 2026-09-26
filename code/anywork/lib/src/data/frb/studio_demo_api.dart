@@ -1,7 +1,7 @@
 part of 'studio_api.dart';
 
 class DemoStudioApi
-    implements StudioApi, TimelineItemBodyReader, PersistenceQueueReader {
+    implements StudioApi, PersistenceQueueReader, ChatWindowReader {
   @override
   Future<RecoveryStateSnapshot> retryRecovery() async =>
       (await readStudioState()).recoveryState;
@@ -21,6 +21,10 @@ class DemoStudioApi
   final _productEvents = StreamController<Object>.broadcast();
   final _threadEvents = StreamController<ThreadStreamFrame>.broadcast();
   final _shutdownEvents = StreamController<StudioShutdownProgress>.broadcast();
+
+  /// 内容窗口的变更信号：条目变化时唤醒在途的 `next()`，正文只经窗口交付。
+  final Map<String, int> _chatChangeSeq = {};
+  final Map<String, List<Completer<void>>> _chatWaiters = {};
   Timer? _lspActivityTimer;
   final Map<String, ThreadWorkspace> _workspaces = {};
   final Map<String, int> _promptGenerations = {};
@@ -1253,6 +1257,13 @@ class DemoStudioApi
     int faultGeneration,
   ) async => const PersistenceQueueSnapshot.empty();
 
+  /// demo 是纯内存实现，没有存储故障闩：显式继续同样是空的 canonical 观测。
+  @override
+  Future<PersistenceQueueSnapshot> resumeThreadHistory(
+    String threadId,
+    int faultGeneration,
+  ) async => const PersistenceQueueSnapshot.empty();
+
   /// demo 是纯内存实现，没有异步持久化队列，因此队列压力恒为空的 canonical 观测。
   @override
   Future<PersistenceQueueSnapshot> readPersistenceQueue() async =>
@@ -1489,13 +1500,9 @@ class DemoStudioApi
   }
 
   /// Thread 首帧/读取只暴露当前状态：已完成条目由分页历史提供，
-  /// 未终态条目由实时通知提供。
+  /// 未终态条目由内容窗口提供。
   ThreadWorkspace _snapshotOf(ThreadWorkspace workspace) {
-    return workspace.copyWith(
-      items: const [],
-      timelineTurns: const {},
-      latestTurn: null,
-    );
+    return workspace.copyWith(items: const [], latestTurn: null);
   }
 
   @override
@@ -1524,14 +1531,39 @@ class DemoStudioApi
     return _demoTimelinePage(threadId, items, start: start, end: end);
   }
 
+  /// 内容窗口：正文（含流式）只经它交给 UI，与状态流相互独立。
   @override
-  Future<TimelinePage> readTimelineItem(String threadId, String itemId) async {
-    final all = _workspaces[threadId]?.items;
-    if (all == null) throw StateError('unknown demo Thread');
-    final index = all.indexWhere((item) => item.id == itemId);
-    if (index < 0) throw StateError('unknown timeline item');
-    // demo 没有字节预览预算，按 identity 回源就是同一条完整载荷。
-    return _demoTimelinePage(threadId, [all[index]]);
+  Future<StudioChatWindow> openChatWindow(String threadId) async {
+    if (!_workspaces.containsKey(threadId)) {
+      throw StateError('unknown demo thread $threadId');
+    }
+    return _DemoChatWindow(this, threadId);
+  }
+
+  /// 按活动身份读取完整详情。demo 没有独立的正文投影，活动本身即为可用事实。
+  @override
+  Future<ThreadActivityDetail> readThreadActivityDetail(
+    String threadId,
+    String activityId,
+  ) async {
+    final workspace = _workspaces[threadId];
+    if (workspace == null) {
+      throw StateError('unknown demo thread $threadId');
+    }
+    final activity = workspace.activity;
+    if (activity == null) {
+      return EndedThreadActivityDetail(
+        threadId: threadId,
+        activityId: activityId,
+      );
+    }
+    if (activity.identity != activityId) {
+      return SupersededThreadActivityDetail(
+        activity: activity,
+        requestedActivityId: activityId,
+      );
+    }
+    return CurrentThreadActivityDetail(activity: activity);
   }
 
   TimelinePage _demoTimelinePage(
@@ -1642,31 +1674,29 @@ class DemoStudioApi
       inputId: input.inputId,
       cursor: workspace.revision + 1,
     );
-    _emitThreadUpdate(
+    _upsertChatItem(
       threadId,
-      ThreadItemUpsert(
-        _messageItem(
-          id: input.inputId,
-          threadId: threadId,
-          turnId: turnId,
-          ordinal: _nextOrdinal(threadId),
-          kind: ThreadItemKind.userMessage,
-          text: trimmed,
-          createdAt: now,
-          attachments: [
-            for (final id in input.attachmentDraftIds)
-              if (_attachmentDrafts[id] case final draft?)
-                ThreadAttachmentView(
-                  id: draft.id,
-                  modality: draft.modality,
-                  mediaType: draft.mediaType,
-                  filename: draft.filename,
-                  width: draft.width,
-                  height: draft.height,
-                  byteSize: draft.byteSize,
-                ),
-          ],
-        ),
+      _messageItem(
+        id: input.inputId,
+        threadId: threadId,
+        turnId: turnId,
+        ordinal: _nextOrdinal(threadId),
+        kind: ThreadItemKind.userMessage,
+        text: trimmed,
+        createdAt: now,
+        attachments: [
+          for (final id in input.attachmentDraftIds)
+            if (_attachmentDrafts[id] case final draft?)
+              ThreadAttachmentView(
+                id: draft.id,
+                modality: draft.modality,
+                mediaType: draft.mediaType,
+                filename: draft.filename,
+                width: draft.width,
+                height: draft.height,
+                byteSize: draft.byteSize,
+              ),
+        ],
       ),
     );
     _emitThreadUpdate(
@@ -1684,6 +1714,13 @@ class DemoStudioApi
           updatedAt: now,
         ),
       ),
+    );
+    // 脚本化活动：提交后进入“思考中”（等待 API / 开始 reasoning）。
+    _emitActivity(
+      threadId,
+      turnId: turnId,
+      inputId: input.inputId,
+      kind: ThreadActivityKind.thinking,
     );
     unawaited(
       _completePrompt(
@@ -1711,139 +1748,121 @@ class DemoStudioApi
         '## Inspecting the request\n\nChecking the live ThreadItem projection.';
     const reasoningContent =
         'The provider is folding summary and raw reasoning independently.';
-    _emitThreadUpdate(
+    _upsertChatItem(
       threadId,
-      ThreadItemUpsert(
-        ThreadItemView(
-          id: reasoningId,
-          threadId: threadId,
-          turnId: turnId,
-          ordinal: _nextOrdinal(threadId),
-          revision: 0,
-          createdAt: startedAt,
-          updatedAt: startedAt,
-          state: const ThreadThinkingItemStateView(
-            summary: [],
-            content: [],
-            lifecycle: StreamingThreadContentView(),
-          ),
+      ThreadItemView(
+        id: reasoningId,
+        threadId: threadId,
+        turnId: turnId,
+        ordinal: _nextOrdinal(threadId),
+        revision: 0,
+        createdAt: startedAt,
+        updatedAt: startedAt,
+        state: const ThreadThinkingItemStateView(
+          summary: [],
+          content: [],
+          lifecycle: StreamingThreadContentView(),
         ),
       ),
     );
     await Future<void>.delayed(promptActivityDelay);
     if (_promptGenerations[threadId] != generation) return;
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: reasoningId,
-          revision: 1,
-          state: const ThreadThinkingSummaryDeltaView(0, '## Inspecting'),
-        ),
-      ),
+      itemId: reasoningId,
+      revision: 1,
+      field: const ThreadThinkingSummaryFieldView(0),
+      text: '## Inspecting',
     );
     await Future<void>.delayed(promptActivityDelay);
     if (_promptGenerations[threadId] != generation) return;
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: reasoningId,
-          revision: 2,
-          state: const ThreadThinkingSummaryDeltaView(
-            0,
-            ' the request\n\nChecking the live ThreadItem projection.',
-          ),
-        ),
-      ),
+      itemId: reasoningId,
+      revision: 2,
+      field: const ThreadThinkingSummaryFieldView(0),
+      text: ' the request\n\nChecking the live ThreadItem projection.',
     );
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: reasoningId,
-          revision: 3,
-          state: const ThreadThinkingContentDeltaView(0, reasoningContent),
-        ),
-      ),
+      itemId: reasoningId,
+      revision: 3,
+      field: const ThreadThinkingContentFieldView(0),
+      text: reasoningContent,
+    );
+    // 脚本化活动：reasoning 已有内容时显示“思考中”+最新非空逻辑行。
+    _emitActivity(
+      threadId,
+      turnId: turnId,
+      inputId: null,
+      kind: ThreadActivityKind.thinking,
+      summary: 'Checking the live ThreadItem projection.',
     );
     final liveReasoning = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == reasoningId,
     );
     final reasoningCompletedAt = DateTime.now();
-    _emitThreadUpdate(
+    _upsertChatItem(
       threadId,
-      ThreadItemUpsert(
-        liveReasoning.copyWith(
-          revision: 4,
-          updatedAt: reasoningCompletedAt,
-          state: ThreadThinkingItemStateView(
-            summary: const [reasoningSummary],
-            content: const [reasoningContent],
-            lifecycle: CompletedThreadContentView(reasoningCompletedAt),
-          ),
+      liveReasoning.copyWith(
+        revision: 4,
+        updatedAt: reasoningCompletedAt,
+        state: ThreadThinkingItemStateView(
+          summary: const [reasoningSummary],
+          content: const [reasoningContent],
+          lifecycle: CompletedThreadContentView(reasoningCompletedAt),
         ),
       ),
     );
     final commentaryId = '$turnId:commentary';
-    _emitThreadUpdate(
+    _upsertChatItem(
       threadId,
-      ThreadItemUpsert(
-        ThreadItemView(
-          id: commentaryId,
-          threadId: threadId,
-          turnId: turnId,
-          ordinal: _nextOrdinal(threadId),
-          revision: 0,
-          createdAt: startedAt,
-          updatedAt: startedAt,
-          state: const ThreadTextItemStateView(
-            channel: ThreadTextChannel.commentary,
-            text: '',
-            attachments: [],
-            lifecycle: StreamingThreadContentView(),
-          ),
+      ThreadItemView(
+        id: commentaryId,
+        threadId: threadId,
+        turnId: turnId,
+        ordinal: _nextOrdinal(threadId),
+        revision: 0,
+        createdAt: startedAt,
+        updatedAt: startedAt,
+        state: const ThreadTextItemStateView(
+          channel: ThreadTextChannel.commentary,
+          text: '',
+          attachments: [],
+          lifecycle: StreamingThreadContentView(),
         ),
       ),
     );
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: commentaryId,
-          revision: 1,
-          state: const ThreadTextDeltaView('正在逐段核对 Timeline'),
-        ),
-      ),
+      itemId: commentaryId,
+      revision: 1,
+      field: const ThreadTextFieldView(),
+      text: '正在逐段核对 Timeline',
     );
     await Future<void>.delayed(promptActivityDelay);
     if (_promptGenerations[threadId] != generation) return;
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: commentaryId,
-          revision: 2,
-          state: const ThreadTextDeltaView(' 的 typed delta。'),
-        ),
-      ),
+      itemId: commentaryId,
+      revision: 2,
+      field: const ThreadTextFieldView(),
+      text: ' 的 typed delta。',
     );
     final commentaryCompletedAt = DateTime.now();
     final liveCommentary = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == commentaryId,
     );
-    _emitThreadUpdate(
+    _upsertChatItem(
       threadId,
-      ThreadItemUpsert(
-        liveCommentary.copyWith(
-          revision: 3,
-          updatedAt: commentaryCompletedAt,
-          state: ThreadTextItemStateView(
-            channel: ThreadTextChannel.commentary,
-            text: '正在逐段核对 Timeline 的 typed delta。',
-            attachments: const [],
-            lifecycle: CompletedThreadContentView(commentaryCompletedAt),
-          ),
+      liveCommentary.copyWith(
+        revision: 3,
+        updatedAt: commentaryCompletedAt,
+        state: ThreadTextItemStateView(
+          channel: ThreadTextChannel.commentary,
+          text: '正在逐段核对 Timeline 的 typed delta。',
+          attachments: const [],
+          lifecycle: CompletedThreadContentView(commentaryCompletedAt),
         ),
       ),
     );
@@ -1862,182 +1881,158 @@ class DemoStudioApi
         ),
       ),
     );
-    final toolId = '$turnId:tool';
-    _emitThreadUpdate(
+    // 脚本化活动：工具前台显示“执行中”+完整命令行预览。
+    _emitActivity(
       threadId,
-      ThreadItemUpsert(
-        ThreadItemView(
-          id: toolId,
-          threadId: threadId,
-          turnId: turnId,
-          ordinal: _nextOrdinal(threadId),
-          revision: 0,
-          createdAt: startedAt,
-          updatedAt: startedAt,
-          state: ThreadToolItemStateView(
-            invocation: ThreadToolInvocationView(
-              toolCallId: '$turnId:tool-call',
-              name: 'exec',
-              arguments: '',
-            ),
-            lifecycle: const StartedThreadToolView(),
+      turnId: turnId,
+      inputId: null,
+      kind: ThreadActivityKind.runningTool,
+      summary: 'cargo test -p pl-model --test provider_wire',
+    );
+    final toolId = '$turnId:tool';
+    _upsertChatItem(
+      threadId,
+      ThreadItemView(
+        id: toolId,
+        threadId: threadId,
+        turnId: turnId,
+        ordinal: _nextOrdinal(threadId),
+        revision: 0,
+        createdAt: startedAt,
+        updatedAt: startedAt,
+        state: ThreadToolItemStateView(
+          invocation: ThreadToolInvocationView(
+            toolCallId: '$turnId:tool-call',
+            name: 'exec',
+            arguments: '',
           ),
+          lifecycle: const StartedThreadToolView(),
         ),
       ),
     );
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: toolId,
-          revision: 1,
-          state: const ThreadToolArgumentsDeltaView(
-            '{"command":"cargo test -p pl-model ',
-          ),
-        ),
-      ),
+      itemId: toolId,
+      revision: 1,
+      field: const ThreadToolArgumentsFieldView(),
+      text: '{"command":"cargo test -p pl-model ',
     );
     await Future<void>.delayed(promptActivityDelay);
     if (_promptGenerations[threadId] != generation) return;
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: toolId,
-          revision: 2,
-          state: const ThreadToolArgumentsDeltaView('--test provider_wire"}'),
-        ),
-      ),
+      itemId: toolId,
+      revision: 2,
+      field: const ThreadToolArgumentsFieldView(),
+      text: '--test provider_wire"}',
     );
     final streamedTool = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == toolId,
     );
     final streamedToolState = streamedTool.state as ThreadToolItemStateView;
-    _emitThreadUpdate(
+    _upsertChatItem(
       threadId,
-      ThreadItemUpsert(
-        streamedTool.copyWith(
-          revision: 3,
-          updatedAt: DateTime.now(),
-          state: ThreadToolItemStateView(
-            invocation: streamedToolState.invocation,
-            lifecycle: const RunningThreadToolView(''),
-          ),
+      streamedTool.copyWith(
+        revision: 3,
+        updatedAt: DateTime.now(),
+        state: ThreadToolItemStateView(
+          invocation: streamedToolState.invocation,
+          lifecycle: const RunningThreadToolView(''),
         ),
       ),
     );
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: toolId,
-          revision: 4,
-          state: const ThreadToolResultDeltaView('running widget tests...\n'),
-        ),
-      ),
+      itemId: toolId,
+      revision: 4,
+      field: const ThreadToolResultFieldView(),
+      text: 'running widget tests...\n',
     );
     await Future<void>.delayed(promptToolDelay);
     if (_promptGenerations[threadId] != generation) return;
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: toolId,
-          revision: 5,
-          state: const ThreadToolResultDeltaView(
-            '[stderr] analyzer warnings: 0\n',
-          ),
-        ),
-      ),
+      itemId: toolId,
+      revision: 5,
+      field: const ThreadToolResultFieldView(),
+      text: '[stderr] analyzer warnings: 0\n',
     );
     final runningTool = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == toolId,
     );
     final runningToolState = runningTool.state as ThreadToolItemStateView;
     final toolCompletedAt = DateTime.now();
-    _emitThreadUpdate(
+    _upsertChatItem(
       threadId,
-      ThreadItemUpsert(
-        runningTool.copyWith(
-          revision: 6,
-          updatedAt: toolCompletedAt,
-          state: ThreadToolItemStateView(
-            invocation: runningToolState.invocation,
-            lifecycle: SucceededThreadToolView(
-              toolCompletedAt,
-              const ThreadToolOutputView(
-                result:
-                    'running widget tests...\n'
-                    '[stderr] analyzer warnings: 0\n'
-                    'All widget tests passed.',
-                attachments: [],
-                outputArtifacts: [],
-              ),
+      runningTool.copyWith(
+        revision: 6,
+        updatedAt: toolCompletedAt,
+        state: ThreadToolItemStateView(
+          invocation: runningToolState.invocation,
+          lifecycle: SucceededThreadToolView(
+            toolCompletedAt,
+            const ThreadToolOutputView(
+              result:
+                  'running widget tests...\n'
+                  '[stderr] analyzer warnings: 0\n'
+                  'All widget tests passed.',
+              attachments: [],
+              outputArtifacts: [],
             ),
           ),
         ),
       ),
     );
     final finalId = '$turnId:final';
-    _emitThreadUpdate(
+    _upsertChatItem(
       threadId,
-      ThreadItemUpsert(
-        ThreadItemView(
-          id: finalId,
-          threadId: threadId,
-          turnId: turnId,
-          ordinal: _nextOrdinal(threadId),
-          revision: 0,
-          createdAt: startedAt,
-          updatedAt: startedAt,
-          state: const ThreadTextItemStateView(
-            channel: ThreadTextChannel.finalAnswer,
-            text: '',
-            attachments: [],
-            lifecycle: StreamingThreadContentView(),
-          ),
+      ThreadItemView(
+        id: finalId,
+        threadId: threadId,
+        turnId: turnId,
+        ordinal: _nextOrdinal(threadId),
+        revision: 0,
+        createdAt: startedAt,
+        updatedAt: startedAt,
+        state: const ThreadTextItemStateView(
+          channel: ThreadTextChannel.finalAnswer,
+          text: '',
+          attachments: [],
+          lifecycle: StreamingThreadContentView(),
         ),
       ),
     );
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: finalId,
-          revision: 1,
-          state: ThreadTextDeltaView('Demo response for: **$trimmedPrompt**'),
-        ),
-      ),
+      itemId: finalId,
+      revision: 1,
+      field: const ThreadTextFieldView(),
+      text: 'Demo response for: **$trimmedPrompt**',
     );
     await Future<void>.delayed(promptActivityDelay);
     if (_promptGenerations[threadId] != generation) return;
     const finalSuffix = '\n\n- reasoning、tool output 与 Plan 都直接来自 typed delta';
-    _emitThreadUpdate(
+    _appendChatContent(
       threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: finalId,
-          revision: 2,
-          state: const ThreadTextDeltaView(finalSuffix),
-        ),
-      ),
+      itemId: finalId,
+      revision: 2,
+      field: const ThreadTextFieldView(),
+      text: finalSuffix,
     );
     final finalCompletedAt = DateTime.now();
     final liveFinal = _workspaces[threadId]!.items.firstWhere(
       (item) => item.id == finalId,
     );
-    _emitThreadUpdate(
+    _upsertChatItem(
       threadId,
-      ThreadItemUpsert(
-        liveFinal.copyWith(
-          revision: 3,
-          updatedAt: finalCompletedAt,
-          state: ThreadTextItemStateView(
-            channel: ThreadTextChannel.finalAnswer,
-            text: 'Demo response for: **$trimmedPrompt**$finalSuffix',
-            attachments: const [],
-            lifecycle: CompletedThreadContentView(finalCompletedAt),
-          ),
+      liveFinal.copyWith(
+        revision: 3,
+        updatedAt: finalCompletedAt,
+        state: ThreadTextItemStateView(
+          channel: ThreadTextChannel.finalAnswer,
+          text: 'Demo response for: **$trimmedPrompt**$finalSuffix',
+          attachments: const [],
+          lifecycle: CompletedThreadContentView(finalCompletedAt),
         ),
       ),
     );
@@ -2057,6 +2052,8 @@ class DemoStudioApi
         ),
       ),
     );
+    // Turn 结束：清空当前活动。
+    _clearActivity(threadId);
   }
 
   @override
@@ -2083,6 +2080,8 @@ class DemoStudioApi
         ),
       ),
     );
+    // 打断结束 Turn：清空当前活动。
+    _clearActivity(threadId);
   }
 
   @override
@@ -2373,6 +2372,28 @@ class DemoStudioApi
     }
   }
 
+  /// 通知某 Thread 的内容窗口：条目发生真实变化（正文只由窗口交给 UI）。
+  void _notifyItemsChanged(String threadId) {
+    _chatChangeSeq[threadId] = (_chatChangeSeq[threadId] ?? 0) + 1;
+    final waiters = _chatWaiters.remove(threadId);
+    if (waiters == null) return;
+    for (final waiter in waiters) {
+      if (!waiter.isCompleted) waiter.complete();
+    }
+  }
+
+  Future<void> _awaitItemsChanged(String threadId, int from) async {
+    while ((_chatChangeSeq[threadId] ?? 0) == from) {
+      final waiter = Completer<void>();
+      (_chatWaiters[threadId] ??= []).add(waiter);
+      await waiter.future;
+    }
+  }
+
+  /// demo 模拟一次 Thread 状态更新。
+  ///
+  /// 状态流只承载 Turn / 活动 / 交互 / 运行时——与生产投影同一契约；**条目与正文不在
+  /// 这里**，它们写进内存条目并由内容窗口（[openChatWindow]）按同一窗口契约交付。
   void _emitThreadUpdate(String threadId, ThreadWorkspaceUpdate update) {
     final workspace = _workspaces[threadId];
     if (workspace == null) return;
@@ -2390,28 +2411,28 @@ class DemoStudioApi
         ),
       );
     }
-    final updated = switch (update) {
+    final ThreadWorkspace updated = switch (update) {
       ThreadTurnUpdate(:final turn) => workspace.copyWith(
         revision: revision,
         activeTurn: turn.state.isBusy ? turn : null,
       ),
-      ThreadItemUpsert(:final item) => _demoUpsertItem(
-        workspace,
-        revision,
-        item,
+      // 活动与生产一样只从 typed 活动事实进入状态。
+      ThreadActivityUpdate(:final activity) => workspace.copyWith(
+        revision: revision,
+        activity: activity,
       ),
-      ThreadItemDeltaUpdate(:final delta) => _demoAppendDelta(
-        workspace,
-        revision,
-        delta,
-      ),
-      ThreadInteractionUpdate(:final interaction, :final pending) =>
-        _demoUpdateInteraction(workspace, revision, interaction, pending),
       ThreadRuntimeUpdate(:final runtime, :final todo) => workspace.copyWith(
         revision: revision,
         runtime: runtime,
         todo: todo,
       ),
+      // 存储状态与生产一样只从 typed 事实进入状态。
+      ThreadStorageUpdate(:final storage) => workspace.copyWith(
+        revision: revision,
+        storage: storage,
+      ),
+      ThreadInteractionUpdate(:final interaction, :final pending) =>
+        _demoUpdateInteraction(workspace, revision, interaction, pending),
     };
     _workspaces[threadId] = updated;
     _threadEvents.add(
@@ -2426,22 +2447,119 @@ class DemoStudioApi
       final previous = workspace.items
           .where((item) => item.id == id)
           .firstOrNull;
-      _emitThreadUpdate(
+      _upsertChatItem(
         threadId,
-        ThreadItemUpsert(
-          ThreadItemView(
-            id: id,
-            threadId: threadId,
-            turnId: turn.turnId,
-            ordinal: previous?.ordinal ?? _nextOrdinal(threadId),
-            revision: turn.revision,
-            createdAt: previous?.createdAt ?? turn.updatedAt,
-            updatedAt: turn.updatedAt,
-            state: ThreadTurnItemStateView(turn.state, inputId: turn.inputId),
-          ),
+        ThreadItemView(
+          id: id,
+          threadId: threadId,
+          turnId: turn.turnId,
+          ordinal: previous?.ordinal ?? _nextOrdinal(threadId),
+          revision: turn.revision,
+          createdAt: previous?.createdAt ?? turn.updatedAt,
+          updatedAt: turn.updatedAt,
+          state: ThreadTurnItemStateView(turn.state, inputId: turn.inputId),
         ),
       );
     }
+  }
+
+  /// 把一条条目写入内存窗口：条目只属于内容窗口，不推进线程状态水位。
+  void _upsertChatItem(String threadId, ThreadItemView item) {
+    final workspace = _workspaces[threadId];
+    if (workspace == null) return;
+    // demo 的内存条目没有独立的执行终态事件：状态进入终态即视为窗口终态。
+    final entry = item.executionTerminal
+        ? item
+        : item.copyWith(executionTerminal: item.isTerminal);
+    final items = [...workspace.items];
+    final index = items.indexWhere((existing) => existing.id == entry.id);
+    if (index < 0) {
+      items.add(entry);
+    } else {
+      items[index] = entry;
+    }
+    items.sort(_compareThreadItems);
+    _workspaces[threadId] = workspace.copyWith(items: items);
+    _notifyItemsChanged(threadId);
+  }
+
+  /// 应用一帧 typed `UpdateItem` 字段变化，与 `BridgeViewChange::UpdateItem` 同形状：
+  /// 按字段身份落到条目的 domain 字段，本地基线必须等于当前 revision；条目缺失、
+  /// revision 不连续或已终态接受流式变化时丢弃（真实链路会重建权威窗口）。
+  void _applyChatFieldUpdates(
+    String threadId, {
+    required String itemId,
+    required int revision,
+    required List<ThreadFieldUpdateView> fields,
+  }) {
+    final workspace = _workspaces[threadId];
+    if (workspace == null) return;
+    final items = [...workspace.items];
+    final index = items.indexWhere((item) => item.id == itemId);
+    if (index < 0) return;
+    final current = items[index];
+    final next = current.applyFieldUpdates(
+      fields: fields,
+      expectedRevision: current.revision,
+      revision: revision,
+      omittedUnits: current.bodyOmittedUnits,
+      saved: current.saved,
+      terminal: current.executionTerminal,
+    );
+    if (next == null) return;
+    items[index] = next;
+    _workspaces[threadId] = workspace.copyWith(items: items);
+    _notifyItemsChanged(threadId);
+  }
+
+  /// 单字段 append 的便捷入口（demo 脚本只追加正文）。
+  void _appendChatContent(
+    String threadId, {
+    required String itemId,
+    required int revision,
+    required ThreadContentFieldView field,
+    required String text,
+  }) {
+    _applyChatFieldUpdates(
+      threadId,
+      itemId: itemId,
+      revision: revision,
+      fields: [
+        ThreadFieldUpdateView(
+          field: field,
+          change: AppendThreadFieldChangeView(text),
+        ),
+      ],
+    );
+  }
+
+  /// demo 脚本化的当前活动：作为 typed `ActivityChanged` 状态走状态流。
+  void _emitActivity(
+    String threadId, {
+    required String turnId,
+    required String? inputId,
+    required ThreadActivityKind kind,
+    String summary = '',
+  }) {
+    _emitThreadUpdate(
+      threadId,
+      ThreadActivityUpdate(
+        activity: ThreadActivityView(
+          threadId: threadId,
+          identity: 'activity:$turnId:${kind.name}',
+          revision: 0,
+          turnId: turnId,
+          inputId: inputId,
+          kind: kind,
+          summary: summary,
+        ),
+      ),
+    );
+  }
+
+  /// Turn 结束或打断：清空当前活动（`activity == null`）。
+  void _clearActivity(String threadId) {
+    _emitThreadUpdate(threadId, const ThreadActivityUpdate(activity: null));
   }
 
   int _nextOrdinal(String threadId) {
@@ -2452,6 +2570,72 @@ class DemoStudioApi
                   .map((item) => item.ordinal)
                   .reduce((left, right) => left > right ? left : right) +
               1;
+  }
+}
+
+/// 内容窗口的内存实现：快照直接来自 demo 的工作区条目，变化由 [_DemoChatWindow.next]
+/// 唤醒；不参与状态流，也没有第二份业务状态。
+class _DemoChatWindow implements StudioChatWindow {
+  _DemoChatWindow(this._api, this._threadId);
+
+  final DemoStudioApi _api;
+  final String _threadId;
+  String? _focusId;
+  bool _closed = false;
+
+  List<ThreadItemView> get _items =>
+      _api._workspaces[_threadId]?.items ?? const <ThreadItemView>[];
+
+  StudioChatSnapshot _snapshot() {
+    return StudioChatSnapshot(
+      focusedItemId: _focusId,
+      version: _api._workspaces[_threadId]?.revision ?? 0,
+      items: List.unmodifiable([
+        for (final item in _items)
+          StudioChatItem(
+            item,
+            saved: item.saved,
+            lifecycle: item.executionTerminal
+                ? StudioChatLifecycle.terminal
+                : StudioChatLifecycle.streaming,
+          ),
+      ]),
+      hasOlder: false,
+      hasNewer: false,
+    );
+  }
+
+  @override
+  Future<StudioChatSnapshot> initial() async => _snapshot();
+
+  @override
+  Future<StudioChatSnapshot?> next() async {
+    final from = _api._chatChangeSeq[_threadId] ?? 0;
+    await _api._awaitItemsChanged(_threadId, from);
+    if (_closed) return null;
+    return _snapshot();
+  }
+
+  @override
+  Future<StudioChatSnapshot> load(TimelineDirection direction) async =>
+      _snapshot();
+
+  @override
+  Future<StudioChatSnapshot> focus(String? itemId) async {
+    _focusId = itemId;
+    return _snapshot();
+  }
+
+  /// demo 的窗口条目没有字节预览预算：窗口里已经是完整正文，按身份展开只需确认身份仍在窗口。
+  @override
+  Future<StudioChatSnapshot?> expandItem(String itemId) async {
+    if (_closed) return null;
+    return _items.any((item) => item.id == itemId) ? _snapshot() : null;
+  }
+
+  @override
+  Future<void> close() async {
+    _closed = true;
   }
 }
 
@@ -2541,22 +2725,6 @@ AttachmentDraftView _demoAttachmentDraft(
   );
 }
 
-ThreadWorkspace _demoUpsertItem(
-  ThreadWorkspace workspace,
-  int revision,
-  ThreadItemView incoming,
-) {
-  final items = [...workspace.items];
-  final index = items.indexWhere((item) => item.id == incoming.id);
-  if (index < 0) {
-    items.add(incoming);
-  } else {
-    items[index] = incoming;
-  }
-  items.sort(_compareThreadItems);
-  return workspace.copyWith(revision: revision, items: items);
-}
-
 /// demo 的历史数据库身份：与分页、按 identity 回源共用，使窗口身份校验生效。
 String _demoHistoryDatabaseId(String threadId) => 'demo-history:$threadId';
 
@@ -2593,23 +2761,6 @@ StudioTurnView _turnOfItem(ThreadItemView item) {
     state: state.state,
     updatedAt: item.updatedAt,
   );
-}
-
-ThreadWorkspace _demoAppendDelta(
-  ThreadWorkspace workspace,
-  int revision,
-  ThreadItemDeltaView delta,
-) {
-  final items = [...workspace.items];
-  final index = items.indexWhere((item) => item.id == delta.itemId);
-  if (index >= 0) {
-    final nextItem = items[index].appendDelta(
-      delta: delta.state,
-      nextRevision: delta.revision,
-    );
-    if (nextItem != null) items[index] = nextItem;
-  }
-  return workspace.copyWith(revision: revision, items: items);
 }
 
 ThreadWorkspace _demoUpdateInteraction(
@@ -2709,23 +2860,21 @@ class DriverDemoStudioApi extends DemoStudioApi {
         await Future<void>.delayed(promptActivityDelay);
         if (_promptGenerations[threadId] != generation) return;
         final now = DateTime.now();
-        _emitThreadUpdate(
+        _upsertChatItem(
           threadId,
-          ThreadItemUpsert(
-            ThreadItemView(
-              id: '$turnId:connection-retry-$attempt',
-              threadId: threadId,
-              turnId: turnId,
-              ordinal: _nextOrdinal(threadId),
-              revision: 0,
-              createdAt: now,
-              updatedAt: now,
-              state: ThreadTextItemStateView(
-                channel: ThreadTextChannel.commentary,
-                text: '连接中断，正在重试（$attempt/5）。',
-                attachments: const [],
-                lifecycle: CompletedThreadContentView(now),
-              ),
+          ThreadItemView(
+            id: '$turnId:connection-retry-$attempt',
+            threadId: threadId,
+            turnId: turnId,
+            ordinal: _nextOrdinal(threadId),
+            revision: 0,
+            createdAt: now,
+            updatedAt: now,
+            state: ThreadTextItemStateView(
+              channel: ThreadTextChannel.commentary,
+              text: '连接中断，正在重试（$attempt/5）。',
+              attachments: const [],
+              lifecycle: CompletedThreadContentView(now),
             ),
           ),
         );
@@ -2767,6 +2916,8 @@ class DriverDemoStudioApi extends DemoStudioApi {
         ),
       ),
     );
+    // 注入的 Turn 失败也是终态：清空当前活动。
+    _clearActivity(threadId);
   }
 
   @override

@@ -124,6 +124,16 @@ impl ThreadItem {
         &self.state
     }
 
+    /// Rebuilds the item with the given state, keeping identity, ordinal, revision and timestamps.
+    ///
+    /// Hosts use this at a materialization boundary (window delivery, persistence) to inject the
+    /// streamed text back into a canonical item whose static structure was stored once, so the text
+    /// never has to be re-encoded into the durable payload on the hot path.
+    pub fn with_state(mut self, state: ThreadItemState) -> Self {
+        self.state = state;
+        self
+    }
+
     pub fn kind(&self) -> ThreadItemKind {
         self.state.kind()
     }
@@ -241,38 +251,6 @@ impl ThreadItem {
             | ThreadItemState::Raw(_)
             | ThreadItemState::ContextCompaction(_) => None,
         }
-    }
-
-    pub fn apply_delta(&mut self, delta: &ThreadItemDelta) -> Result<bool, ThreadItemDeltaError> {
-        if delta.item_id != self.id {
-            return Err(ThreadItemDeltaError::WrongItem);
-        }
-        if delta.revision <= self.revision {
-            return Ok(false);
-        }
-        let result = match (&mut self.state, &delta.delta) {
-            (ThreadItemState::Text(item), ThreadItemDeltaState::Text { delta }) => {
-                item.append(delta)
-            }
-            (
-                ThreadItemState::Thinking(item),
-                ThreadItemDeltaState::ThinkingSummary { chunk_index, delta },
-            ) => item.append_summary(*chunk_index, delta),
-            (
-                ThreadItemState::Thinking(item),
-                ThreadItemDeltaState::ThinkingContent { chunk_index, delta },
-            ) => item.append_content(*chunk_index, delta),
-            (ThreadItemState::Tool(item), ThreadItemDeltaState::ToolArguments { delta }) => {
-                item.append_arguments(delta)
-            }
-            (ThreadItemState::Tool(item), ThreadItemDeltaState::ToolResult { delta }) => {
-                item.append_result(delta)
-            }
-            _ => Err("delta kind does not match thread item state"),
-        };
-        result.map_err(ThreadItemDeltaError::Illegal)?;
-        self.revision = delta.revision;
-        Ok(true)
     }
 }
 
@@ -427,28 +405,4 @@ pub struct ThreadAttachment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u32>,
     pub byte_size: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadItemDelta {
-    pub item_id: String,
-    pub revision: u64,
-    pub delta: ThreadItemDeltaState,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-pub enum ThreadItemDeltaState {
-    Text { delta: String },
-    ThinkingSummary { chunk_index: u32, delta: String },
-    ThinkingContent { chunk_index: u32, delta: String },
-    ToolArguments { delta: String },
-    ToolResult { delta: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ThreadItemDeltaError {
-    WrongItem,
-    Illegal(&'static str),
 }

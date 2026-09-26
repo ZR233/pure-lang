@@ -27,6 +27,7 @@ use crate::completion::CompletionTraceContext;
 
 pub(crate) use accumulator::StreamCompletionAccumulator;
 pub(crate) use decode::{CompletionEventStream, OpenAiRawEventStream, decode_raw_event_stream};
+pub(crate) use tool_stream::ToolStream;
 
 const COMPLETION_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 

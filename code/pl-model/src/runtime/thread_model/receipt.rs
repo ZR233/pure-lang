@@ -1,11 +1,32 @@
 //! Immutable model-owned provenance and complete normalized responses for history consumers.
+use crate::completion::{CompletionPresentationItemKind, CompletionPresentationPartKind};
 use crate::{
     completion::CompletionResponse,
     provider::{ProviderAdapterKind, ProviderWireProtocol},
     runtime::ModelRuntime,
 };
-use pl_core::model::{ModelError, ModelProgress, ModelStepOutput};
+use pl_core::context::{ContextContent, OpaquePayload};
+use pl_core::model::{
+    AggregateChannel, ModelError, ModelFailureKind, ModelProgress, ModelStepOutput,
+    ObservedItemKind, ObservedPart, ObservedPartIdentity, ObservedPartKind, ProviderPartIdentity,
+};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+/// Version of the persisted model failure receipt owned by this crate.
+///
+/// Version 2 stores the live observation as typed parts whose text is materialized once, at this
+/// encoding boundary. Version 1 kept the previous full-text preview shape; it is upgraded to the
+/// current structure only at the persistence decode boundary in [`model_failure_receipt`], so a
+/// receipt written by an earlier incarnation of this same data version still recovers every byte of
+/// partial text it had already received. The running producer and live path handle version 2 only.
+pub const FAILURE_RECEIPT_VERSION: u32 = 2;
+
+/// Failure receipt encoding written before the live observation became typed parts.
+const LEGACY_FAILURE_RECEIPT_VERSION: u32 = 1;
+
+/// Format of the version 1 preview payload holding one encoded presentation item.
+const PRESENTATION_PREVIEW_FORMAT: &str = "pl.model.presentation-item";
 
 /// Non-secret binding facts selected before execution; diagnostic purpose is not a permission.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,11 +86,16 @@ pub struct ModelFailureReceipt {
     /// Full provider output retained independently of the bounded live preview.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub presentation_items: Vec<crate::completion::CompletionPresentationItem>,
+    /// Live observation observed before the failure, with its text materialized for this encoding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub partial_progress: Option<ModelProgress>,
 }
 
 /// Reads a producer-owned failure receipt without repricing history using current configuration.
+///
+/// The current structure is read directly. A receipt written in the version 1 shape is upgraded here,
+/// at the only persistence decode boundary, so the partial text already received is preserved rather
+/// than dropped as unsupported content. The live path never sees the legacy shape.
 ///
 /// # Errors
 /// Rejects unsupported receipt encodings; original error details remain available to raw history views.
@@ -79,17 +105,164 @@ pub fn model_failure_receipt(
     let Some(payload) = &error.details else {
         return Ok(None);
     };
-    if payload.format() != "pl.model.failure" || payload.version() != 1 {
+    if payload.format() != "pl.model.failure" {
         return Err(super::failure(
-            pl_core::model::ModelFailureKind::UnsupportedContent,
+            ModelFailureKind::UnsupportedContent,
             std::io::Error::other("unsupported model failure receipt"),
         ));
     }
-    serde_json::from_str(payload.content())
-        .map(Some)
-        .map_err(|source| {
-            super::failure(pl_core::model::ModelFailureKind::UnsupportedContent, source)
+    match payload.version() {
+        FAILURE_RECEIPT_VERSION => serde_json::from_str(payload.content())
+            .map(Some)
+            .map_err(|source| super::failure(ModelFailureKind::UnsupportedContent, source)),
+        LEGACY_FAILURE_RECEIPT_VERSION => {
+            let legacy: FailureReceiptV1 = serde_json::from_str(payload.content())
+                .map_err(|source| super::failure(ModelFailureKind::UnsupportedContent, source))?;
+            Ok(Some(legacy.migrate()?))
+        }
+        _ => Err(super::failure(
+            ModelFailureKind::UnsupportedContent,
+            std::io::Error::other("unsupported model failure receipt"),
+        )),
+    }
+}
+
+/// Version 1 failure receipt, decoded only to upgrade it into the current structure.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FailureReceiptV1 {
+    #[serde(default)]
+    provider_failure: Option<pl_protocol::ProviderFailure>,
+    #[serde(default)]
+    message: String,
+    binding: ModelCallBinding,
+    accounting: crate::completion::InferenceAccounting,
+    #[serde(default)]
+    model_observation: Option<crate::completion::InferenceModelObservation>,
+    #[serde(default)]
+    presentation_items: Vec<crate::completion::CompletionPresentationItem>,
+    #[serde(default)]
+    partial_progress: Option<FailureProgressV1>,
+}
+
+/// Version 1 live preview: one channel-aggregate text/reasoning body plus encoded item previews.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FailureProgressV1 {
+    #[serde(default)]
+    content: Vec<ContextContent>,
+    #[serde(default)]
+    reasoning: Option<OpaquePayload>,
+    #[serde(default)]
+    presentation: Vec<OpaquePayload>,
+}
+
+impl FailureReceiptV1 {
+    fn migrate(self) -> Result<ModelFailureReceipt, ModelError> {
+        let partial_progress = match self.partial_progress {
+            Some(progress) => Some(progress.migrate()?),
+            None => None,
+        };
+        Ok(ModelFailureReceipt {
+            provider_failure: self.provider_failure,
+            message: self.message,
+            binding: self.binding,
+            accounting: self.accounting,
+            model_observation: self.model_observation,
+            presentation_items: self.presentation_items,
+            partial_progress,
         })
+    }
+}
+
+impl FailureProgressV1 {
+    /// Rebuilds the observed text as current typed parts without consulting current configuration.
+    fn migrate(self) -> Result<ModelProgress, ModelError> {
+        let mut parts = Vec::new();
+        // Version 1 replaced the channel aggregate with item previews as soon as an item closed, so
+        // the two shapes never coexist and item previews win when present.
+        for payload in &self.presentation {
+            if payload.format() != PRESENTATION_PREVIEW_FORMAT || payload.version() != 1 {
+                continue;
+            }
+            let item: crate::completion::CompletionPresentationItem =
+                serde_json::from_str(payload.content()).map_err(|source| {
+                    super::failure(ModelFailureKind::UnsupportedContent, source)
+                })?;
+            let item_kind = presentation_item_kind(item.kind);
+            let item_id: Arc<str> = Arc::from(item.provider_item_id.as_str());
+            for part in &item.parts {
+                let identity = ObservedPartIdentity::Provider(ProviderPartIdentity {
+                    item_id: item_id.clone(),
+                    output_index: item.output_index,
+                    item_kind,
+                    part: presentation_part_kind(part.kind),
+                    content_index: part.content_index,
+                });
+                parts.push(ObservedPart::new(identity).authorized(&part.text));
+            }
+        }
+        if parts.is_empty() {
+            let text = self
+                .content
+                .iter()
+                .filter_map(|content| match content {
+                    ContextContent::Text { text } => Some(text.as_ref()),
+                    ContextContent::Resource { .. } | ContextContent::Opaque { .. } => None,
+                })
+                .collect::<String>();
+            if !text.is_empty() {
+                parts.push(
+                    ObservedPart::new(ObservedPartIdentity::Aggregate {
+                        channel: AggregateChannel::Text,
+                    })
+                    .authorized(&text),
+                );
+            }
+            if let Some(reasoning) = self
+                .reasoning
+                .as_ref()
+                .filter(|payload| payload.format() == "text/plain")
+                .map(OpaquePayload::content)
+                .filter(|text| !text.is_empty())
+            {
+                parts.push(
+                    ObservedPart::new(ObservedPartIdentity::Aggregate {
+                        channel: AggregateChannel::Reasoning,
+                    })
+                    .authorized(reasoning),
+                );
+            }
+        }
+        Ok(ModelProgress::new(1, parts))
+    }
+}
+
+fn presentation_item_kind(kind: CompletionPresentationItemKind) -> ObservedItemKind {
+    match kind {
+        CompletionPresentationItemKind::Text(channel) => {
+            ObservedItemKind::Text(text_channel(channel))
+        }
+        CompletionPresentationItemKind::Reasoning => ObservedItemKind::Reasoning,
+    }
+}
+
+fn presentation_part_kind(kind: CompletionPresentationPartKind) -> ObservedPartKind {
+    match kind {
+        CompletionPresentationPartKind::OutputText => ObservedPartKind::OutputText,
+        CompletionPresentationPartKind::ReasoningText => ObservedPartKind::ReasoningText,
+        CompletionPresentationPartKind::SummaryText => ObservedPartKind::SummaryText,
+    }
+}
+
+fn text_channel(channel: pl_protocol::trace::TraceTextChannel) -> pl_core::model::ModelTextChannel {
+    match channel {
+        pl_protocol::trace::TraceTextChannel::User => pl_core::model::ModelTextChannel::User,
+        pl_protocol::trace::TraceTextChannel::Commentary => {
+            pl_core::model::ModelTextChannel::Commentary
+        }
+        pl_protocol::trace::TraceTextChannel::Final => pl_core::model::ModelTextChannel::Final,
+    }
 }
 
 pub(super) fn failure_error(
@@ -152,8 +325,12 @@ pub(super) fn postprocess_failure_error(
 
 fn failure_details(receipt: &ModelFailureReceipt) -> pl_core::context::OpaquePayload {
     match serde_json::to_string(receipt) {
-        Ok(content) => pl_core::context::OpaquePayload::new("pl.model.failure", 1, content)
-            .expect("static format and version are valid"),
+        Ok(content) => pl_core::context::OpaquePayload::new(
+            "pl.model.failure",
+            FAILURE_RECEIPT_VERSION,
+            content,
+        )
+        .expect("static format and version are valid"),
         Err(encoding) => pl_core::context::OpaquePayload::new(
             "pl.model.failure-diagnostic",
             1,

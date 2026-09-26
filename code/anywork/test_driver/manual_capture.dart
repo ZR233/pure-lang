@@ -63,6 +63,15 @@ Map<String, Object?> _summary(Map<String, dynamic> snapshot) {
   final composerDetails = composer is Map ? composer : const {};
   return {
     'projectOpened': snapshot['project'] != null,
+    // Pure geometry/identity so the integrated timeline scroll contract can be
+    // re-checked from evidence; no message text is duplicated here.
+    'timelineScroll': _timelineScroll(snapshot),
+    // Activity stage identity plus expand state only; summary/error stay as
+    // lengths so no provider text or credential can leak into the snapshot.
+    'conversationActivity': _conversationActivity(snapshot),
+    // Driver-only application-payload counters; `bodyUtf8Bytes` is a UTF-8
+    // measure of delivered body text and is explicitly not FRB/wire bytes.
+    'contentDelivery': _contentDelivery(snapshot),
     'persistence': {
       'kind': persistenceDetails['kind'],
       'pendingCommits': persistenceDetails['pendingCommits'],
@@ -80,5 +89,74 @@ Map<String, Object?> _summary(Map<String, dynamic> snapshot) {
             'hasIncompleteUsage': usageDetails['hasIncompleteUsage'],
             'submissionPending': composerDetails['submissionPending'],
           },
+  };
+}
+
+Map<String, Object?>? _timelineScroll(Map<String, dynamic> snapshot) {
+  final scroll = snapshot['timelineScroll'];
+  if (scroll is! Map) return null;
+  final anchor = scroll['anchor'];
+  return {
+    'threadId': scroll['threadId'],
+    'centerId': scroll['centerId'],
+    'centerIndex': scroll['centerIndex'],
+    'rowCount': scroll['rowCount'],
+    'followingBottom': scroll['followingBottom'],
+    'detachedByUser': scroll['detachedByUser'],
+    'pendingNewEvents': scroll['pendingNewEvents'],
+    'pixels': scroll['pixels'],
+    'minScrollExtent': scroll['minScrollExtent'],
+    'maxScrollExtent': scroll['maxScrollExtent'],
+    'viewportDimension': scroll['viewportDimension'],
+    'extentAfter': scroll['extentAfter'],
+    'bottomSlack': scroll['bottomSlack'],
+    'hasNewer': scroll['hasNewer'],
+    'showJumpToLatest': scroll['showJumpToLatest'],
+    'anchor': anchor is Map
+        ? {
+            'itemId': anchor['itemId'],
+            'offset': anchor['offset'],
+            'followingBottom': anchor['followingBottom'],
+          }
+        : null,
+  };
+}
+
+Map<String, Object?>? _conversationActivity(Map<String, dynamic> snapshot) {
+  final activity = snapshot['conversationActivity'];
+  if (activity is! Map) return null;
+  final details = activity['details'];
+  final summary = activity['summary'];
+  final error = activity['errorMessage'];
+  return {
+    'identity': activity['identity'],
+    'kind': activity['kind'],
+    'activeToolCount': activity['activeToolCount'],
+    // `expandable` is the capability; `expanded` is the user's actual state.
+    'expandable': activity['expandable'],
+    'expanded': activity['expanded'],
+    'summaryLength': summary is String ? summary.length : 0,
+    'errorLength': error is String ? error.length : 0,
+    'hasDetails': details is List && details.isNotEmpty,
+    'detailCount': details is List ? details.length : 0,
+    'detailIds': [
+      if (details is List)
+        for (final detail in details)
+          if (detail is Map) detail['id'],
+    ],
+  };
+}
+
+Map<String, Object?>? _contentDelivery(Map<String, dynamic> snapshot) {
+  final delivery = snapshot['contentDelivery'];
+  if (delivery is! Map) return null;
+  return {
+    'enabled': delivery['enabled'],
+    'metric': delivery['metric'],
+    'resets': delivery['resets'],
+    'patches': delivery['patches'],
+    'contentChanges': delivery['contentChanges'],
+    'bodyUtf8Bytes': delivery['bodyUtf8Bytes'],
+    'maxWindowItems': delivery['maxWindowItems'],
   };
 }

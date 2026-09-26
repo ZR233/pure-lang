@@ -1,11 +1,12 @@
 //! Tool timeline facts use original call bytes and the context actually delivered by core.
 use super::{ProjectionError, content::text_content};
+use pl_core::context::ResourceReference;
 use pl_core::thread::{
     ThreadSnapshot, ToolDelivery, ToolOutcome, permissions::PermissionState, task::TaskStatus,
 };
 use pl_protocol::{
-    ThreadItem, ThreadItemState, ThreadToolInvocation, ThreadToolItem, ThreadToolOutput,
-    ThreadToolState,
+    FailedThreadTool, SucceededThreadTool, ThreadItem, ThreadItemState, ThreadToolInvocation,
+    ThreadToolItem, ThreadToolOutput, ThreadToolState,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -58,6 +59,81 @@ pub(super) fn project_saved_tool_call(
     )
 }
 
+/// Supplements one already-projected terminal tool result with durable resource references.
+///
+/// A reliable-output repair lands *after* its result was committed, so the delivery that carried the
+/// original projection has already left resident state and cannot describe the terminal result from
+/// the current snapshot. The canonical terminal item is therefore the authority for everything but
+/// the repaired references: this keeps its invocation, result text, attachments, exit code, order and
+/// identity, and only appends the references the retried archive stored. The result is never
+/// re-executed, never re-delivered and never moved; an already-projected reference is not duplicated.
+///
+/// # Errors
+/// Rejects an identity that is not a committed terminal tool result, so a supplement can never turn
+/// a running or unrelated item into a repaired one.
+pub(super) fn project_repaired_tool_call(
+    thread_id: &str,
+    saved: &ThreadItem,
+    references: &[ResourceReference],
+    updated_at: i64,
+) -> Result<Vec<ThreadItem>, ProjectionError> {
+    let ThreadItemState::Tool(tool) = saved.state() else {
+        return Err(ProjectionError::DuplicateCall(saved.id.clone()));
+    };
+    if saved.thread_id != thread_id {
+        return Err(ProjectionError::DuplicateCall(saved.id.clone()));
+    }
+    let state = match tool.state() {
+        ThreadToolState::Succeeded(succeeded) => {
+            ThreadToolState::Succeeded(SucceededThreadTool::new(
+                succeeded.completed_at(),
+                supplement_output(succeeded.output(), references)?,
+            ))
+        }
+        ThreadToolState::Failed(failed) => {
+            let Some(output) = failed.output() else {
+                return Err(ProjectionError::DuplicateCall(saved.id.clone()));
+            };
+            ThreadToolState::Failed(FailedThreadTool::new(
+                failed.failed_at(),
+                failed.failure().clone(),
+                Some(supplement_output(output, references)?),
+            ))
+        }
+        _ => return Err(ProjectionError::DuplicateCall(saved.id.clone())),
+    };
+    Ok(vec![ThreadItem::new(
+        saved.id.clone(),
+        saved.thread_id.clone(),
+        saved.turn_id.clone(),
+        saved.ordinal,
+        saved.revision,
+        saved.created_at,
+        updated_at,
+        ThreadItemState::Tool(ThreadToolItem::new(tool.invocation().clone(), state)),
+    )])
+}
+
+/// Appends the repaired durable references to one projected tool output, never duplicating one.
+fn supplement_output(
+    output: &ThreadToolOutput,
+    references: &[ResourceReference],
+) -> Result<ThreadToolOutput, ProjectionError> {
+    let mut artifacts = output.output_artifacts().to_vec();
+    for reference in references {
+        let artifact = serde_json::to_value(reference)?;
+        if !artifacts.contains(&artifact) {
+            artifacts.push(artifact);
+        }
+    }
+    Ok(ThreadToolOutput::new(
+        output.result().to_owned(),
+        output.attachments().to_vec(),
+        artifacts,
+        output.exit_code(),
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn project_invocation(
     thread_id: &str,
@@ -88,7 +164,9 @@ fn project_invocation(
         let progress = snapshot
             .tool_progress
             .get(&task.id)
-            .map_or_else(String::new, |content| text_content(content));
+            // The canonical item carries the completed preview as text; the live window shares its
+            // block and is materialized only here, at the projection boundary that has to encode it.
+            .map_or_else(String::new, |progress| progress.content().text());
         if task.cancel_requested {
             ThreadToolState::Cancelling(pl_protocol::CancellingThreadTool::new(progress))
         } else if snapshot.permissions.values().any(|permission| {

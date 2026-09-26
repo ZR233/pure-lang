@@ -113,15 +113,22 @@ impl TaskAccess {
         }
     }
 
-    /// Replaces this running call's transient preview without committing history or model context.
-    /// The producer bounds and coalesces updates; at most 64 KiB of portable content is accepted.
+    /// Reports one increment of this running call's live output without committing history or model
+    /// context.
+    ///
+    /// The producer sends only what changed — one chunk for an append, or the whole bounded window
+    /// when it rolled over — and the owner charges the resulting accepted total against the call's
+    /// reliable output quota before it accepts the increment. A refused increment therefore leaves
+    /// the accepted output exactly as it was, and the producer never keeps a second full copy of the
+    /// output it is streaming.
     ///
     /// # Errors
-    /// Rejects oversized previews, expired or revoked executors and a closed owner.
-    pub async fn report_progress(&self, content: Vec<ContextContent>) -> Result<(), ThreadError> {
-        if content.len() > 256 || progress_bytes(&content) > 64 * 1024 {
-            return Err(ThreadError::InvalidOutput);
-        }
+    /// Rejects an output identity or total beyond the live bound, an expired or revoked executor
+    /// and a closed owner.
+    pub async fn report_output(
+        &self,
+        update: crate::model::ToolProgressUpdate,
+    ) -> Result<(), ThreadError> {
         self.ensure_running(&self.snapshots.borrow())?;
         let commands = self.commands.upgrade().ok_or(ThreadError::Closed)?;
         let (reply, response) = oneshot::channel();
@@ -129,7 +136,37 @@ impl TaskAccess {
             .send(mailbox::MailboxCommand::ToolProgress {
                 caller: self.caller.clone(),
                 executor: self.executor.clone(),
-                content,
+                update,
+                reply,
+            })
+            .await
+            .map_err(|_| ThreadError::Closed)?;
+        response.await.map_err(|_| ThreadError::Closed)?
+    }
+
+    /// Reports that this running call's accepted output could not be stored.
+    ///
+    /// A capture write or archive failure is a fact about accepted output, not about the call's final
+    /// result, so the tool reports it through this reliable, bounded channel as soon as it happens:
+    /// the owner latches the typed fault — and blocks other model/tool admission — before the call
+    /// returns, instead of only when `execute` unwinds. The fault keeps its
+    /// [`cold::OutputRetryObligation`], so the pause stays until that exact obligation is retried and
+    /// its bytes really stored; a healthy history write cannot stand in for it.
+    ///
+    /// # Errors
+    /// Rejects an expired or revoked executor and a closed owner; the latch itself is idempotent.
+    pub async fn report_output_storage_fault(
+        &self,
+        fault: Arc<cold::OutputStorageFault>,
+    ) -> Result<(), ThreadError> {
+        self.ensure_running(&self.snapshots.borrow())?;
+        let commands = self.commands.upgrade().ok_or(ThreadError::Closed)?;
+        let (reply, response) = oneshot::channel();
+        commands
+            .send(mailbox::MailboxCommand::ToolOutputStorageFault {
+                caller: self.caller.clone(),
+                executor: self.executor.clone(),
+                fault,
                 reply,
             })
             .await
@@ -352,21 +389,4 @@ impl TaskAccess {
             Err(ThreadError::TaskAccessExpired)
         }
     }
-}
-
-fn progress_bytes(content: &[ContextContent]) -> usize {
-    content.iter().fold(0usize, |bytes, item| {
-        bytes.saturating_add(match item {
-            ContextContent::Text { text } => text.len(),
-            ContextContent::Opaque { payload } => payload
-                .content()
-                .len()
-                .saturating_add(payload.format().len()),
-            ContextContent::Resource { reference } => reference
-                .id()
-                .len()
-                .saturating_add(reference.content_digest().len())
-                .saturating_add(reference.media_type().len()),
-        })
-    })
 }

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../domain/models/attachment_models.dart';
+import '../domain/models/conversation_activity_models.dart';
 import '../domain/models/provider_models.dart';
 import '../domain/models/runtime_models.dart';
 import '../domain/models/studio_enums.dart';
 import '../domain/models/thread_directory_models.dart';
-import '../domain/models/turn_models.dart';
 import 'app_localizations.dart';
 
 extension StudioLocalizationsX on BuildContext {
@@ -80,8 +80,41 @@ extension StudioLocalizationsX on BuildContext {
     };
   }
 
-  String turnActivityLabel(StudioTurnActivity activity) {
-    return activity.label(l10n);
+  /// 固定活动条的准确阶段标签。
+  ///
+  /// 与 Timeline 的推理/工具组标签彼此独立：那里描述“历史上发生过什么”，这里只描述
+  /// “此刻在做什么”。等待 API 与已开始 reasoning 都显示“思考中”；保存被明确阻塞时
+  /// 显示准确原因，而不是回落到“思考中”。存储状态按 typed `canResume` 区分“已恢复
+  /// 待继续”“等待保存恢复”与“具体故障”，绝不解析错误文本来判定。
+  String conversationActivityLabel(ConversationActivityView view) {
+    final storage = view.storage;
+    return switch (view.kind) {
+      ConversationActivityKind.preparing => l10n.conversationActivityPreparing,
+      ConversationActivityKind.thinking => l10n.timelineReasoningActive,
+      ConversationActivityKind.responding => l10n.statusTurnResponding,
+      ConversationActivityKind.planning => l10n.statusTurnPlanning,
+      ConversationActivityKind.runningTool =>
+        l10n.conversationActivityRunningTool,
+      ConversationActivityKind.awaitingApproval =>
+        l10n.statusInteractionToolApproval,
+      ConversationActivityKind.awaitingInput => l10n.statusInteractionUserInput,
+      ConversationActivityKind.stopping => l10n.conversationActivityStopping,
+      ConversationActivityKind.storageBlocked =>
+        storage == null
+            ? l10n.conversationActivitySaveFailed
+            // 已核验可继续（`canResume`）表示保存已恢复、水位核验通过；core 的故障闩在
+            // 显式继续前可能仍保留上一次的错误文本，此时不能显示“保存故障”，而应明确
+            // “已保存，等待继续执行”。
+            : storage.resumeRequired && storage.canResume
+            ? l10n.conversationActivityResumeReady
+            : storage.hasFault
+            ? l10n.conversationActivitySaveFailed
+            : storage.pressurePaused
+            ? l10n.conversationActivityStoragePressure
+            : storage.resumeRequired
+            ? l10n.conversationActivityResumeRequired
+            : l10n.conversationActivitySavePaused,
+    };
   }
 
   String interactionKindLabel(InteractionKind kind) {
@@ -234,24 +267,19 @@ extension StudioLocalizationsX on BuildContext {
   }
 }
 
-extension StudioTurnActivityX on StudioTurnActivity {
+extension ConversationActivityKindX on ConversationActivityKind {
   IconData get icon => switch (this) {
-    StudioTurnActivity.preparing => Icons.menu_book_outlined,
-    StudioTurnActivity.thinking => Icons.psychology_alt_outlined,
-    StudioTurnActivity.responding => Icons.edit_note_outlined,
-    StudioTurnActivity.planning => Icons.route_outlined,
-    StudioTurnActivity.runningTool => Icons.build_outlined,
-    StudioTurnActivity.persisting => Icons.save_outlined,
+    ConversationActivityKind.preparing => Icons.menu_book_outlined,
+    ConversationActivityKind.thinking => Icons.psychology_alt_outlined,
+    ConversationActivityKind.responding => Icons.edit_note_outlined,
+    ConversationActivityKind.planning => Icons.route_outlined,
+    ConversationActivityKind.runningTool => Icons.build_outlined,
+    ConversationActivityKind.awaitingApproval => Icons.verified_outlined,
+    ConversationActivityKind.awaitingInput => Icons.help_outline,
+    ConversationActivityKind.stopping => Icons.stop_circle_outlined,
+    ConversationActivityKind.storageBlocked => Icons.error_outline,
   };
 
-  bool get drivesToolGroup => this == StudioTurnActivity.runningTool;
-
-  String label(AppLocalizations l10n) => switch (this) {
-    StudioTurnActivity.preparing => l10n.statusTurnPreparing,
-    StudioTurnActivity.thinking => l10n.timelineReasoningActive,
-    StudioTurnActivity.responding => l10n.statusTurnResponding,
-    StudioTurnActivity.planning => l10n.statusTurnPlanning,
-    StudioTurnActivity.runningTool => l10n.statusTurnRunningTool,
-    StudioTurnActivity.persisting => l10n.statusTurnPersisting,
-  };
+  /// 保存故障使用错误色，其余状态跟随中性/强调色。
+  bool get isIssue => this == ConversationActivityKind.storageBlocked;
 }

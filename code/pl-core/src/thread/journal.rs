@@ -67,6 +67,14 @@ pub struct ThreadEffectBatch {
     pub turn: Option<TurnRecord>,
     pub discovered_tools: Option<Arc<[ModelToolDeclaration]>>,
     pub deliveries: Arc<[ToolDelivery]>,
+    /// Durable resource supplements for already-committed deliveries of this commit.
+    ///
+    /// A re-saved archive names the committed call identity its reference belongs to, so the
+    /// reference is applied to that one tool identity — the live projection and history writer
+    /// append it to the already-projected result — instead of a second delivery for the same call,
+    /// which the journal rejects. Empty for every commit that repairs nothing.
+    #[serde(default)]
+    pub delivery_repairs: Arc<[cold::OutputRepair]>,
     pub extensions: Arc<[extensions::ExtensionChange]>,
     pub inbox: Arc<[inbox::InboxRecord]>,
     pub consumed_messages: Option<u64>,
@@ -167,7 +175,10 @@ impl ThreadEffectBatch {
             .to_vec()
             .into();
         // Delivered results leave resident state independently of each other, so identify the
-        // changed entries instead of relying on a retained prefix.
+        // changed entries instead of relying on a retained prefix. A result is exported once under
+        // its call identity; a repair supplements the already-committed *context* record the model
+        // reads instead of re-exporting the delivery, so a call identity never appears twice in the
+        // journal and the result keeps its single identity.
         let exported_deliveries = previous
             .deliveries
             .iter()
@@ -182,6 +193,12 @@ impl ThreadEffectBatch {
             .into();
         let replacements: Arc<[ContextReplacement]> = current.context_replacements
             [previous.context_replacements.len()..]
+            .to_vec()
+            .into();
+        // Repair supplements are a commit-export buffer like the replacements above: the commit that
+        // publishes them consumes them, so the exported suffix is exactly this commit's facts.
+        let delivery_repairs: Arc<[cold::OutputRepair]> = current.delivery_repairs
+            [previous.delivery_repairs.len()..]
             .to_vec()
             .into();
         let runtime_facts = (previous.runtime_facts != current.runtime_facts)
@@ -232,6 +249,7 @@ impl ThreadEffectBatch {
             && tasks.is_empty()
             && inputs.is_empty()
             && deliveries.is_empty()
+            && delivery_repairs.is_empty()
             && replacements.is_empty()
             && runtime_facts.is_none()
             && lifecycle.is_none()
@@ -257,6 +275,7 @@ impl ThreadEffectBatch {
             turn,
             discovered_tools,
             deliveries,
+            delivery_repairs,
             extensions,
             inbox,
             consumed_messages,

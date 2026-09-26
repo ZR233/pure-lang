@@ -247,19 +247,45 @@ pub trait CommandBackend: std::fmt::Debug + Send + Sync + 'static {
         request: CommandSpawnRequest,
     ) -> impl std::future::Future<Output = std::result::Result<ManagedCommand, Self::Error>> + Send;
 
+    /// Prepares the capture fragment and returns the length it starts at.
+    ///
+    /// The returned length is the backend-confirmed committed offset every later repair truncates back
+    /// to, so a repair never depends on a length read that could fail and be mistaken for "nothing
+    /// written".
     fn prepare_output(
         &self,
         target: &CommandOutputTarget,
         command: &str,
         working_directory: &str,
-    ) -> impl std::future::Future<Output = std::result::Result<(), Self::Error>> + Send;
+    ) -> impl std::future::Future<Output = std::result::Result<u64, Self::Error>> + Send;
 
+    /// Appends one accepted chunk and returns the fragment's new confirmed length.
+    ///
+    /// The returned length is the committed offset the next chunk (or a repair) builds on, so the
+    /// capture plan tracks exactly what the backend confirmed writing.
     fn append_output_chunk(
         &self,
         target: &CommandOutputTarget,
         stream: CommandCaptureStream,
         chunk: &[u8],
-    ) -> impl std::future::Future<Output = std::result::Result<(), Self::Error>> + Send;
+    ) -> impl std::future::Future<Output = std::result::Result<u64, Self::Error>> + Send;
+
+    /// Re-materializes one accepted chunk a failed capture append could not write.
+    ///
+    /// The append may have left the capture fragment short of the bytes already accepted and
+    /// published live. This truncates the fragment back to its last committed offset and re-appends
+    /// `chunk` with the same framing a successful append would have produced, so the fragment holds
+    /// exactly the accepted bytes under its stable identity. Truncating first makes it idempotent: a
+    /// repeated repair reproduces the same bytes instead of duplicating the chunk, and the command is
+    /// never re-run. It returns the fragment's new confirmed length, so a caller replaying the whole
+    /// plan passes that length as the next chunk's `committed_len` and the truncation is a no-op.
+    fn repair_output_chunk(
+        &self,
+        capture_file: &Path,
+        stream: CommandCaptureStream,
+        committed_len: u64,
+        chunk: &[u8],
+    ) -> impl std::future::Future<Output = std::result::Result<u64, Self::Error>> + Send;
 
     fn publish_output(
         &self,
@@ -479,7 +505,7 @@ impl CommandBackend for LocalCommandBackend {
         target: &CommandOutputTarget,
         command: &str,
         working_directory: &str,
-    ) -> Result<()> {
+    ) -> Result<u64> {
         if let Some(parent) = target.capture_file().parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|error| {
                 command_error(
@@ -491,7 +517,10 @@ impl CommandBackend for LocalCommandBackend {
         let header = format!("=== COMMAND ===\n{command}\n\n=== CWD ===\n{working_directory}\n\n");
         tokio::fs::write(target.capture_file(), header.as_bytes())
             .await
-            .map_err(|error| command_error("exec", format!("failed to write output file: {error}")))
+            .map_err(|error| {
+                command_error("exec", format!("failed to write output file: {error}"))
+            })?;
+        Ok(header.len() as u64)
     }
 
     async fn append_output_chunk(
@@ -499,7 +528,7 @@ impl CommandBackend for LocalCommandBackend {
         target: &CommandOutputTarget,
         stream: CommandCaptureStream,
         chunk: &[u8],
-    ) -> Result<()> {
+    ) -> Result<u64> {
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -549,7 +578,69 @@ impl CommandBackend for LocalCommandBackend {
         }
         file.flush().await.map_err(|error| {
             command_error("exec", format!("failed to flush command output: {error}"))
-        })
+        })?;
+        confirmed_capture_len(&file).await
+    }
+
+    async fn repair_output_chunk(
+        &self,
+        capture_file: &Path,
+        stream: CommandCaptureStream,
+        committed_len: u64,
+        chunk: &[u8],
+    ) -> Result<u64> {
+        // Truncate any partially written bytes back to the last committed offset, then re-append the
+        // exact accepted chunk with the same framing a normal append would have written. Truncating
+        // first makes the repair idempotent: a repeated repair reproduces the same bytes instead of
+        // appending the same chunk twice, and the command is never re-run.
+        let file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .open(capture_file)
+            .await
+            .map_err(|error| {
+                command_error(
+                    "exec",
+                    format!("failed to open output file for repair: {error}"),
+                )
+            })?;
+        file.set_len(committed_len).await.map_err(|error| {
+            command_error(
+                "exec",
+                format!("failed to truncate partial output: {error}"),
+            )
+        })?;
+        drop(file);
+        let mut file = tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(capture_file)
+            .await
+            .map_err(|error| {
+                command_error(
+                    "exec",
+                    format!("failed to reopen output file for repair: {error}"),
+                )
+            })?;
+        let label = match stream {
+            CommandCaptureStream::Stdout => "STDOUT",
+            CommandCaptureStream::Stderr => "STDERR",
+        };
+        file.write_all(format!("=== {label} ===\n").as_bytes())
+            .await
+            .map_err(|error| {
+                command_error("exec", format!("failed to write output label: {error}"))
+            })?;
+        file.write_all(chunk).await.map_err(|error| {
+            command_error("exec", format!("failed to write output chunk: {error}"))
+        })?;
+        if !chunk.ends_with(b"\n") {
+            file.write_all(b"\n").await.map_err(|error| {
+                command_error("exec", format!("failed to finish output chunk: {error}"))
+            })?;
+        }
+        file.flush().await.map_err(|error| {
+            command_error("exec", format!("failed to flush command output: {error}"))
+        })?;
+        confirmed_capture_len(&file).await
     }
 
     async fn publish_output(&self, _target: &CommandOutputTarget) -> Result<()> {
@@ -570,6 +661,19 @@ fn command_error(tool: &str, error: impl std::fmt::Display) -> PureError {
         tool: tool.to_string(),
         error: error.to_string(),
     }
+}
+
+/// The length an open capture fragment now has, as the backend's confirmed write fact.
+///
+/// A write that cannot report its result is a capture failure, not a length to guess: the caller keeps
+/// the previous confirmed offset and owes a repair, so a fragment whose length cannot be read is never
+/// archived as if it were whole.
+async fn confirmed_capture_len(file: &tokio::fs::File) -> Result<u64> {
+    let metadata = file
+        .metadata()
+        .await
+        .map_err(|error| command_error("exec", format!("failed to read output length: {error}")))?;
+    Ok(metadata.len())
 }
 
 fn safe_path_component(value: &str, fallback: &str) -> String {

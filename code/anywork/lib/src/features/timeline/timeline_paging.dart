@@ -1,52 +1,57 @@
 part of 'timeline_view.dart';
 
 extension on _TimelineViewState {
-  Widget _itemSliver(List<_TimelineDisplayBlock> blocks, {Key? key}) {
+  Widget _itemSliver(List<TimelineRow> rows, {required bool isCenter}) {
     return SliverPadding(
-      key: key,
       padding: const EdgeInsets.symmetric(horizontal: 24),
       sliver: SliverList(
-        key: ValueKey((key == _centerKey, _centerId)),
+        key: ValueKey((isCenter, _centerId)),
         delegate: SliverChildBuilderDelegate(
           (context, index) {
-            final block = blocks[index];
-            final expanded = _expandedReasoningGroups.contains(
-              block.rows.single.reasoningGroup?.id,
+            final row = rows[index];
+            final reasoningExpanded = _expandedReasoningGroups.contains(
+              row.reasoningGroup?.id,
             );
-            final version = block.rows.single.renderVersion;
-            final bodyStates = _itemBodyStates(block.rows.single);
+            final toolExpanded = _expandedToolGroups.contains(
+              row.toolGroup?.id,
+            );
+            final version = row.renderVersion;
+            final bodyStates = _itemBodyStates(row);
             final bodyState = _itemBodyCacheKey(bodyStates);
-            final cached = _rowWidgets[block.id];
+            final cached = _rowWidgets[row.id];
             if (cached == null ||
                 cached.version != version ||
-                cached.expanded != expanded ||
+                cached.expanded != reasoningExpanded ||
+                cached.toolExpanded != toolExpanded ||
                 cached.body != bodyState) {
-              _rowWidgets[block.id] = (
+              _rowWidgets[row.id] = (
                 version: version,
-                expanded: expanded,
+                expanded: reasoningExpanded,
+                toolExpanded: toolExpanded,
                 body: bodyState,
                 child: _TimelineRowBlock(
-                  key: ValueKey(block.id),
-                  row: block.rows.single,
-                  isCurrentActivity: block.isCurrentActivity,
-                  isReasoningExpanded: expanded,
+                  key: ValueKey(row.id),
+                  row: row,
+                  isReasoningExpanded: reasoningExpanded,
                   onToggleReasoning: _toggleReasoning,
+                  isToolGroupExpanded: toolExpanded,
+                  onToggleToolGroup: _toggleToolGroup,
                   body: bodyStates,
                 ),
               );
             }
             return KeyedSubtree(
-              key: StudioDriverKeys.timelineBlock(block.id),
+              key: StudioDriverKeys.timelineBlock(row.id),
               child: SizedBox(
-                key: _rowKeys.putIfAbsent(block.id, GlobalKey.new),
-                child: _rowWidgets[block.id]!.child,
+                key: _rowKeys.putIfAbsent(row.id, GlobalKey.new),
+                child: _rowWidgets[row.id]!.child,
               ),
             );
           },
-          childCount: blocks.length,
+          childCount: rows.length,
           findChildIndexCallback: (key) {
-            final index = blocks.indexWhere(
-              (block) => StudioDriverKeys.timelineBlock(block.id) == key,
+            final index = rows.indexWhere(
+              (row) => StudioDriverKeys.timelineBlock(row.id) == key,
             );
             return index < 0 ? null : index;
           },
@@ -86,37 +91,66 @@ extension on _TimelineViewState {
   List<_ItemBodyState> _itemBodyStates(TimelineRow row) {
     final states = <_ItemBodyState>[];
     for (final candidate in _rowBodyCandidates(row)) {
-      final state = _itemBodyState(candidate.id, candidate.label);
+      final state = _itemBodyState(
+        candidate.id,
+        candidate.label,
+        autoComplete: candidate.isText,
+      );
       if (state != null) states.add(state);
     }
     return states;
   }
 
   /// 一行底层承载的条目身份：单条/raw 行是自身条目，分组行是其全部成员条目。
-  List<({String id, String? label})> _rowBodyCandidates(TimelineRow row) {
+  ///
+  /// [isText] 标记该身份的正文由窗口按身份自动补齐：它不再需要“加载完整内容”入口。
+  List<({String id, String? label, bool isText})> _rowBodyCandidates(
+    TimelineRow row,
+  ) {
+    final isTextRow = switch (row.type) {
+      TimelineRowType.userMessage ||
+      TimelineRowType.parentAgentMessage ||
+      TimelineRowType.commentary ||
+      TimelineRowType.finalAnswer => true,
+      _ => false,
+    };
     if (row.part case final part?) {
-      return <({String id, String? label})>[(id: part.id, label: null)];
+      return <({String id, String? label, bool isText})>[
+        (id: part.id, label: null, isText: isTextRow),
+      ];
     }
     if (row.toolGroup case final group?) {
-      return <({String id, String? label})>[
-        for (final item in group.items) (id: item.id, label: item.name),
+      return <({String id, String? label, bool isText})>[
+        for (final item in group.items)
+          (id: item.id, label: item.name, isText: false),
       ];
     }
     if (row.reasoningGroup case final group?) {
-      return <({String id, String? label})>[
-        for (final part in group.parts) (id: part.id, label: null),
+      return <({String id, String? label, bool isText})>[
+        for (final part in group.parts)
+          (id: part.id, label: null, isText: false),
       ];
     }
     return const [];
   }
 
   /// 单个底层条目的“回源完整正文”提示；不需要时返回 null。
-  _ItemBodyState? _itemBodyState(String itemId, String? label) {
+  ///
+  /// [autoComplete] 的正文由窗口按身份自动补齐，因此“预览态”与它自己的加载态都不产生提示：
+  /// 读者既不需要点击加载，也不会看到分页/折叠入口。只有补齐失败与“尚未 durable”如实提示。
+  _ItemBodyState? _itemBodyState(
+    String itemId,
+    String? label, {
+    bool autoComplete = false,
+  }) {
     final previewed = widget.previewedItemIds.contains(itemId);
     final loading = widget.loadingItemIds.contains(itemId);
     final error = widget.itemBodyErrors[itemId];
     final pending = widget.pendingItemBodyIds.contains(itemId);
     final unavailable = widget.unavailableItemIds.contains(itemId);
+    if (autoComplete && !pending && !unavailable && error == null) {
+      return null;
+    }
     if (!previewed && !loading && !pending && !unavailable && error == null) {
       return null;
     }
@@ -146,6 +180,11 @@ extension on _TimelineViewState {
     return null;
   }
 
+  /// 记录“最靠上的可见行”的锚点。
+  ///
+  /// 记录的偏移量是**内容自身**的偏移：短内容整体贴底时整段内容被
+  /// [_BottomAlignedSliver] 下移了 `_bottomSlack`，这里减掉它，锚点就与
+  /// 视口是否贴底无关。恢复位置仍然只用 `-offset`，不需要知道当前留白。
   TimelineAnchor? _captureAnchor() {
     final viewport = _viewportKey.currentContext?.findRenderObject();
     if (viewport is! RenderBox || !viewport.hasSize) return null;
@@ -165,7 +204,7 @@ extension on _TimelineViewState {
         ? null
         : TimelineAnchor(
             _anchorItemId(id),
-            offset!,
+            offset! - _bottomSlack,
             followingBottom:
                 _followingBottom && !_detachedByUser && !widget.hasNewer,
           );

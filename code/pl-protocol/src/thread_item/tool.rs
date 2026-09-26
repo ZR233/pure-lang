@@ -36,52 +36,6 @@ impl ThreadToolItem {
             | ThreadToolState::Cancelled(_) => None,
         }
     }
-
-    pub(super) fn append_arguments(&mut self, delta: &str) -> Result<(), &'static str> {
-        match self.state {
-            ThreadToolState::Queued(_)
-            | ThreadToolState::Cancelling(_)
-            | ThreadToolState::Interrupted(_) => Err("session task arguments are immutable"),
-            ThreadToolState::Started(_) | ThreadToolState::Streaming(_) => {
-                self.invocation.arguments.push_str(delta);
-                self.state = ThreadToolState::Streaming(StreamingThreadTool);
-                Ok(())
-            }
-            ThreadToolState::AwaitingApproval(_)
-            | ThreadToolState::Approved(_)
-            | ThreadToolState::Running(_)
-            | ThreadToolState::Succeeded(_)
-            | ThreadToolState::Failed(_)
-            | ThreadToolState::Denied(_)
-            | ThreadToolState::Cancelled(_) => {
-                Err("tool argument delta requires started or streaming state")
-            }
-        }
-    }
-
-    pub(super) fn append_result(&mut self, delta: &str) -> Result<(), &'static str> {
-        match &mut self.state {
-            ThreadToolState::Queued(_) | ThreadToolState::Interrupted(_) => {
-                Err("task output requires an active task")
-            }
-            ThreadToolState::Cancelling(state) => {
-                state.streamed_output.push_str(delta);
-                Ok(())
-            }
-            ThreadToolState::Running(state) => {
-                state.streamed_output.push_str(delta);
-                Ok(())
-            }
-            ThreadToolState::Started(_)
-            | ThreadToolState::Streaming(_)
-            | ThreadToolState::AwaitingApproval(_)
-            | ThreadToolState::Approved(_)
-            | ThreadToolState::Succeeded(_)
-            | ThreadToolState::Failed(_)
-            | ThreadToolState::Denied(_)
-            | ThreadToolState::Cancelled(_) => Err("tool result delta requires running state"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

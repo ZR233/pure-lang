@@ -14,7 +14,15 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
   static const _maximumPlanPanelWidth = 720.0;
   static const _minimumTimelineWidth = 560.0;
   static const _minimumPlanTimelineWidth = 600.0;
-  static const _maximumFooterFraction = 0.5;
+
+  /// footer 的高度上限 = 窗口高度 − 时间线**最小可视高度**。
+  ///
+  /// 这里刻意不用固定比例（例如半屏）：固定比例在矮窗口会把 composer 与状态栏之后的
+  /// 剩余高度压到几像素，展开详情退化成「假展开」（实测 640×600 只剩 8.5px）。改为
+  /// 先给时间线留出随窗口缩放的最小可视高度，再把其余高度交给 footer。
+  static const _minimumTimelineHeight = 96.0;
+  static const _maximumTimelineReserve = 200.0;
+  static const _timelineReserveFraction = 0.3;
 
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final Map<String, bool> _todoExpandedByThread = {};
@@ -67,7 +75,7 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                 constraints.maxWidth < _todoPanelWidth + _minimumTimelineWidth;
             final todoExpanded = _todoExpandedByThread[threadId] ?? false;
             final footerMaxHeight = constraints.hasBoundedHeight
-                ? constraints.maxHeight * _maximumFooterFraction
+                ? _footerMaxHeight(constraints.maxHeight)
                 : null;
             if (plan != null &&
                 _autoOpenedPlanByThread[threadId] != plan.interactionId) {
@@ -209,6 +217,7 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                                       ),
                                     ),
                                     _AdaptiveFooter(
+                                      threadId: threadId,
                                       maxHeight: footerMaxHeight,
                                       showTodo: !planExpanded && todo != null,
                                       todoExpanded:
@@ -285,6 +294,15 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
 
   void _closePlan(String threadId) {
     setState(() => _expandedPlanByThread.remove(threadId));
+  }
+
+  /// footer 可用高度上限：先给时间线留下最小可视高度，剩余高度交给 footer。
+  double _footerMaxHeight(double viewportHeight) {
+    final reserve = (viewportHeight * _timelineReserveFraction)
+        .clamp(_minimumTimelineHeight, _maximumTimelineReserve)
+        .toDouble();
+    final available = viewportHeight - reserve;
+    return available > 0 ? available : 0;
   }
 
   /// 计划详情面板：左边缘分隔条 + 内容。并排与覆盖共用，避免语义偏差。
@@ -423,15 +441,29 @@ class _PlanResizeHandleState extends State<_PlanResizeHandle> {
   }
 }
 
-/// Keeps a large interaction dock scrollable when the desktop window is short.
+/// footer 预算低于该值时启用紧凑布局：让 composer 适度收起留白与输入行数（保留操作），
+/// 把省下的高度让给展开详情，同时避免矮窗口 `RenderFlex` 溢出。
+const _compactFooterBudget = 400.0;
+
+/// 在窗口较矮时把可伸缩的活动条压进剩余空间，而不是让整条 footer 滚动。
+///
+/// 整条 footer 放进滚动容器会把「装不下」变成「输入区被裁到窗口外」：容器只保证
+/// `maxHeight` 内的内容可见，超出的部分（正好是底部的输入区与发送/停止按钮）被静默
+/// 裁掉。这里只给出高度上限，footer 内部把唯一可伸缩的活动条压到剩余高度里（见
+/// [_Footer]），因此输入区始终完整可见，活动条详情在自身范围内滚动。
+///
+/// footer 的总高度上限由 [AgentWorkspacePane] 按「窗口高度 − 时间线最小可视高度」给出；
+/// 这里仅据该预算决定是否进入紧凑布局（唯一所有者，不在别处重复读窗口尺寸）。
 class _AdaptiveFooter extends StatelessWidget {
   const _AdaptiveFooter({
+    required this.threadId,
     required this.maxHeight,
     required this.showTodo,
     required this.todoExpanded,
     required this.onToggleTodo,
   });
 
+  final String threadId;
   final double? maxHeight;
   final bool showTodo;
   final bool todoExpanded;
@@ -439,20 +471,30 @@ class _AdaptiveFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final footer = _Footer(
-      showTodo: showTodo,
-      todoExpanded: todoExpanded,
-      onToggleTodo: onToggleTodo,
-    );
     if (maxHeight == null) {
-      return footer;
+      return _Footer(
+        threadId: threadId,
+        showTodo: showTodo,
+        todoExpanded: todoExpanded,
+        onToggleTodo: onToggleTodo,
+        compact: false,
+        contentKey: StudioDriverKeys.workspaceFooterScroll,
+      );
     }
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight!),
-      child: SingleChildScrollView(
-        key: StudioDriverKeys.workspaceFooterScroll,
-        primary: false,
-        child: footer,
+      child: LayoutBuilder(
+        // ConstrainedBox 已把窗口预算收成有界 maxHeight，这里据此决定紧凑与否，避免在
+        // composer 里再读一次窗口尺寸形成第二套事实源。
+        builder: (context, constraints) => _Footer(
+          threadId: threadId,
+          showTodo: showTodo,
+          todoExpanded: todoExpanded,
+          onToggleTodo: onToggleTodo,
+          compact: constraints.maxHeight < _compactFooterBudget,
+          // footer 区域的可定位句柄：内容不再整体滚动，但保持同一 key，便于驱动按区域定位。
+          contentKey: StudioDriverKeys.workspaceFooterScroll,
+        ),
       ),
     );
   }
@@ -628,6 +670,11 @@ class _AgentTimelineHost extends ConsumerWidget {
             ref
                 .read(studioControllerProvider.notifier)
                 .loadItemBody(threadId, itemId),
+          ),
+          onVisibleItemBodies: (itemIds) => unawaited(
+            ref
+                .read(studioControllerProvider.notifier)
+                .ensureItemBodies(threadId, itemIds),
           ),
           onAnchorChanged: (anchor) => ref
               .read(studioControllerProvider.notifier)

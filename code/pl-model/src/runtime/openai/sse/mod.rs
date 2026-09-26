@@ -101,6 +101,9 @@ fn chat_choice_events(event: &SseStreamEvent) -> Option<Vec<ModelStreamEvent>> {
             id: DEFAULT_REASONING_ID.to_string(),
             content_index: 0,
             delta: delta.clone(),
+            // Chat Completions reports no provider item identity; the raw reasoning is observed as
+            // the request-scoped reasoning channel rather than a synthetic item.
+            provider: None,
         });
     }
 
@@ -111,6 +114,7 @@ fn chat_choice_events(event: &SseStreamEvent) -> Option<Vec<ModelStreamEvent>> {
             DEFAULT_TEXT_ID.to_string(),
             TraceTextChannel::Final,
             content.clone(),
+            None,
         ));
     }
 
@@ -213,41 +217,10 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
             },
         )),
 
-        "response.output_text.delta" => event.delta.as_ref().map(|d| {
-            StreamEventBatch::Single(ModelStreamEvent::text_delta(
-                event
-                    .item_id
-                    .clone()
-                    .unwrap_or_else(|| DEFAULT_TEXT_ID.to_string()),
-                TraceTextChannel::Final,
-                d.clone(),
-            ))
-        }),
-
-        "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
-            event.delta.as_ref().map(|d| {
-                if event.kind == "response.reasoning_summary_text.delta" {
-                    StreamEventBatch::Single(ModelStreamEvent::reasoning_summary_delta(
-                        event
-                            .item_id
-                            .clone()
-                            .unwrap_or_else(|| DEFAULT_REASONING_ID.to_string()),
-                        event.summary_index.unwrap_or(0).max(0) as u32,
-                        d.clone(),
-                    ))
-                } else {
-                    StreamEventBatch::Single(ModelStreamEvent::ReasoningRawDelta {
-                        id: event
-                            .item_id
-                            .clone()
-                            .unwrap_or_else(|| DEFAULT_REASONING_ID.to_string()),
-                        content_index: event.content_index.unwrap_or(0).max(0) as u32,
-                        delta: d.clone(),
-                    })
-                }
-            })
-        }
-
+        // Responses text and reasoning deltas are decoded by the stateful decoder, which resolves
+        // the item identity an event omits from the `output_index` it announced and rejects an
+        // unresolvable delta instead of inventing a default item. Chat content arrives through
+        // `chat_choice_events` above, so this fallback never fabricates those identities.
         "response.function_call_arguments.delta" => {
             let (item_id, call_id) = responses_tool_identity(
                 event.item_id.as_deref(),

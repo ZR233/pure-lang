@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use crate::studio::runtime::chat_item::typed_item;
 use anyhow::{Context, Result, ensure};
 use pl_core::chat::{ChatError, ChatHistory, ChatItem, ChatQuery, HistoryPage};
 use pl_protocol::thread::TimelineCursor;
@@ -159,6 +160,8 @@ pub(crate) struct EffectCommit<'a> {
     /// Task lifecycle and full delivery are authority, not lossy call statistics.
     pub tasks: &'a [pl_core::thread::task::TaskRecord],
     pub deliveries: &'a [pl_core::thread::ToolDelivery],
+    /// Durable resource supplements for already-committed deliveries of this effect.
+    pub delivery_repairs: &'a [pl_core::thread::cold::OutputRepair],
     pub attempt: Option<&'a pl_core::thread::journal::AttemptUpdate>,
 }
 
@@ -329,6 +332,7 @@ impl HistoryStore {
             receipts,
             tasks,
             deliveries,
+            delivery_repairs,
             attempt,
         } = commit;
         ensure!(write_seq > 0, "history write sequence must be positive");
@@ -418,6 +422,7 @@ impl HistoryStore {
                         status: pl_core::thread::task::TaskStatus::Running,
                         cancel_requested: false,
                         acknowledgement: None,
+                        started_sequence: None,
                     },
                 )
                 .await?;
@@ -428,6 +433,9 @@ impl HistoryStore {
         }
         for delivery in deliveries {
             write_tool_delivery(&tx, write_seq, delivery).await?;
+        }
+        for repair in delivery_repairs {
+            write_tool_delivery_repair(&tx, write_seq, repair).await?;
         }
         if write_seq > current {
             tx.execute_raw(statement(
@@ -682,18 +690,6 @@ impl HistoryStore {
         Ok(items)
     }
 
-    /// Resolves the exact rows an effect committed before releasing their in-memory owner.
-    pub(crate) async fn committed_chat_items(
-        &self,
-        ids: impl IntoIterator<Item = String>,
-    ) -> Result<Vec<ChatItem>> {
-        self.existing_items(ids)
-            .await?
-            .into_values()
-            .map(|item| chat_item(item, true))
-            .collect()
-    }
-
     pub(crate) async fn items_for_turn(&self, turn_id: &str) -> Result<Vec<ThreadItem>> {
         let Some(connection) = self.reader().await? else {
             return Ok(Vec::new());
@@ -704,73 +700,6 @@ impl HistoryStore {
             vec![turn_id.into()],
         )
         .await
-    }
-
-    /// Newest durable terminal Turn item, or `None` when no Turn has finished yet.
-    ///
-    /// Root product observation uses this single bounded row (ordinal primary key, descending) to
-    /// repair a directory and terminal-derived state its effect window already dropped; it never
-    /// scans the terminal history to find the newest fact.
-    pub(crate) async fn latest_terminal_turn(&self) -> Result<Option<ThreadItem>> {
-        let Some(connection) = self.reader().await? else {
-            return Ok(None);
-        };
-        let row = connection
-            .db
-            .query_one_raw(statement(
-                "SELECT payload FROM history_items
-                 WHERE kind='turn' AND lifecycle='terminal'
-                 ORDER BY ordinal DESC LIMIT 1",
-                vec![],
-            ))
-            .await?;
-        match row {
-            Some(row) => Ok(Some(serde_json::from_str(
-                &row.try_get::<String>("", "payload")?,
-            )?)),
-            None => Ok(None),
-        }
-    }
-
-    /// Reads terminal Turns from one missing effect window, keyed by their original write sequence.
-    ///
-    /// Live product observation uses this only to reconstruct terminal facts after its bounded
-    /// effect window lost the effects that produced them. The original write sequence is also the
-    /// terminal notification identity; an item's ordinal is only its presentation order.
-    pub(crate) async fn terminal_turns_in_effect_range(
-        &self,
-        after: (u64, u64),
-        through_sequence: u64,
-        limit: usize,
-    ) -> Result<Vec<(u64, ThreadItem)>> {
-        let Some(connection) = self.reader().await? else {
-            return Ok(Vec::new());
-        };
-        let rows = connection
-            .db
-            .query_all_raw(statement(
-                "SELECT last_write_seq,ordinal,payload FROM history_items
-                 WHERE kind='turn' AND lifecycle='terminal'
-                   AND (last_write_seq > ? OR (last_write_seq = ? AND ordinal > ?))
-                   AND last_write_seq <= ?
-                 ORDER BY last_write_seq ASC,ordinal ASC LIMIT ?",
-                vec![
-                    integer(after.0)?.into(),
-                    integer(after.0)?.into(),
-                    integer(after.1)?.into(),
-                    integer(through_sequence)?.into(),
-                    integer(limit)?.into(),
-                ],
-            ))
-            .await?;
-        rows.into_iter()
-            .map(|row| {
-                Ok((
-                    u64::try_from(row.try_get::<i64>("", "last_write_seq")?)?,
-                    serde_json::from_str(&row.try_get::<String>("", "payload")?)?,
-                ))
-            })
-            .collect()
     }
 
     pub(crate) async fn watermark(&self) -> Result<u64> {
@@ -1357,6 +1286,63 @@ impl HistoryStore {
         integer(cursor.ordinal)
     }
 
+    /// Reads the newest terminal Turn this Thread already committed, without a body read.
+    ///
+    /// The realtime contract carries a finished Turn exactly once — the authoritative snapshot only
+    /// ever holds the *active* Turn and `turnCompleted` is broadcast only to the subscribers that
+    /// exist at that moment — so a projection owner that is installed (or a subscription that opens)
+    /// after the finishing commit has no live frame left to learn it from. This cold read closes that
+    /// gap from the durable facts the writer already committed, never from item bodies and never by
+    /// scanning: "finished" is a stored column (`history_items.lifecycle='terminal'`) and its partial
+    /// index is therefore able to return the single newest finished Turn by execution order.
+    ///
+    /// The two durable tables are one fact, chosen deliberately: `history_items` carries the
+    /// `lifecycle`/`last_write_seq` columns the partial index orders on, while `history_turns.payload`
+    /// carries the typed `Turn` the realtime frame and the client use. `commit_effect` writes both in
+    /// the same transaction from the same turn item, and `upsert_item` freezes a terminal Turn item's
+    /// `last_write_seq` (a later sequence is rejected), so an item row can name the newest finished
+    /// Turn in execution order and that identity's Turn payload is the very fact the item projected —
+    /// identity and revision are the writer's own, not a re-derivation, and no body is read.
+    ///
+    /// 冷读缺失历史库时返回 `None`，且绝不创建它。
+    pub(crate) async fn newest_terminal_turn(&self) -> Result<Option<pl_protocol::Turn>> {
+        let Some(connection) = self.reader().await? else {
+            return Ok(None);
+        };
+        // `history_terminal_turns_by_write_seq` is declared over exactly this predicate
+        // (`kind='turn' AND lifecycle='terminal'`) and its leading column is `last_write_seq`, so
+        // this is one index scan returning at most one row — no table scan, no ordering work and no
+        // bounded-scan heuristic that a pathological history could defeat.
+        let Some(row) = connection
+            .db
+            .query_one_raw(statement(
+                "SELECT turn_id FROM history_items
+                 WHERE kind='turn' AND lifecycle='terminal'
+                 ORDER BY last_write_seq DESC, ordinal DESC LIMIT 1",
+                vec![],
+            ))
+            .await?
+        else {
+            return Ok(None);
+        };
+        let turn_id: String = row.try_get("", "turn_id")?;
+        let payload: String = connection
+            .db
+            .query_one_raw(statement(
+                "SELECT payload FROM history_turns WHERE turn_id=?",
+                vec![turn_id.into()],
+            ))
+            .await?
+            .context("terminal Turn item has no committed Turn record")?
+            .try_get("", "payload")?;
+        let history: pl_protocol::TimelineTurn = serde_json::from_str(&payload)?;
+        ensure!(
+            history.turn.state.is_terminal(),
+            "terminal Turn item does not resolve to a terminal Turn record"
+        );
+        Ok(Some(history.turn))
+    }
+
     /// Reads one bounded Turn page, newest Turn first, without activating a Thread owner.
     ///
     /// The page is a keyset over `history_turns.last_ordinal` (index-backed, no offset, no full
@@ -1574,21 +1560,35 @@ impl HistoryStore {
         items.truncate(limit);
         Ok((watermark, ceiling, items, has_more))
     }
+
+    /// Reads one committed timeline item by its durable identity.
+    ///
+    /// The projection owner needs the canonical committed body of an identity whose live window already
+    /// released it (for example the tool result a reliable-output repair names) so the *same* owner can
+    /// still project the repaired fact with its own content version instead of the writer inventing one.
+    /// This is a read of an already-committed fact, never a read-back of the effect being written.
+    pub(crate) async fn item(&self, item_id: &str) -> Result<Option<ThreadItem>> {
+        let Some(connection) = self.reader().await? else {
+            return Ok(None);
+        };
+        let row = connection
+            .db
+            .query_one_raw(statement(
+                "SELECT payload FROM history_items WHERE item_id=?",
+                vec![item_id.to_owned().into()],
+            ))
+            .await?;
+        row.map(|row| {
+            let payload: String = row.try_get("", "payload")?;
+            Ok(serde_json::from_str(&payload)?)
+        })
+        .transpose()
+    }
 }
 
 impl ChatHistory for HistoryStore {
-    fn preview(&self, item: &ChatItem) -> std::result::Result<ChatItem, ChatError> {
-        if item.body.len() <= TIMELINE_ITEM_PREVIEW_BYTES {
-            return Ok(item.clone());
-        }
-        let decoded: ThreadItem = serde_json::from_str(&item.body)
-            .map_err(anyhow::Error::from)
-            .map_err(chat_history_error)?;
-        let mut visible = chat_preview_item(decoded, item.saved).map_err(chat_history_error)?;
-        visible.omitted_bytes = visible.omitted_bytes.saturating_add(item.omitted_bytes);
-        Ok(visible)
-    }
-
+    // 有界预览由 core 的默认 `bounded` 提供：它按 `ContentBlock` 前缀复用裁剪，不再让宿主重新
+    // 解码/重编码整条 JSON 才能压缩一条超长条目。
     async fn latest_allocated_order(&self) -> std::result::Result<u64, ChatError> {
         HistoryStore::latest_allocated_order(self)
             .await
@@ -1610,43 +1610,19 @@ impl ChatHistory for HistoryStore {
             .await
             .map_err(chat_history_error)
     }
-
-    async fn read_body(
-        &self,
-        item_id: &str,
-    ) -> std::result::Result<Option<std::sync::Arc<str>>, ChatError> {
-        let item = self
-            .read_chat_item(item_id)
-            .await
-            .map_err(chat_history_error)?;
-        Ok(item.map(|item| item.body))
-    }
 }
 
 pub(crate) fn chat_item(item: ThreadItem, saved: bool) -> Result<ChatItem> {
-    let body = serde_json::to_string(&item)?;
-    Ok(ChatItem {
-        item_id: item.id,
-        turn_id: item.turn_id,
-        order: item.ordinal,
-        revision: item.revision,
-        part_id: None,
-        body: body.into(),
-        omitted_bytes: 0,
-        saved,
-    })
+    typed_item(item, saved, 0)
 }
 
 fn chat_preview_item(item: ThreadItem, saved: bool) -> Result<ChatItem> {
     let (preview, reference) = preview_timeline_item(&item, TIMELINE_ITEM_PREVIEW_BYTES);
-    let mut visible = chat_item(preview, saved)?;
-    ensure!(
-        visible.body.len() <= TIMELINE_ITEM_PREVIEW_BYTES,
-        "chat item {} cannot be previewed within the byte budget",
-        item.id
-    );
-    visible.omitted_bytes = reference.map_or(0, |reference| reference.omitted_bytes);
-    Ok(visible)
+    typed_item(
+        preview,
+        saved,
+        reference.map_or(0, |reference| reference.omitted_bytes),
+    )
 }
 
 fn chat_history_error(error: anyhow::Error) -> ChatError {
@@ -1862,6 +1838,55 @@ async fn write_tool_delivery(
     tx.execute_raw(statement(
         "UPDATE history_tool_tasks SET revision=?,task_payload=?,delivery_payload=?,last_write_seq=? WHERE call_id=?",
         vec![integer(task.revision)?.into(), serde_json::to_string(&task)?.into(), payload.into(), write_seq.into(), delivery.call_id.clone().into()],
+    ))
+    .await?;
+    Ok(())
+}
+
+/// Folds one repaired resource reference into the delivery the Thread already committed.
+///
+/// The delivery is the durable authority for a tool's full resource set, so a reference the retry
+/// stored after the result was committed is recorded there as well as on the projected item. The
+/// delivery keeps its call identity, outcome and every already-committed reference; an identical
+/// reference is never appended twice, so a repeated repair cannot duplicate the fact or move the
+/// result. A repair whose result is not committed yet is not written here at all: the owner keeps it
+/// pending until the commit that carries the result, so a reference can never land in history
+/// without the delivery it supplements.
+///
+/// This only supplements a durable delivery fact; the canonical timeline item and its content version
+/// are produced by the Thread's single projection owner, never invented here.
+async fn write_tool_delivery_repair(
+    tx: &impl ConnectionTrait,
+    write_seq: i64,
+    repair: &pl_core::thread::cold::OutputRepair,
+) -> Result<()> {
+    let existing = tx
+        .query_one_raw(statement(
+            "SELECT delivery_payload FROM history_tool_tasks WHERE call_id=?",
+            vec![repair.call_id.clone().into()],
+        ))
+        .await?;
+    let Some(row) = existing else {
+        return Ok(());
+    };
+    let Some(stored) = row.try_get::<Option<String>>("", "delivery_payload")? else {
+        return Ok(());
+    };
+    let mut delivery: pl_core::thread::ToolDelivery = serde_json::from_str(&stored)?;
+    let resource = pl_core::context::ContextContent::Resource {
+        reference: repair.reference.clone(),
+    };
+    if delivery.delivered_context.contains(&resource) {
+        return Ok(());
+    }
+    delivery.delivered_context.push(resource);
+    tx.execute_raw(statement(
+        "UPDATE history_tool_tasks SET delivery_payload=?,last_write_seq=? WHERE call_id=?",
+        vec![
+            serde_json::to_string(&delivery)?.into(),
+            write_seq.into(),
+            repair.call_id.clone().into(),
+        ],
     ))
     .await?;
     Ok(())
@@ -2720,8 +2745,10 @@ fn kind_label(kind: ThreadItemKind) -> &'static str {
 mod storage_fault_tests {
     use super::*;
 
+    /// A durable terminal Turn is readable by its own Turn identity, and a later revision of the
+    /// same Turn identity is rejected instead of silently rewriting committed history.
     #[tokio::test]
-    async fn terminal_recovery_uses_effect_sequence_instead_of_item_order() -> Result<()> {
+    async fn terminal_turn_history_is_readable_by_turn_and_rejects_revisions() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let store = HistoryStore::open(&directory.path().join("history.sqlite"), "child").await?;
         let terminal = |id: &str, ordinal: u64| {
@@ -2747,19 +2774,13 @@ mod storage_fault_tests {
             .commit(80, &[terminal("second", 2), terminal("third", 3)], &[])
             .await?;
 
-        let missing = store.terminal_turns_in_effect_range((31, 0), 80, 1).await?;
-        assert_eq!(missing.len(), 1);
-        assert_eq!(missing[0].0, 80);
-        assert_eq!(missing[0].1.turn_id, "second");
-        let next = store.terminal_turns_in_effect_range((80, 2), 80, 1).await?;
-        assert_eq!(next.len(), 1);
-        assert_eq!(next[0].1.turn_id, "third");
-        assert!(
-            store
-                .terminal_turns_in_effect_range((31, 0), 79, 1)
-                .await?
-                .is_empty()
-        );
+        let first = store.items_for_turn("first").await?;
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].id, "turn:first");
+        let committed = store.items_for_turn("second").await?;
+        assert_eq!(committed.len(), 1);
+        assert_eq!(committed[0].revision, 1);
+        assert!(store.items_for_turn("missing").await?.is_empty());
         let mut revised = terminal("second", 2);
         revised.revision = 2;
         assert!(store.commit(90, &[revised], &[]).await.is_err());
@@ -2872,6 +2893,7 @@ mod storage_fault_tests {
                     receipts: &receipts,
                     tasks: &[],
                     deliveries: &[],
+                    delivery_repairs: &[],
                     attempt: None,
                 },
             )
@@ -3067,6 +3089,7 @@ mod storage_fault_tests {
                     receipts: &receipts,
                     tasks: &[],
                     deliveries: &[],
+                    delivery_repairs: &[],
                     attempt: None,
                 },
             )
@@ -3128,6 +3151,7 @@ mod storage_fault_tests {
             status: TaskStatus::Running,
             cancel_requested: false,
             acknowledgement: None,
+            started_sequence: None,
         }];
         let empty = std::collections::BTreeSet::new();
         store
@@ -3141,6 +3165,7 @@ mod storage_fault_tests {
                     receipts: &[],
                     tasks: &tasks,
                     deliveries: &[],
+                    delivery_repairs: &[],
                     attempt: None,
                 },
             )
@@ -3167,6 +3192,7 @@ mod storage_fault_tests {
                     receipts: &[],
                     tasks: &[],
                     deliveries: &[delivery],
+                    delivery_repairs: &[],
                     attempt: None,
                 },
             )

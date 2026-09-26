@@ -148,7 +148,34 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String persistenceBlocked(int count) {
-    return 'Saving is blocked with $count pending update(s) and needs attention. You can continue the conversation.';
+    return 'Saving is blocked with $count pending update(s) and needs attention.';
+  }
+
+  @override
+  String get persistenceExecutionPaused =>
+      'Saving failed; execution is paused.';
+
+  @override
+  String get persistenceSavingBackpressure =>
+      'Storage is under pressure; saving is waiting.';
+
+  @override
+  String get persistenceNewWorkPaused =>
+      'Saving failed; new work is paused while in-flight work winds down.';
+
+  @override
+  String persistenceResumeReadyOtherSession(String session) {
+    return 'Another session “$session” is saved and waiting to resume.';
+  }
+
+  @override
+  String persistenceExecutionPausedOtherSession(String session) {
+    return 'Another session “$session” failed to save; its execution is paused.';
+  }
+
+  @override
+  String persistenceNewWorkPausedOtherSession(String session) {
+    return 'Another session “$session” failed to save; its new work is paused while in-flight work winds down.';
   }
 
   @override
@@ -220,6 +247,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get persistenceQueueRefresh => 'Refresh diagnostics';
 
   @override
+  String get persistenceQueueShowDetails => 'Show diagnostics';
+
+  @override
+  String get persistenceQueueHideDetails => 'Hide diagnostics';
+
+  @override
   String get persistenceHistoryPaused => 'Session history saving is paused';
 
   @override
@@ -229,7 +262,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get persistenceHistoryWriteFailed => 'History save failed';
 
   @override
-  String get persistenceHistoryRetry => 'Retry saving and continue';
+  String get persistenceHistoryRetrySave => 'Retry saving';
+
+  @override
+  String get persistenceHistoryResume => 'Resume execution';
+
+  @override
+  String get persistenceHistoryResumeHint => 'Retry saving to enable resume';
 
   @override
   String get persistenceStatisticsGap =>
@@ -2383,4 +2422,28 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get agentRoleRetired =>
       'This subagent role has been retired. History is read-only.';
+
+  @override
+  String get conversationActivityPreparing => 'Preparing';
+
+  @override
+  String get conversationActivityRunningTool => 'Running';
+
+  @override
+  String get conversationActivitySaveFailed => 'Save failed';
+
+  @override
+  String get conversationActivitySavePaused => 'Saving paused';
+
+  @override
+  String get conversationActivityStoragePressure => 'Storage pressure';
+
+  @override
+  String get conversationActivityResumeReady => 'Saved, waiting to resume';
+
+  @override
+  String get conversationActivityResumeRequired => 'Waiting for save recovery';
+
+  @override
+  String get conversationActivityStopping => 'Stopping';
 }

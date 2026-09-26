@@ -214,10 +214,13 @@ impl BridgeTaskRegistry {
     }
 }
 
-pub async fn subscribe_thread(
-    thread_id: String,
-    state_only: bool,
-) -> Result<BridgeEventSubscription, BridgeError> {
+/// 订阅一个 Thread 的**状态流**：Turn、活动、交互、运行时与 lagged 帧。
+///
+/// 内容不在状态流里：条目与流式正文只由 ChatView 窗口交付。内容帧的过滤发生在生产端
+/// （runtime 的状态流不再转发 `Item*`/`Delta`），所以这里没有“末端丢弃内容帧”的开关，客户端
+/// 也不会再因为过滤内容帧而看到 revision 空洞。状态流的 envelope `revision` 只按状态帧递增，
+/// 与 ChatView 窗口的内容 revision 相互独立。
+pub async fn subscribe_thread(thread_id: String) -> Result<BridgeEventSubscription, BridgeError> {
     let bridge = active_bridge().await?;
     let mut events = bridge
         .studio
@@ -233,13 +236,11 @@ pub async fn subscribe_thread(
     let residency_pin = bridge.studio.pin_thread(&thread_id);
     let producer_task = tokio::spawn(async move {
         let _residency_pin = residency_pin;
-        let mut last_revision = None;
-        let mut last_epoch = None;
         loop {
             tokio::select! {
                 _ = producer_cancel.cancelled() => break,
                 frame = events.recv() => {
-                    let mut frame = match frame {
+                    let frame = match frame {
                         Ok(Some(frame)) => frame,
                         Ok(None) => break,
                         Err(error) => {
@@ -249,34 +250,6 @@ pub async fn subscribe_thread(
                             break;
                         }
                     };
-                    if state_only {
-                        match &mut frame {
-                            pl_protocol::ThreadSubscriptionUpdate::Snapshot { snapshot } => {
-                                last_revision = Some(snapshot.revision);
-                                last_epoch = None;
-                            }
-                            pl_protocol::ThreadSubscriptionUpdate::Notification { notification } => {
-                                let discontinuity = last_revision.is_some_and(|last| last != notification.base_revision)
-                                    || last_epoch.is_some_and(|epoch| epoch != notification.epoch);
-                                if discontinuity && !matches!(notification.notification, pl_protocol::ThreadNotification::Lagged { .. }) {
-                                    let dropped = last_revision
-                                        .map(|last| notification.base_revision.saturating_sub(last))
-                                        .unwrap_or_default();
-                                    notification.notification = pl_protocol::ThreadNotification::Lagged { dropped };
-                                }
-                                last_revision = Some(notification.revision);
-                                last_epoch = Some(notification.epoch);
-                                if matches!(
-                                    notification.notification,
-                                    pl_protocol::ThreadNotification::ItemStarted { .. }
-                                        | pl_protocol::ThreadNotification::ItemDelta { .. }
-                                        | pl_protocol::ThreadNotification::ItemCompleted { .. }
-                                ) {
-                                    continue;
-                                }
-                            }
-                        }
-                    }
                     match bridge_thread_update(frame) {
                         Ok(Some(update)) => {
                             if sender

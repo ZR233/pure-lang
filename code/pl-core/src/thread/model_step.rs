@@ -194,6 +194,45 @@ impl Owner {
         plan: crate::tool::opaque::ToolPlan,
         retry_of: Option<String>,
     ) -> Result<ModelStepOutput, ThreadError> {
+        // The explicit execution phase describes live execution only: clear it on every exit path
+        // (success, failure, cancellation and error) so a projection never reads a phase left over
+        // from a finished step.
+        let attempt_id = input.attempt_id.clone();
+        let result = self.run_step(input, plan, retry_of).await;
+        // The call is over on every exit path — success, failure, cancellation or an early error —
+        // so the live quota is handed back here once: a call that never reserved (or already
+        // released) is a no-op, and a refusal latched during the call becomes the typed fault that
+        // stops new model/tool work. The hand-over check keeps the release from running ahead of the
+        // fact the step published — the batch `run_step` committed is enrolled by `publish`/`admit`,
+        // and only once that really completed does the ceiling come back. Doing it in the wrapper
+        // covers the early returns between the reservation and the provider call that a call-site
+        // release would miss.
+        self.settle_operation_output(&attempt_id);
+        if self.state.model_execution.is_some() {
+            self.state.model_execution = None;
+            self.publish_snapshot();
+        }
+        result
+    }
+
+    /// Publishes the explicit model execution phase at the exact boundary it describes.
+    fn enter_model_execution(&mut self, phase: ModelExecutionPhase) {
+        if self.state.model_execution == Some(phase) {
+            return;
+        }
+        self.state.model_execution = Some(phase);
+        self.publish_snapshot();
+    }
+
+    async fn run_step(
+        &mut self,
+        input: StepInput,
+        plan: crate::tool::opaque::ToolPlan,
+        retry_of: Option<String>,
+    ) -> Result<ModelStepOutput, ThreadError> {
+        // The first boundary is admission, not a provider call: the driver may wait for storage
+        // admission before it even knows whether the context hook runs.
+        self.enter_model_execution(ModelExecutionPhase::Admitting);
         self.ensure_model_admission(&input.cancellation).await?;
         let tools = plan.declarations();
         if input.turn_id.is_empty()
@@ -226,10 +265,19 @@ impl Owner {
             })
         });
         if retry_of.is_none() || correcting {
+            // The context-preparation hook is the only step that may replace or compact the context;
+            // it is the one boundary that can genuinely run a separate preparation model.
+            self.enter_model_execution(ModelExecutionPhase::PreparingContext);
             self.apply_pending_runtime_facts()?;
             self.prepare_context(&input, tools.clone()).await?;
+            // Admission after the hook is a storage/capacity wait again, not context preparation and
+            // not a provider wait.
+            self.enter_model_execution(ModelExecutionPhase::Admitting);
             self.ensure_model_admission(&input.cancellation).await?;
         }
+        // Assembling the message/steering/tool records and the immutable request is request
+        // construction, not context preparation.
+        self.enter_model_execution(ModelExecutionPhase::BuildingRequest);
         let mut records = self.state.context.records.to_vec();
         let (messages, consumed_messages) = if retry_of.is_none() || correcting {
             self.message_context(&input.turn_id)
@@ -277,10 +325,20 @@ impl Owner {
         };
         context.validate_complete()?;
         let tool_context = context.clone();
+        // Reserving the reliable output budget waits for capacity/storage admission, which is a wait
+        // on the host, not on the model implementation.
+        self.enter_model_execution(ModelExecutionPhase::Admitting);
+        // The call may only start once the reliable budget really funds the output it will stream:
+        // this is the admission reservation, and it waits at a storage safety point instead of
+        // starting a call whose result could not be retained.
+        let output_budget = self
+            .reserve_operation_output(&input.attempt_id, &input.cancellation)
+            .await?;
         let (progress, observations) = crate::model::ModelProgressSender::channel(
             self.cold.clone(),
             &self.id,
             &input.attempt_id,
+            output_budget.clone(),
         );
         self.model_progress = Some((input.attempt_id.clone(), observations));
         let request = ModelRequest {
@@ -296,6 +354,9 @@ impl Owner {
             resources: self.resources.clone(),
             cancellation: input.cancellation.clone(),
         };
+        // Preparing the request runs inside the model implementation (freezing, encoding, estimating)
+        // before any provider call exists, so this is still preparation, not a wait for output.
+        self.enter_model_execution(ModelExecutionPhase::PreparingRequest);
         let mut model = self.model.take().ok_or(ThreadError::Closed)?;
         let prepared = self.await_with_mailbox(model.prepare(request)).await;
         self.model = Some(model);
@@ -315,6 +376,9 @@ impl Owner {
         let input_estimate = prepared.input_estimate();
         let request_metadata = prepared.request_metadata().cloned();
         let tool_projection = prepared.tool_projection().cloned();
+        // Capacity and storage admission happen before dispatch; they are waits on the host, not on
+        // the model implementation.
+        self.enter_model_execution(ModelExecutionPhase::Admitting);
         self.capacity.admit(input_estimate)?;
         self.ensure_model_admission(&input.cancellation).await?;
         if !plan.remains_authorized(&self.tools) {
@@ -339,6 +403,11 @@ impl Owner {
         self.state.context = context;
         self.state.consumed_messages = consumed_messages;
         self.state.attempts = attempts.clone().into();
+        // The attempt is now running the prepared provider call; streaming output is observed
+        // through the model progress sender.
+        self.enter_model_execution(ModelExecutionPhase::Running);
+        // The attempt's own "running" row is part of what this call's reliable output ceiling funds.
+        self.claim_output(input.attempt_id.clone());
         self.publish();
         let result = self
             .await_with_mailbox(prepared.execute())
@@ -429,6 +498,9 @@ impl Owner {
             attempt.outcome = outcome;
         }
         self.state.attempts = attempts.into();
+        // This commit carries the answer the attempt reserved its reliable output budget for, so the
+        // store transfers that reservation onto the fact instead of charging the same output twice.
+        self.pending_output_claim = Some(input.attempt_id.clone());
         self.publish();
         result
     }

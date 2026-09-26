@@ -540,23 +540,46 @@ String _threadSubtitle(
 
 class _Footer extends StatelessWidget {
   const _Footer({
+    required this.threadId,
     required this.showTodo,
     required this.todoExpanded,
     required this.onToggleTodo,
+    required this.compact,
+    this.contentKey,
   });
 
+  final String threadId;
   final bool showTodo;
   final bool todoExpanded;
   final VoidCallback? onToggleTodo;
 
+  /// 矮窗口紧凑布局：只收缩 composer 的留白与输入行数，不隐藏任何操作。
+  final bool compact;
+
+  /// footer 区域的可定位句柄（供驱动按区域定位）。
+  final Key? contentKey;
+
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
+    final footer = DecoratedBox(
       decoration: BoxDecoration(color: context.colors.surface),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const _ComposerHost(),
+          // 固定在输入区上方：滚历史时依旧可见，且与 Timeline 解耦。
+          //
+          // 活动条是整条 footer 里**唯一**可伸缩的部分：`Flexible` 把输入区与状态栏
+          // 布局之后的实际剩余高度交给它，因此展开详情只能压缩自己，不可能把输入区
+          // 顶出窗口。输入区与状态栏保持自身固有高度，始终完整可见。
+          //
+          // footer 的总预算由 [AgentWorkspacePane] 按「窗口高度 − 时间线最小可视高度」
+          // 给出；矮窗口时 [compact] 只收起 composer 留白与输入行数，让展开详情保留可读
+          // 高度，同时不隐藏任何操作按钮。
+          Flexible(
+            fit: FlexFit.loose,
+            child: _ConversationActivityHost(threadId: threadId),
+          ),
+          _ComposerHost(compact: compact),
           _StatusBarHost(
             showTodo: showTodo,
             todoExpanded: todoExpanded,
@@ -564,6 +587,43 @@ class _Footer extends StatelessWidget {
           ),
         ],
       ),
+    );
+    return contentKey == null
+        ? footer
+        : KeyedSubtree(key: contentKey, child: footer);
+  }
+}
+
+/// 固定活动条的接线点。
+///
+/// 事实来源是后端 typed 活动投影（`conversationActivityProvider`）：
+/// - 阶段/摘要/并行工具：`ThreadWorkspace.activity`（快照与 `ActivityChanged` 通知）；
+/// - 等待审批/输入：当前选中会话的待处理交互；
+/// - 保存故障/暂停：`ThreadWorkspace.storage`（typed，不从错误字符串解析）；
+/// - 详情：用户展开时由 controller 按活动身份**按需**读取，独立于消息窗口。
+class _ConversationActivityHost extends ConsumerWidget {
+  const _ConversationActivityHost({required this.threadId});
+
+  final String threadId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final view = ref.watch(conversationActivityProvider(threadId)).value;
+    if (view == null) {
+      StudioDriverState.publishConversationActivity(null);
+      return const SizedBox.shrink();
+    }
+    StudioDriverState.publishConversationActivity(view);
+    return ConversationActivityBar(
+      view: view,
+      onExpand: () => ref
+          .read(studioControllerProvider.notifier)
+          .expandActivityDetail(threadId),
+      onCollapse: () => ref
+          .read(studioControllerProvider.notifier)
+          .collapseActivityDetail(threadId),
+      // Driver 可观察的是“实际展开态”，不是 `expandable` 的“可展开能力”。
+      onExpandedChanged: StudioDriverState.publishActivityExpanded,
     );
   }
 }
@@ -601,7 +661,9 @@ class _StatusBarHost extends ConsumerWidget {
 }
 
 class _ComposerHost extends ConsumerWidget {
-  const _ComposerHost();
+  const _ComposerHost({required this.compact});
+
+  final bool compact;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -613,7 +675,7 @@ class _ComposerHost extends ConsumerWidget {
         if (workspace == null) {
           return const SizedBox.shrink();
         }
-        return ComposerDock(workspace: workspace);
+        return ComposerDock(workspace: workspace, compact: compact);
       },
     );
   }

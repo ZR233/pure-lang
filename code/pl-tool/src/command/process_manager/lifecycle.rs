@@ -34,6 +34,9 @@ pub(super) struct CommandLifecycle {
     pub timeout: Duration,
     pub task_cancellation: Option<CancellationToken>,
     pub manager_cancellation: CancellationToken,
+    /// Fires when the durable output capture could no longer continue; terminates the process but
+    /// keeps it classified as an output failure rather than a user cancellation.
+    pub output_failure: CancellationToken,
 }
 
 pub(super) fn spawn_lifecycle_task(
@@ -52,6 +55,13 @@ pub(super) fn spawn_lifecycle_task(
             }
             LifecycleOutcome::Interrupted => {
                 apply_transition(&entry, CommandProcessTransition::Cancel).await;
+                child.cancellation().cancel();
+                child.wait().await
+            }
+            LifecycleOutcome::OutputFailed => {
+                // The read task already recorded the typed reason and applied the terminating
+                // transition before it fired this token; terminate the tree and settle the wait so
+                // the bytes already captured stay readable.
                 child.cancellation().cancel();
                 child.wait().await
             }
@@ -89,6 +99,7 @@ enum LifecycleOutcome {
     Exited(std::result::Result<crate::command::CommandExit, String>),
     TimedOut,
     Interrupted,
+    OutputFailed,
 }
 
 async fn wait_for_lifecycle_outcome(
@@ -105,6 +116,7 @@ async fn wait_for_lifecycle_outcome(
         result = child.wait() => LifecycleOutcome::Exited(result),
         _ = tokio::time::sleep(lifecycle.timeout) => LifecycleOutcome::TimedOut,
         _ = cancelled => LifecycleOutcome::Interrupted,
+        _ = lifecycle.output_failure.cancelled() => LifecycleOutcome::OutputFailed,
         _ = lifecycle.manager_cancellation.cancelled() => LifecycleOutcome::Interrupted,
     }
 }
@@ -117,4 +129,8 @@ pub(super) async fn apply_transition(
     state.apply_transition(transition);
     drop(state);
     entry.notify.notify_waiters();
+    // Every transition can change whether the single capture writer may settle (a stream closed, or
+    // an output failure stopped admission), so wake it to re-check rather than waiting for another
+    // chunk that may never come.
+    entry.capture_wake.notify_one();
 }

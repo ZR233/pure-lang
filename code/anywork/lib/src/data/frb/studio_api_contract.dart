@@ -7,15 +7,6 @@ typedef ThreadModelRouteUpdateResult = ({
   String? warning,
 });
 
-/// 按 item identity 直接读取完整条目正文的可选能力。
-///
-/// Timeline 分页对超出单条预览预算的条目只返回同身份预览；实现本能力的 API 额外
-/// 提供按 identity 读取未经截断 payload 的入口，使 preview 条目可以回源完整正文。
-/// 未实现该能力的 API（例如测试替身）退化为围绕该身份读取一页。
-abstract interface class TimelineItemBodyReader {
-  Future<TimelinePage> readTimelineItem(String threadId, String itemId);
-}
-
 /// 按需读取进程级持久化队列压力的可选能力。
 ///
 /// 队列压力（排队操作数、字节、最老待保存年龄、在途字节与最近错误）是诊断观测，不是权威
@@ -83,6 +74,16 @@ abstract class StudioApi {
     String threadId,
     int faultGeneration,
   );
+
+  /// 显式继续：在保存重试已按同一代数确认后再解除准入闩。
+  ///
+  /// 与 [retryThreadHistory] 是两个动作：重试只把积压事实写下去，本命令才恢复执行。
+  /// 代数过期、后端仍在上报故障或仍有未上交批次时后端会拒绝，调用方按 typed 存储状态重试，
+  /// 绝不本地假定成功或自动恢复。
+  Future<PersistenceQueueSnapshot> resumeThreadHistory(
+    String threadId,
+    int faultGeneration,
+  );
   Future<SettingsStateSnapshot> setModelRole({
     required int expectedSettingsRevision,
     required String roleKey,
@@ -112,6 +113,15 @@ abstract class StudioApi {
   Stream<Object> subscribeProductEvents();
   Stream<ThreadStreamFrame> subscribeThread(String threadId);
   Stream<StudioShutdownProgress> subscribeShutdownProgress();
+
+  /// 按活动身份按需读取当前活动的完整内容（reasoning / 输出正文 / 工具参数与输出）。
+  ///
+  /// 只读，且独立于消息窗口：即使该活动不在窗口里也能读取，不查 SQL 历史。身份不再
+  /// 成立时返回 `superseded` / `ended`，调用方据此丢弃迟到的展开结果。
+  Future<ThreadActivityDetail> readThreadActivityDetail(
+    String threadId,
+    String activityId,
+  );
 
   /// Completes successfully only after native shutdown has reached Stopped.
   /// Cleanup failures preserve the native owner and propagate to the caller.
@@ -228,11 +238,7 @@ AttachmentDraftView _attachmentDraftFromFrb(
 }
 
 class FrbStudioApi
-    implements
-        StudioApi,
-        TimelineItemBodyReader,
-        PersistenceQueueReader,
-        ChatWindowReader {
+    implements StudioApi, PersistenceQueueReader, ChatWindowReader {
   static final startupProgress = ValueNotifier(
     StudioStartupPhase.loadingBridge,
   );
@@ -733,6 +739,22 @@ class FrbStudioApi
   }
 
   @override
+  Future<PersistenceQueueSnapshot> resumeThreadHistory(
+    String threadId,
+    int faultGeneration,
+  ) async {
+    await _ensureReady();
+    return _persistenceQueueFromFrb(
+      await _bridgeCall(
+        () => frb.resumeThreadHistory(
+          threadId: threadId,
+          faultGeneration: BigInt.from(faultGeneration),
+        ),
+      ),
+    );
+  }
+
+  @override
   Future<SettingsStateSnapshot> setModelRole({
     required int expectedSettingsRevision,
     required String roleKey,
@@ -995,7 +1017,7 @@ class FrbStudioApi
       try {
         await _ensureReady();
         final created = await _bridgeCall(
-          () => frb.subscribeThread(threadId: threadId, stateOnly: true),
+          () => frb.subscribeThread(threadId: threadId),
         );
         if (cancelled) {
           await created.cancel();
@@ -1032,6 +1054,22 @@ class FrbStudioApi
       },
     );
     return controller.stream;
+  }
+
+  @override
+  Future<ThreadActivityDetail> readThreadActivityDetail(
+    String threadId,
+    String activityId,
+  ) async {
+    await _ensureReady();
+    return _activityDetailFromFrb(
+      await _bridgeCall(
+        () => frb.readThreadActivityDetail(
+          threadId: threadId,
+          activityId: activityId,
+        ),
+      ),
+    );
   }
 
   @override
@@ -1072,15 +1110,6 @@ class FrbStudioApi
           limit: limit,
         ),
       ),
-    );
-    return _timelinePageFromFrb(page);
-  }
-
-  @override
-  Future<TimelinePage> readTimelineItem(String threadId, String itemId) async {
-    await _ensureReady();
-    final page = await _bridgeCall(
-      () => frb.readTimelineItem(threadId: threadId, itemId: itemId),
     );
     return _timelinePageFromFrb(page);
   }

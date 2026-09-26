@@ -35,27 +35,6 @@ sealed class ThreadStreamFrame {
             baseRevision: baseRevision,
             update: ThreadTurnUpdate(_turnFromFrb(turn)),
           ),
-          itemStarted: (item) => ThreadNotificationFrame(
-            threadId: threadId,
-            revision: revision,
-            epoch: epoch,
-            baseRevision: baseRevision,
-            update: ThreadItemUpsert(_threadItemFromFrb(item)),
-          ),
-          itemDelta: (delta) => ThreadNotificationFrame(
-            threadId: threadId,
-            revision: revision,
-            epoch: epoch,
-            baseRevision: baseRevision,
-            update: ThreadItemDeltaUpdate(_threadItemDeltaFromFrb(delta)),
-          ),
-          itemCompleted: (item) => ThreadNotificationFrame(
-            threadId: threadId,
-            revision: revision,
-            epoch: epoch,
-            baseRevision: baseRevision,
-            update: ThreadItemUpsert(_threadItemFromFrb(item)),
-          ),
           interactionChanged: (interaction) => ThreadNotificationFrame(
             threadId: threadId,
             revision: revision,
@@ -74,6 +53,26 @@ sealed class ThreadStreamFrame {
             update: ThreadRuntimeUpdate(
               runtime: _threadRuntimeFromFrb(runtime),
               todo: _todoFromFrb(runtime.todo),
+            ),
+          ),
+          activityChanged: (activity) => ThreadNotificationFrame(
+            threadId: threadId,
+            revision: revision,
+            epoch: epoch,
+            baseRevision: baseRevision,
+            update: ThreadActivityUpdate(
+              activity: activity == null
+                  ? null
+                  : _threadActivityFromFrb(activity),
+            ),
+          ),
+          storageChanged: (storage) => ThreadNotificationFrame(
+            threadId: threadId,
+            revision: revision,
+            epoch: epoch,
+            baseRevision: baseRevision,
+            update: ThreadStorageUpdate(
+              storage: storage == null ? null : _threadStorageFromFrb(storage),
             ),
           ),
           lagged: (dropped) => ThreadResyncRequiredFrame(
@@ -136,16 +135,21 @@ final class ThreadTurnUpdate extends ThreadWorkspaceUpdate {
   final StudioTurnView turn;
 }
 
-final class ThreadItemUpsert extends ThreadWorkspaceUpdate {
-  const ThreadItemUpsert(this.item);
+/// 后端 typed 当前活动变化；[activity] 为 `null` 表示当前没有活动（清除）。
+///
+/// 活动独立于消息窗口：它只带小型 typed 摘要与身份，正文不在状态流里。
+final class ThreadActivityUpdate extends ThreadWorkspaceUpdate {
+  const ThreadActivityUpdate({required this.activity});
 
-  final ThreadItemView item;
+  final ThreadActivityView? activity;
 }
 
-final class ThreadItemDeltaUpdate extends ThreadWorkspaceUpdate {
-  const ThreadItemDeltaUpdate(this.delta);
+/// 后端 typed 存储状态变化；[storage] 为 `null` 表示当前没有可报告的存储事实（未知，
+/// 不是“健康”）。界面据此显示“等待保存/明确暂停原因”，不从错误文本推断故障。
+final class ThreadStorageUpdate extends ThreadWorkspaceUpdate {
+  const ThreadStorageUpdate({required this.storage});
 
-  final ThreadItemDeltaView delta;
+  final ThreadStorageStateView? storage;
 }
 
 final class ThreadInteractionUpdate extends ThreadWorkspaceUpdate {
@@ -163,18 +167,6 @@ final class ThreadRuntimeUpdate extends ThreadWorkspaceUpdate {
 
   final ThreadRuntimeView runtime;
   final TimelineTodoListUpdate? todo;
-}
-
-class ThreadItemDeltaView {
-  const ThreadItemDeltaView({
-    required this.itemId,
-    required this.revision,
-    required this.state,
-  });
-
-  final String itemId;
-  final int revision;
-  final ThreadItemDeltaStateView state;
 }
 
 class ThreadHistoryPage {
@@ -306,6 +298,184 @@ ThreadWorkspace _threadWorkspaceFromSnapshot(frb.BridgeThreadSnapshot value) {
         ? null
         : _turnFromFrb(value.activeTurn!),
     todo: _todoFromFrb(value.runtime?.todo),
+    activity: value.activity == null
+        ? null
+        : _threadActivityFromFrb(value.activity!),
+    storage: value.storage == null
+        ? null
+        : _threadStorageFromFrb(value.storage!),
+  );
+}
+
+ThreadActivityView _threadActivityFromFrb(
+  frb_activity.BridgeThreadActivity value,
+) {
+  return ThreadActivityView(
+    threadId: value.threadId,
+    identity: value.identity,
+    revision: value.revision.toInt(),
+    turnId: value.turnId,
+    inputId: value.inputId,
+    attemptId: value.attemptId,
+    kind: switch (value.kind) {
+      frb_activity.BridgeThreadActivityKind.preparing =>
+        ThreadActivityKind.preparing,
+      frb_activity.BridgeThreadActivityKind.waitingApi =>
+        ThreadActivityKind.waitingApi,
+      frb_activity.BridgeThreadActivityKind.thinking =>
+        ThreadActivityKind.thinking,
+      frb_activity.BridgeThreadActivityKind.responding =>
+        ThreadActivityKind.responding,
+      frb_activity.BridgeThreadActivityKind.planning =>
+        ThreadActivityKind.planning,
+      frb_activity.BridgeThreadActivityKind.runningTool =>
+        ThreadActivityKind.runningTool,
+      frb_activity.BridgeThreadActivityKind.awaitingApproval =>
+        ThreadActivityKind.awaitingApproval,
+      frb_activity.BridgeThreadActivityKind.awaitingInput =>
+        ThreadActivityKind.awaitingInput,
+      frb_activity.BridgeThreadActivityKind.stopping =>
+        ThreadActivityKind.stopping,
+    },
+    summary: value.summary,
+    summaryTruncated: value.summaryTruncated,
+    tools: ThreadActivityTools(
+      count: value.tools.count,
+      background: value.tools.background,
+      active: [
+        for (final tool in value.tools.active) _activityToolFromFrb(tool),
+      ],
+      latestStarted: value.tools.latestStarted == null
+          ? null
+          : _activityToolFromFrb(value.tools.latestStarted!),
+    ),
+  );
+}
+
+ThreadActivityToolEntry _activityToolFromFrb(
+  frb_activity.BridgeThreadActivityToolEntry value,
+) {
+  return ThreadActivityToolEntry(
+    callId: value.callId,
+    taskId: value.taskId,
+    name: value.name,
+    summary: value.summary,
+    arguments: switch (value.arguments) {
+      frb_activity.BridgeThreadActivityArguments.commandLine =>
+        ThreadActivityArgumentsKind.commandLine,
+      frb_activity.BridgeThreadActivityArguments.opaque =>
+        ThreadActivityArgumentsKind.opaque,
+      frb_activity.BridgeThreadActivityArguments.streaming =>
+        ThreadActivityArgumentsKind.streaming,
+      frb_activity.BridgeThreadActivityArguments.unavailable =>
+        ThreadActivityArgumentsKind.unavailable,
+    },
+    state: _activityToolStateFromFrb(value.state),
+    ordinal: value.ordinal?.toInt(),
+    startedAt: _frbNullableInt(value.startedAt),
+  );
+}
+
+ThreadActivityToolState _activityToolStateFromFrb(
+  frb_activity.BridgeThreadActivityToolState value,
+) {
+  return switch (value) {
+    frb_activity.BridgeThreadActivityToolState.running =>
+      ThreadActivityToolState.running,
+    frb_activity.BridgeThreadActivityToolState.awaitingApproval =>
+      ThreadActivityToolState.awaitingApproval,
+    frb_activity.BridgeThreadActivityToolState.cancelling =>
+      ThreadActivityToolState.cancelling,
+    frb_activity.BridgeThreadActivityToolState.finished =>
+      ThreadActivityToolState.finished,
+  };
+}
+
+ThreadStorageStateView _threadStorageFromFrb(
+  frb_activity.BridgeThreadStorageState value,
+) {
+  return ThreadStorageStateView(
+    fault: switch (value.fault) {
+      frb_activity.BridgeHistoryFault.queueFull => ThreadHistoryFault.queueFull,
+      frb_activity.BridgeHistoryFault.writeFailed =>
+        ThreadHistoryFault.writeFailed,
+      frb_activity.BridgeHistoryFault.writerUnavailable =>
+        ThreadHistoryFault.writerUnavailable,
+      frb_activity.BridgeHistoryFault.noProgress =>
+        ThreadHistoryFault.noProgress,
+      frb_activity.BridgeHistoryFault.checkpointFailed =>
+        ThreadHistoryFault.checkpointFailed,
+      frb_activity.BridgeHistoryFault.blobFailed =>
+        ThreadHistoryFault.blobFailed,
+      null => null,
+    },
+    faultGeneration: value.faultGeneration.toInt(),
+    acceptedSequence: value.acceptedSequence?.toInt(),
+    durableSequence: value.durableSequence?.toInt(),
+    execution: switch (value.execution) {
+      frb_activity.BridgeThreadStorageExecution.running =>
+        ThreadStorageExecution.running,
+      frb_activity.BridgeThreadStorageExecution.pausing =>
+        ThreadStorageExecution.pausing,
+      frb_activity.BridgeThreadStorageExecution.paused =>
+        ThreadStorageExecution.paused,
+    },
+    pressurePaused: value.pressurePaused,
+    resumeRequired: value.resumeRequired,
+    canResume: value.canResume,
+    lastError: value.lastError,
+  );
+}
+
+/// 按活动身份读取的完整详情映射；`revision` 为 `null` 表示纯内存推导，如实保留未知。
+ThreadActivityDetail _activityDetailFromFrb(
+  frb_activity.BridgeThreadActivityDetail value,
+) {
+  return value.when(
+    current: (activity, reasoning, response, tools) =>
+        CurrentThreadActivityDetail(
+          activity: _threadActivityFromFrb(activity),
+          reasoning: [
+            for (final part in reasoning) _activityContentPartFromFrb(part),
+          ],
+          response: [
+            for (final part in response) _activityContentPartFromFrb(part),
+          ],
+          tools: [for (final tool in tools) _activityToolDetailFromFrb(tool)],
+        ),
+    superseded: (activity, requestedActivityId) =>
+        SupersededThreadActivityDetail(
+          activity: _threadActivityFromFrb(activity),
+          requestedActivityId: requestedActivityId,
+        ),
+    ended: (threadId, activityId) =>
+        EndedThreadActivityDetail(threadId: threadId, activityId: activityId),
+  );
+}
+
+ThreadActivityContentPart _activityContentPartFromFrb(
+  frb_activity.BridgeThreadActivityContentPart value,
+) {
+  return ThreadActivityContentPart(
+    itemId: value.itemId,
+    revision: value.revision?.toInt(),
+    complete: value.complete,
+    text: value.text,
+  );
+}
+
+ThreadActivityToolDetail _activityToolDetailFromFrb(
+  frb_activity.BridgeThreadActivityToolDetail value,
+) {
+  return ThreadActivityToolDetail(
+    callId: value.callId,
+    taskId: value.taskId,
+    name: value.name,
+    state: _activityToolStateFromFrb(value.state),
+    arguments: value.arguments,
+    output: value.output,
+    ordinal: value.ordinal?.toInt(),
+    startedAt: _frbNullableInt(value.startedAt),
   );
 }
 
@@ -577,22 +747,6 @@ ThreadInferenceLifecycleView _inferenceLifecycleFromFrb(
         FailedThreadInferenceView(_dateFromUnix(failedAt), error),
     cancelled: (cancelledAt, reason) =>
         CancelledThreadInferenceView(_dateFromUnix(cancelledAt), reason),
-  );
-}
-
-ThreadItemDeltaView _threadItemDeltaFromFrb(
-  frb_item.BridgeThreadItemDelta value,
-) {
-  return ThreadItemDeltaView(
-    itemId: value.itemId,
-    revision: value.revision.toInt(),
-    state: value.delta.when(
-      text: ThreadTextDeltaView.new,
-      thinkingSummary: ThreadThinkingSummaryDeltaView.new,
-      thinkingContent: ThreadThinkingContentDeltaView.new,
-      toolArguments: ThreadToolArgumentsDeltaView.new,
-      toolResult: ThreadToolResultDeltaView.new,
-    ),
   );
 }
 

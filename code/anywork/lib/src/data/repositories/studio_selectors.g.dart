@@ -525,3 +525,136 @@ final class AgentTimelineFamily extends $Family
   @override
   String toString() => r'agentTimelineProvider';
 }
+
+/// 固定活动条的唯一输入。
+///
+/// 完全由后端 typed 活动投影、typed 存储状态与待处理交互派生；展开详情是 controller
+/// 按活动身份**按需**读取的结果（不依赖消息窗口、不查 SQL 历史）。没有任何窗口可见性
+/// 推断或默认阶段。
+///
+/// 待接线：后端状态流暂无 storage 通知，存储事实目前只在快照刷新时更新（见
+/// activity-contract §6/§8）。这里不解析错误字符串、也不在本地猜测“已恢复”。
+
+@ProviderFor(conversationActivity)
+final conversationActivityProvider = ConversationActivityFamily._();
+
+/// 固定活动条的唯一输入。
+///
+/// 完全由后端 typed 活动投影、typed 存储状态与待处理交互派生；展开详情是 controller
+/// 按活动身份**按需**读取的结果（不依赖消息窗口、不查 SQL 历史）。没有任何窗口可见性
+/// 推断或默认阶段。
+///
+/// 待接线：后端状态流暂无 storage 通知，存储事实目前只在快照刷新时更新（见
+/// activity-contract §6/§8）。这里不解析错误字符串、也不在本地猜测“已恢复”。
+
+final class ConversationActivityProvider
+    extends
+        $FunctionalProvider<
+          AsyncValue<ConversationActivityView?>,
+          AsyncValue<ConversationActivityView?>,
+          AsyncValue<ConversationActivityView?>
+        >
+    with $Provider<AsyncValue<ConversationActivityView?>> {
+  /// 固定活动条的唯一输入。
+  ///
+  /// 完全由后端 typed 活动投影、typed 存储状态与待处理交互派生；展开详情是 controller
+  /// 按活动身份**按需**读取的结果（不依赖消息窗口、不查 SQL 历史）。没有任何窗口可见性
+  /// 推断或默认阶段。
+  ///
+  /// 待接线：后端状态流暂无 storage 通知，存储事实目前只在快照刷新时更新（见
+  /// activity-contract §6/§8）。这里不解析错误字符串、也不在本地猜测“已恢复”。
+  ConversationActivityProvider._({
+    required ConversationActivityFamily super.from,
+    required String super.argument,
+  }) : super(
+         retry: null,
+         name: r'conversationActivityProvider',
+         isAutoDispose: true,
+         dependencies: null,
+         $allTransitiveDependencies: null,
+       );
+
+  @override
+  String debugGetCreateSourceHash() => _$conversationActivityHash();
+
+  @override
+  String toString() {
+    return r'conversationActivityProvider'
+        ''
+        '($argument)';
+  }
+
+  @$internal
+  @override
+  $ProviderElement<AsyncValue<ConversationActivityView?>> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  AsyncValue<ConversationActivityView?> create(Ref ref) {
+    final argument = this.argument as String;
+    return conversationActivity(ref, argument);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(AsyncValue<ConversationActivityView?> value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride:
+          $SyncValueProvider<AsyncValue<ConversationActivityView?>>(value),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ConversationActivityProvider && other.argument == argument;
+  }
+
+  @override
+  int get hashCode {
+    return argument.hashCode;
+  }
+}
+
+String _$conversationActivityHash() =>
+    r'b66224605d48c252e2c8c50e200a87cc4d184ce1';
+
+/// 固定活动条的唯一输入。
+///
+/// 完全由后端 typed 活动投影、typed 存储状态与待处理交互派生；展开详情是 controller
+/// 按活动身份**按需**读取的结果（不依赖消息窗口、不查 SQL 历史）。没有任何窗口可见性
+/// 推断或默认阶段。
+///
+/// 待接线：后端状态流暂无 storage 通知，存储事实目前只在快照刷新时更新（见
+/// activity-contract §6/§8）。这里不解析错误字符串、也不在本地猜测“已恢复”。
+
+final class ConversationActivityFamily extends $Family
+    with
+        $FunctionalFamilyOverride<
+          AsyncValue<ConversationActivityView?>,
+          String
+        > {
+  ConversationActivityFamily._()
+    : super(
+        retry: null,
+        name: r'conversationActivityProvider',
+        dependencies: null,
+        $allTransitiveDependencies: null,
+        isAutoDispose: true,
+      );
+
+  /// 固定活动条的唯一输入。
+  ///
+  /// 完全由后端 typed 活动投影、typed 存储状态与待处理交互派生；展开详情是 controller
+  /// 按活动身份**按需**读取的结果（不依赖消息窗口、不查 SQL 历史）。没有任何窗口可见性
+  /// 推断或默认阶段。
+  ///
+  /// 待接线：后端状态流暂无 storage 通知，存储事实目前只在快照刷新时更新（见
+  /// activity-contract §6/§8）。这里不解析错误字符串、也不在本地猜测“已恢复”。
+
+  ConversationActivityProvider call(String threadId) =>
+      ConversationActivityProvider._(argument: threadId, from: this);
+
+  @override
+  String toString() => r'conversationActivityProvider';
+}

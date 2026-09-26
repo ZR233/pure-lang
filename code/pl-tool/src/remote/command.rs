@@ -96,8 +96,10 @@ impl CommandBackend for RemoteCommandBackend {
         _target: &CommandOutputTarget,
         _command: &str,
         _working_directory: &str,
-    ) -> Result<()> {
-        Ok(())
+    ) -> Result<u64> {
+        // The remote helper owns the capture beside the remote workspace and streams it to the live
+        // observer; there is no local fragment, so the local committed length starts at zero.
+        Ok(0)
     }
 
     async fn append_output_chunk(
@@ -105,9 +107,27 @@ impl CommandBackend for RemoteCommandBackend {
         _target: &CommandOutputTarget,
         _stream: CommandCaptureStream,
         _chunk: &[u8],
-    ) -> Result<()> {
+    ) -> Result<u64> {
         // The helper writes the full capture next to the remote workspace while streaming bytes.
-        Ok(())
+        Ok(0)
+    }
+
+    async fn repair_output_chunk(
+        &self,
+        _capture_file: &Path,
+        _stream: CommandCaptureStream,
+        _committed_len: u64,
+        _chunk: &[u8],
+    ) -> Result<u64> {
+        // There is no local fragment for a remote command, so this backend cannot honestly claim a
+        // local repair. A remote capture is stored by the helper; a request for a local repair is
+        // refused rather than reported as a successful store of bytes this side never wrote.
+        Err(PureError::ToolExecutionFailed {
+            tool: "exec".to_string(),
+            error:
+                "the remote command helper owns its capture; there is no local fragment to repair"
+                    .to_string(),
+        })
     }
 
     async fn publish_output(&self, _target: &CommandOutputTarget) -> Result<()> {

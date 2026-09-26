@@ -4,12 +4,11 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
-import 'attachment.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 
-import 'thread_stream/item.dart';
+import 'thread_activity.dart';
 part 'thread_stream.freezed.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
@@ -409,21 +408,22 @@ sealed class BridgeThreadNotification with _$BridgeThreadNotification {
   const factory BridgeThreadNotification.turnCompleted({
     required BridgeTurn turn,
   }) = BridgeThreadNotification_TurnCompleted;
-  const factory BridgeThreadNotification.itemStarted({
-    required BridgeThreadItem item,
-  }) = BridgeThreadNotification_ItemStarted;
-  const factory BridgeThreadNotification.itemDelta({
-    required BridgeThreadItemDelta delta,
-  }) = BridgeThreadNotification_ItemDelta;
-  const factory BridgeThreadNotification.itemCompleted({
-    required BridgeThreadItem item,
-  }) = BridgeThreadNotification_ItemCompleted;
   const factory BridgeThreadNotification.interactionChanged({
     required BridgeInteractionRequest interaction,
   }) = BridgeThreadNotification_InteractionChanged;
   const factory BridgeThreadNotification.threadRuntimeUpdated({
     required BridgeThreadRuntimeSnapshot runtime,
   }) = BridgeThreadNotification_ThreadRuntimeUpdated;
+
+  /// 当前执行活动变化；`None` 表示当前没有活动（Turn 已结束或尚未开始）。
+  const factory BridgeThreadNotification.activityChanged({
+    BridgeThreadActivity? activity,
+  }) = BridgeThreadNotification_ActivityChanged;
+
+  /// Thread 存储状态变化；`None` 表示当前没有可报告的存储事实（未知，不是“健康”）。
+  const factory BridgeThreadNotification.storageChanged({
+    BridgeThreadStorageState? storage,
+  }) = BridgeThreadNotification_StorageChanged;
   const factory BridgeThreadNotification.lagged({required BigInt dropped}) =
       BridgeThreadNotification_Lagged;
 }
@@ -638,6 +638,12 @@ class BridgeThreadSnapshot {
   final BridgeTurn? activeTurn;
   final List<BridgeInteractionRequest> interactions;
   final BridgeThreadRuntimeSnapshot? runtime;
+
+  /// 当前执行活动的权威小摘要；`None` 表示当前没有活动。
+  final BridgeThreadActivity? activity;
+
+  /// Thread 存储状态；`None` 表示没有可报告的存储事实（不是“健康”）。
+  final BridgeThreadStorageState? storage;
   final BridgeThreadRuntimeAvailability runtimeAvailability;
 
   const BridgeThreadSnapshot({
@@ -647,6 +653,8 @@ class BridgeThreadSnapshot {
     this.activeTurn,
     required this.interactions,
     this.runtime,
+    this.activity,
+    this.storage,
     required this.runtimeAvailability,
   });
 
@@ -658,6 +666,8 @@ class BridgeThreadSnapshot {
       activeTurn.hashCode ^
       interactions.hashCode ^
       runtime.hashCode ^
+      activity.hashCode ^
+      storage.hashCode ^
       runtimeAvailability.hashCode;
 
   @override
@@ -671,6 +681,8 @@ class BridgeThreadSnapshot {
           activeTurn == other.activeTurn &&
           interactions == other.interactions &&
           runtime == other.runtime &&
+          activity == other.activity &&
+          storage == other.storage &&
           runtimeAvailability == other.runtimeAvailability;
 }
 

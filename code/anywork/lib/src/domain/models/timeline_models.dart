@@ -378,13 +378,13 @@ String? _commandSummary(String arguments) {
 }
 
 String? _reasoningPartSummary(TimelineEntry part) {
-  final title = _plainReasoningSummary(part.title ?? '');
+  final title = plainReasoningSummary(part.title ?? '');
   if (title != null) {
     return title;
   }
   final lines = part.text.replaceAll('\r\n', '\n').split('\n');
   for (final line in lines) {
-    final summary = _plainReasoningSummary(line);
+    final summary = plainReasoningSummary(line);
     if (summary != null) {
       return summary;
     }
@@ -392,7 +392,11 @@ String? _reasoningPartSummary(TimelineEntry part) {
   return null;
 }
 
-String? _plainReasoningSummary(String value) {
+/// 把一行 reasoning 文本压成无标记的纯文本摘要；空行与注释占位返回 null。
+///
+/// 固定活动条与 Timeline 推理摘要共用这一处映射，避免两处各自实现一套去除
+/// markdown 标记的规则而出现不一致。
+String? plainReasoningSummary(String value) {
   var summary = value.trim();
   if (summary.isEmpty || summary == '<!-- -->') {
     return null;

@@ -95,20 +95,6 @@ impl CallRetention {
     }
 }
 
-/// Durable attempt identity and timing needed to recover a skipped billing effect.
-#[derive(Debug)]
-pub(crate) struct ModelCallFact {
-    /// Effect sequence that admitted this call; the durable recovery cursor.
-    pub(crate) revision: u64,
-    pub(crate) call_id: String,
-    pub(crate) turn_id: String,
-    pub(crate) terminal: bool,
-    pub(crate) retention: Option<String>,
-    pub(crate) started_at: i64,
-    pub(crate) finished_at: Option<i64>,
-    pub(crate) body_ref: Option<String>,
-}
-
 /// 单个 root 会话的费用聚合投影（由调用库 SQL 聚合得到）。
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SessionCostRollup {
@@ -496,59 +482,6 @@ impl CallsStore {
             .admitted_ticket
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1)
-    }
-
-    /// 有界读取一个 Thread 在给定 effect 序号区间内已 durable 的模型调用事实。
-    ///
-    /// 产品观察在 effect 窗口缺口后用它恢复尚未计费的调用事实：已有 `billing_ref`
-    /// 保存了完整计费正文，摘要列无法无损重建它，重复提交会触发身份冲突。按 revision
-    /// 游标分页，根 Thread 与子 Thread 走同一条只读路径。
-    pub(crate) async fn model_call_facts_between(
-        &self,
-        thread_id: &str,
-        after_revision: u64,
-        through_revision: u64,
-        limit: usize,
-    ) -> Result<Vec<ModelCallFact>> {
-        if through_revision < after_revision {
-            return Ok(Vec::new());
-        }
-        let rows = self
-            .writer
-            .db
-            .query_all_raw(statement(
-                "SELECT revision, call_id, turn_id, terminal, retention, started_at, finished_at, body_ref FROM model_calls
-                 WHERE thread_id=? AND revision > ? AND revision <= ? AND billing_ref IS NULL
-                 ORDER BY revision ASC, call_id ASC LIMIT ?",
-                vec![
-                    thread_id.to_owned().into(),
-                    i64::try_from(after_revision)?.into(),
-                    i64::try_from(through_revision)?.into(),
-                    i64::try_from(limit.clamp(1, 4096))?.into(),
-                ],
-            ))
-            .await?;
-        rows.iter().map(model_fact).collect()
-    }
-
-    /// Recover the exact accepted attempt, including its provider receipt and timing.
-    pub(crate) async fn read_attempt_fact(&self, fact: &ModelCallFact) -> Result<AttemptUpdate> {
-        let reference = fact
-            .body_ref
-            .as_deref()
-            .context("model call body is missing")?;
-        let name = blob_file_name(reference).context("invalid model call body reference")?;
-        let body = tokio::fs::read(self.writer.blobs_dir.join(name)).await?;
-        ensure!(
-            pl_core::context::content_hash(&body) == reference,
-            "model call body hash mismatch"
-        );
-        let attempt: AttemptUpdate = serde_json::from_slice(&body)?;
-        ensure!(
-            attempt.attempt_id == fact.call_id && attempt.turn_id == fact.turn_id,
-            "model call body identity mismatch"
-        );
-        Ok(attempt)
     }
 
     /// 按 root 会话聚合费用；调用库是唯一事实源，不依赖进程内缓存。
@@ -1556,19 +1489,6 @@ async fn upsert_attempt(
     ))
     .await?;
     Ok(())
-}
-
-fn model_fact(row: &QueryResult) -> Result<ModelCallFact> {
-    Ok(ModelCallFact {
-        revision: u64::try_from(row.try_get::<i64>("", "revision")?)?,
-        call_id: row.try_get("", "call_id")?,
-        turn_id: row.try_get("", "turn_id")?,
-        terminal: row.try_get::<i64>("", "terminal")? != 0,
-        retention: row.try_get("", "retention")?,
-        started_at: row.try_get("", "started_at")?,
-        finished_at: row.try_get("", "finished_at")?,
-        body_ref: row.try_get("", "body_ref")?,
-    })
 }
 
 fn performance_sample_row(row: &QueryResult) -> Result<PerformanceSampleRow> {

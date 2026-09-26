@@ -9,6 +9,7 @@ import '../types/error.dart';
 import '../types/history.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
+import '../types/thread_activity.dart';
 import '../types/thread_stream.dart';
 import '../types/thread_stream/item.dart';
 
@@ -25,6 +26,19 @@ Future<BridgeThreadSnapshot> readThread({required String threadId}) => RustLib
     .instance
     .api
     .crateApiStudioHandlersHistoryReadThread(threadId: threadId);
+
+/// 按活动身份读取当前完整内容事实（reasoning / 输出正文 / 工具参数与流式输出）。
+///
+/// 只读：不激活 owner、不 flush writer、不改变 revision。身份不再成立时返回 `superseded` /
+/// `ended`，未知 Thread 返回 `NotFound`；客户端据此丢弃迟到的展开请求而不是恢复旧活动。
+Future<BridgeThreadActivityDetail> readThreadActivityDetail({
+  required String threadId,
+  required String activityId,
+}) =>
+    RustLib.instance.api.crateApiStudioHandlersHistoryReadThreadActivityDetail(
+      threadId: threadId,
+      activityId: activityId,
+    );
 
 Future<BridgeThreadTurnPage> listThreadTurns({
   required ListThreadTurnsRequest request,

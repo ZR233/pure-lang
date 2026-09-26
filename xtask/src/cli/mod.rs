@@ -63,8 +63,10 @@ pub(crate) struct ToolOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub(crate) struct ManualGuiOptions {
-    /// Run the regular, stress, or isolated call-statistics acceptance journey.
-    #[arg(long, default_value = "gui", value_parser = ["gui", "stress", "statistics"])]
+    /// Run the regular, stress, single-item long-body stress (`stress-body`,
+    /// `stress-body-large`), isolated call-statistics, realtime, paused
+    /// history-writer, or history-fault retry/resume acceptance journey.
+    #[arg(long, default_value = "gui", value_parser = pl_provider_fixture::GUI_SCENARIOS)]
     pub(crate) scenario: String,
     /// Directory for sanitized evidence (defaults to target/manual-gui/<timestamp>-<pid>).
     #[arg(long, value_name = "DIR")]

@@ -7,14 +7,14 @@ use std::collections::{BTreeSet, HashMap};
 
 use pl_protocol::trace::TraceTextChannel;
 
-use crate::completion::stream::event::{ModelBlockKind, ModelStreamEvent};
+use crate::completion::stream::event::{ModelBlockKind, ModelStreamEvent, ProviderBlockIdentity};
 use crate::runtime::openai::VisibleOutputProtocol;
 
 use super::item::{
     assistant_message_identity, assistant_message_parts, output_item_native_context,
     presentation_item, reasoning_item_id, reasoning_summary_texts,
 };
-use super::{DEFAULT_TEXT_ID, SseStreamEvent, process_sse_events, response_model_observation};
+use super::{SseStreamEvent, process_sse_events, response_model_observation};
 
 /// Stateful OpenAI stream decoder.
 ///
@@ -30,12 +30,20 @@ pub(crate) struct OpenAiStreamDecoder {
     open_reasoning_blocks: HashMap<String, String>,
     next_text_block_ordinal: HashMap<(String, u32), u64>,
     next_reasoning_block_ordinal: HashMap<String, u64>,
+    /// Provider item id announced for each Responses `output_index`.
+    ///
+    /// A delta that omits `item_id` is attributed to the item its `output_index` was announced for,
+    /// never to a synthetic default that could duplicate the real item.
+    output_index_items: HashMap<u32, String>,
+    /// Set when the decoder rejected the stream as a protocol error; later events are dropped.
+    protocol_failed: bool,
 }
 
 #[derive(Debug, Clone)]
 struct OpenTextBlock {
     id: String,
     channel: TraceTextChannel,
+    provider: Option<ProviderBlockIdentity>,
 }
 
 impl OpenAiStreamDecoder {
@@ -50,10 +58,15 @@ impl OpenAiStreamDecoder {
             open_reasoning_blocks: HashMap::new(),
             next_text_block_ordinal: HashMap::new(),
             next_reasoning_block_ordinal: HashMap::new(),
+            output_index_items: HashMap::new(),
+            protocol_failed: false,
         }
     }
 
     pub(crate) fn decode(&mut self, event: &SseStreamEvent) -> Vec<ModelStreamEvent> {
+        if self.protocol_failed {
+            return Vec::new();
+        }
         if matches!(
             event.kind.as_str(),
             "response.completed" | "response.failed" | "response.incomplete"
@@ -79,6 +92,7 @@ impl OpenAiStreamDecoder {
 
         match event.kind.as_str() {
             "response.output_item.added" => {
+                self.remember_output_index(event);
                 if let Some((item_id, channel)) = assistant_message_identity(event.item.as_ref()) {
                     self.text_channels.insert(item_id, channel);
                     return with_response_model_observation(event, Vec::new());
@@ -98,27 +112,83 @@ impl OpenAiStreamDecoder {
                 }
             }
             "response.output_text.delta" => {
-                let item_id = event
-                    .item_id
-                    .clone()
-                    .unwrap_or_else(|| DEFAULT_TEXT_ID.to_string());
+                let Some(delta) = event.delta.clone() else {
+                    return with_response_model_observation(event, Vec::new());
+                };
+                let Some(item_id) = self.event_item_id(event) else {
+                    return self.protocol_failure(
+                        "provider stream protocol error: output text delta carries no item id and no announced output index",
+                    );
+                };
                 let channel = self
                     .text_channels
                     .get(&item_id)
                     .copied()
                     .unwrap_or(TraceTextChannel::Final);
-                if let Some(delta) = event.delta.clone() {
-                    let (block_id, mut events) = self.ensure_text_block_open(
-                        &item_id,
-                        event.content_index.unwrap_or(0).max(0) as u32,
-                        channel,
+                let identity = ProviderBlockIdentity {
+                    item_id: item_id.clone(),
+                    content_index: event.content_index.unwrap_or(0).max(0) as u32,
+                };
+                let (block_id, mut events) = self.ensure_text_block_open(
+                    &item_id,
+                    identity.content_index,
+                    channel,
+                    Some(identity.clone()),
+                );
+                events.push(ModelStreamEvent::text_delta(
+                    block_id,
+                    channel,
+                    delta,
+                    Some(identity),
+                ));
+                return with_response_model_observation(event, events);
+            }
+            "response.reasoning_text.delta" | "response.reasoning_summary_text.delta" => {
+                let Some(delta) = event.delta.clone() else {
+                    return with_response_model_observation(event, Vec::new());
+                };
+                let is_summary = event.kind == "response.reasoning_summary_text.delta";
+                let Some(item_id) = self.event_item_id(event) else {
+                    return self.protocol_failure(
+                        "provider stream protocol error: reasoning delta carries no item id and no announced output index",
                     );
-                    events.push(ModelStreamEvent::text_delta(block_id, channel, delta));
+                };
+                // A summary part is one content part of its item, identified by the provider's
+                // `summary_index`; raw reasoning is one content part identified by its
+                // `content_index`. Both carry the index their terminal presentation part finalizes,
+                // so multiple summaries of one item stay distinct parts instead of collapsing into
+                // index zero and overwriting each other.
+                let content_index = if is_summary {
+                    event.summary_index.unwrap_or(0).max(0) as u32
+                } else {
+                    event.content_index.unwrap_or(0).max(0) as u32
+                };
+                let identity = ProviderBlockIdentity {
+                    item_id: item_id.clone(),
+                    content_index,
+                };
+                if is_summary {
+                    let (block_id, mut events) = self.ensure_reasoning_block_open(&item_id);
+                    events.push(ModelStreamEvent::reasoning_summary_delta(
+                        block_id,
+                        content_index,
+                        delta,
+                        Some(identity),
+                    ));
                     return with_response_model_observation(event, events);
                 }
-                return with_response_model_observation(event, Vec::new());
+                return with_response_model_observation(
+                    event,
+                    vec![ModelStreamEvent::ReasoningRawDelta {
+                        id: item_id,
+                        content_index,
+                        delta,
+                        provider: Some(identity),
+                    }],
+                );
             }
             "response.output_item.done" => {
+                self.remember_output_index(event);
                 if let Some(item) = event.item.as_ref()
                     && let Some((item_id, item_channel)) = assistant_message_identity(Some(item))
                 {
@@ -140,8 +210,20 @@ impl OpenAiStreamDecoder {
                             .iter()
                             .find(|(part_index, _)| *part_index == index)
                             .map(|(_, text)| text.clone());
+                        let identity = ProviderBlockIdentity {
+                            item_id: item_id.clone(),
+                            content_index: index,
+                        };
                         if authoritative_text.is_some() {
-                            events.extend(self.ensure_text_block_open(&item_id, index, channel).1);
+                            events.extend(
+                                self.ensure_text_block_open(
+                                    &item_id,
+                                    index,
+                                    channel,
+                                    Some(identity),
+                                )
+                                .1,
+                            );
                         }
                         if let Some(block) = self.open_text_blocks.remove(&(item_id.clone(), index))
                         {
@@ -149,6 +231,7 @@ impl OpenAiStreamDecoder {
                                 block.id,
                                 channel,
                                 authoritative_text,
+                                block.provider,
                             ));
                         }
                     }
@@ -162,6 +245,10 @@ impl OpenAiStreamDecoder {
                 {
                     let authoritative_summary = reasoning_summary_texts(item);
                     let was_open = self.open_reasoning_blocks.contains_key(&item_id);
+                    let identity = ProviderBlockIdentity {
+                        item_id: item_id.clone(),
+                        content_index: 0,
+                    };
                     let (block_id, mut events) = if authoritative_summary.is_some() {
                         self.ensure_reasoning_block_open(&item_id)
                     } else {
@@ -181,6 +268,7 @@ impl OpenAiStreamDecoder {
                         block_id,
                         Some(item.clone()),
                         authoritative_summary,
+                        Some(identity),
                     ));
                     if let Some(native) = output_item_native_context(item) {
                         events.push(native);
@@ -210,6 +298,46 @@ impl OpenAiStreamDecoder {
         }
     }
 
+    /// Remembers which provider item an `output_index` was announced for.
+    fn remember_output_index(&mut self, event: &SseStreamEvent) {
+        let Some(index) = event.output_index else {
+            return;
+        };
+        let Some(item_id) = event
+            .item
+            .as_ref()
+            .and_then(|item| item.get("id"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            return;
+        };
+        self.output_index_items.insert(index, item_id.to_owned());
+    }
+
+    /// Provider item id of a delta: its own `item_id`, or the item its `output_index` announced.
+    fn event_item_id(&self, event: &SseStreamEvent) -> Option<String> {
+        match event.item_id.as_deref() {
+            Some(item_id) if !item_id.is_empty() => Some(item_id.to_owned()),
+            _ => event
+                .output_index
+                .and_then(|index| self.output_index_items.get(&index).cloned()),
+        }
+    }
+
+    /// Rejects the stream as a protocol error instead of attributing content to a fabricated item.
+    ///
+    /// The failure closes the invocation through the accumulator, so every observation received
+    /// before it is still retained in the failure receipt.
+    fn protocol_failure(&mut self, message: &str) -> Vec<ModelStreamEvent> {
+        self.protocol_failed = true;
+        vec![ModelStreamEvent::Failed {
+            code: Some("invalid_response".to_owned()),
+            http_status: None,
+            retry_after_ms: None,
+            message: message.to_owned(),
+        }]
+    }
+
     fn normalize_fallback_events(
         &mut self,
         events: Vec<ModelStreamEvent>,
@@ -221,8 +349,10 @@ impl OpenAiStreamDecoder {
                     id,
                     kind: ModelBlockKind::Text { channel },
                     provider_metadata,
+                    provider,
                 } => {
-                    let (block_id, mut events) = self.ensure_text_block_open(&id, 0, channel);
+                    let (block_id, mut events) =
+                        self.ensure_text_block_open(&id, 0, channel, provider);
                     if let Some(ModelStreamEvent::BlockOpened {
                         provider_metadata: metadata,
                         ..
@@ -237,6 +367,7 @@ impl OpenAiStreamDecoder {
                     id,
                     kind: ModelBlockKind::ReasoningSummary,
                     provider_metadata,
+                    ..
                 } => {
                     let (block_id, mut events) = self.ensure_reasoning_block_open(&id);
                     if let Some(ModelStreamEvent::BlockOpened {
@@ -255,8 +386,10 @@ impl OpenAiStreamDecoder {
                     field,
                     delta,
                     section_index,
+                    provider,
                 } => {
-                    let (block_id, events) = self.ensure_text_block_open(&id, 0, channel);
+                    let (block_id, events) =
+                        self.ensure_text_block_open(&id, 0, channel, provider.clone());
                     normalized.extend(events);
                     normalized.push(ModelStreamEvent::BlockDelta {
                         id: block_id,
@@ -264,6 +397,7 @@ impl OpenAiStreamDecoder {
                         field,
                         delta,
                         section_index,
+                        provider,
                     });
                 }
                 ModelStreamEvent::BlockDelta {
@@ -272,6 +406,7 @@ impl OpenAiStreamDecoder {
                     field,
                     delta,
                     section_index,
+                    provider,
                 } => {
                     let (block_id, events) = self.ensure_reasoning_block_open(&id);
                     normalized.extend(events);
@@ -281,6 +416,7 @@ impl OpenAiStreamDecoder {
                         field,
                         delta,
                         section_index,
+                        provider,
                     });
                 }
                 ModelStreamEvent::BlockClosed {
@@ -288,11 +424,12 @@ impl OpenAiStreamDecoder {
                     kind: ModelBlockKind::Text { channel },
                     authoritative_content,
                     provider_metadata,
+                    provider,
                 } => {
                     let key = (id.clone(), 0);
                     let was_open = self.open_text_blocks.contains_key(&key);
                     let (block_id, events) = if authoritative_content.is_some() {
-                        self.ensure_text_block_open(&id, 0, channel)
+                        self.ensure_text_block_open(&id, 0, channel, provider.clone())
                     } else {
                         (id.clone(), Vec::new())
                     };
@@ -300,16 +437,17 @@ impl OpenAiStreamDecoder {
                     if authoritative_content.is_none() && !was_open {
                         continue;
                     }
-                    let block_id = self
+                    let (block_id, provider) = self
                         .open_text_blocks
                         .remove(&key)
-                        .map(|block| block.id)
-                        .unwrap_or(block_id);
+                        .map(|block| (block.id, block.provider))
+                        .unwrap_or((block_id, provider));
                     normalized.push(ModelStreamEvent::BlockClosed {
                         id: block_id,
                         kind: ModelBlockKind::Text { channel },
                         authoritative_content,
                         provider_metadata,
+                        provider,
                     });
                 }
                 ModelStreamEvent::BlockClosed {
@@ -317,6 +455,7 @@ impl OpenAiStreamDecoder {
                     kind: ModelBlockKind::ReasoningSummary,
                     authoritative_content,
                     provider_metadata,
+                    provider,
                 } => {
                     let was_open = self.open_reasoning_blocks.contains_key(&id);
                     let (block_id, events) = if authoritative_content.is_some() {
@@ -334,6 +473,7 @@ impl OpenAiStreamDecoder {
                         kind: ModelBlockKind::ReasoningSummary,
                         authoritative_content,
                         provider_metadata,
+                        provider,
                     });
                 }
                 event @ (ModelStreamEvent::ToolInputStarted { .. }
@@ -358,6 +498,7 @@ impl OpenAiStreamDecoder {
         item_id: &str,
         content_index: u32,
         channel: TraceTextChannel,
+        provider: Option<ProviderBlockIdentity>,
     ) -> (String, Vec<ModelStreamEvent>) {
         let key = (item_id.to_owned(), content_index);
         if let Some(block) = self.open_text_blocks.get(&key)
@@ -371,6 +512,7 @@ impl OpenAiStreamDecoder {
                 block.id,
                 block.channel,
                 None,
+                block.provider,
             ));
         }
         let block_id = self.next_text_block_id(item_id, content_index);
@@ -379,9 +521,14 @@ impl OpenAiStreamDecoder {
             OpenTextBlock {
                 id: block_id.clone(),
                 channel,
+                provider: provider.clone(),
             },
         );
-        events.push(ModelStreamEvent::text_started(block_id.clone(), channel));
+        events.push(ModelStreamEvent::text_started(
+            block_id.clone(),
+            channel,
+            provider,
+        ));
         (block_id, events)
     }
 
@@ -394,7 +541,14 @@ impl OpenAiStreamDecoder {
             .insert(item_id.to_string(), block_id.clone());
         (
             block_id.clone(),
-            vec![ModelStreamEvent::reasoning_summary_started(block_id, None)],
+            vec![ModelStreamEvent::reasoning_summary_started(
+                block_id,
+                None,
+                Some(ProviderBlockIdentity {
+                    item_id: item_id.to_string(),
+                    content_index: 0,
+                }),
+            )],
         )
     }
 
@@ -405,11 +559,18 @@ impl OpenAiStreamDecoder {
                 block.id,
                 block.channel,
                 None,
+                block.provider,
             ));
         }
-        for (_, block_id) in std::mem::take(&mut self.open_reasoning_blocks) {
+        for (item_id, block_id) in std::mem::take(&mut self.open_reasoning_blocks) {
             events.push(ModelStreamEvent::reasoning_summary_completed(
-                block_id, None, None,
+                block_id,
+                None,
+                None,
+                Some(ProviderBlockIdentity {
+                    item_id,
+                    content_index: 0,
+                }),
             ));
         }
         events

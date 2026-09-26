@@ -220,19 +220,3 @@ pub enum BridgeThreadInferenceState {
         reason: String,
     },
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeThreadItemDelta {
-    pub item_id: String,
-    pub revision: u64,
-    pub delta: BridgeThreadItemDeltaState,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BridgeThreadItemDeltaState {
-    Text { delta: String },
-    ThinkingSummary { chunk_index: u32, delta: String },
-    ThinkingContent { chunk_index: u32, delta: String },
-    ToolArguments { delta: String },
-    ToolResult { delta: String },
-}

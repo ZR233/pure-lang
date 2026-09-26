@@ -14,10 +14,28 @@ pub(super) enum MailboxCommand {
         oneshot::Sender<Result<u64, ThreadError>>,
     ),
     QueueRuntimeFacts(Vec<RuntimeFact>, oneshot::Sender<Result<(), ThreadError>>),
+    /// One accepted increment of a running tool call's live output.
+    ///
+    /// The command carries only what changed — one chunk, or the whole bounded window after the
+    /// producer rolled over — so a progress report never ships the accumulated text back to the
+    /// owner.
     ToolProgress {
         caller: String,
         executor: crate::tool::opaque::ExecutionAuthority,
-        content: Vec<ContextContent>,
+        update: crate::model::ToolProgressUpdate,
+        reply: oneshot::Sender<Result<(), ThreadError>>,
+    },
+    /// A running tool's accepted output could not be stored; latch the typed fault now.
+    ///
+    /// The producer reports this through the same reliable, bounded channel it already uses for
+    /// progress, so a capture write or archive that failed stops other model/tool admission before
+    /// the call returns instead of only when `execute` unwinds. The fault keeps its
+    /// [`crate::thread::cold::OutputRetryObligation`], so the pause stays until that exact obligation
+    /// is retried and its bytes really stored.
+    ToolOutputStorageFault {
+        caller: String,
+        executor: crate::tool::opaque::ExecutionAuthority,
+        fault: Arc<cold::OutputStorageFault>,
         reply: oneshot::Sender<Result<(), ThreadError>>,
     },
     QueueModelUpdate(
@@ -70,6 +88,32 @@ pub(super) enum MailboxCommand {
         oneshot::Sender<Result<input::InputRecord, ThreadError>>,
     ),
     RetryToolCommits(oneshot::Sender<Result<(), ThreadError>>),
+    /// Continues new model/tool admission after a hard storage fault was recovered.
+    ///
+    /// The explicit resume must reach an owner that is already *inside* a running Turn: a paused
+    /// Turn waits at a storage safety point (`await_storage_admission`) and only services this
+    /// mailbox, so a resume that only travelled the outer command channel could never release the
+    /// pause it was sent to release. Routing it here keeps one path for both idle and in-flight
+    /// owners instead of two ladders with different reachability.
+    ResumeStorage {
+        generation: u64,
+        reply: oneshot::Sender<Result<(), ThreadError>>,
+    },
+    /// Re-runs the accepted output the current fault owes and clears the obligation on success.
+    ///
+    /// Like the resume control, it must reach an owner that is already inside a running or paused
+    /// Turn, so it travels this mailbox. It only clears the obligation; the generation, backend
+    /// verdict and durability fence are still verified by the explicit resume, so this is an
+    /// idempotent retry rather than a release.
+    RetryOutputStorage(oneshot::Sender<Result<(), ThreadError>>),
+    /// Makes every already-published fact durable, keeping the target fixed at request time.
+    ///
+    /// An explicit flush must reach an owner that is already *inside* a running or paused Turn, so
+    /// it travels this mailbox like the resume control instead of the outer command channel: a
+    /// paused Turn only services this mailbox, and a flush waiting on the outer channel there would
+    /// wait for a Turn that cannot end on its own. The target is the admitted watermark this owner
+    /// has when it handles the request, so a later admission never extends the barrier.
+    Flush(oneshot::Sender<Result<(), ThreadError>>),
     ToolCancelTask {
         caller: String,
         authorization: Option<crate::tool::opaque::ToolAuthorization>,
@@ -113,27 +157,19 @@ impl Owner {
             MailboxCommand::ToolProgress {
                 caller,
                 executor,
-                content,
+                update,
                 reply,
             } => {
-                let result = if self.state.lifecycle != ThreadLifecycle::Open
-                    || self.interrupt.is_closing()
-                {
-                    Err(ThreadError::Closed)
-                } else if !self
-                    .state
-                    .tasks
-                    .get(&caller)
-                    .is_some_and(|task| task.status == task::TaskStatus::Running)
-                {
-                    Err(ThreadError::TaskAccessExpired)
-                } else if !executor.remains_authorized(&self.tools) {
-                    Err(ThreadError::ToolPermissionRevoked)
-                } else {
-                    self.state.tool_progress.insert(caller, content);
-                    self.publish_snapshot();
-                    Ok(())
-                };
+                let result = self.report_tool_progress(caller, executor, update);
+                let _ = reply.send(result);
+            }
+            MailboxCommand::ToolOutputStorageFault {
+                caller,
+                executor,
+                fault,
+                reply,
+            } => {
+                let result = self.report_tool_output_storage_fault(caller, executor, fault);
                 let _ = reply.send(result);
             }
             MailboxCommand::QueueModelUpdate(update, precondition, mutations, reply) => {
@@ -307,6 +343,14 @@ impl Owner {
             MailboxCommand::RetryToolCommits(reply) => {
                 let _ = reply.send(self.retry_tool_commits());
             }
+            MailboxCommand::ResumeStorage { generation, reply } => {
+                let result = if self.interrupt.is_closing() {
+                    Err(ThreadError::Closed)
+                } else {
+                    self.resume_storage(generation)
+                };
+                let _ = reply.send(result);
+            }
             MailboxCommand::ToolCancelTask {
                 caller,
                 authorization,
@@ -375,6 +419,29 @@ impl Owner {
             } => {
                 let _ = reply.send(self.wake_accepted_message(&id, sequence, options));
             }
+            // Handled by `dispatch_mailbox`, which is the only place that may await the machine.
+            MailboxCommand::Flush(reply) | MailboxCommand::RetryOutputStorage(reply) => {
+                let _ = reply.send(Err(ThreadError::Closed));
+            }
+        }
+    }
+
+    /// Services one mailbox command, awaiting the ones that need the machine.
+    ///
+    /// An explicit flush is the only command that has to run the (async) durability barrier, and it
+    /// must be reachable from inside a running or paused Turn — the very place a sync handler cannot
+    /// await. Everything else stays synchronous, so the common path costs no extra state machine.
+    pub(super) async fn dispatch_mailbox(&mut self, command: MailboxCommand) {
+        match command {
+            MailboxCommand::Flush(reply) => {
+                let result = self.flush_cold().await;
+                let _ = reply.send(result);
+            }
+            MailboxCommand::RetryOutputStorage(reply) => {
+                let result = self.retry_output_obligation().await;
+                let _ = reply.send(result);
+            }
+            other => self.process_mailbox(other),
         }
     }
 
@@ -395,12 +462,28 @@ impl Owner {
                     if changed.is_ok() { self.publish_snapshot(); }
                     else { self.model_progress = None; }
                 },
+                refusal = self.output_refusal_rx.changed() => {
+                    // A producer that could not retain the next chunk reports it here the moment it
+                    // happens: a slow tool would otherwise hold the typed fault and the admission
+                    // block invisible until it finally returned. The latching is idempotent, so the
+                    // release path observing the same refusal again is a no-op.
+                    if refusal.is_ok() {
+                        let reported = self.output_refusal_rx.borrow_and_update().clone();
+                        if let Some(refusal) = reported {
+                            self.latch_output_budget_fault(
+                                &refusal.operation_id,
+                                refusal.accepted,
+                                refusal.limit,
+                            );
+                        }
+                    }
+                },
                 Some(completion) = futures::StreamExt::next(&mut self.background), if !self.background.is_empty() => {
                     self.finish_background(completion);
                 },
                 message = self.mailbox.recv(), if !self.mailbox.is_closed() || !self.mailbox.is_empty() => {
                     if let Some(message) = message {
-                        self.process_mailbox(message);
+                        self.dispatch_mailbox(message).await;
                     }
                 }
             }

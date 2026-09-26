@@ -4,6 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 
+// 活动/存储 DTO 定义在兄弟模块 `thread_activity`，由 `types` 重导出；这里显式引入，不复制定义，
+// 也不做 `pub use` 以免与 `thread_activity::*` 产生同名 glob 歧义。
+use super::{BridgeThreadActivity, BridgeThreadStorageState};
+
 pub mod item;
 
 pub use item::*;
@@ -41,20 +45,19 @@ pub enum BridgeThreadNotification {
     TurnCompleted {
         turn: Box<BridgeTurn>,
     },
-    ItemStarted {
-        item: Box<BridgeThreadItem>,
-    },
-    ItemDelta {
-        delta: Box<BridgeThreadItemDelta>,
-    },
-    ItemCompleted {
-        item: Box<BridgeThreadItem>,
-    },
     InteractionChanged {
         interaction: Box<BridgeInteractionRequest>,
     },
     ThreadRuntimeUpdated {
         runtime: Box<BridgeThreadRuntimeSnapshot>,
+    },
+    /// 当前执行活动变化；`None` 表示当前没有活动（Turn 已结束或尚未开始）。
+    ActivityChanged {
+        activity: Option<Box<BridgeThreadActivity>>,
+    },
+    /// Thread 存储状态变化；`None` 表示当前没有可报告的存储事实（未知，不是“健康”）。
+    StorageChanged {
+        storage: Option<Box<BridgeThreadStorageState>>,
     },
     Lagged {
         dropped: u64,
@@ -69,6 +72,10 @@ pub struct BridgeThreadSnapshot {
     pub active_turn: Option<BridgeTurn>,
     pub interactions: Vec<BridgeInteractionRequest>,
     pub runtime: Option<BridgeThreadRuntimeSnapshot>,
+    /// 当前执行活动的权威小摘要；`None` 表示当前没有活动。
+    pub activity: Option<BridgeThreadActivity>,
+    /// Thread 存储状态；`None` 表示没有可报告的存储事实（不是“健康”）。
+    pub storage: Option<BridgeThreadStorageState>,
     pub runtime_availability: BridgeThreadRuntimeAvailability,
 }
 

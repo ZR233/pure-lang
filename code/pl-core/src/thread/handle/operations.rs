@@ -130,6 +130,8 @@ impl ThreadHandle {
         let (mailbox, mailbox_receiver) = mpsc::channel(64);
         let interrupt = cancellation::InterruptHandle::default();
         let (publish, snapshots) = watch::channel(published.clone());
+        let (output_refusals, output_refusal_rx) =
+            watch::channel::<Option<crate::model::OutputRefusal>>(None);
         let tools = crate::tool::opaque::ToolManager::with_discovery(&state.discovered_tools);
         let effect_window = Arc::new(EffectWindow::new());
         let thread_id = id.clone();
@@ -165,6 +167,20 @@ impl ThreadHandle {
             pending_effects: Default::default(),
             cold: None,
             cold_error: None,
+            fault_fence: None,
+            store_fault_generation: None,
+            verified_recovery_generation: None,
+            local_fault: None,
+            output_obligations: Default::default(),
+            pending_output_repairs: Default::default(),
+            satisfied_output_obligations: Default::default(),
+            output_backpressure: false,
+            threshold_paused: false,
+            operation_budgets: Default::default(),
+            output_refusals,
+            output_refusal_rx,
+            deferred_output_releases: Default::default(),
+            pending_output_claim: None,
             resources: None,
             retry_plan: None,
             published,
@@ -766,11 +782,67 @@ impl ThreadHandle {
         response.await.map_err(|_| ThreadError::Closed)?
     }
 
+    /// Continues new model/tool admission after a hard storage fault was recovered.
+    ///
+    /// `generation` is the fault generation the caller verified, taken from the reported typed
+    /// storage state. A stale generation, a store that still reports a fault, a batch the store has
+    /// not admitted or a fence that is not durable yet is refused: releasing the pause is a fact
+    /// about the recovery, not a button. A caller that was refused because the fence is not durable
+    /// retries the save (`flush`/history retry) and asks again instead of waiting inside this call.
+    /// Pressure-only pauses need no resume and resume by themselves.
+    ///
+    /// The request travels the bounded mailbox rather than the outer command channel so an owner
+    /// that is paused *inside* a running Turn can still receive it: the paused Turn services the
+    /// mailbox at its storage safety point and never returns to the outer loop until it is released.
+    ///
+    /// # Errors
+    /// Rejects a stale generation, an unhealthy store, an unfinished durability fence or a released
+    /// owner.
+    pub async fn resume_storage(&self, generation: u64) -> Result<(), ThreadError> {
+        let (reply, response) = oneshot::channel();
+        self.mailbox
+            .send(super::mailbox::MailboxCommand::ResumeStorage { generation, reply })
+            .await
+            .map_err(|_| ThreadError::Closed)?;
+        response.await.map_err(|_| ThreadError::Closed)?
+    }
+
+    /// Re-runs the accepted output the current storage fault owes, without releasing the pause.
+    ///
+    /// A failed capture write or archive leaves a typed, retriable obligation (see
+    /// [`crate::thread::cold::OutputStorageFault`]): the bytes the producer accepted are kept, and
+    /// this call re-saves exactly those bytes under their stable identity. It never reruns the tool
+    /// and a repeated call is idempotent, so a caller can retry safely. Success only clears the
+    /// obligation; the explicit [`Self::resume_storage`] still verifies the fault generation, the
+    /// backend's own recovery verdict and the durability fence, so the pause is never released by
+    /// the retry alone. With no owed obligation this is a no-op.
+    ///
+    /// The request travels the bounded mailbox so an owner that is paused *inside* a running Turn can
+    /// still receive it.
+    ///
+    /// # Errors
+    /// Returns the retry's own typed storage failure (the obligation stays owed) or
+    /// [`ThreadError::StorageRecoveryUnverified`] when the attached backend cannot own the
+    /// obligation, or [`ThreadError::Closed`] when the owner is gone.
+    pub async fn retry_output_storage(&self) -> Result<(), ThreadError> {
+        let (reply, response) = oneshot::channel();
+        self.mailbox
+            .send(super::mailbox::MailboxCommand::RetryOutputStorage(reply))
+            .await
+            .map_err(|_| ThreadError::Closed)?;
+        response.await.map_err(|_| ThreadError::Closed)?
+    }
+
     /// Retries pending admissions and waits for durability without rolling back runtime facts.
     ///
     /// A released Thread already satisfies this barrier: closing only confirms after the admitted
     /// watermark covered the final commit, so live observation can finish projecting a closed
     /// Thread without a live owner.
+    ///
+    /// The request reaches an owner that is already inside a running or paused Turn: it travels the
+    /// mailbox the Turn services at every storage safety point, and the durability target is fixed
+    /// when the owner handles it. An explicit flush therefore still has a reachable fixed-target
+    /// meaning while a Turn is paused, instead of waiting on a Turn that cannot end on its own.
     ///
     /// # Errors
     /// Returns storage failure, or an unavailable owner that never confirmed a durable close.
@@ -779,7 +851,18 @@ impl ThreadHandle {
             return Ok(());
         }
         let (reply, response) = oneshot::channel();
-        if self.commands.send(Command::Flush(reply)).await.is_err() {
+        // The flush travels the bounded mailbox rather than the outer command channel so an owner
+        // that is *inside* a running or paused Turn can still service it at a storage safety point.
+        // A paused Turn only returns to the outer loop once it is released, so a flush sent there
+        // could never reach it: the request itself would wait for the very Turn it is meant to make
+        // durable. The admitted watermark is fixed when the owner handles it, so a later admission
+        // never extends the barrier.
+        if self
+            .mailbox
+            .send(super::mailbox::MailboxCommand::Flush(reply))
+            .await
+            .is_err()
+        {
             return self.settled_flush();
         }
         match response.await {

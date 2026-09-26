@@ -9,6 +9,8 @@ use pl_tool::mcp::McpRuntimeHandle;
 
 mod attachment_drafts;
 mod background_task;
+pub(crate) mod chat_item;
+mod chat_window;
 mod history;
 mod lifecycle;
 mod lsp_state;
@@ -29,6 +31,7 @@ mod thread_service;
 mod thread_stream;
 pub(in crate::studio) mod timeline;
 mod tool_refresh;
+pub use chat_window::{ChatWindowHandle, ChatWindowStream};
 pub use thread_stream::StudioThreadSubscription;
 mod thread_observation;
 mod thread_title;
@@ -269,6 +272,35 @@ impl StudioRuntime {
             .thread_persistence()
             .retry_history(thread_id, fault_generation)
             .await?;
+        // The reliable writer's backlog and a producer's failed capture/archive are two independent
+        // obligations: a healthy history write never stands in for the archive that failed. The same
+        // GUI "retry save" action therefore also re-runs the active owner's owed output, through the
+        // one CoreHandle, before the caller verifies the fence with `resume_thread_history`. A retry
+        // that is not yet durable surfaces its typed failure and leaves the Thread paused; only its
+        // success lets the existing explicit resume release the latch.
+        if let Some(thread) = self.threads.thread(thread_id) {
+            thread.retry_output_storage().await?;
+        }
+        Ok(self.persistence_queue_snapshot())
+    }
+
+    /// 硬故障恢复后的显式继续：只有当保存故障确实按 `fault_generation` 恢复后才解除准入闩。
+    ///
+    /// 这是与 [`Self::retry_thread_history`] **分开**的第二个动作。重试保存只负责把积压事实写下去，
+    /// 绝不自行恢复模型/工具调用；本命令把调用方核验过的代数交给驻留 owner，由 owner 重新读取
+    /// 后端 typed 报告，只有在代数匹配、故障已消失且每个已发布批次都已上交时才解除闩锁，随后
+    /// 才能开始下一轮推理。代数过期、仍在上报故障或仍有未上交批次都会被拒绝，所以“继续”是恢复
+    /// 的事实回执，而不是只改变外观的按钮。
+    ///
+    /// 不驻留的 Thread 没有活跃 owner，也就没有活跃的准入闩：此时返回成功且不激活任何 Thread。
+    pub async fn resume_thread_history(
+        &self,
+        thread_id: &str,
+        fault_generation: u64,
+    ) -> Result<pl_protocol::PersistenceQueueSnapshot> {
+        if let Some(thread) = self.threads.thread(thread_id) {
+            thread.resume_storage(fault_generation).await?;
+        }
         Ok(self.persistence_queue_snapshot())
     }
 

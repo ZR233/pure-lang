@@ -31,13 +31,57 @@ Future<Map<String, dynamic>> waitForSnapshot(
 String selectedThread(Map<String, dynamic> snapshot) =>
     (snapshot['navigation'] as Map)['selectedThreadId'] as String;
 
+/// Native content-window capacity, the same bound the stress probe saturates.
+///
+/// The reading window is the shared `ChatView` window in `pl-core/src/chat.rs`
+/// (`WINDOW_ITEMS = 96`): a focus paints `INITIAL_ITEMS = 32` and each page adds
+/// up to `PAGE_ITEMS = 32` until the window is trimmed back to this capacity.
+/// The Driver `timelineWindow.itemIds` mirrors that window, so the list must stay
+/// unique and within this capacity; there is no `historyCount`/`overlayCount`
+/// field to fall back on.
+const _windowCapacityItems = 96;
+
 int boundedWindow(Map<String, dynamic> snapshot) {
   final window = snapshot['timelineWindow'] as Map;
   final ids = (window['itemIds'] as List).cast<String>();
-  if (ids.length > 96 || ids.toSet().length != ids.length) {
+  // The typed contract reports `windowItemCount` for the same window; a missing
+  // or inconsistent field is an observation failure, never a silent pass.
+  if (window['windowItemCount'] != ids.length ||
+      ids.length > _windowCapacityItems ||
+      ids.toSet().length != ids.length) {
     throw StateError('invalid window: ${ids.length} items');
   }
   return ids.length;
+}
+
+/// Fixture session 1 replies with `Long body 1: ` + `content ` repeated 16_384
+/// times (see `gui_stress_script`), so the complete assistant body is
+/// 13 + 16_384 * 8 = 131_085 UTF-16 code units. That is below the native 256 KiB
+/// timeline budget, so the new contract must show the whole body without a
+/// manual full-body load. A truncated preview (for example 8192 code units) is
+/// not a complete body.
+const _largeSessionPrefix = 'Long body 1: ';
+const _largeSessionCharacters = 131085;
+
+/// The longest row body text in the snapshot, or null when none is available.
+/// The multi-item stress fixture delivers its large reply as one message, so the
+/// longest row is that assistant body.
+Map<String, Object?>? _largestAssistantBody(Map<String, dynamic> snapshot) {
+  final workspace = snapshot['workspace'];
+  if (workspace is! Map) return null;
+  final timeline = workspace['timeline'];
+  if (timeline is! List) return null;
+  Map<String, Object?>? best;
+  for (final row in timeline) {
+    if (row is! Map) continue;
+    final id = row['id'];
+    final text = row['text'];
+    if (id is! String || text is! String) continue;
+    if (best == null || text.length > (best['text'] as String).length) {
+      best = {'id': id, 'text': text};
+    }
+  }
+  return best;
 }
 
 bool settled(Map<String, dynamic> snapshot, String threadId) {
@@ -81,7 +125,8 @@ Future<void> main(List<String> args) async {
       'first session',
     );
     final originalId = selectedThread(first);
-    if (!settled(first, originalId) || boundedWindow(first) != 96) {
+    if (!settled(first, originalId) ||
+        boundedWindow(first) != _windowCapacityItems) {
       throw StateError('original stress session did not settle');
     }
     final ids = <String>{originalId};
@@ -98,8 +143,16 @@ Future<void> main(List<String> args) async {
         'new session $ordinal',
       );
       await stage.writeAsString('session_${ordinal}_composer');
-      await driver.waitFor(find.byValueKey('start-page-selectors'));
-      await driver.waitFor(find.byValueKey('composer-input'));
+      // `FlutterDriver.waitFor` defaults to no timeout, so every finder wait here
+      // carries an explicit deadline instead of hanging the host.
+      await driver.waitFor(
+        find.byValueKey('start-page-selectors'),
+        timeout: const Duration(seconds: 30),
+      );
+      await driver.waitFor(
+        find.byValueKey('composer-input'),
+        timeout: const Duration(seconds: 30),
+      );
       await driver.tap(find.byValueKey('composer-input'));
       final prompt = '${args[2]} $ordinal';
       await driver.enterText(prompt);
@@ -142,18 +195,52 @@ Future<void> main(List<String> args) async {
       if ((finished['sidebarDirectory'] as Map)['count'] < ids.length) {
         throw StateError('session directory omitted $id');
       }
-      final previewed =
-          ((finished['timelineWindow'] as Map)['previewedItemIds'] as List)
-              .length;
-      if (ordinal == 1 && previewed == 0) {
-        throw StateError('large response did not enter lazy body preview');
-      }
+      final window = finished['timelineWindow'] as Map;
+      final previewed = (window['previewedItemIds'] as List).length;
+      final pendingBodies = (window['pendingItemBodyIds'] as List).length;
+      final body = _largestAssistantBody(finished);
+      final bodyText = body?['text'] as String?;
+      final bodyId = body?['id'] as String?;
       sessions.add({
         'ordinal': ordinal,
         'threadId': id,
         'windowItems': countInWindow,
         'previewedBodies': previewed,
+        'pendingBodies': pendingBodies,
+        'assistantCharacters': bodyText?.length,
       });
+      if (ordinal == 1) {
+        // The large reply must be delivered whole, without falling back to a
+        // lazy body preview or awaiting a manual full-body load. The previous
+        // assertion that a large response *must* enter lazy preview checked the
+        // removed 8 KiB Dart truncation and is deliberately not kept.
+        if (previewed != 0) {
+          throw StateError(
+            'large response fell back to a lazy body preview: $previewed items',
+          );
+        }
+        if (pendingBodies != 0) {
+          throw StateError(
+            'large response awaited a manual body load: $pendingBodies items',
+          );
+        }
+        if (bodyText == null ||
+            !bodyText.startsWith(_largeSessionPrefix) ||
+            bodyText.length != _largeSessionCharacters) {
+          throw StateError(
+            'large response body incomplete: ${bodyText?.length} of '
+            '$_largeSessionCharacters characters',
+          );
+        }
+        // No manual full-body load affordance may be present once the body is
+        // complete; the journey never taps one.
+        if (bodyId != null) {
+          await driver.waitForAbsent(
+            find.byValueKey('timeline-item-body-load-$bodyId'),
+            timeout: const Duration(seconds: 5),
+          );
+        }
+      }
     }
     await stage.writeAsString('revisit_original');
     await driver.scrollUntilVisible(

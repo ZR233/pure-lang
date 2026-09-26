@@ -54,6 +54,15 @@ pub struct TaskRecord {
     pub cancel_requested: bool,
     #[serde(default)]
     pub acknowledgement: Option<TaskAcknowledgement>,
+    /// Owner-assigned start order of this task.
+    ///
+    /// The commit sequence of the task's own start fact, so concurrently dispatched calls carry a
+    /// strictly increasing order that no runtime has to guess from call ids, wall-clock seconds or
+    /// the newest output. It is the stable fact a live projection names "the most recently started
+    /// call" with. Records written before this field existed decode without it and fall back to the
+    /// call ordering of their Turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_sequence: Option<u64>,
 }
 
 impl Owner {
@@ -67,11 +76,18 @@ impl Owner {
             status: TaskStatus::Running,
             cancel_requested: false,
             acknowledgement: None,
+            // `publish` commits this record in the batch numbered one past the current watermark,
+            // so the value is the task's real position in this Thread's start order.
+            started_sequence: Some(self.state.commit_sequence.saturating_add(1)),
         };
         if self.state.tasks.contains_key(&record.id) {
             return Err(ThreadError::InvalidIdentity);
         }
+        let id = record.id.clone();
         record_change(&mut self.state, record);
+        // The task's own "running" row is part of what the call's reliable output ceiling funds, so
+        // it names that reservation instead of needing headroom next to it.
+        self.claim_output(id);
         self.publish();
         Ok(())
     }
@@ -107,7 +123,10 @@ impl Owner {
             .checked_add(1)
             .ok_or(ThreadError::RevisionExhausted)?;
         record.cancel_requested = true;
+        let operation = record.id.clone();
         record_change(&mut self.state, record);
+        // The cancellation row belongs to the same in-flight call: its ceiling funds this fact too.
+        self.claim_output(operation);
         self.publish();
         token.cancel();
         Ok(TaskCancellationReceipt::Requested)

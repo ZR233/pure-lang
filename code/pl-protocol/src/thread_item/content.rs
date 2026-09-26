@@ -42,12 +42,6 @@ impl ThreadTextItem {
     pub fn lifecycle(&self) -> &ThreadContentLifecycle {
         &self.lifecycle
     }
-
-    pub(super) fn append(&mut self, delta: &str) -> Result<(), &'static str> {
-        self.lifecycle.require_streaming()?;
-        self.text.push_str(delta);
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -93,24 +87,6 @@ impl ThreadThinkingItem {
 
     pub fn lifecycle(&self) -> &ThreadContentLifecycle {
         &self.lifecycle
-    }
-
-    pub(super) fn append_summary(
-        &mut self,
-        chunk_index: u32,
-        delta: &str,
-    ) -> Result<(), &'static str> {
-        self.lifecycle.require_streaming()?;
-        append_chunk(&mut self.summary, chunk_index, delta)
-    }
-
-    pub(super) fn append_content(
-        &mut self,
-        chunk_index: u32,
-        delta: &str,
-    ) -> Result<(), &'static str> {
-        self.lifecycle.require_streaming()?;
-        append_chunk(&mut self.content, chunk_index, delta)
     }
 }
 
@@ -167,14 +143,6 @@ impl ThreadContentLifecycle {
         match self {
             Self::Cancelled(state) => Some(&state.reason),
             Self::Streaming(_) | Self::Completed(_) | Self::Failed(_) => None,
-        }
-    }
-
-    fn require_streaming(&self) -> Result<(), &'static str> {
-        if matches!(self, Self::Streaming(_)) {
-            Ok(())
-        } else {
-            Err("content delta requires streaming lifecycle")
         }
     }
 }
@@ -288,20 +256,4 @@ impl ThreadContextCompactionItem {
     pub fn compacted_at(&self) -> i64 {
         self.compacted_at
     }
-}
-
-fn append_chunk(
-    chunks: &mut Vec<String>,
-    chunk_index: u32,
-    delta: &str,
-) -> Result<(), &'static str> {
-    let index = usize::try_from(chunk_index).map_err(|_| "chunk index does not fit usize")?;
-    if index > chunks.len() {
-        return Err("chunk index skipped an earlier chunk");
-    }
-    if index == chunks.len() {
-        chunks.push(String::new());
-    }
-    chunks[index].push_str(delta);
-    Ok(())
 }

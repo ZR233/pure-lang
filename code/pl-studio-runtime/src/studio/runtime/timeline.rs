@@ -1,4 +1,9 @@
-//! Durable timeline pages backed by one independently owned SQLite database per Thread.
+//! **已落盘历史**分页：每个 Thread 一份独立 SQLite（`history.sqlite`）的纯 SQL 读取。
+//!
+//! 这里只服务“数据库里已经写了哪些条目”的长历史分页与按 identity 回读 —— 输入再长也稳定、可分页、
+//! 不激活 owner、不 flush writer。它**不**是实时内容窗口：尚未落盘的流式条目不在其中，读取水位也只
+//! 是 history 的 applied write sequence。实时窗口（初始/分页/按身份读）是
+//! [`super::chat_window`]（HTTP `/window`），两者共享同一个 `ChatSession` 事实源，但职责不同。
 use super::StudioRuntime;
 use crate::studio::storage::history::HistoryStore;
 use anyhow::Result;

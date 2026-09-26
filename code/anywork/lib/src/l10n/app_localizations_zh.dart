@@ -146,7 +146,31 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String persistenceBlocked(int count) {
-    return '保存已阻塞，仍有 $count 项更改未保存，需要处理；可以继续会话。';
+    return '保存已阻塞，仍有 $count 项更改未保存，需要处理。';
+  }
+
+  @override
+  String get persistenceExecutionPaused => '保存失败，执行已暂停。';
+
+  @override
+  String get persistenceSavingBackpressure => '存储压力较高，正在等待保存。';
+
+  @override
+  String get persistenceNewWorkPaused => '保存失败，新工作已暂停，进行中的工作正在收束。';
+
+  @override
+  String persistenceResumeReadyOtherSession(String session) {
+    return '另一个会话「$session」已保存，等待继续执行。';
+  }
+
+  @override
+  String persistenceExecutionPausedOtherSession(String session) {
+    return '另一个会话「$session」保存失败，执行已暂停。';
+  }
+
+  @override
+  String persistenceNewWorkPausedOtherSession(String session) {
+    return '另一个会话「$session」保存失败，新工作已暂停，进行中的工作正在收束。';
   }
 
   @override
@@ -212,6 +236,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get persistenceQueueRefresh => '刷新诊断';
 
   @override
+  String get persistenceQueueShowDetails => '展开诊断';
+
+  @override
+  String get persistenceQueueHideDetails => '收起诊断';
+
+  @override
   String get persistenceHistoryPaused => '会话历史保存已暂停';
 
   @override
@@ -221,7 +251,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get persistenceHistoryWriteFailed => '历史保存失败';
 
   @override
-  String get persistenceHistoryRetry => '重试保存并继续';
+  String get persistenceHistoryRetrySave => '重试保存';
+
+  @override
+  String get persistenceHistoryResume => '继续执行';
+
+  @override
+  String get persistenceHistoryResumeHint => '重试保存成功后即可继续';
 
   @override
   String get persistenceStatisticsGap => '调用统计不完整；缺失的用量未知，不能按零计算。';
@@ -2294,4 +2330,28 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get agentRoleRetired => '该子代理角色已停用，仅可查看历史记录。';
+
+  @override
+  String get conversationActivityPreparing => '准备中';
+
+  @override
+  String get conversationActivityRunningTool => '执行中';
+
+  @override
+  String get conversationActivitySaveFailed => '保存故障';
+
+  @override
+  String get conversationActivitySavePaused => '保存已暂停';
+
+  @override
+  String get conversationActivityStoragePressure => '存储受限';
+
+  @override
+  String get conversationActivityResumeReady => '已保存，等待继续执行';
+
+  @override
+  String get conversationActivityResumeRequired => '等待保存恢复';
+
+  @override
+  String get conversationActivityStopping => '停止中';
 }

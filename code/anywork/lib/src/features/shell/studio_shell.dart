@@ -25,6 +25,7 @@ import '../settings/settings_ssh_server_dialog.dart';
 import '../settings/settings_remote_directory_dialog.dart';
 import '../interaction/composer_dock.dart';
 import '../status/thread_status_bar.dart';
+import '../timeline/conversation_activity_bar.dart';
 import '../timeline/timeline_view.dart';
 import '../todo/todo_panel.dart';
 

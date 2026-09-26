@@ -11,7 +11,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'item.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeRawPayload {
   final String format;
@@ -251,51 +251,6 @@ class BridgeThreadItem {
           createdAt == other.createdAt &&
           updatedAt == other.updatedAt &&
           state == other.state;
-}
-
-class BridgeThreadItemDelta {
-  final String itemId;
-  final BigInt revision;
-  final BridgeThreadItemDeltaState delta;
-
-  const BridgeThreadItemDelta({
-    required this.itemId,
-    required this.revision,
-    required this.delta,
-  });
-
-  @override
-  int get hashCode => itemId.hashCode ^ revision.hashCode ^ delta.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeThreadItemDelta &&
-          runtimeType == other.runtimeType &&
-          itemId == other.itemId &&
-          revision == other.revision &&
-          delta == other.delta;
-}
-
-@freezed
-sealed class BridgeThreadItemDeltaState with _$BridgeThreadItemDeltaState {
-  const BridgeThreadItemDeltaState._();
-
-  const factory BridgeThreadItemDeltaState.text({required String delta}) =
-      BridgeThreadItemDeltaState_Text;
-  const factory BridgeThreadItemDeltaState.thinkingSummary({
-    required int chunkIndex,
-    required String delta,
-  }) = BridgeThreadItemDeltaState_ThinkingSummary;
-  const factory BridgeThreadItemDeltaState.thinkingContent({
-    required int chunkIndex,
-    required String delta,
-  }) = BridgeThreadItemDeltaState_ThinkingContent;
-  const factory BridgeThreadItemDeltaState.toolArguments({
-    required String delta,
-  }) = BridgeThreadItemDeltaState_ToolArguments;
-  const factory BridgeThreadItemDeltaState.toolResult({required String delta}) =
-      BridgeThreadItemDeltaState_ToolResult;
 }
 
 @freezed

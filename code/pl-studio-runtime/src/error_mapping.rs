@@ -83,6 +83,16 @@ fn thread_error(error: &pl_core::thread::ThreadError) -> Option<StudioError> {
             "Studio is still persisting earlier work; retry shortly",
             true,
         )),
+        pl_core::thread::ThreadError::StorageRecoveryPending { .. } => Some(StudioError::new(
+            StudioErrorCode::Busy,
+            "Studio has not saved the recovered history yet; retry saving before continuing",
+            true,
+        )),
+        pl_core::thread::ThreadError::StorageRecoveryUnverified { .. } => Some(StudioError::new(
+            StudioErrorCode::Busy,
+            "Studio has not verified that this save fault recovered; retry saving before continuing",
+            true,
+        )),
         pl_core::thread::ThreadError::Storage(_) => Some(StudioError::storage()),
         pl_core::thread::ThreadError::Closed => Some(StudioError::new(
             StudioErrorCode::RuntimeStopped,

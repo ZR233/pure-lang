@@ -13,7 +13,7 @@ import 'thread_stream.dart';
 import 'thread_stream/item.dart';
 part 'chat.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 enum BridgeChatDirection { older, newer }
 
@@ -29,18 +29,24 @@ sealed class BridgeChatFocus with _$BridgeChatFocus {
 class BridgeChatItem {
   final BridgeThreadItem item;
   final bool saved;
+  final BridgeChatLifecycle lifecycle;
 
-  /// Bytes omitted from the canonical body in a bounded window preview.
+  /// Bytes omitted from the bounded preview; `> 0` 时用 `readComplete` 按身份取回完整正文。
   final BigInt omittedBytes;
 
   const BridgeChatItem({
     required this.item,
     required this.saved,
+    required this.lifecycle,
     required this.omittedBytes,
   });
 
   @override
-  int get hashCode => item.hashCode ^ saved.hashCode ^ omittedBytes.hashCode;
+  int get hashCode =>
+      item.hashCode ^
+      saved.hashCode ^
+      lifecycle.hashCode ^
+      omittedBytes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -49,8 +55,12 @@ class BridgeChatItem {
           runtimeType == other.runtimeType &&
           item == other.item &&
           saved == other.saved &&
+          lifecycle == other.lifecycle &&
           omittedBytes == other.omittedBytes;
 }
+
+/// 条目的执行终态事实，与保存水位 `saved` 严格独立。
+enum BridgeChatLifecycle { streaming, terminal }
 
 class BridgeChatSnapshot {
   final BridgeChatFocus focus;
@@ -98,8 +108,64 @@ sealed class BridgeChatUpdate with _$BridgeChatUpdate {
     required BigInt to,
     required List<BridgeViewChange> changes,
     required bool hasNewer,
+    required BridgeUpdatePriority priority,
   }) = BridgeChatUpdate_Patch;
 }
+
+@freezed
+sealed class BridgeContentField with _$BridgeContentField {
+  const BridgeContentField._();
+
+  const factory BridgeContentField.text() = BridgeContentField_Text;
+  const factory BridgeContentField.thinkingSummary({required int chunkIndex}) =
+      BridgeContentField_ThinkingSummary;
+  const factory BridgeContentField.thinkingContent({required int chunkIndex}) =
+      BridgeContentField_ThinkingContent;
+  const factory BridgeContentField.toolArguments() =
+      BridgeContentField_ToolArguments;
+  const factory BridgeContentField.toolResult() = BridgeContentField_ToolResult;
+}
+
+@freezed
+sealed class BridgeFieldChange with _$BridgeFieldChange {
+  const BridgeFieldChange._();
+
+  /// 正文不变，但所属 item 的 revision/omitted 仍要提交（版本帧不是空 Patch）。
+  const factory BridgeFieldChange.unchanged() = BridgeFieldChange_Unchanged;
+
+  /// 该字段仍以前缀方式扩展本地已交付末尾；`text` 是新增字节。
+  const factory BridgeFieldChange.append({required String text}) =
+      BridgeFieldChange_Append;
+
+  /// 本地基线已失效（权威替换、预览升级）；`text` 是整段权威正文。
+  const factory BridgeFieldChange.replace({required String text}) =
+      BridgeFieldChange_Replace;
+
+  /// 该字段已从条目移除，消费者丢弃本地副本。
+  const factory BridgeFieldChange.remove() = BridgeFieldChange_Remove;
+}
+
+/// 同一 item 的一个字段变化。
+class BridgeFieldUpdate {
+  final BridgeContentField field;
+  final BridgeFieldChange change;
+
+  const BridgeFieldUpdate({required this.field, required this.change});
+
+  @override
+  int get hashCode => field.hashCode ^ change.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeFieldUpdate &&
+          runtimeType == other.runtimeType &&
+          field == other.field &&
+          change == other.change;
+}
+
+/// 一帧是否需要立即应用，还是普通文本可以合帧。
+enum BridgeUpdatePriority { immediate, coalesced }
 
 @freezed
 sealed class BridgeViewChange with _$BridgeViewChange {
@@ -110,11 +176,18 @@ sealed class BridgeViewChange with _$BridgeViewChange {
     required BigInt remove,
     required List<BridgeChatItem> items,
   }) = BridgeViewChange_Splice;
-  const factory BridgeViewChange.appendText({
+
+  /// 同一身份的全部内容字段，在**一次** `expectedRevision`/`revision` 提交里原子应用。
+  ///
+  /// 应用条件：本地该 `itemId` 的 content revision 等于 `expectedRevision`；否则按宿主策略重同步。
+  /// 全部字段应用完成后**一次**提交 `revision`、`omittedBytes` 与保存水位 `saved`——即使字段全为
+  /// `unchanged`（仅版本推进、仅保存确认）也必须提交，不能当成空 Patch 丢弃。
+  const factory BridgeViewChange.updateItem({
     required String itemId,
-    required String partId,
     required BigInt expectedRevision,
     required BigInt revision,
-    required String text,
-  }) = BridgeViewChange_AppendText;
+    required BigInt omittedBytes,
+    required bool saved,
+    required List<BridgeFieldUpdate> fields,
+  }) = BridgeViewChange_UpdateItem;
 }

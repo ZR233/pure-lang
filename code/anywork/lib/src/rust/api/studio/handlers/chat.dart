@@ -12,7 +12,7 @@ import '../types/thread_stream/item.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bridge_focus`, `bridge_item`, `bridge_snapshot`, `bridge_update`, `core_focus`
+// These functions are ignored because they are not marked as `pub`: `view_closed`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
 Future<BridgeChatView> openChatView({
@@ -25,19 +25,41 @@ Future<BridgeChatView> openChatView({
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeChatView>>
 abstract class BridgeChatView implements RustOpaqueInterface {
+  /// 结束这个窗口：取消锁内的帧等待、打断正在 await history 的翻页/换焦点。
   Future<void> close();
+
+  /// 展开被有界窗口省略的条目：这是一次**同 view 的窗口操作**，不是另开窗口的只读查询。
+  ///
+  /// 步骤：锁外请求该身份的**完整**正文（同 view/revision，历史条目至多冷读一次并保留到身份离开
+  /// 窗口；被取消不会写回），再在短临界区里重新订阅这条窗口并把**权威窗口快照**交出去——返回的快照
+  /// 版本就是后续 `Patch.from` 的基线，因此 Dart 直接把它当成一次的 `Reset` 应用即可，不需要自己
+  /// 覆一份 item 或维持另一份 baseline（据此删除 `_completedBodies` 覆盖层）。
+  Future<BridgeChatSnapshot> expand({required String itemId});
 
   Future<BridgeChatSnapshot> focus({required BridgeChatFocus focus});
 
   /// The subscription baseline is captured before returning the handle.
   Future<BridgeChatSnapshot> initial();
 
+  /// 按方向翻页：从**当前窗口**继续（core `ChatView::load` 换入一页、换出相反方向的一页），
+  /// 因此每次调用都前进，也不会用同一个 item 反复拿到同一个居中窗口。
+  ///
+  /// `close` 会取消正在等待 history 的翻页，避免视图关闭后调用永久挂起。
   Future<BridgeChatSnapshot> load({required BridgeChatDirection direction});
 
   /// Waits for one consolidated batch, then returns control to the consumer.
+  ///
+  /// 「锁外 readiness 等待 + 短临界区同步取帧」：等待期间不持窗口锁（见结构体文档），`close` 立刻
+  /// 打断等待。`Ok(None)` 只表示窗口流真的结束（会话不再变化或视图已关闭）。
   Future<BridgeChatUpdate?> next();
 
+  /// 按身份读一条完整条目（内存优先，必要时回落 durable history）。
+  ///
+  /// 它走的是**同一个 view** 的锁外句柄，读的是与窗口完全相同的共享会话事实：不重新 `open_chat`、
+  /// 不按 thread id 另找运行时实例，窗口句柄关闭后也不会读到别的实例的条目。一个挂起的 `next`
+  /// 同样不会挡住正文读取。
   Future<BridgeChatItem?> readItem({required String itemId});
 
+  /// 当前窗口，并把订阅基线对齐到它：返回的快照版本一定等于随后差量的 `from`。
   Future<BridgeChatSnapshot> snapshot();
 }

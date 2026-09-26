@@ -199,8 +199,13 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> retryRecoveryIssue(String id) =>
       ValueKey<String>('recovery-retry-$id');
 
-  static ValueKey<String> turnActivity(String id) =>
-      ValueKey<String>('turn-activity-$id');
+  /// 输入框上方的固定活动条与其展开详情。
+  static const ValueKey<String> conversationActivity = ValueKey<String>(
+    'conversation-activity',
+  );
+  static const ValueKey<String> conversationActivityDetails = ValueKey<String>(
+    'conversation-activity-details',
+  );
 
   static ValueKey<String> timelineRolledBack(String id) =>
       ValueKey<String>('timeline-rolled-back-$id');

@@ -3,7 +3,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart'
     show debugPrint, kDebugMode, visibleForTesting;
-import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/studio_models.dart';
@@ -25,14 +24,23 @@ class StudioController extends _$StudioController {
   late ThreadStreamCoordinator _threadCoordinator;
   final Set<String> _historyRequests = {};
   final Map<String, int> _windowLoadGeneration = {};
-  final Map<String, Timer> _terminalRefreshTimers = {};
-  final List<(ThreadNotificationFrame, String, int)> _pendingThreadDeltas = [];
   StudioChatWindow? _chatWindow;
   String? _chatWindowThreadId;
   String? _chatFocusedItemId;
   int _chatWindowOperation = 0;
   Future<void>? _openingChatWindow;
-  bool _deltaFrameScheduled = false;
+
+  /// 固定活动条展开详情的在途请求：同一活动身份只保留一个，避免每 token 排队全量读。
+  Future<void>? _activityDetailInFlight;
+  String? _activityDetailInFlightThread;
+  String? _activityDetailInFlightIdentity;
+  String? _activityDetailExpandedThread;
+
+  /// 在途详情请求期间活动版本又前进过：完成后再补取一次最新版本。
+  ///
+  /// 只合并成一个尾随请求，不为一串 token 排队全量读取；末帧 token 落在在途请求
+  /// 之后时也一定能被取到。
+  bool _activityDetailRefreshQueued = false;
   int _debugThreadFrameCount = 0;
   int _debugThreadFrameMicros = 0;
   int _debugThreadFrameMaxMicros = 0;
@@ -66,11 +74,6 @@ class StudioController extends _$StudioController {
       _windowLoadGeneration.clear();
       _streamEpochByThread.clear();
       _historyRequests.clear();
-      for (final timer in _terminalRefreshTimers.values) {
-        timer.cancel();
-      }
-      _terminalRefreshTimers.clear();
-      _pendingThreadDeltas.clear();
     });
     final startupWatch = Stopwatch()..start();
     final catalog = await _api.loadProviderCatalog();
@@ -559,8 +562,10 @@ class StudioController extends _$StudioController {
     _windowLoadGeneration.remove(threadId);
     _streamEpochByThread.remove(threadId);
     _historyRequests.remove(threadId);
-    _terminalRefreshTimers.remove(threadId)?.cancel();
-    _pendingThreadDeltas.removeWhere((entry) => entry.$2 == threadId);
+    if (_activityDetailExpandedThread == threadId) {
+      _activityDetailExpandedThread = null;
+      _activityDetailRefreshQueued = false;
+    }
   }
 
   void _closeChatWindow() {
@@ -722,103 +727,73 @@ class StudioController extends _$StudioController {
     await _loadTimelinePage(threadId, TimelineDirection.newer);
   }
 
-  /// 读取一条完整条目正文：原生 bridge 与 demo 直接按 identity 读取完整 payload；
-  /// 其它实现退化为围绕该身份的一页，仍由同一身份/revision 规则决定是否采纳。
-  Future<TimelinePage> _readTimelineItemBody(String threadId, String itemId) {
-    final api = _api;
-    // 声明式模式绑定：只有实现该可选能力的 API 才走按 identity 的完整正文回源，
-    // 其它实现（测试替身等）退化为围绕该身份的一页，不编造完整载荷。
-    if (api case final TimelineItemBodyReader reader) {
-      return reader.readTimelineItem(threadId, itemId);
+  /// 可见条目正文补齐：对窗口内仍是预览的可见身份按 identity 向同一 ChatView 请求展开。
+  ///
+  /// 这不是用户点击回源：身份进入视口即自动展开，因此智能体正文不需要“加载完整内容”
+  /// 入口。展开是一次同 view 的窗口操作（`BridgeChatView.expand`）：原生窗口把完整正文
+  /// retain 进窗口并交回权威快照，Dart 当成一次 Reset 应用，不另拼 SQL 页、不覆盖窗口基线。
+  ///
+  /// 运行中与终态的预览身份走**同一条**路径：超过窗口预览预算的流式正文同样会被截成预览，
+  /// 因此按身份补齐与是否终态无关，助手正文（含实时过程）始终完整、不折叠。窗口对进行中身份
+  /// 从内存返回完整正文，并在同一 view 内继续跟踪最新 revision（不每 token 重读历史）。
+  /// 每个身份最多一个在途请求（`loadingItemIds` 即在途标记），正文完整后预览标记自然消失、
+  /// 不会对已完整正文重复请求；窗口或会话切换后旧响应会被丢弃；不在窗口内、或已有错误的
+  /// 身份不再自动重试。
+  Future<void> ensureItemBodies(
+    String threadId,
+    Iterable<String> itemIds,
+  ) async {
+    for (final itemId in itemIds) {
+      await _completeItemBody(threadId, itemId);
     }
-    return api.listTimelineItems(
-      threadId,
-      kind: TimelineQueryKind.around,
-      itemId: itemId,
-      limit: 1,
-    );
   }
 
-  /// 按 item identity 回源一条被页面预览预算截断的完整正文。
-  ///
-  /// 加载期间在窗口状态里显式标记该条目；回源结果与窗口共享 database identity 与
-  /// watermark，因此只按同一身份合并，窗口过期时改为重读权威窗口而不是拼接旧载荷。
+  /// 显式重试一次按 identity 的正文补齐（只对窗口内仍是预览的身份生效）。
   Future<void> loadItemBody(String threadId, String itemId) async {
+    await _completeItemBody(threadId, itemId, retry: true);
+  }
+
+  Future<void> _completeItemBody(
+    String threadId,
+    String itemId, {
+    bool retry = false,
+  }) async {
+    // 先确认“确实有可展开的窗口”再激活会话：可见性上报是帧末诊断，不得成为打开/订阅
+    // 会话这类状态变更的副作用（展开本来就只走 ChatView 窗口自己的按身份读取）。
+    final window = _chatWindowThreadId == threadId ? _chatWindow : null;
+    if (window == null) return;
     await _ensureThreadOpen(threadId);
     final current = state.value;
     if (current == null ||
         current.selectedThreadId != threadId ||
-        !current.workspacesByThread.containsKey(threadId) ||
-        !_workspaceUi(
-          current,
-          threadId,
-        ).history.previewedItemIds.contains(itemId)) {
+        !current.workspacesByThread.containsKey(threadId)) {
       return;
     }
-    if (_workspaceUi(
-      current,
-      threadId,
-    ).history.loadingItemIds.contains(itemId)) {
+    final history = _workspaceUi(current, threadId).history;
+    if (!history.previewedItemIds.contains(itemId) ||
+        history.loadingItemIds.contains(itemId)) {
       return;
     }
+    if (!retry && history.itemBodyErrors.containsKey(itemId)) {
+      return;
+    }
+    // 自动补齐不再限定终态：上面的 `previewedItemIds` 已由窗口条目正文状态派生，只要求身份
+    // 仍在窗口内、正文仍是预览。补齐完成后预览标记消失，不会对已完整的正文重复请求。
     state = AsyncData(startItemBodyLoad(current, threadId, itemId));
-    final chatWindow = _chatWindowThreadId == threadId ? _chatWindow : null;
-    if (chatWindow != null) {
-      try {
-        final item = await chatWindow.readItem(itemId);
-        if (!ref.mounted || _chatWindow != chatWindow) return;
-        final latest = state.value;
-        if (latest != null && latest.selectedThreadId == threadId) {
-          state = AsyncData(
-            applyChatWindowItemBody(latest, threadId, itemId, item),
-          );
-        }
-      } catch (error) {
-        if (ref.mounted && _chatWindow == chatWindow && state.value != null) {
-          state = AsyncData(
-            failItemBodyLoad(state.value!, threadId, itemId, error.toString()),
-          );
-        }
-      }
-      return;
-    }
     try {
-      final page = await _readTimelineItemBody(threadId, itemId);
-      if (!ref.mounted) return;
+      final snapshot = await window.expandItem(itemId);
+      if (!ref.mounted || _chatWindow != window) return;
       final latest = state.value;
-      if (latest == null ||
-          latest.selectedThreadId != threadId ||
-          !latest.workspacesByThread.containsKey(threadId)) {
-        return;
-      }
-      if (timelinePageIsStale(
-        _workspaceUi(latest, threadId).history,
-        page,
-        // 按 identity 回源只能并入同一数据库实体：身份不同或水位回退都拒绝。
-        replaceWindow: false,
-      )) {
-        // 回源页来自已被替换的数据库实体：不并入，改读权威窗口。
-        state = AsyncData(
-          _withWorkspaceUi(latest, threadId, (ui) {
-            final loadingItemIds = {...ui.history.loadingItemIds}
-              ..remove(itemId);
-            return ui.copyWith(
-              history: ui.history.copyWith(loadingItemIds: loadingItemIds),
-            );
-          }),
-        );
-        unawaited(
-          _reloadTimelineWindow(
-            threadId,
-            _threadCoordinator.generation,
-            force: true,
-          ),
-        );
-        return;
-      }
-      state = AsyncData(applyItemBodyPage(latest, threadId, itemId, page));
+      if (latest == null || latest.selectedThreadId != threadId) return;
+      // null 只说明数据源此刻给不出完整正文（例如身份已离开窗口，或历史事务尚未
+      // durable）：保留预览与重试入口，不把它当成“身份不存在”，也不本地编造正文。
+      state = AsyncData(
+        snapshot == null
+            ? markItemBodyPending(latest, threadId, itemId)
+            : applyChatWindowSnapshot(latest, threadId, snapshot),
+      );
     } catch (error) {
-      if (!ref.mounted) return;
+      if (!ref.mounted || _chatWindow != window) return;
       final latest = state.value;
       if (latest == null) return;
       state = AsyncData(
@@ -948,8 +923,8 @@ class StudioController extends _$StudioController {
     final anchor =
         aroundItemId ??
         (older
-            ? history.olderCursor ?? workspace.historyItems.firstOrNull?.id
-            : history.newerCursor ?? workspace.historyItems.lastOrNull?.id);
+            ? history.olderCursor ?? workspace.items.firstOrNull?.id
+            : history.newerCursor ?? workspace.items.lastOrNull?.id);
     if (history.isLoading || _historyRequests.contains(threadId)) return false;
     if (!resetWindow &&
         (anchor == null ||
@@ -1150,99 +1125,141 @@ class StudioController extends _$StudioController {
     }
   }
 
-  void _scheduleTerminalRefresh(String threadId) {
-    if (_terminalRefreshTimers.containsKey(threadId)) return;
-    _terminalRefreshTimers[threadId] = Timer(
-      const Duration(milliseconds: 48),
-      () async {
-        _terminalRefreshTimers.remove(threadId);
-        final current = state.value;
-        if (!ref.mounted ||
-            current == null ||
-            current.selectedThreadId != threadId ||
-            current.workspacesByThread[threadId]?.liveItems.values.any(
-                  (item) => item.isTerminal,
-                ) !=
-                true) {
-          return;
-        }
-        if (current.selectedWorkspaceUi.history.isLoading ||
-            _historyRequests.contains(threadId)) {
-          _scheduleTerminalRefresh(threadId);
-          return;
-        }
-        if (current.selectedWorkspaceUi.history.detached) {
-          await _confirmDetachedTerminalItems(threadId);
-          return;
-        }
-        await _loadTimelinePage(
-          threadId,
-          TimelineDirection.newer,
-          resetWindow: true,
-        );
-      },
-    );
+  /// 展开固定活动条详情：按当前活动身份**按需**读取完整内容。
+  ///
+  /// 调用发生在用户显式展开时；同一活动身份只保留一个在途请求（重复触发被合并），
+  /// 活动版本前进时刷新，身份变化时丢弃旧结果。读取独立于消息窗口，不查 SQL 历史，
+  /// 也不依赖该活动是否可见。
+  void expandActivityDetail(String threadId) {
+    _activityDetailExpandedThread = threadId;
+    unawaited(_loadActivityDetail(threadId));
   }
 
-  Future<void> _confirmDetachedTerminalItems(String threadId) async {
+  void collapseActivityDetail(String threadId) {
+    if (_activityDetailExpandedThread == threadId) {
+      _activityDetailExpandedThread = null;
+      _activityDetailRefreshQueued = false;
+    }
+  }
+
+  Future<void> _loadActivityDetail(String threadId) async {
     final current = state.value;
-    if (current == null) return;
-    final history = current.selectedWorkspaceUi.history;
-    final pending = current.workspacesByThread[threadId]?.liveItems.values
-        .where((item) => item.isTerminal)
-        .toList();
-    if (pending == null || pending.isEmpty) return;
-    final ids = {for (final item in pending) item.id};
-    final oldestOrdinal = pending
-        .map((item) => item.ordinal)
-        .reduce((a, b) => a < b ? a : b);
+    if (!ref.mounted ||
+        current == null ||
+        current.selectedThreadId != threadId ||
+        _activityDetailExpandedThread != threadId) {
+      return;
+    }
+    final activity = current.workspacesByThread[threadId]?.activity;
+    if (activity == null) return;
+    if (_workspaceUi(
+      current,
+      threadId,
+    ).activityDetail.covers(activity.identity, activity.revision)) {
+      return;
+    }
+    // 合并同一身份的在途请求：不为一串 token 排队多次全量读取。合并掉的那次仍然
+    // 记下“完成后再取一次”，否则末帧 token 可能永远取不到。
+    if (_activityDetailInFlight != null &&
+        _activityDetailInFlightThread == threadId &&
+        _activityDetailInFlightIdentity == activity.identity) {
+      _activityDetailRefreshQueued = true;
+      return;
+    }
+    _activityDetailInFlightThread = threadId;
+    _activityDetailInFlightIdentity = activity.identity;
+    _setActivityDetailState(
+      threadId,
+      (state) => state.copyWith(
+        identity: activity.identity,
+        revision: activity.revision,
+        loading: true,
+        error: null,
+      ),
+    );
+    final request = _performActivityDetailLoad(threadId, activity);
+    _activityDetailInFlight = request;
+    await request;
+    if (identical(_activityDetailInFlight, request)) {
+      _activityDetailInFlight = null;
+      _activityDetailInFlightThread = null;
+      _activityDetailInFlightIdentity = null;
+    }
+    // 在途期间活动又前进过（末帧 token 落在请求之后）：补取一次最新版本。
+    // 版本没变时 [_loadActivityDetail] 会被 [ThreadActivityDetailState.covers] 拦下，
+    // 因此这里最多只多出一次读取，不会为每个 token 排队。
+    if (_activityDetailRefreshQueued &&
+        ref.mounted &&
+        _activityDetailExpandedThread == threadId) {
+      _activityDetailRefreshQueued = false;
+      unawaited(_loadActivityDetail(threadId));
+    }
+  }
+
+  Future<void> _performActivityDetailLoad(
+    String threadId,
+    ThreadActivityView activity,
+  ) async {
     try {
-      var page = await _api.listTimelineItems(
+      final detail = await _api.readThreadActivityDetail(
         threadId,
-        kind: TimelineQueryKind.latest,
+        activity.identity,
       );
-      final databaseId = page.databaseId;
-      final confirmed = <(ThreadItemView, int)>[];
-      String? previousCursor;
-      while (page.threadId == threadId && page.databaseId == databaseId) {
-        final omitted = {
-          for (final preview in page.previews)
-            preview.itemId: preview.omittedBytes,
-        };
-        confirmed.addAll(
-          page.items
-              .where((item) => ids.contains(item.id))
-              .map((item) => (item, omitted[item.id] ?? 0)),
-        );
-        if (page.items.isEmpty || page.items.first.ordinal <= oldestOrdinal) {
-          break;
-        }
-        final cursor = page.olderCursor;
-        if (cursor == null || cursor == previousCursor) break;
-        previousCursor = cursor;
-        page = await _api.listTimelineItems(
-          threadId,
-          kind: TimelineQueryKind.before,
-          itemId: cursor,
-        );
-      }
+      if (!ref.mounted) return;
       final latest = state.value;
-      if (!ref.mounted ||
-          latest == null ||
-          latest.selectedThreadId != threadId ||
-          !latest.selectedWorkspaceUi.history.detached ||
-          latest.selectedWorkspaceUi.history.epoch != history.epoch ||
-          (history.databaseId.isNotEmpty && history.databaseId != databaseId)) {
+      if (latest == null || latest.selectedThreadId != threadId) return;
+      // 迟到的旧身份结果不得覆盖新身份（身份变化即丢弃）。
+      final currentActivity = latest.workspacesByThread[threadId]?.activity;
+      if (currentActivity != null &&
+          currentActivity.identity != activity.identity) {
         return;
       }
-      state = AsyncData(
-        confirmDetachedTimelineItems(latest, threadId, confirmed),
+      _setActivityDetailState(
+        threadId,
+        (state) => state.copyWith(
+          identity: activity.identity,
+          revision: activity.revision,
+          loading: false,
+          detail: detail,
+          error: null,
+        ),
       );
     } catch (error) {
-      // A failed confirmation cannot evict the in-memory body. The next page
-      // load or terminal notification can retry using the same SQL identity.
-      debugPrint('timeline terminal confirmation failed: $error');
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest == null || latest.selectedThreadId != threadId) return;
+      // 与成功路径同规：迟到的旧身份失败同样不得写进 `activityDetail`，否则会把新身份的
+      // 在途/已成功状态覆盖成旧身份的错误。
+      final currentActivity = latest.workspacesByThread[threadId]?.activity;
+      if (currentActivity != null &&
+          currentActivity.identity != activity.identity) {
+        return;
+      }
+      _setActivityDetailState(
+        threadId,
+        (state) => state.copyWith(
+          identity: activity.identity,
+          revision: activity.revision,
+          loading: false,
+          error: error.toString(),
+        ),
+      );
     }
+  }
+
+  void _setActivityDetailState(
+    String threadId,
+    ThreadActivityDetailState Function(ThreadActivityDetailState) update,
+  ) {
+    final current = state.value;
+    if (current == null || current.selectedThreadId != threadId) return;
+    state = AsyncData(
+      _withWorkspaceUi(
+        current,
+        threadId,
+        (ui) => ui.copyWith(activityDetail: update(ui.activityDetail)),
+      ),
+    );
   }
 
   /// 侧栏触底加载下一页会话目录；内存未命中时由 bridge 从数据库分页取回。
@@ -2175,6 +2192,16 @@ class StudioController extends _$StudioController {
     int faultGeneration,
   ) => _api.retryThreadHistory(threadId, faultGeneration);
 
+  /// 显式继续执行：与重试保存是**两个动作**。
+  ///
+  /// 必须先按同一代数重试保存成功，后端 typed 存储状态解除硬故障闩（`resumeRequired`
+  /// 变 false）后此命令才会让下一轮模型/工具准入恢复。代数不匹配或仍有未上交批次时后端
+  /// 会拒绝；不自动恢复、不从错误文本推断结果，调用方按返回值/typed 状态重试。
+  Future<PersistenceQueueSnapshot> resumeThreadHistory(
+    String threadId,
+    int faultGeneration,
+  ) => _api.resumeThreadHistory(threadId, faultGeneration);
+
   /// 读取进程级持久化队列压力；只在当前 API 实现该观测能力时返回，否则为未知。
   ///
   /// 该值用于诊断展示，不写入会话状态、也不驱动任何执行：它是协调器已观测到的真实
@@ -2270,17 +2297,6 @@ class StudioController extends _$StudioController {
       return;
     }
     state = AsyncData(next);
-    if (event.payload is PersistenceStateChangedPayload &&
-        next.persistenceState.state.pendingCommits == 0) {
-      final threadId = next.selectedThreadId;
-      if (threadId != null &&
-          next.workspacesByThread[threadId]?.liveItems.values.any(
-                (item) => item.isTerminal,
-              ) ==
-              true) {
-        _scheduleTerminalRefresh(threadId);
-      }
-    }
   }
 
   /// Product 流终止（bridge 的 failure/closed）不是正常结束：读取一次 canonical
@@ -2313,18 +2329,6 @@ class StudioController extends _$StudioController {
   ) {
     final stopwatch = kDebugMode ? (Stopwatch()..start()) : null;
     try {
-      if (frame case ThreadNotificationFrame(update: ThreadItemDeltaUpdate())) {
-        _pendingThreadDeltas.add((frame, threadId, generation));
-        if (!_deltaFrameScheduled) {
-          _deltaFrameScheduled = true;
-          SchedulerBinding.instance.scheduleFrameCallback((_) {
-            _deltaFrameScheduled = false;
-            _flushThreadDeltas();
-          });
-        }
-        return;
-      }
-      _flushThreadDeltas();
       _applyThreadFrame(frame, threadId, generation);
     } finally {
       if (stopwatch != null) {
@@ -2347,48 +2351,6 @@ class StudioController extends _$StudioController {
           _debugThreadFrameStartedAt = now;
         }
       }
-    }
-  }
-
-  void _flushThreadDeltas() {
-    if (_pendingThreadDeltas.isEmpty || !ref.mounted) return;
-    final pending = List<(ThreadNotificationFrame, String, int)>.of(
-      _pendingThreadDeltas,
-    );
-    _pendingThreadDeltas.clear();
-    var next = state.value;
-    for (final (frame, threadId, generation) in pending) {
-      if (next == null ||
-          generation != _threadCoordinator.generation ||
-          next.selectedThreadId != threadId ||
-          _workspaceUi(next, threadId).subscriptionGeneration != generation) {
-        continue;
-      }
-      final epoch = frame.epoch;
-      final knownEpoch = _streamEpochByThread[threadId];
-      if (epoch != null && knownEpoch != null && knownEpoch != epoch) {
-        unawaited(_resyncThread(threadId, generation));
-        return;
-      }
-      if (epoch != null) _streamEpochByThread[threadId] = epoch;
-      final reduced = applyThreadUpdate(
-        next,
-        threadId: threadId,
-        revision: frame.revision,
-        update: frame.update,
-        baseRevision: frame.baseRevision,
-        chatWindowOwnsItems:
-            _chatWindowThreadId == threadId && _chatWindow != null,
-        filteredItemRevisions: _api is ChatWindowReader,
-      );
-      if (reduced.resyncThreadId != null) {
-        unawaited(_resyncThread(threadId, generation));
-        return;
-      }
-      next = reduced.state;
-    }
-    if (next != null && !identical(next, state.value)) {
-      state = AsyncData(next);
     }
   }
 
@@ -2435,19 +2397,16 @@ class StudioController extends _$StudioController {
           revision: revision,
           update: update,
           baseRevision: frame.baseRevision,
-          chatWindowOwnsItems:
-              _chatWindowThreadId == threadId && _chatWindow != null,
-          filteredItemRevisions: _api is ChatWindowReader,
         );
         if (reduced.resyncThreadId != null) {
           unawaited(_resyncThread(threadId, generation));
           return;
         }
         state = AsyncData(reduced.state);
-        if (_chatWindow == null) {
-          if (update case ThreadItemUpsert(:final item) when item.isTerminal) {
-            _scheduleTerminalRefresh(threadId);
-          }
+        // 展开中的固定活动条随 typed 活动版本前进刷新（同一身份只保留一个在途请求）。
+        if (update is ThreadActivityUpdate &&
+            _activityDetailExpandedThread == threadId) {
+          unawaited(_loadActivityDetail(threadId));
         }
       case ThreadResyncRequiredFrame():
         unawaited(_resyncThread(threadId, generation));

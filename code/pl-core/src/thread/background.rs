@@ -61,6 +61,8 @@ impl Owner {
         });
         self.state.context = context;
         task::record_change(&mut self.state, task.clone());
+        // The task receipt belongs to the still-running call whose reliable output ceiling funds it.
+        self.claim_output(task.id.clone());
         self.publish();
         Ok(task)
     }
@@ -81,7 +83,7 @@ impl Owner {
             tokio::select! {
                 Some(completion) = futures::StreamExt::next(&mut self.background) => self.finish_background(completion),
                 message = self.mailbox.recv(), if !self.mailbox.is_closed() || !self.mailbox.is_empty() => {
-                    if let Some(message) = message { self.process_mailbox(message); }
+                    if let Some(message) = message { self.dispatch_mailbox(message).await; }
                 },
             }
         }

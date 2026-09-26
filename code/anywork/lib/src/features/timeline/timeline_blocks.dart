@@ -15,25 +15,18 @@ class _EmptyTimeline extends StatelessWidget {
   }
 }
 
-/// Timeline 的收束区域：短内容时把活动块压到视口底部，长内容时自然接在末项后。
+/// Timeline 的收束区域：计划摘要位于消息之后。
+///
+/// 当前活动不再在这里渲染（那会与消息列里的同一行形成两套搬动的渲染）；活动只由
+/// 输入框上方的固定活动条呈现。收束区作为正向区的一部分参与贴底几何
+/// （见 [_BottomAlignedSliver]），这里不再自己撑高、也不再依赖 `minHeight`。
 class _TimelineTail extends StatelessWidget {
-  const _TimelineTail({this.activity, this.planSummary});
+  const _TimelineTail({this.planSummary});
 
-  final Widget? activity;
   final Widget? planSummary;
 
   @override
   Widget build(BuildContext context) {
-    final currentActivity = activity;
-    final alignedActivity = currentActivity == null
-        ? null
-        : Align(
-            alignment: Alignment.centerLeft,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 700),
-              child: currentActivity,
-            ),
-          );
     final currentPlan = planSummary;
     final alignedPlan = currentPlan == null
         ? null
@@ -46,74 +39,13 @@ class _TimelineTail extends StatelessWidget {
           );
     return Column(
       key: const ValueKey('timeline-tail'),
-      mainAxisAlignment: MainAxisAlignment.end,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         ?alignedPlan,
-        if (alignedPlan != null && alignedActivity != null)
-          const SizedBox(height: 12),
-        ?alignedActivity,
         const SizedBox(key: ValueKey('timeline-tail-bottom-gap'), height: 14),
       ],
     );
   }
-}
-
-class _TurnActivityBlock extends StatelessWidget {
-  const _TurnActivityBlock({
-    required this.turn,
-    required this.reasoningExpanded,
-    required this.onToggleReasoning,
-    this.reasoningGroup,
-    this.toolGroup,
-    super.key,
-  });
-
-  final StudioTurnView turn;
-  final bool reasoningExpanded;
-  final VoidCallback onToggleReasoning;
-  final TimelineReasoningGroup? reasoningGroup;
-  final TimelineToolGroup? toolGroup;
-
-  @override
-  Widget build(BuildContext context) {
-    final activity = turn.state.activity;
-    final reasoning = reasoningGroup;
-    if (activity == StudioTurnActivity.thinking && reasoning != null) {
-      return _ReasoningPart(
-        threadId: turn.threadId,
-        group: reasoning,
-        isCurrentActivity: true,
-        expanded: reasoningExpanded,
-        onToggle: onToggleReasoning,
-      );
-    }
-    final tools = toolGroup;
-    if (activity == StudioTurnActivity.runningTool && tools != null) {
-      return _ToolGroupPart(
-        threadId: turn.threadId,
-        group: tools,
-        isCurrentActivity: true,
-      );
-    }
-    return _TimelineActivitySummary(
-      icon: activity?.icon ?? Icons.schedule_outlined,
-      label: _turnActivityLabel(context, turn.state),
-      isCurrentActivity: true,
-      muted: activity == StudioTurnActivity.thinking,
-    );
-  }
-}
-
-String _turnActivityLabel(BuildContext context, StudioTurnState state) {
-  return switch (state.status) {
-    StudioTurnStatus.queued => context.l10n.statusTurnQueued,
-    StudioTurnStatus.running => context.turnActivityLabel(state.activity!),
-    StudioTurnStatus.completed ||
-    StudioTurnStatus.failed ||
-    StudioTurnStatus.cancelled ||
-    StudioTurnStatus.budgetLimited => '',
-  };
 }
 
 class _JumpToLatestButton extends StatelessWidget {
@@ -177,17 +109,19 @@ class _JumpToLatestButton extends StatelessWidget {
 class _TimelineRowBlock extends StatelessWidget {
   const _TimelineRowBlock({
     required this.row,
-    required this.isCurrentActivity,
     required this.isReasoningExpanded,
     required this.onToggleReasoning,
+    required this.isToolGroupExpanded,
+    required this.onToggleToolGroup,
     this.body = const [],
     super.key,
   });
 
   final TimelineRow row;
-  final bool isCurrentActivity;
   final bool isReasoningExpanded;
   final ValueChanged<String> onToggleReasoning;
+  final bool isToolGroupExpanded;
+  final ValueChanged<String> onToggleToolGroup;
 
   /// 该行底层超大条目的完整正文状态；空列表表示该行不需要回源。
   ///
@@ -274,9 +208,10 @@ class _TimelineRowBlock extends StatelessWidget {
                     child: _RowCard(
                       key: ValueKey(row.id),
                       row: row,
-                      isCurrentActivity: isCurrentActivity,
                       isReasoningExpanded: isReasoningExpanded,
                       onToggleReasoning: onToggleReasoning,
+                      isToolGroupExpanded: isToolGroupExpanded,
+                      onToggleToolGroup: onToggleToolGroup,
                     ),
                   ),
                   if (!row.saved)
@@ -361,10 +296,12 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-/// 超大条目的完整正文提示：可见的加载 / 失败 / 重试路径。
+/// 折叠条目的完整正文提示：可见的加载 / 失败 / 重试路径。
 ///
-/// 页面只返回同身份预览时给出显式回源入口；回源进行中显示加载态；失败时显示错误与
-/// 重试。所有状态只改变该条目的载荷，不改变身份、ordinal 或用户阅读位置。
+/// 推理 / 工具 / raw 载荷仍收敛到客户端预算，展开后按底层条目身份给出显式补齐入口；补齐
+/// 进行中显示加载态；失败时显示错误与重试。智能体正文不在此列：它由窗口按身份自动补齐，
+/// 因此既不显示分页/折叠入口，也不需要读者点击加载。所有状态只改变该条目的载荷，不改变
+/// 身份、ordinal 或用户阅读位置。
 class _ItemBodyNotice extends StatelessWidget {
   const _ItemBodyNotice({required this.state});
 
@@ -455,16 +392,18 @@ class _ItemBodyNotice extends StatelessWidget {
 class _RowCard extends StatelessWidget {
   const _RowCard({
     required this.row,
-    required this.isCurrentActivity,
     required this.isReasoningExpanded,
     required this.onToggleReasoning,
+    required this.isToolGroupExpanded,
+    required this.onToggleToolGroup,
     super.key,
   });
 
   final TimelineRow row;
-  final bool isCurrentActivity;
   final bool isReasoningExpanded;
   final ValueChanged<String> onToggleReasoning;
+  final bool isToolGroupExpanded;
+  final ValueChanged<String> onToggleToolGroup;
 
   @override
   Widget build(BuildContext context) {
@@ -512,7 +451,6 @@ class _RowCard extends StatelessWidget {
         key: ValueKey('${row.threadId}:${row.reasoningGroup!.id}'),
         threadId: row.threadId,
         group: row.reasoningGroup!,
-        isCurrentActivity: isCurrentActivity,
         expanded: isReasoningExpanded,
         onToggle: () => onToggleReasoning(row.reasoningGroup!.id),
       ),
@@ -520,7 +458,8 @@ class _RowCard extends StatelessWidget {
         key: ValueKey(row.toolGroup!.id),
         threadId: row.threadId,
         group: row.toolGroup!,
-        isCurrentActivity: isCurrentActivity,
+        expanded: isToolGroupExpanded,
+        onToggle: () => onToggleToolGroup(row.toolGroup!.id),
       ),
       TimelineRowType.skillActivation => _SkillActivationPart(
         key: StudioDriverKeys.timelineSkillActivation(row.part!.id),
@@ -697,7 +636,6 @@ class _ReasoningPart extends StatelessWidget {
   const _ReasoningPart({
     required this.threadId,
     required this.group,
-    required this.isCurrentActivity,
     required this.expanded,
     required this.onToggle,
     super.key,
@@ -705,17 +643,14 @@ class _ReasoningPart extends StatelessWidget {
 
   final String threadId;
   final TimelineReasoningGroup group;
-  final bool isCurrentActivity;
   final bool expanded;
   final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
-    final label = _reasoningGroupLabel(context, group, isCurrentActivity);
-    final secondary = isCurrentActivity
-        ? _reasoningCurrentSummary(group, label)
-        : null;
-    final semanticsLabel = secondary == null ? label : '$label · $secondary';
+    // 历史上发生过的推理只描述“曾经思考了什么”，展开态按 group 身份保存在 Timeline
+    // 状态里；当前活动由输入框上方的固定活动条单独呈现。
+    final label = _reasoningGroupLabel(context, group);
     final details = expanded ? group.details : '';
 
     return Column(
@@ -724,9 +659,8 @@ class _ReasoningPart extends StatelessWidget {
         Semantics(
           container: true,
           button: true,
-          liveRegion: isCurrentActivity,
           expanded: expanded,
-          label: semanticsLabel,
+          label: label,
           onTap: onToggle,
           excludeSemantics: true,
           child: Material(
@@ -739,9 +673,6 @@ class _ReasoningPart extends StatelessWidget {
               child: _TimelineActivitySummary(
                 icon: Icons.psychology_alt_outlined,
                 label: label,
-                secondary: secondary,
-                isCurrentActivity: isCurrentActivity,
-                muted: true,
                 isIssue: const {
                   'failed',
                   'interrupted',
@@ -792,11 +723,7 @@ class _ReasoningPart extends StatelessWidget {
 String _reasoningGroupLabel(
   BuildContext context,
   TimelineReasoningGroup group,
-  bool isCurrentActivity,
 ) {
-  if (isCurrentActivity) {
-    return context.l10n.timelineReasoningActive;
-  }
   final allSummaries = group.summaries;
   final summaries = allSummaries
       .take(3)
@@ -809,35 +736,6 @@ String _reasoningGroupLabel(
   return summaries.isEmpty
       ? context.l10n.timelineReasoningCompleted
       : summaries.join(' · ');
-}
-
-/// 当前 thinking 活动块作为次要信息展示的最迟 reasoning 摘要；无有效摘要返回 null。
-///
-/// 与本地化主标签大小写无关相同时视为重复（如摘要本身就是 “Thinking”），
-/// 返回 null 以避免 “Thinking · Thinking” 与重复 live-region 播报。
-String? _reasoningCurrentSummary(
-  TimelineReasoningGroup group,
-  String mainLabel,
-) {
-  String? latest;
-  for (final part in group.parts.reversed) {
-    for (final summary in part.reasoningSummary.reversed) {
-      if (summary.isNotEmpty) {
-        latest = summary;
-        break;
-      }
-    }
-    latest ??= part.text.isEmpty ? null : part.text;
-    if (latest != null) break;
-  }
-  if (latest == null || latest.isEmpty) {
-    return null;
-  }
-  final short = _activityPreview(latest);
-  if (short.toLowerCase() == mainLabel.toLowerCase()) {
-    return null;
-  }
-  return short;
 }
 
 String _activityPreview(String text) {
@@ -853,61 +751,28 @@ class _TimelineActivitySummary extends StatelessWidget {
   const _TimelineActivitySummary({
     required this.icon,
     required this.label,
-    required this.isCurrentActivity,
     this.isIssue = false,
-    this.muted = false,
     this.expanded,
-    this.secondary,
-    this.showWaitPulse,
   });
 
   final IconData icon;
   final String label;
-  final bool isCurrentActivity;
   final bool isIssue;
-  final bool muted;
   final bool? expanded;
-
-  /// 可选的次要文案（例如 thinking 的最新 reasoning 摘要），跟随主标签滚动展开。
-  final String? secondary;
-
-  /// 是否显示等待脉冲；为 null 时跟随 [isCurrentActivity]。
-  final bool? showWaitPulse;
-
-  bool get _showPulse => showWaitPulse ?? isCurrentActivity;
 
   @override
   Widget build(BuildContext context) {
     final color = isIssue
         ? Theme.of(context).colorScheme.error
-        : muted
-        ? context.colors.onSurfaceVariant
-        : isCurrentActivity
-        ? context.colors.onSurface
         : context.colors.onSurfaceVariant;
-    final showPulse = _showPulse;
     return ConstrainedBox(
-      key: isCurrentActivity
-          ? const ValueKey('timeline-current-activity')
-          : null,
       constraints: const BoxConstraints(minHeight: 32),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
         child: Row(
           children: [
-            if (showPulse) ...[
-              const TimelineWaitIndicator(
-                key: ValueKey('timeline-current-activity-pulse'),
-              ),
-              const SizedBox(width: 10),
-            ] else ...[
-              Icon(
-                icon,
-                size: 16,
-                color: color.withValues(alpha: isCurrentActivity ? 0.9 : 0.76),
-              ),
-              const SizedBox(width: 8),
-            ],
+            Icon(icon, size: 16, color: color.withValues(alpha: 0.76)),
+            const SizedBox(width: 8),
             Expanded(
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 140),
@@ -919,7 +784,18 @@ class _TimelineActivitySummary extends StatelessWidget {
                     children: [...previousChildren, ?currentChild],
                   );
                 },
-                child: _activityLabel(context, color),
+                child: Text(
+                  label,
+                  key: ValueKey(label),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  style: context.text.bodySmall?.copyWith(
+                    color: color,
+                    fontWeight: isIssue ? FontWeight.w600 : FontWeight.w400,
+                    height: 1.25,
+                  ),
+                ),
               ),
             ),
             if (expanded != null) ...[
@@ -934,67 +810,6 @@ class _TimelineActivitySummary extends StatelessWidget {
             ],
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _activityLabel(BuildContext context, Color color) {
-    final secondaryText = secondary?.trim();
-    final hasSecondary = secondaryText != null && secondaryText.isNotEmpty;
-    final baseStyle = context.text.bodySmall?.copyWith(
-      color: color,
-      fontWeight: isIssue
-          ? FontWeight.w600
-          : isCurrentActivity
-          ? FontWeight.w500
-          : FontWeight.w400,
-      height: 1.25,
-    );
-    if (hasSecondary) {
-      return Semantics(
-        key: ValueKey((label, true)),
-        liveRegion: isCurrentActivity,
-        label: '$label · $secondaryText',
-        excludeSemantics: true,
-        child: Row(
-          children: [
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                softWrap: false,
-                style: baseStyle,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                secondaryText,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                softWrap: false,
-                style: context.text.bodySmall?.copyWith(
-                  color: context.colors.onSurfaceVariant,
-                  height: 1.25,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-    return Semantics(
-      key: ValueKey(label),
-      liveRegion: isCurrentActivity,
-      label: label,
-      excludeSemantics: true,
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        softWrap: false,
-        style: baseStyle,
       ),
     );
   }

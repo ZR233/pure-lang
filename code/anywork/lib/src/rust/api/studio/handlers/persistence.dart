@@ -23,6 +23,18 @@ Future<BridgePersistenceQueueSnapshot> retryThreadHistory({
   faultGeneration: faultGeneration,
 );
 
+/// 显式继续：在保存重试已按同一代数确认后再解除准入闩，让下一轮模型/工具工作可以开始。
+///
+/// 与 [`retry_thread_history`] 是两个动作：重试只把积压事实写下去，本命令才恢复执行。代数过期、
+/// 后端仍在上报故障或仍有未上交批次时会失败，调用方必须按 typed 存储状态重试而不是假定成功。
+Future<BridgePersistenceQueueSnapshot> resumeThreadHistory({
+  required String threadId,
+  required BigInt faultGeneration,
+}) => RustLib.instance.api.crateApiStudioHandlersPersistenceResumeThreadHistory(
+  threadId: threadId,
+  faultGeneration: faultGeneration,
+);
+
 /// 读取进程级持久化队列压力与逐 Thread 水位。
 ///
 /// 返回协调器已观测到的真实值：队列操作数、字节、在途字节、最老待保存年龄与最近错误，

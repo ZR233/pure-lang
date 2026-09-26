@@ -18,7 +18,7 @@
 //! that effect, so a candidate never carries a summary the state it saves does not include.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, VecDeque},
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -36,8 +36,9 @@ use tokio::time::Instant;
 use crate::studio::StudioStore;
 use crate::studio::storage::coordinator::ThreadPersistenceMetrics;
 use crate::studio::storage::history::{
-    EffectCommit, InputIdentityWrite, MessageIdentityWrite, chat_item, is_retryable_write,
+    EffectCommit, InputIdentityWrite, MessageIdentityWrite, is_retryable_write,
 };
+use crate::studio::thread_projection::PreparedEffect;
 
 /// Fixed coalescing interval for dirty checkpoint revisions.
 const SNAPSHOT_COALESCE: Duration = Duration::from_secs(1);
@@ -106,6 +107,23 @@ struct PendingCheckpoint {
     usage: Option<UsageSummary>,
 }
 
+/// One admitted effect waiting for its ordered durable write.
+#[derive(Debug)]
+struct QueuedEffect {
+    sequence: u64,
+    write: Arc<ThreadWrite>,
+    /// Encoded size of `write.effect`, measured once at admission.
+    bytes: u64,
+    /// The product content the Thread's single live projection owner prepared for this commit.
+    ///
+    /// `None` until the projection owner took the fact over. The writer never projects an effect
+    /// itself, so a fact whose reliable handoff is still unfinished stays queued instead of being
+    /// written out of the projection's order.
+    prepared: Option<Arc<PreparedEffect>>,
+    /// Retained bytes of `prepared`, charged to the reliable budget while this entry holds it.
+    prepared_bytes: u64,
+}
+
 #[derive(Debug, Default)]
 struct Progress {
     /// Highest effect sequence whose history/calls write completed.
@@ -127,8 +145,35 @@ struct Progress {
     in_flight: Option<PendingCheckpoint>,
     /// Checkpoint revision currently being serialized or synced.
     saving_revision: u64,
-    /// Admitted effects awaiting their ordered history/calls write, with their projection state.
-    effects: VecDeque<(u64, Arc<ThreadWrite>, u64)>,
+    /// Admitted effects awaiting their ordered history/calls write.
+    ///
+    /// An entry leaves the queue only once the durable store committed it *and* the Thread's single
+    /// live projection owner took it over, so this queue is the one reliable handoff between a core
+    /// commit and both durable history and the live product.
+    effects: VecDeque<QueuedEffect>,
+    /// Retained bytes of the prepared batches the queue still holds.
+    ///
+    /// A prepared batch is the immutable product content the projection owner published, and the
+    /// queue holds it until the effect is durable: its text is real resident memory, so it is
+    /// charged to the Thread's reliable budget instead of hiding outside it. It is released with the
+    /// queue entry and never double-counted against that effect's own encoded size.
+    prepared_bytes: u64,
+    /// Bytes the Thread's live projection currently retains in its own tables.
+    ///
+    /// The projection owner publishes this absolute gauge after every projection step. It is what
+    /// keeps the Thread's budget honest past durability: the retained bodies and the report
+    /// accumulator outlive the prepared batch the writer already committed, so without this the
+    /// Thread would claim to be drained while still holding its Turn's process bodies.
+    projection_bytes: u64,
+    /// Newest commit the Thread's live projection owner has handed over.
+    ///
+    /// This is the handoff ticket the projection's own durability barrier asks for: effects are
+    /// admitted in order and the owner hands its batch over in the same order, so "the writer is
+    /// durable through this commit" is exactly "every fact this owner handed over is saved". A
+    /// channel that has handed nothing over is at `0`, so a projection installed on a restored
+    /// Thread — whose commits were already durable before this process started — never waits for a
+    /// watermark that cannot move.
+    handoff: u64,
     /// Effect sequence a caller is waiting for; publication may not wait for the coalescing tick.
     flush_target: u64,
     /// Highest effect sequence whose call write was admitted.
@@ -147,9 +192,25 @@ struct Progress {
     error: Option<String>,
     fault: Option<pl_protocol::studio::HistoryFault>,
     fault_generation: u64,
+    /// Whether the newest fault generation's retry has been verified as really landed.
+    ///
+    /// It stays `false` from the moment a fault is latched until a retry made the fixed target
+    /// durable and published — the only fact that makes an explicit continue acceptable. A later
+    /// fault clears it again, so a stale verification never vouches for a newer failure.
+    fault_recovered: bool,
     fault_target: u64,
     retry_requested: bool,
     last_progress_at: Option<Instant>,
+    /// Reliable output ceilings currently held by in-flight model/tool operations of this Thread.
+    ///
+    /// One entry per operation that reserved a live-output ceiling from the process budget. The
+    /// ceiling is charged to the budget the moment it is granted (a call only starts when its worst
+    /// case could be retained). The value is what is still *reserved* for output that has not become
+    /// a fact yet: admitting a fact transfers the bytes it covers out of these ceilings instead of
+    /// charging the same output a second time next to them, so the process total keeps exactly one
+    /// charge for it — as the in-flight ceiling before the fact exists, as the fact's own charge
+    /// afterwards. What is left when the call ends is given back in full.
+    operation_output: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -306,6 +367,19 @@ pub(crate) struct HistoryChannel {
     progress: Mutex<Progress>,
     changed: Arc<tokio::sync::Notify>,
     step_lock: tokio::sync::Mutex<()>,
+    /// The process-wide reliable budget, shared by every Thread's channel.
+    ///
+    /// It charges exactly two things, each byte once: the effects the channels hold, each at the
+    /// encoded size it was admitted with, and the live-output ceilings still reserved by in-flight
+    /// model/tool operations. A fact whose operation holds a ceiling takes those bytes over at
+    /// admission instead of adding a second charge for the same output, and both charges are
+    /// released when the fact becomes durable or the call ends without one.
+    ///
+    /// The prepared batches and the live projection's retained bodies are deliberately *not* part of
+    /// this process counter: they are the same product content the queued effect already charged,
+    /// kept alive by a different owner, so charging them here would count one body twice and make the
+    /// process limit fire at half the memory it names. They are charged to the owning Thread's
+    /// budget instead, which is the enforced per-Thread gate (`StoragePressure::thread_bytes`).
     process_bytes: Arc<AtomicU64>,
     status: tokio::sync::watch::Sender<HistoryStatus>,
     pressure_changed: tokio::sync::watch::Sender<()>,
@@ -335,8 +409,224 @@ impl HistoryChannel {
             .is_ok()
     }
 
+    /// Reserves up to `max_bytes` from the process budget, returning what was really granted.
+    ///
+    /// `None` means there is no headroom at all: the caller must wait for the budget to free up
+    /// instead of starting an operation whose output this process could not retain.
+    fn reserve_output_up_to(&self, max_bytes: u64) -> Option<u64> {
+        let mut granted = 0_u64;
+        let reserved = self
+            .process_bytes
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                let headroom = MAX_HISTORY_PROCESS_BYTES.saturating_sub(current);
+                let take = headroom.min(max_bytes);
+                if take == 0 {
+                    return None;
+                }
+                granted = take;
+                Some(current.saturating_add(take))
+            })
+            .is_ok();
+        reserved.then_some(granted)
+    }
+
+    /// Reserves one operation's live-output ceiling from the process budget.
+    ///
+    /// The ceiling is charged to the budget as soon as it is granted, so a call only starts when its
+    /// worst case could be retained. The *whole* ceiling is given back at
+    /// [`release_operation_output`](Self::release_operation_output): this is a transient reservation
+    /// for output that is still in flight, not a second copy of the produced fact. Once the call
+    /// returns, the content it produced is charged once by the ordinary effect admission (`admit`
+    /// reserves the encoded batch and releases it when the batch becomes durable), so keeping the
+    /// accepted bytes charged here too would double-count them and leak the process budget a little
+    /// on every successful call. An already reserved operation keeps its original grant, so a
+    /// repeated reservation never charges twice.
+    fn reserve_operation_output(&self, operation_id: &str, max_bytes: u64) -> Option<u64> {
+        let mut progress = self
+            .progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(granted) = progress.operation_output.get(operation_id) {
+            return Some(*granted);
+        }
+        let granted = self.reserve_output_up_to(max_bytes)?;
+        progress
+            .operation_output
+            .insert(operation_id.to_owned(), granted);
+        Some(granted)
+    }
+
+    /// Checks that what the producer accepted still fits the ceiling it reserved.
+    ///
+    /// The ceiling is already charged to the budget, so there is nothing to add here — this only
+    /// guards the invariant that an operation can never accept more than the budget funded. The
+    /// compared value is the ceiling that is *still reserved* for this operation's not-yet-committed
+    /// output: facts the Thread admitted while the call was in flight already took over the bytes
+    /// they covered, and retaining more than what is left would exceed the process budget. A refusal
+    /// is typed and is what makes the producer truncate the call with the bytes it already had; the
+    /// remaining ceiling is released afterwards, so the refused operation leaves no residue.
+    fn charge_operation_output(
+        &self,
+        operation_id: &str,
+        accepted_bytes: u64,
+    ) -> Result<(), ColdStoreError> {
+        let progress = self
+            .progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match progress.operation_output.get(operation_id) {
+            Some(granted) if accepted_bytes > *granted => Err(cold_error(&format!(
+                "operation {operation_id} accepted {accepted_bytes} bytes over its {granted}-byte reservation"
+            ))),
+            _ => Ok(()),
+        }
+    }
+
+    /// Gives back whatever ceiling the operation still holds.
+    ///
+    /// The reservation is transient: the bytes its produced facts already took over are charged to
+    /// those facts now, so only the remainder comes back here. Releasing the whole original ceiling
+    /// instead would drop the charge of the facts that consumed it, and releasing nothing would leak
+    /// the remainder of every call.
+    fn release_operation_output(&self, operation_id: &str) {
+        let granted = {
+            let mut progress = self
+                .progress
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            progress.operation_output.remove(operation_id).unwrap_or(0)
+        };
+        if granted > 0 {
+            self.process_bytes.fetch_sub(granted, Ordering::AcqRel);
+        }
+    }
+
     pub(crate) fn subscribe(&self) -> tokio::sync::watch::Receiver<HistoryStatus> {
         self.status.subscribe()
+    }
+
+    /// Publishes the bytes the Thread's live projection currently retains in its own tables.
+    ///
+    /// The projection owner is the only writer of this gauge, and it reports an absolute value, so
+    /// the Thread's budget covers the report accumulator and the retained bodies without charging a
+    /// cumulative estimate twice. It is reported through the same status the reliable queue uses,
+    /// so a Thread whose projection still holds its Turn's bodies reads as pending work — which is
+    /// what pauses new model/tool admission at a safe gap instead of growing unseen memory.
+    pub(crate) fn set_projection_bytes(&self, bytes: u64) {
+        let mut progress = self
+            .progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if progress.projection_bytes == bytes {
+            return;
+        }
+        progress.projection_bytes = bytes;
+        self.report(&progress);
+    }
+
+    /// Newest commit the Thread's live projection owner has handed over to this channel.
+    ///
+    /// The projection owner waits on the writer's watermark only for facts it handed over itself, so
+    /// this ticket — not an absolute commit sequence — is what its durability barrier targets. It is
+    /// `0` while nothing was handed over, which is already durable.
+    pub(crate) fn handoff_ticket(&self) -> u64 {
+        self.progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .handoff
+    }
+
+    /// Hands the Thread's single live projection owner's prepared batch to the reliable handoff.
+    ///
+    /// The batch is attached to the admitted effect it belongs to, so the writer commits exactly the
+    /// content the projection published instead of projecting the effect a second time. Only a fact
+    /// this channel already admitted can be handed over — the projection owner reads its work from
+    /// this same queue — so an unknown or already durable sequence is refused rather than stored in a
+    /// second, unordered slot. Returns whether the batch was attached.
+    pub(in crate::studio) fn prepare(&self, prepared: Arc<PreparedEffect>) -> bool {
+        // Measure before taking the lock: the batch is immutable, and sizing it walks text lengths
+        // instead of encoding a payload inside the critical section.
+        let bytes = crate::studio::thread_projection::retained_bytes(&prepared.items);
+        let sequence = prepared.sequence;
+        let mut progress = self
+            .progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if sequence <= progress.durable {
+            return false;
+        }
+        // Locate the entry by index so the budget update and the attach happen in one place without
+        // holding a borrow of the queue while `prepared_bytes` changes.
+        let Some(index) = progress
+            .effects
+            .iter()
+            .position(|queued| queued.sequence == sequence)
+        else {
+            return false;
+        };
+        if progress.effects[index].prepared.is_none() {
+            progress.prepared_bytes = progress.prepared_bytes.saturating_add(bytes);
+            progress.effects[index].prepared_bytes = bytes;
+        }
+        progress.effects[index].prepared = Some(prepared);
+        progress.handoff = progress.handoff.max(sequence);
+        drop(progress);
+        self.changed.notify_one();
+        true
+    }
+
+    /// Oldest admitted effect the Thread's live projection owner has not taken over yet.
+    ///
+    /// The reliable queue is the Thread's one ordered handoff, so the projection owner consumes it in
+    /// admission order: this is the next fact it owes a projection, and `None` while every admitted
+    /// effect is already prepared. Nothing waits for a GUI — a Thread without subscribers still
+    /// drains the queue, because the writer cannot save a fact no projection holds.
+    pub(in crate::studio) fn next_unprojected(&self) -> Option<Arc<ThreadWrite>> {
+        let progress = self
+            .progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        progress
+            .effects
+            .iter()
+            .find(|queued| queued.prepared.is_none())
+            .map(|queued| queued.write.clone())
+    }
+
+    /// Publishes the failure of one admitted fact's projection.
+    ///
+    /// The writer never projects an effect itself, so a fact the projection owner cannot project is
+    /// never handed over and never saved. Reporting it here is what makes the durable barrier fail
+    /// closed with the projection's own reason — and what keeps `pressure()` agreeing with it —
+    /// instead of waiting forever for a batch that will never arrive.
+    ///
+    /// An unchanged fault is published once. The projection owner re-observes the same pending fact
+    /// on every owner snapshot, so re-publishing the identical status would wake its own status
+    /// watcher and turn the failure into a busy loop instead of a paused, fail-closed Thread.
+    pub(crate) fn fail_projection(&self, sequence: u64, message: String) {
+        let published = {
+            let mut progress = self
+                .progress
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let published = progress.error.as_deref() != Some(message.as_str());
+            if progress.error.is_none() {
+                progress.fault_generation = progress.fault_generation.saturating_add(1);
+                progress.retry_requested = false;
+            }
+            progress.fault_target = progress.fault_target.max(sequence);
+            progress.fault = Some(pl_protocol::studio::HistoryFault::WriteFailed);
+            progress.error = Some(message);
+            progress.fault_recovered = false;
+            progress.saving_revision = 0;
+            if published {
+                self.report(&progress);
+            }
+            published
+        };
+        if published {
+            self.changed.notify_one();
+        }
     }
 
     fn report(&self, progress: &Progress) {
@@ -347,10 +637,16 @@ impl HistoryChannel {
             admitted_sequence: progress
                 .effects
                 .back()
-                .map_or(progress.durable, |(seq, _, _)| *seq),
+                .map_or(progress.durable, |queued| queued.sequence),
             committed_sequence: progress.durable,
             queued_records: progress.effects.len() as u64,
-            queued_bytes: progress.effects.iter().map(|(_, _, bytes)| *bytes).sum(),
+            queued_bytes: progress
+                .effects
+                .iter()
+                .map(|queued| queued.bytes)
+                .sum::<u64>()
+                .saturating_add(progress.prepared_bytes)
+                .saturating_add(progress.projection_bytes),
         });
         self.pressure_changed.send_replace(());
     }
@@ -385,11 +681,12 @@ impl HistoryChannel {
         }
         progress.fault = Some(pl_protocol::studio::HistoryFault::WriterUnavailable);
         progress.error = Some("history writer unavailable; queued facts retained".to_owned());
+        progress.fault_recovered = false;
         progress.retry_requested = false;
         progress.fault_target = progress
             .effects
             .back()
-            .map_or(progress.durable, |(seq, _, _)| *seq);
+            .map_or(progress.durable, |queued| queued.sequence);
         self.report(&progress);
     }
 
@@ -422,8 +719,9 @@ impl HistoryChannel {
         progress.fault_target = progress
             .effects
             .back()
-            .map_or(progress.durable, |(seq, _, _)| *seq);
+            .map_or(progress.durable, |queued| queued.sequence);
         progress.error = Some("history writer made no progress with queued facts".to_owned());
+        progress.fault_recovered = false;
         progress.retry_requested = false;
         self.report(&progress);
     }
@@ -488,6 +786,50 @@ fn encoded_bytes(effect: &pl_core::thread::ThreadEffectBatch) -> u64 {
         .map_or(u64::MAX, |payload| payload.content().len() as u64)
 }
 
+/// Bytes of `bytes` that one operation's live-output ceiling can take over.
+fn output_ceiling_draw(progress: &Progress, operation: &str, want: u64) -> u64 {
+    progress
+        .operation_output
+        .get(operation)
+        .map_or(0, |reserved| (*reserved).min(want))
+}
+
+/// Plans the transfer of the reserving operation's live-output ceiling onto the fact it funds.
+///
+/// An operation's ceiling is the reliable budget's hold on the output that operation will produce.
+/// When that output becomes an admitted fact, the hold becomes the fact's own charge instead of the
+/// fact being charged a second time next to it. Both are the same bytes, so the transfer needs no
+/// extra headroom at all: a Thread whose own reservations fill the process budget can still hand its
+/// facts over, which is what keeps a fully reserved process from stalling behind its own queue.
+///
+/// Only the operation the fact itself names may fund it: `ThreadWrite::output_claim` is the
+/// producing operation's own identity, so a fact takes over exactly the ceiling that was reserved
+/// for it. A fact that names no operation — an accepted input, a turn/lifecycle commit, any other
+/// commit that is not an operation's output — is never charged to somebody else's ceiling.
+/// Pooling every in-flight ceiling would let an unfunded fact spend headroom a *different*
+/// operation still needs, which is exactly the "unlimited, over-budget admission" this budget
+/// exists to prevent: such a fact has to fit the real headroom and is otherwise refused with typed
+/// backpressure.
+///
+/// Returns the `(operation, bytes)` pairs to debit and the total they cover, so the caller can take
+/// the decision — and the fail-typed backpressure path — before mutating anything.
+fn output_transfer_plan(
+    progress: &Progress,
+    funding: Option<&str>,
+    bytes: u64,
+) -> (Vec<(String, u64)>, u64) {
+    let mut plan = Vec::new();
+    let mut covered = 0_u64;
+    if let Some(operation) = funding {
+        let take = output_ceiling_draw(progress, operation, bytes);
+        if take > 0 {
+            covered += take;
+            plan.push((operation.to_owned(), take));
+        }
+    }
+    (plan, covered)
+}
+
 /// The writer's single durable history reader, opened on first use.
 ///
 /// The handle comes from the per-Thread shared writer registry, so this sink's effect commit and a
@@ -525,12 +867,12 @@ fn report(inner: &Inner, progress: &Progress) {
     let pending = progress
         .effects
         .iter()
-        .map(|(sequence, _, _)| *sequence)
+        .map(|queued| queued.sequence)
         .collect::<Vec<_>>();
     let pending_bytes = progress
         .effects
         .iter()
-        .fold(0_u64, |total, (_, _, bytes)| total.saturating_add(*bytes));
+        .fold(0_u64, |total, queued| total.saturating_add(queued.bytes));
     // 进行中 + 最新待写的未发布 checkpoint 也是待处理操作；只保留 checkpoint dirty 时，最老
     // 待写年龄仍来自它自己的 saved_at，而不是退化成 None。
     let dirty = progress
@@ -544,7 +886,7 @@ fn report(inner: &Inner, progress: &Progress) {
     let oldest_pending_age_millis = progress
         .effects
         .iter()
-        .map(|(_, write, _)| write.checkpoint.saved_at)
+        .map(|queued| queued.write.checkpoint.saved_at)
         .chain(
             dirty
                 .iter()
@@ -559,7 +901,7 @@ fn report(inner: &Inner, progress: &Progress) {
     let max_admitted = progress
         .effects
         .back()
-        .map(|(sequence, _, _)| *sequence)
+        .map(|queued| queued.sequence)
         .unwrap_or(0);
     let metrics = ThreadPersistenceMetrics {
         fault_generation: progress.fault_generation,
@@ -599,21 +941,10 @@ fn clear_recovered_fault(progress: &mut Progress) {
         progress.error = None;
         progress.fault = None;
         progress.retry_requested = false;
+        // The retry named this generation and the fixed target really landed, so an explicit
+        // continue would be accepted now: that verified fact is what the UI is allowed to show.
+        progress.fault_recovered = true;
     }
-}
-
-/// The owner still retains the effect if admission rejects it; making its new input
-/// visible here never transfers durable responsibility to the presentation cache.
-fn publish_accepted_inputs(inner: &Inner, write: &ThreadWrite) -> Result<()> {
-    for mut item in crate::studio::thread_projection::project_accepted_inputs(
-        &inner.thread.id,
-        &write.checkpoint.state,
-        &write.effect,
-    )? {
-        item.ordinal = inner.chat.reserve_order_in_memory(&item.id)?;
-        inner.chat.publish(chat_item(item, false)?)?;
-    }
-    Ok(())
 }
 
 impl ThreadStorageSink {
@@ -698,6 +1029,14 @@ impl ThreadStorageSink {
                         && progress.fault != Some(pl_protocol::studio::HistoryFault::QueueFull)
                 };
                 if paused {
+                    // 通道可以把一个本 incarnation 自己没失败过的 Thread 标成失败：投影无法完成的
+                    // 事实永远不会被交接，writer 因此既不写也不报错。协调器聚合的错误正是进程级
+                    // drain 等待的那个事实，所以这里把通道的故障转成协调器可见的错误；否则暂停的
+                    // 队列会把停机变成无界等待，而不是带着真实原因的显式失败。
+                    {
+                        let progress = lock_progress(&inner);
+                        report(&inner, &progress);
+                    }
                     inner.changed.notified().await;
                     continue;
                 }
@@ -803,18 +1142,31 @@ async fn step(inner: &Inner) -> Result<Step> {
     if publishable {
         return publish_checkpoint(inner).await;
     }
-    let next_effect = lock_progress(inner)
-        .effects
-        .front()
-        .map(|(sequence, _, _)| *sequence);
-    if let Some(sequence) = next_effect {
-        persist_effect(inner, sequence).await?;
+    let next_effect = lock_progress(inner).effects.front().map(|queued| {
+        (
+            queued.sequence,
+            queued.write.clone(),
+            queued.prepared.clone(),
+        )
+    });
+    if let Some((sequence, write, prepared)) = next_effect {
+        // The Thread's live projection owner consumed this fact before the durable store may write
+        // it: the writer commits the content that owner published instead of projecting the effect
+        // again, so live and durable history can never disagree and durability never advances past a
+        // commit the product has not published.
+        let Some(prepared) = prepared else {
+            return Ok(Step::Idle(None));
+        };
+        persist_effect(inner, sequence, &write, &prepared).await?;
         let mut progress = lock_progress(inner);
-        if let Some((committed, _, bytes)) = progress.effects.pop_front() {
+        if let Some(committed) = progress.effects.pop_front() {
+            let bytes = committed.bytes;
+            let prepared_bytes = committed.prepared_bytes;
             ensure!(
-                committed == sequence,
+                committed.sequence == sequence,
                 "history queue head changed before acknowledgement"
             );
+            progress.prepared_bytes = progress.prepared_bytes.saturating_sub(prepared_bytes);
             inner
                 .channel
                 .process_bytes
@@ -833,82 +1185,26 @@ async fn step(inner: &Inner) -> Result<Step> {
 
 /// Writes one effect's history and call records, then folds its cumulative accounting.
 ///
-/// The projection state is the effect's own transfer state, so projections stay deterministic
-/// regardless of newer admitted revisions and resolve facts the commit itself pruned from the
-/// resident owner.
-async fn persist_effect(inner: &Inner, sequence: u64) -> Result<()> {
-    let write = {
-        let progress = lock_progress(inner);
-        progress
-            .effects
-            .front()
-            .filter(|(head, _, _)| *head == sequence)
-            .map(|(_, write, _)| write.clone())
-            .with_context(|| format!("missing admitted effect {sequence}"))?
-    };
+/// The committed content is the immutable batch the Thread's single live projection owner prepared
+/// for exactly this commit. The writer therefore never projects the effect a second time — the whole
+/// product body is projected once, published once and written once — and the identity/revision pair
+/// it confirms is the pair that owner handed over.
+async fn persist_effect(
+    inner: &Inner,
+    sequence: u64,
+    write: &ThreadWrite,
+    projected: &PreparedEffect,
+) -> Result<()> {
+    ensure!(
+        projected.sequence == sequence,
+        "prepared history batch {sequence} was handed over as {}",
+        projected.sequence
+    );
     {
         let mut progress = lock_progress(inner);
         progress.in_flight_bytes = encoded_bytes(&write.effect);
     }
-    let thread = &inner.thread;
     let history = history_store(inner).await?;
-    let provisional = crate::studio::thread_projection::project_effect_items(
-        thread,
-        &write.checkpoint.state,
-        &write.effect,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeSet::new(),
-    )?;
-    let mut ids = provisional
-        .items
-        .iter()
-        .map(|item| item.id.clone())
-        .collect::<Vec<_>>();
-    // A Turn keeps referencing the input id whose body its consuming commit pruned from the resident
-    // state. Nothing is re-projected from that identity, but its durable item is what proves the
-    // referenced body is committed, so the identity is part of this effect's lookup phase.
-    ids.extend(provisional.unresolved_inputs.iter().cloned());
-    ids.extend(provisional.unresolved_calls.iter().cloned());
-    // Only a channel with an earlier preview or durable row may be finalized here.
-    if let Some(attempt) = &write.effect.attempt {
-        for channel in ["reasoning", "text"] {
-            ids.push(crate::studio::thread_projection::attempt_channel_id(
-                &attempt.attempt_id,
-                channel,
-            ));
-        }
-    }
-    let existing = history.existing_items(ids.clone()).await?;
-    let hidden_inputs = history
-        .hidden_input_identities(provisional.unresolved_inputs.iter().cloned())
-        .await?;
-    let mut reserved = BTreeMap::new();
-    for id in provisional.items.iter().map(|item| &item.id) {
-        if !existing.contains_key(id) && !reserved.contains_key(id) {
-            let order = inner.chat.reserve_order(id).await?;
-            reserved.insert(id.clone(), order);
-        }
-    }
-    if let Some(attempt) = &write.effect.attempt {
-        for channel in ["reasoning", "text"] {
-            let id =
-                crate::studio::thread_projection::attempt_channel_id(&attempt.attempt_id, channel);
-            if let Some(order) = inner.chat.assigned_order(&id) {
-                reserved.entry(id).or_insert(order);
-            }
-        }
-    }
-    let projected = crate::studio::thread_projection::project_effect_items(
-        thread,
-        &write.checkpoint.state,
-        &write.effect,
-        &existing,
-        &reserved,
-        &hidden_inputs,
-    )?;
-    // Only an explicitly durable hidden identity can replace the visible item requirement.
-    projected.ensure_complete()?;
     // The durable identity indexes answer a repeated `submitPrompt` and a repeated message delivery
     // after the input/message left core state. Only minimal identities are written, and they share
     // this effect's transaction so an index can never be durable without the effect it describes; a
@@ -924,23 +1220,25 @@ async fn persist_effect(inner: &Inner, sequence: u64) -> Result<()> {
                 receipts: &fact_receipts(&write.effect)?,
                 tasks: &write.effect.tasks,
                 deliveries: &write.effect.deliveries,
+                delivery_repairs: &write.effect.delivery_repairs,
                 attempt: write.effect.attempt.as_ref(),
             },
         )
         .await?;
-    // A committed identity replaces its pending revision in the shared session. The
-    // queue owner remains responsible until this read and publication have succeeded.
-    let committed_ids = projected
-        .items
-        .iter()
-        .map(|item| item.id.clone())
-        .collect::<Vec<_>>();
-    for item in history.committed_chat_items(committed_ids).await? {
-        inner.chat.publish(item)?;
+    // The writer confirms exactly the identity and revision this transaction committed, which is the
+    // same batch the Thread's live projection published into the shared session before the handoff
+    // reached this queue. No body is read back and no second content cache exists, so the saved
+    // watermark can never drift from the published content.
+    for item in &projected.items {
+        inner.chat.confirm_saved(&item.id, item.revision);
     }
     if let Some(attempt) = &write.effect.attempt {
-        inner.chat.drop_previews_with_prefix(
+        // Release the attempt's speculative previews, but never an identity this transaction just
+        // confirmed: the durable row owns that content and its window position even if the session
+        // never saw the terminal publication or a slow producer published one more revision of it.
+        inner.chat.drop_previews_with_prefix_except(
             &crate::studio::thread_projection::presentation_preview_prefix(&attempt.attempt_id),
+            projected.items.iter().map(|item| item.id.as_str()),
         );
     }
     let statistics_admitted = inner.store.calls().try_admit_effect(&write.effect);
@@ -1107,10 +1405,11 @@ fn record_error(inner: &Inner, kind: pl_protocol::studio::HistoryFault, message:
         progress.fault_target = progress
             .effects
             .back()
-            .map_or(progress.durable, |(seq, _, _)| *seq);
+            .map_or(progress.durable, |queued| queued.sequence);
         progress.retry_requested = false;
         progress.fault = Some(kind);
         progress.error = Some(message);
+        progress.fault_recovered = false;
         // A failed publication is no longer being serialized; the retained checkpoint stays queued
         // for retry, and the metric must not keep reporting it as actively saving.
         progress.saving_revision = 0;
@@ -1151,6 +1450,53 @@ impl ColdStore for ThreadStorageSink {
     fn subscribe_pressure(&self, thread_id: &str) -> Option<tokio::sync::watch::Receiver<()>> {
         (thread_id == self.0.thread.id).then(|| self.0.channel.pressure_changed.subscribe())
     }
+
+    fn reserve_operation_output(
+        &self,
+        thread_id: &str,
+        operation_id: &str,
+        max_bytes: u64,
+    ) -> Result<u64, ColdStoreError> {
+        if thread_id != self.0.thread.id {
+            return Err(cold_error("Thread persistence owner mismatch"));
+        }
+        self.0
+            .channel
+            .reserve_operation_output(operation_id, max_bytes)
+            .ok_or_else(|| {
+                // No headroom is backpressure, not a failed save: the caller waits at a storage
+                // safety point and retries, and the Thread resumes by itself once the budget frees
+                // up. Latching a hard fault here would turn a transient wait into a pause that only
+                // an explicit resume could release.
+                cold_error(&format!(
+                    "reliable budget exhausted reserving operation {operation_id}"
+                ))
+            })
+    }
+
+    fn charge_operation_output(
+        &self,
+        thread_id: &str,
+        operation_id: &str,
+        accepted_bytes: u64,
+    ) -> Result<(), ColdStoreError> {
+        if thread_id != self.0.thread.id {
+            return Err(cold_error("Thread persistence owner mismatch"));
+        }
+        // The typed refusal a ceiling cannot hold must reach the caller unchanged: it is what makes
+        // the producer cancel the call with the bytes it already has instead of buffering output
+        // this process could not retain.
+        self.0
+            .channel
+            .charge_operation_output(operation_id, accepted_bytes)
+    }
+
+    fn release_operation_output(&self, thread_id: &str, operation_id: &str) {
+        if thread_id == self.0.thread.id {
+            self.0.channel.release_operation_output(operation_id);
+        }
+    }
+
     fn pressure(&self, thread_id: &str) -> StoragePressure {
         if thread_id != self.0.thread.id {
             return StoragePressure {
@@ -1159,10 +1505,25 @@ impl ColdStore for ThreadStorageSink {
             };
         }
         let progress = lock_progress(&self.0);
+        // The Thread's budget covers every resident body this Thread presents, and one of them only
+        // once: the effects still queued, the prepared product batches the reliable handoff still
+        // retains (the writer's queue length alone would under-report a Thread whose projection is
+        // already done but whose save is not), the bodies its live projection and report accumulator
+        // keep after their batch became durable, and the ceilings still reserved for in-flight
+        // model/tool output. The in-flight ceilings are what a Thread about to publish its result
+        // holds; leaving them out would report a Thread as idle while a call is buffering its answer.
+        let reserved = progress
+            .operation_output
+            .values()
+            .fold(0_u64, |total, reserved| total.saturating_add(*reserved));
         let mut bytes = progress
             .effects
             .iter()
-            .fold(0_u64, |total, (_, _, bytes)| total.saturating_add(*bytes));
+            .fold(progress.prepared_bytes, |total, queued| {
+                total.saturating_add(queued.bytes)
+            })
+            .saturating_add(progress.projection_bytes)
+            .saturating_add(reserved);
         if progress
             .pending
             .as_ref()
@@ -1177,6 +1538,20 @@ impl ColdStore for ThreadStorageSink {
         StoragePressure {
             thread_bytes: bytes,
             store_bytes: self.0.channel.process_bytes.load(Ordering::Acquire),
+            // Typed durability receipt: the owner releases the live effect window from this at a
+            // storage safety point instead of waiting for an explicit `flush` command.
+            durable_sequence: progress.durable,
+            // Typed fault category: the history channel already classifies its own failure, so no
+            // consumer has to read the error text to know what failed.
+            fault: progress.fault.map(storage_fault_kind),
+            fault_generation: progress.fault_generation,
+            // The writer's own recovery receipt, named by generation: `fault_recovered` means the
+            // retry of *this* generation reached the fixed durable target, so the owner can require
+            // that exact verdict before releasing the fault it holds instead of accepting an older
+            // generation's success.
+            recovered_generation: progress
+                .fault_recovered
+                .then_some(progress.fault_generation),
             error: progress.error.as_deref().map(storage_error),
         }
     }
@@ -1200,15 +1575,6 @@ impl ColdStore for ThreadStorageSink {
                 source: Box::new(std::io::Error::other("Thread persistence ticket mismatch")),
             });
         }
-        if let Err(error) = publish_accepted_inputs(&self.0, &write) {
-            let message = format!("Thread input could not be published in memory: {error}");
-            record_error(
-                &self.0,
-                pl_protocol::studio::HistoryFault::WriteFailed,
-                message.clone(),
-            );
-            return Err(cold_error(&message));
-        }
         let sequence = write.effect.sequence;
         let bytes = encoded_bytes(&write.effect);
         let mut progress = lock_progress(&self.0);
@@ -1216,17 +1582,22 @@ impl ColdStore for ThreadStorageSink {
             && !progress
                 .effects
                 .iter()
-                .any(|(queued, _, _)| *queued == sequence)
+                .any(|queued| queued.sequence == sequence)
         {
             let queued_bytes = progress
                 .effects
                 .iter()
-                .fold(0_u64, |total, (_, _, size)| total.saturating_add(*size));
+                .fold(0_u64, |total, queued| total.saturating_add(queued.bytes));
+            // The fact takes over the bytes of its own operation's reservation instead of being
+            // charged next to them; only what that one ceiling does not cover needs new headroom.
+            let (transfer, covered) =
+                output_transfer_plan(&progress, write.output_claim.as_deref(), bytes);
+            let added = bytes.saturating_sub(covered);
             if progress.effects.len() >= MAX_HISTORY_BATCHES
                 || queued_bytes
                     .checked_add(bytes)
                     .is_none_or(|total| total > MAX_HISTORY_THREAD_BYTES)
-                || !self.0.channel.reserve(bytes)
+                || (added > 0 && !self.0.channel.reserve(added))
             {
                 let message =
                     format!("history queue full for Thread {thread_id} at write_seq {sequence}");
@@ -1237,12 +1608,30 @@ impl ColdStore for ThreadStorageSink {
                 progress.fault_target = progress.fault_target.max(sequence);
                 progress.fault = Some(pl_protocol::studio::HistoryFault::QueueFull);
                 progress.error = Some(message.clone());
+                progress.fault_recovered = false;
                 report(&self.0, &progress);
                 return Err(cold_error(&message));
             }
-            progress
-                .effects
-                .push_back((sequence, Arc::new(write.clone()), bytes));
+            for (operation, taken) in transfer {
+                let emptied = match progress.operation_output.get_mut(&operation) {
+                    Some(reserved) => {
+                        *reserved = reserved.saturating_sub(taken);
+                        *reserved == 0
+                    }
+                    None => false,
+                };
+                if emptied {
+                    progress.operation_output.remove(&operation);
+                }
+            }
+            progress.effects.push_back(QueuedEffect {
+                sequence,
+                write: Arc::new(write.clone()),
+                bytes,
+                // The projection owner takes this entry over from the same queue, in this order.
+                prepared: None,
+                prepared_bytes: 0,
+            });
             progress.last_progress_at.get_or_insert_with(Instant::now);
         }
         // 首次受理从 checkpoint 继承已折叠的累计摘要，然后只折叠本 incarnation 的新 effect。
@@ -1277,6 +1666,10 @@ impl ColdStore for ThreadStorageSink {
         self.0.changed.notify_one();
         let coordinator = self.0.store.thread_persistence().clone();
         let mut progress = coordinator.subscribe();
+        // 第二个失败来源是可靠受理通道自己的状态：一个投影无法完成的事实永远到不了协调器的
+        // 水位，只有通道会带着投影的真实原因报告它。只等协调器会把这种失败变成永久挂起，
+        // 因此两处都必须唤醒这次屏障。
+        let mut status = self.0.channel.subscribe();
         loop {
             {
                 let local = lock_progress(&self.0);
@@ -1291,11 +1684,22 @@ impl ColdStore for ThreadStorageSink {
                     });
                 }
             }
-            progress.changed().await.map_err(|_| ColdStoreError {
-                source: Box::new(std::io::Error::other(
-                    "Thread persistence progress channel closed",
-                )),
-            })?;
+            tokio::select! {
+                changed = progress.changed() => {
+                    changed.map_err(|_| ColdStoreError {
+                        source: Box::new(std::io::Error::other(
+                            "Thread persistence progress channel closed",
+                        )),
+                    })?;
+                }
+                changed = status.changed() => {
+                    changed.map_err(|_| ColdStoreError {
+                        source: Box::new(std::io::Error::other(
+                            "Thread history status channel closed",
+                        )),
+                    })?;
+                }
+            }
         }
     }
 
@@ -1385,6 +1789,25 @@ fn storage_error(message: &str) -> Arc<ColdStoreError> {
     })
 }
 
+/// The protocol's typed history fault as the core storage fault the owner mirrors.
+///
+/// Both sides are already typed values: this is a rename, not a classification. Core therefore never
+/// sees an error string that it would have to interpret to know what failed.
+fn storage_fault_kind(
+    fault: pl_protocol::studio::HistoryFault,
+) -> pl_core::thread::cold::StorageFaultKind {
+    use pl_core::thread::cold::StorageFaultKind;
+    use pl_protocol::studio::HistoryFault;
+    match fault {
+        HistoryFault::QueueFull => StorageFaultKind::QueueFull,
+        HistoryFault::WriteFailed => StorageFaultKind::WriteFailed,
+        HistoryFault::WriterUnavailable => StorageFaultKind::WriterUnavailable,
+        HistoryFault::NoProgress => StorageFaultKind::NoProgress,
+        HistoryFault::CheckpointFailed => StorageFaultKind::CheckpointFailed,
+        HistoryFault::BlobFailed => StorageFaultKind::BlobFailed,
+    }
+}
+
 /// One typed cold-store failure without the shared-error wrapper.
 fn cold_error(message: &str) -> ColdStoreError {
     ColdStoreError {
@@ -1395,6 +1818,7 @@ fn cold_error(message: &str) -> ColdStoreError {
 #[cfg(test)]
 mod storage_fault_tests {
     use super::*;
+    use crate::studio::storage::history::chat_item;
     use pl_core::{
         context::{ContextContent, OpaquePayload},
         model::{
@@ -1493,6 +1917,7 @@ mod storage_fault_tests {
                 ..Default::default()
             }),
             checkpoint: ThreadCheckpoint::capture_transfer(thread_id.to_owned(), sequence, state),
+            output_claim: None,
         }
     }
 
@@ -1533,7 +1958,252 @@ mod storage_fault_tests {
         let sink =
             ThreadStorageSink::new(store.clone(), pl_protocol::Thread::placeholder(thread_id))
                 .await?;
+        spawn_live_projection(&sink);
         Ok((temp, store, sink))
+    }
+
+    /// The projection an observation worker would own: empty until the test hands it the admitted
+    /// facts, which it folds and hands back to the reliable channel exactly like the production owner.
+    fn live_projection() -> crate::studio::thread_projection::LiveProjection {
+        crate::studio::thread_projection::LiveProjection::new()
+    }
+
+    /// Takes the admitted facts over exactly as the Thread's live projection owner does.
+    ///
+    /// The Studio runtime installs that owner during Thread assembly, and the history writer refuses
+    /// to save a fact no projection holds. These tests exercise the writer on its own, so they drive
+    /// the same production projection against the same reliable admission channel: one projection per
+    /// commit, published shape unchanged, only the caller differs.
+    fn spawn_live_projection(sink: &ThreadStorageSink) {
+        let inner = sink.0.clone();
+        tokio::spawn(async move {
+            let mut projection = live_projection();
+            let mut failed = std::collections::BTreeSet::new();
+            // Wake on the channel's own status watch, never on the channel's `Notify`: the history
+            // writer is the one task that waits on that `Notify`, and a second waiter would consume
+            // the single wakeup permit a recovery notification hands out.
+            let mut updates = inner.channel.subscribe();
+            loop {
+                if let Some(write) = inner.channel.next_unprojected() {
+                    let sequence = write.effect.sequence;
+                    if failed.contains(&sequence) {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                        continue;
+                    }
+                    // A reliable-output repair can name an identity this bounded window released; the
+                    // production observation owner reads that committed body back and folds it in, so
+                    // the harness drives the same step instead of skipping a fact the writer must save.
+                    if !write.effect.delivery_repairs.is_empty() {
+                        let seeded = match inner.store.history(&inner.thread.id).await {
+                            Ok(history) => crate::studio::thread_projection::seed_repaired_targets(
+                                &mut projection,
+                                &history,
+                                &write.effect,
+                            )
+                            .await
+                            .map_err(|error| error.to_string()),
+                            Err(error) => Err(error.to_string()),
+                        };
+                        if let Err(error) = seeded {
+                            failed.insert(sequence);
+                            inner.channel.fail_projection(sequence, error);
+                            continue;
+                        }
+                    }
+                    match projection.project_committed(
+                        &inner.chat,
+                        &inner.thread,
+                        &write.effect,
+                        &write.checkpoint.state,
+                    ) {
+                        Ok(prepared) => {
+                            inner.channel.prepare(prepared);
+                        }
+                        // The writer never projects, so failing here is what the running Studio sees
+                        // from its observation worker: the fact is reported and the barrier fails
+                        // closed with the projection's own reason.
+                        Err(error) => {
+                            failed.insert(sequence);
+                            inner.channel.fail_projection(sequence, error.to_string());
+                        }
+                    }
+                    continue;
+                }
+                if updates.changed().await.is_err() {
+                    return;
+                }
+            }
+        });
+    }
+
+    /// One ticket whose effect commits a visible prompt item, i.e. the shortest effect that projects
+    /// a durable body the writer must confirm.
+    fn visible_input_ticket(thread_id: &str, sequence: u64, input_id: &str) -> Result<ThreadWrite> {
+        let mut write = ticket(thread_id, sequence);
+        let input = InputRecord {
+            accepted_sequence: sequence,
+            delivery: Default::default(),
+            input: ThreadInput {
+                id: input_id.to_owned(),
+                payload: OpaquePayload::new(
+                    "pl.studio.prompt",
+                    1,
+                    serde_json::json!({"text":"hello","presentation":"visible","attachments":[]})
+                        .to_string(),
+                )?,
+                context: vec![ContextContent::Text {
+                    text: "hello".into(),
+                }],
+            },
+            ordinal: sequence,
+            revision: sequence,
+            state: InputState::Consumed {
+                turn_id: "visible-turn".into(),
+                attempt_id: "attempt".into(),
+            },
+        };
+        write.checkpoint.state.inputs = Arc::from([input.clone()]);
+        Arc::make_mut(&mut write.effect).inputs = Arc::from([InputChange::Accepted(input)]);
+        Ok(write)
+    }
+
+    /// The projected body of `visible_input_ticket`'s item as the live projection would publish it.
+    fn visible_input_item(
+        thread_id: &str,
+        input_id: &str,
+        revision: u64,
+    ) -> pl_protocol::ThreadItem {
+        pl_protocol::ThreadItem::new(
+            input_id.to_owned(),
+            thread_id.to_owned(),
+            "visible-turn".to_owned(),
+            revision,
+            revision,
+            1,
+            1,
+            pl_protocol::ThreadItemState::Text(pl_protocol::ThreadTextItem::new(
+                pl_protocol::ThreadTextChannel::User,
+                "hello".into(),
+                Vec::new(),
+                pl_protocol::ThreadContentLifecycle::completed(1),
+            )),
+        )
+    }
+
+    /// One streaming body revision of `item_id`, always at the same placement `order`.
+    ///
+    /// Two calls with the same `order` and increasing `revision` are exactly what a re-projected
+    /// identity looks like: the same window slot whose content version advanced, never a new item.
+    fn revised_preview(
+        thread_id: &str,
+        item_id: &str,
+        order: u64,
+        revision: u64,
+        text: &str,
+    ) -> Result<pl_core::chat::ChatItem> {
+        chat_item(
+            pl_protocol::ThreadItem::new(
+                item_id.to_owned(),
+                thread_id.to_owned(),
+                "visible-turn".to_owned(),
+                order,
+                revision,
+                1,
+                1,
+                pl_protocol::ThreadItemState::Text(pl_protocol::ThreadTextItem::new(
+                    pl_protocol::ThreadTextChannel::User,
+                    text.to_owned(),
+                    Vec::new(),
+                    pl_protocol::ThreadContentLifecycle::streaming(),
+                )),
+            ),
+            false,
+        )
+    }
+
+    /// The item the window currently shows for `item_id`.
+    fn snapshot_item(view: &pl_core::chat::ChatView, item_id: &str) -> pl_core::chat::ChatItem {
+        view.snapshot()
+            .items
+            .into_iter()
+            .find(|item| item.item_id == item_id)
+            .expect("the identity stays inside the window")
+    }
+
+    /// The writer never reads a committed body back to publish it.
+    ///
+    /// The Thread's live projection publishes the body into the shared chat session, and the writer
+    /// commits exactly the batch that owner handed over: it confirms that identity and revision
+    /// instead of reading a second body copy back from SQLite. The saved watermark therefore advances
+    /// on the published content, and no second content cache exists to drift from it.
+    #[tokio::test]
+    async fn committed_identity_is_confirmed_into_the_shared_session_without_a_body_readback()
+    -> Result<()> {
+        let id = "writer-confirmation";
+        let (_temp, store, sink) = sink(id).await?;
+        let chat = store.chat_session(id).await?;
+        let view = chat.open_chat(pl_core::chat::ChatFocus::Latest).await?;
+
+        // The live projection publishes the body; the reliable handoff then commits that same batch.
+        chat.publish_preview(chat_item(
+            visible_input_item(id, "projected-first", 1),
+            false,
+        )?)?;
+        sink.admit(id, visible_input_ticket(id, 1, "projected-first")?)?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush(id, 1)).await??;
+        let published = view
+            .snapshot()
+            .items
+            .into_iter()
+            .find(|item| item.item_id == "projected-first")
+            .expect("the published body stays in the window");
+        assert!(
+            published.saved,
+            "the committed identity confirms the body the projection already published"
+        );
+        Ok(())
+    }
+
+    /// A commit the Thread's projection owner has not handed over is never written.
+    ///
+    /// This is what makes "the owner released this effect from its window" imply "the projection
+    /// published it": the durable watermark cannot move past a fact no projection took over, so a
+    /// released commit is always one the product already has. The sink below is built without the
+    /// test projection, so nothing takes the fact over until the test hands it in itself.
+    #[tokio::test]
+    async fn a_commit_without_a_projection_handoff_is_never_saved() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let sink = ThreadStorageSink::new(
+            store.clone(),
+            pl_protocol::Thread::placeholder("no-handoff"),
+        )
+        .await?;
+        let write = ticket("no-handoff", 1);
+        sink.admit("no-handoff", write.clone())?;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), sink.flush("no-handoff", 1))
+                .await
+                .is_err(),
+            "an unprojected commit must not reach a durable barrier"
+        );
+        let unprojected = sink.0.channel.subscribe().borrow().clone();
+        assert_eq!(unprojected.committed_sequence, 0);
+        assert_eq!(unprojected.queued_records, 1);
+        assert_eq!(store.history("no-handoff").await?.watermark().await?, 0);
+
+        let chat = store.chat_session("no-handoff").await?;
+        let mut projection = live_projection();
+        let prepared = projection.project_committed(
+            &chat,
+            &sink.0.thread,
+            &write.effect,
+            &write.checkpoint.state,
+        )?;
+        sink.0.channel.prepare(prepared);
+        tokio::time::timeout(Duration::from_secs(5), sink.flush("no-handoff", 1)).await??;
+        assert_eq!(store.history("no-handoff").await?.watermark().await?, 1);
+        Ok(())
     }
 
     #[tokio::test]
@@ -1591,7 +2261,17 @@ mod storage_fault_tests {
 
     #[tokio::test]
     async fn missing_visible_input_item_still_blocks_history() -> Result<()> {
-        let (_temp, store, sink) = sink("missing-visible").await?;
+        // A Thread re-activated after its durable timeline lost a visible input body. The projection
+        // that installs now has never folded that input — it is a fresh owner, exactly like a Thread
+        // whose earlier incarnation committed the input — so the effect that still references it must
+        // fail closed instead of committing a timeline with a hole.
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let sink = ThreadStorageSink::new(
+            store.clone(),
+            pl_protocol::Thread::placeholder("missing-visible"),
+        )
+        .await?;
         let mut accepted = ticket("missing-visible", 1);
         let input = InputRecord {
             accepted_sequence: 1,
@@ -1617,7 +2297,17 @@ mod storage_fault_tests {
         };
         accepted.checkpoint.state.inputs = Arc::from([input.clone()]);
         Arc::make_mut(&mut accepted.effect).inputs = Arc::from([InputChange::Accepted(input)]);
-        sink.admit("missing-visible", accepted)?;
+        // The incarnation that committed the input projects and hands it over normally.
+        let chat = store.chat_session("missing-visible").await?;
+        sink.admit("missing-visible", accepted.clone())?;
+        let mut owner = live_projection();
+        let prepared = owner.project_committed(
+            &chat,
+            &sink.0.thread,
+            &accepted.effect,
+            &accepted.checkpoint.state,
+        )?;
+        sink.0.channel.prepare(prepared);
         tokio::time::timeout(Duration::from_secs(5), sink.flush("missing-visible", 1)).await??;
         let history = store.history("missing-visible").await?;
         let path = store
@@ -1627,6 +2317,9 @@ mod storage_fault_tests {
         db.execute_unprepared("DELETE FROM history_items WHERE item_id='visible-input'")
             .await?;
 
+        // The owner this Thread gets on re-activation never folded the input, and the durable row
+        // the projection would resolve it from is gone.
+        spawn_live_projection(&sink);
         let mut later = ticket("missing-visible", 2);
         let turn = TurnRecord {
             elapsed_ms: None,
@@ -1639,7 +2332,8 @@ mod storage_fault_tests {
         Arc::make_mut(&mut later.effect).turn = Some(turn);
         sink.admit("missing-visible", later)?;
         let error = tokio::time::timeout(Duration::from_secs(5), sink.flush("missing-visible", 2))
-            .await?
+            .await
+            .context("a torn projection must fail the durable barrier instead of hanging")?
             .expect_err("a visible input without its item must fail closed");
         assert!(
             error
@@ -1647,6 +2341,651 @@ mod storage_fault_tests {
                 .contains("missing the committed input item")
         );
         assert_eq!(history.watermark().await?, 1);
+        Ok(())
+    }
+
+    /// One visible, already-consumed input record owned by `turn_id`.
+    ///
+    /// This is exactly what core's consuming commit leaves behind: the input is `Consumed`, so it has
+    /// a visible timeline item whose `turn_id` is the Turn it opened.
+    fn consumed_visible_input(id: &str, turn_id: &str, sequence: u64) -> Result<InputRecord> {
+        Ok(InputRecord {
+            accepted_sequence: sequence,
+            delivery: Default::default(),
+            input: ThreadInput {
+                id: id.to_owned(),
+                payload: OpaquePayload::new(
+                    "pl.studio.prompt",
+                    1,
+                    serde_json::json!({"text":"hello","presentation":"visible","attachments":[]})
+                        .to_string(),
+                )?,
+                context: vec![ContextContent::Text {
+                    text: "hello".into(),
+                }],
+            },
+            ordinal: sequence,
+            revision: sequence,
+            state: InputState::Consumed {
+                turn_id: turn_id.to_owned(),
+                attempt_id: "attempt".to_owned(),
+            },
+        })
+    }
+
+    /// One Turn record naming `input_id` as the input that opened it.
+    fn turn_record(turn_id: &str, input_id: &str, state: TurnState) -> TurnRecord {
+        TurnRecord {
+            elapsed_ms: None,
+            input_id: Some(input_id.to_owned()),
+            turn_id: turn_id.to_owned(),
+            state,
+            model_steps: 0,
+        }
+    }
+
+    /// One provider output item with a single text part, as a model receipt reports it.
+    ///
+    /// The multi-item stress response is exactly a long list of these: one stable identity per
+    /// provider item, all delivered inside one model step.
+    fn provider_presentation_part(
+        index: usize,
+    ) -> pl_model::completion::CompletionPresentationItem {
+        use pl_model::completion::{
+            CompletionPresentationItem, CompletionPresentationItemKind, CompletionPresentationPart,
+            CompletionPresentationPartKind,
+        };
+        CompletionPresentationItem {
+            provider_item_id: format!("stress-item-{index}"),
+            output_index: Some(index as u32),
+            kind: CompletionPresentationItemKind::Text(pl_protocol::trace::TraceTextChannel::Final),
+            parts: vec![CompletionPresentationPart {
+                content_index: 0,
+                provider_part_id: Some(format!("stress-part-{index}")),
+                kind: CompletionPresentationPartKind::OutputText,
+                text: format!("chunk-{index}"),
+            }],
+        }
+    }
+
+    /// The snapshot attempt and the matching effect update for one committed step of `parts` parts.
+    ///
+    /// The receipt is the model crate's own `pl.model.assistant` frame — the same payload a real
+    /// adapter writes — so the projection itemizes it through its public receipt reader instead of a
+    /// test-only shape.
+    fn committed_parts_attempt(
+        turn_id: &str,
+        attempt_id: &str,
+        parts: usize,
+    ) -> Result<(
+        pl_core::thread::RequestAttempt,
+        pl_core::thread::journal::AttemptUpdate,
+    )> {
+        let receipt = pl_model::runtime::ModelResponseReceipt {
+            binding: pl_model::runtime::ModelCallBinding {
+                provider_instance_id: "fixture".into(),
+                requested_model: "fixture-model".into(),
+                adapter: pl_model::provider::ProviderAdapterKind::OpenAiCompatible,
+                protocol: pl_model::provider::ProviderWireProtocol::ChatCompletions,
+                isolation: "test".into(),
+                purpose: "test".into(),
+                context_window: None,
+            },
+            response: pl_model::completion::CompletionResponse {
+                response_id: None,
+                content: None,
+                reasoning_content: None,
+                tool_calls: Vec::new(),
+                responses_context_items: Vec::new(),
+                presentation_items: (0..parts).map(provider_presentation_part).collect(),
+                orchestration: Default::default(),
+                timing: None,
+                accounting: Default::default(),
+                model: "fixture-model".into(),
+                model_observation: None,
+            },
+        };
+        // The durable assistant frame is exactly this pair of receipt and tool bindings.
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Frame<'a> {
+            receipt: &'a pl_model::runtime::ModelResponseReceipt,
+            bindings: Vec<ModelToolCall>,
+        }
+        let frame = OpaquePayload::new(
+            "pl.model.assistant",
+            2,
+            serde_json::to_string(&Frame {
+                receipt: &receipt,
+                bindings: Vec::new(),
+            })?,
+        )?;
+        let output = ModelStepOutput {
+            attempt_id: attempt_id.to_owned(),
+            base_context_revision: 0,
+            content: vec![ContextContent::Opaque { payload: frame }],
+            tool_calls: Vec::new(),
+            private_context: None,
+            usage: Default::default(),
+        };
+        let tools: Arc<[pl_core::model::ModelToolDeclaration]> =
+            Arc::from(Vec::<pl_core::model::ModelToolDeclaration>::new());
+        let attempt = pl_core::thread::RequestAttempt {
+            request_metadata: None,
+            tool_projection: None,
+            turn_id: turn_id.to_owned(),
+            attempt_id: attempt_id.to_owned(),
+            retry_of: None,
+            input: pl_core::context::ContextSnapshot::default(),
+            tools: tools.clone(),
+            outcome: pl_core::thread::AttemptOutcome::Committed(output.clone()),
+            input_estimate: None,
+        };
+        let update = pl_core::thread::journal::AttemptUpdate {
+            request_metadata: None,
+            tool_projection: None,
+            turn_id: turn_id.to_owned(),
+            attempt_id: attempt_id.to_owned(),
+            retry_of: None,
+            input_revision: 0,
+            tools,
+            outcome: pl_core::thread::AttemptOutcome::Committed(output),
+            input_estimate: None,
+        };
+        Ok((attempt, update))
+    }
+
+    /// Hands one admitted fact to the production live projection and to the writer, exactly as the
+    /// Thread's observation worker does: admit, take the owed fact over, project it, hand the batch
+    /// back. The writer saves only what this owner handed over, so a `flush` afterwards is the same
+    /// durable barrier the product uses.
+    fn drive_live_projection(
+        projection: &mut crate::studio::thread_projection::LiveProjection,
+        chat: &pl_core::chat::Session,
+        sink: &ThreadStorageSink,
+        usage: &pl_core::thread::UsageSummary,
+        thread_id: &str,
+        write: ThreadWrite,
+    ) -> Result<()> {
+        sink.admit(thread_id, write)?;
+        let write = sink
+            .0
+            .channel
+            .next_unprojected()
+            .context("the admitted fact is owed a projection")?;
+        let (_, prepared) = projection.advance(
+            chat,
+            &sink.0.thread,
+            usage,
+            &write.effect,
+            &write.checkpoint.state,
+        )?;
+        assert!(sink.0.channel.prepare(prepared));
+        Ok(())
+    }
+
+    /// A live Turn survives a retained window smaller than the response it produced.
+    ///
+    /// The live projection is a bounded observation owner: it releases a Turn's oldest facts by
+    /// ordinal once that Turn commits more identities than `LIVE_ITEM_WINDOW`. A Turn's own input is
+    /// the identity core keeps referencing from *every* later effect of that Turn — above all its
+    /// terminal one, whose checkpoint has already pruned the consumed body and carries only the
+    /// minimal `turns[].input_id` — while it is also the oldest fact the Turn ever created. Numbering
+    /// the window purely by ordinal therefore evicted exactly that identity, the terminal effect then
+    /// resolved the pruned input as a hole and the durable barrier failed closed with
+    /// `MissingDurableInput`: the multi-item stress fault. The window must bound only *optional*
+    /// retained history; the minimal identity a live Turn still references is not optional.
+    ///
+    /// Keeping an identity without keeping its content version is not enough: the Turn's own item is
+    /// re-projected by the same later effects, so a window that released it made the re-projection
+    /// restart at revision 1, and the durable row rejected the new payload as a revision conflict.
+    /// Identity and version have to survive together.
+    ///
+    /// This drives the production `advance` path over the same reliable handoff the observation
+    /// worker uses, with no GUI subscriber: the projection publishes into the shared session and
+    /// hands the batch to the writer exactly like the owner. The pressure is a real provider receipt
+    /// with more presentation parts than the window holds, not a fabricated per-Turn input queue.
+    #[tokio::test]
+    async fn a_live_turn_input_survives_a_window_smaller_than_its_parts() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let sink = ThreadStorageSink::new(
+            store.clone(),
+            pl_protocol::Thread::placeholder("window-input"),
+        )
+        .await?;
+        let thread_id = "window-input";
+        let turn_id = "long-turn";
+        let attempt_id = "long-attempt";
+        let input_id = "input-under-the-window";
+        let chat = store.chat_session(thread_id).await?;
+        let mut projection = live_projection();
+        let usage = pl_core::thread::UsageSummary::default();
+
+        // Commit 1: the Turn's own opening input. Every later commit's checkpoint has pruned the
+        // consumed body from `state.inputs` and keeps only the minimal `turns[].input_id`.
+        let input = consumed_visible_input(input_id, turn_id, 1)?;
+        let mut opening = ticket(thread_id, 1);
+        opening.checkpoint.state.inputs = Arc::from([input.clone()]);
+        opening.checkpoint.state.turns =
+            Arc::from([turn_record(turn_id, input_id, TurnState::Running)]);
+        Arc::make_mut(&mut opening.effect).inputs = Arc::from([InputChange::Accepted(input)]);
+        Arc::make_mut(&mut opening.effect).turn =
+            Some(turn_record(turn_id, input_id, TurnState::Running));
+        drive_live_projection(&mut projection, &chat, &sink, &usage, thread_id, opening)?;
+
+        // Commit 2: one model step whose receipt itemizes more provider parts than the window holds.
+        // That pushes the Turn's own oldest facts out of the ordinal window.
+        let parts = crate::studio::thread_projection::LIVE_ITEM_WINDOW + 8;
+        let (attempt, update) = committed_parts_attempt(turn_id, attempt_id, parts)?;
+        let mut step = ticket(thread_id, 2);
+        step.checkpoint.state.turns =
+            Arc::from([turn_record(turn_id, input_id, TurnState::Running)]);
+        step.checkpoint.state.attempts = Arc::from([attempt.clone()]);
+        Arc::make_mut(&mut step.effect).attempt = Some(update);
+        drive_live_projection(&mut projection, &chat, &sink, &usage, thread_id, step)?;
+
+        // Commit 3: the Turn's terminal effect. Its checkpoint names the input without carrying its
+        // body, and it re-projects the Turn item, so both the input identity and the Turn's content
+        // version have to resolve from the projection's own memory.
+        let finished = || {
+            turn_record(
+                turn_id,
+                input_id,
+                TurnState::Finished(TurnOutcome::Completed),
+            )
+        };
+        let mut terminal = ticket(thread_id, 3);
+        terminal.checkpoint.state.turns = Arc::from([finished()]);
+        terminal.checkpoint.state.attempts = Arc::from([attempt]);
+        Arc::make_mut(&mut terminal.effect).turn = Some(finished());
+        drive_live_projection(&mut projection, &chat, &sink, &usage, thread_id, terminal)?;
+
+        // Every fact is handed over, so the durable barrier reaches the terminal commit with no
+        // fault, and the rows a long Turn produced are complete instead of a hole or a revision
+        // conflict.
+        tokio::time::timeout(Duration::from_secs(30), sink.flush(thread_id, 3)).await??;
+        let history = store.history(thread_id).await?;
+        assert_eq!(history.watermark().await?, 3);
+        assert_eq!(sink.0.channel.subscribe().borrow().fault, None);
+        assert!(history.input_identity(input_id).await?.is_some());
+        let turn_item_id = crate::studio::thread_projection::order::turn_id(turn_id);
+        let last_part_id = crate::studio::thread_projection::order::presentation_id(
+            attempt_id,
+            &format!("stress-item-{}", parts - 1),
+            Some(crate::studio::thread_projection::order::PresentationPart::OutputText(0)),
+        );
+        let mut rows = history
+            .existing_items([
+                input_id.to_owned(),
+                turn_item_id.clone(),
+                last_part_id.clone(),
+            ])
+            .await?;
+        let input_row = rows
+            .remove(input_id)
+            .expect("the live Turn's consumed input stays a complete durable row");
+        match input_row.state() {
+            pl_protocol::ThreadItemState::Text(text) => assert_eq!(text.text(), "hello"),
+            other => panic!("the input row keeps its visible body, got {other:?}"),
+        }
+        let turn_row = rows
+            .remove(&turn_item_id)
+            .expect("the Turn row is re-projected onto its own content version");
+        match turn_row.state() {
+            pl_protocol::ThreadItemState::Turn(turn) => {
+                assert!(matches!(turn.state(), pl_protocol::TurnState::Completed(_)))
+            }
+            other => panic!("the Turn row keeps its Turn state, got {other:?}"),
+        }
+        let part_row = rows
+            .remove(&last_part_id)
+            .expect("the receipt's provider parts are durable rows");
+        match part_row.state() {
+            pl_protocol::ThreadItemState::Text(text) => {
+                assert_eq!(text.text(), format!("chunk-{}", parts - 1).as_str())
+            }
+            other => panic!("the provider part keeps its text, got {other:?}"),
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_cold_owner_seeds_the_same_terminal_turn_the_live_projection_publishes() -> Result<()>
+    {
+        // A Thread re-activated after its last Turn finished has no live frame left for that fact:
+        // the authoritative snapshot carries only the active Turn and `turnCompleted` is broadcast
+        // once. The owner therefore seeds its retained last-Turn fact from durable history on the
+        // install path. This drives that cold read over real committed rows and proves it agrees with
+        // the live projection the frame would have used — same identity, same revision, same state —
+        // while a Turn that is still running (or not yet durable) is never reported as finished.
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let sink =
+            ThreadStorageSink::new(store.clone(), pl_protocol::Thread::placeholder("cold-turn"))
+                .await?;
+        let thread_id = "cold-turn";
+        let turn_id = "terminal-turn";
+        let input_id = "cold-input";
+        let chat = store.chat_session(thread_id).await?;
+        let mut projection = live_projection();
+        let usage = pl_core::thread::UsageSummary::default();
+
+        // A Thread whose history was never written reads as "no finished Turn" instead of creating a
+        // database, so this cold read can never make the live path wait on the writer.
+        assert!(
+            store
+                .history("never-written")
+                .await?
+                .newest_terminal_turn()
+                .await?
+                .is_none()
+        );
+
+        // Commit 1: the Turn opens and is durable, but it is still running — the cold seed must not
+        // mistake the newest Turn row for a finished one.
+        let input = consumed_visible_input(input_id, turn_id, 1)?;
+        let mut opening = ticket(thread_id, 1);
+        opening.checkpoint.state.inputs = Arc::from([input.clone()]);
+        opening.checkpoint.state.turns =
+            Arc::from([turn_record(turn_id, input_id, TurnState::Running)]);
+        Arc::make_mut(&mut opening.effect).inputs = Arc::from([InputChange::Accepted(input)]);
+        Arc::make_mut(&mut opening.effect).turn =
+            Some(turn_record(turn_id, input_id, TurnState::Running));
+        drive_live_projection(&mut projection, &chat, &sink, &usage, thread_id, opening)?;
+        tokio::time::timeout(Duration::from_secs(30), sink.flush(thread_id, 1)).await??;
+        assert!(
+            store
+                .history(thread_id)
+                .await?
+                .newest_terminal_turn()
+                .await?
+                .is_none()
+        );
+
+        // Commit 2: the Turn finishes. The live projection of that same effect is the fact the frame
+        // carried; the durable row the writer commits has to recover the identical Turn.
+        let finished = || {
+            turn_record(
+                turn_id,
+                input_id,
+                TurnState::Finished(TurnOutcome::Completed),
+            )
+        };
+        let mut terminal = ticket(thread_id, 2);
+        terminal.checkpoint.state.turns = Arc::from([finished()]);
+        Arc::make_mut(&mut terminal.effect).turn = Some(finished());
+        let live = crate::studio::thread_projection::project_effect_terminal_turn(
+            thread_id,
+            &terminal.checkpoint.state,
+            &terminal.effect,
+        )
+        .context("the live projection must carry the finished Turn")?;
+        drive_live_projection(&mut projection, &chat, &sink, &usage, thread_id, terminal)?;
+        tokio::time::timeout(Duration::from_secs(30), sink.flush(thread_id, 2)).await??;
+
+        let cold = store
+            .history(thread_id)
+            .await?
+            .newest_terminal_turn()
+            .await?
+            .context("the durable history must carry the finished Turn")?;
+        assert_eq!(cold.id, live.id);
+        assert_eq!(cold.revision, live.revision);
+        assert_eq!(cold.state, live.state);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn retained_budget_counts_the_bodies_the_live_projection_holds() {
+        // A running Turn retains tool arguments, terminal results, attachment metadata and opaque
+        // payloads. Charging only text and reasoning would leave the largest resident bodies outside
+        // the Thread's reliable budget, so the estimate has to cover every category payload.
+        let arguments = "a".repeat(4096);
+        let result = "r".repeat(8192);
+        let artifact = "z".repeat(2048);
+        let raw_content = "p".repeat(1024);
+        let failure = "f".repeat(256);
+        let attachment = pl_protocol::ThreadAttachment {
+            id: "artifact-attachment".to_owned(),
+            modality: pl_protocol::AttachmentModality::File,
+            media_type: "application/octet-stream".to_owned(),
+            filename: Some("artifact.bin".to_owned()),
+            width: None,
+            height: None,
+            byte_size: 64 * 1024 * 1024,
+        };
+        let tool = pl_protocol::ThreadItem::new(
+            "tool-item".to_owned(),
+            "retained-budget".to_owned(),
+            "turn".to_owned(),
+            1,
+            1,
+            1,
+            1,
+            pl_protocol::ThreadItemState::Tool(pl_protocol::ThreadToolItem::new(
+                pl_protocol::ThreadToolInvocation::new(
+                    "call".to_owned(),
+                    "shell".to_owned(),
+                    arguments.clone(),
+                ),
+                pl_protocol::ThreadToolState::Succeeded(pl_protocol::SucceededThreadTool::new(
+                    1,
+                    pl_protocol::ThreadToolOutput::new(
+                        result.clone(),
+                        vec![attachment.clone()],
+                        vec![serde_json::json!({"stdout": artifact.clone()})],
+                        Some(0),
+                    ),
+                )),
+            )),
+        );
+        let raw = pl_protocol::ThreadItem::new(
+            "raw-item".to_owned(),
+            "retained-budget".to_owned(),
+            "turn".to_owned(),
+            2,
+            1,
+            1,
+            1,
+            pl_protocol::ThreadItemState::Raw(pl_protocol::ThreadRawItem {
+                payloads: vec![pl_protocol::ThreadRawPayload {
+                    format: "pl.model.receipt".to_owned(),
+                    version: 1,
+                    content: raw_content.clone(),
+                }],
+                notice: String::new(),
+                recorded_at: 1,
+            }),
+        );
+        let failed_text = pl_protocol::ThreadItem::new(
+            "failed-text".to_owned(),
+            "retained-budget".to_owned(),
+            "turn".to_owned(),
+            3,
+            1,
+            1,
+            1,
+            pl_protocol::ThreadItemState::Text(pl_protocol::ThreadTextItem::new(
+                pl_protocol::ThreadTextChannel::Commentary,
+                "visible".to_owned(),
+                vec![attachment],
+                pl_protocol::ThreadContentLifecycle::failed(1, failure.clone()),
+            )),
+        );
+        let bytes = crate::studio::thread_projection::retained_bytes(&[tool, raw, failed_text]);
+        let bodies =
+            (arguments.len() + result.len() + artifact.len() + raw_content.len() + failure.len())
+                as u64;
+        assert!(
+            bytes >= bodies,
+            "retained budget {bytes} must cover the {bodies} resident body bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn projection_gauge_is_part_of_the_thread_budget() -> Result<()> {
+        let (_temp, _store, sink) = sink("projection-budget").await?;
+        // The projection owner keeps a Turn's retained bodies and its report accumulator resident
+        // after their batch became durable. The Thread's budget therefore reads the owner's absolute
+        // gauge, and releasing the owner's tables releases the budget with them.
+        sink.0.channel.set_projection_bytes(8192);
+        assert_eq!(sink.pressure("projection-budget").thread_bytes, 8192);
+        assert_eq!(sink.0.channel.subscribe().borrow().queued_bytes, 8192);
+        sink.0.channel.set_projection_bytes(0);
+        assert_eq!(sink.pressure("projection-budget").thread_bytes, 0);
+        assert_eq!(sink.0.channel.subscribe().borrow().queued_bytes, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn operation_output_reservation_returns_to_baseline_across_rounds() -> Result<()> {
+        // A model/tool call reserves its live-output ceiling from the same process budget the
+        // reliable save path uses and gives the *whole* ceiling back when it ends. Returning
+        // `granted - accepted` would leave the accepted bytes charged forever while the batch that
+        // carries the same fact charges them again, so the Thread's water level would creep up on
+        // every successful call. This drives the reservation directly and asserts the gauge is back
+        // at its baseline after each round, which a leak of any size would break.
+        let (_temp, _store, sink) = sink("operation-budget").await?;
+        let channel = &sink.0.channel;
+        let baseline = channel.process_bytes.load(Ordering::Acquire);
+        for round in 0..4_u64 {
+            let operation = format!("task:call-{round}");
+            let granted = channel
+                .reserve_operation_output(&operation, 4096)
+                .expect("the empty budget funds the reservation");
+            assert_eq!(granted, 4096);
+            assert_eq!(
+                channel.process_bytes.load(Ordering::Acquire),
+                baseline + 4096,
+                "the whole ceiling is charged while the call is in flight"
+            );
+            channel.charge_operation_output(&operation, 1024)?;
+            channel.release_operation_output(&operation);
+            assert_eq!(
+                channel.process_bytes.load(Ordering::Acquire),
+                baseline,
+                "a finished call returns its whole ceiling instead of leaking the accepted bytes"
+            );
+        }
+        Ok(())
+    }
+
+    /// The whole reserve/complete/refuse/recover cycle of parallel in-flight operations.
+    ///
+    /// Four operations reserve the process budget down to its last byte, which is exactly the state
+    /// where charging an admitted fact *next to* the reservation that produced it would need space
+    /// that does not exist: every result would be refused, no result could be handed over, and the
+    /// reservations would be held forever waiting for the queue they themselves block. The rule under
+    /// test is the transfer instead — the bytes a reservation covers become the fact's own charge, so
+    /// a fully reserved process still hands its facts over — together with the boundaries that stay
+    /// real: an uncovered fact is refused with a typed fault instead of being admitted over budget,
+    /// the refused fact is handed over unchanged once its Thread's ceiling comes back, and the
+    /// process gauge returns to the baseline once everything is durable.
+    #[tokio::test]
+    async fn parallel_reservations_transfer_into_their_facts_without_deadlock() -> Result<()> {
+        // No test projection here: nothing takes the admitted facts over until the test hands them
+        // in itself, so the durable watermark cannot drain the queue while the reservations are
+        // still charged and every step below is deterministic.
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let sink = ThreadStorageSink::new(
+            store.clone(),
+            pl_protocol::Thread::placeholder("output-transfer"),
+        )
+        .await?;
+        let channel = &sink.0.channel;
+        let baseline = channel.process_bytes.load(Ordering::Acquire);
+        // A quarter of the process budget each: four in-flight calls leave no headroom at all.
+        let reservation = MAX_HISTORY_PROCESS_BYTES / 4;
+        let operations = (0..4)
+            .map(|index| format!("task:parallel-{index}"))
+            .collect::<Vec<_>>();
+        for operation in &operations {
+            let granted = channel
+                .reserve_operation_output(operation, reservation)
+                .expect("the empty budget funds a quarter of itself");
+            assert_eq!(granted, reservation);
+            channel.charge_operation_output(operation, 512)?;
+        }
+        assert_eq!(
+            channel.process_bytes.load(Ordering::Acquire),
+            MAX_HISTORY_PROCESS_BYTES,
+            "the reservations alone fill the process budget"
+        );
+        assert!(
+            channel
+                .reserve_operation_output("task:one-too-many", reservation)
+                .is_none(),
+            "a call that the reliable budget cannot fund is backpressure, never a silent grant"
+        );
+
+        // A fact no reservation covers is refused while there is no headroom and no projection holds
+        // a queued fact that could free any: typed backpressure, nothing dropped, ticket untouched.
+        let uncovered = visible_input_ticket("output-transfer", 5, "input-uncovered")?;
+        sink.admit("output-transfer", uncovered.clone())
+            .expect_err("an unfunded fact cannot be admitted into a full budget");
+        let refused = channel.subscribe().borrow().clone();
+        assert_eq!(
+            refused.fault,
+            Some(pl_protocol::studio::HistoryFault::QueueFull)
+        );
+
+        // Every call returns: its result is admitted while the process budget is still full, which
+        // only works because the reservation it was made under is transferred onto the fact.
+        for (index, operation) in operations.iter().enumerate() {
+            let sequence = index as u64 + 1;
+            let mut write =
+                visible_input_ticket("output-transfer", sequence, &format!("input-{index}"))?;
+            write.output_claim = Some(operation.clone());
+            sink.admit("output-transfer", write)
+                .expect("the reservation funds the fact it was made for");
+        }
+        assert_eq!(
+            channel.process_bytes.load(Ordering::Acquire),
+            MAX_HISTORY_PROCESS_BYTES,
+            "transferring a reservation onto a fact adds no second charge for the same output"
+        );
+
+        // Recovery: the first call ends, so its remaining ceiling comes back and the very same
+        // ticket is admitted unchanged; the rest of the calls end too.
+        channel.release_operation_output(&operations[0]);
+        sink.admit("output-transfer", uncovered)?;
+        for operation in &operations[1..] {
+            channel.release_operation_output(operation);
+        }
+
+        // The Thread's own projection owner hands the admitted facts over in admission order, which
+        // is what lets the writer save them; then the fixed fault generation is retried and every
+        // fact is durable.
+        let mut projection = live_projection();
+        while let Some(write) = channel.next_unprojected() {
+            let prepared = projection.project_committed(
+                &sink.0.chat,
+                &sink.0.thread,
+                &write.effect,
+                &write.checkpoint.state,
+            )?;
+            assert!(channel.prepare(prepared));
+        }
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            store
+                .thread_persistence()
+                .retry_history("output-transfer", refused.fault_generation),
+        )
+        .await??;
+        assert_eq!(
+            store.history("output-transfer").await?.watermark().await?,
+            5
+        );
+        assert_eq!(
+            channel.process_bytes.load(Ordering::Acquire),
+            baseline,
+            "once every fact is durable and every call ended, the process gauge is back to baseline"
+        );
+        let drained = channel.subscribe().borrow().clone();
+        assert!(drained.error.is_none() && drained.fault.is_none());
         Ok(())
     }
 
@@ -1882,9 +3221,21 @@ mod storage_fault_tests {
     #[tokio::test]
     async fn committed_batch_is_replayed_after_ack_is_lost() -> Result<()> {
         let (_temp, store, sink) = sink("lost-ack").await?;
+        // The Thread's projection owner hands the batch over before the writer may write it. The test
+        // drives that one write directly, under the step lock, so it can lose the acknowledgement while
+        // the queue entry stays — exactly the retry the writer has to make idempotent.
+        let write = ticket("lost-ack", 1);
+        let chat = store.chat_session("lost-ack").await?;
+        let mut projection = live_projection();
+        let prepared = projection.project_committed(
+            &chat,
+            &sink.0.thread,
+            &write.effect,
+            &write.checkpoint.state,
+        )?;
         let locked = sink.0.channel.step_lock.lock().await;
-        sink.admit("lost-ack", ticket("lost-ack", 1))?;
-        persist_effect(&sink.0, 1).await?;
+        sink.admit("lost-ack", write.clone())?;
+        persist_effect(&sink.0, 1, &write, &prepared).await?;
         assert_eq!(store.history("lost-ack").await?.watermark().await?, 1);
         assert_eq!(sink.0.channel.subscribe().borrow().queued_records, 1);
         sink.0.channel.mark_unavailable();
@@ -2180,6 +3531,1175 @@ mod storage_fault_tests {
             store.history("fault-generation").await?.watermark().await?,
             2
         );
+        Ok(())
+    }
+
+    /// The continue entry the UI reads is exactly the Thread owner's readiness, with nothing else
+    /// able to light it.
+    ///
+    /// The writer reports watermarks and the typed fault generation, but no readiness of its own:
+    /// the owner can still owe a newer fault while a writer has long since written an older retry, so
+    /// the projection takes the owner's single verdict — byte for byte — instead of combining
+    /// anything a writer reports. `resume_required` stays a separate fact: readiness never releases
+    /// the latch by itself.
+    #[test]
+    fn can_resume_is_exactly_the_owners_readiness() {
+        use crate::studio::thread_projection::storage_state;
+
+        let mut owner = ThreadSnapshot::default();
+        owner.persistence.resume_required = true;
+        owner.persistence.fault_generation = 2;
+
+        // A writer that is already past this generation's fault — it reports the same generation with
+        // no error and fully admitted watermarks — still cannot offer a continue the owner refuses.
+        let writer = pl_protocol::ThreadPersistenceSnapshot {
+            fault_generation: 2,
+            history_admitted_sequence: Some(9),
+            history_durable_sequence: Some(9),
+            last_error: None,
+            ..pl_protocol::ThreadPersistenceSnapshot::default()
+        };
+        let storage = storage_state(&owner, &writer);
+        assert!(storage.resume_required);
+        assert!(
+            !storage.can_resume,
+            "only the owner's own generation-matched readiness may enable the continue"
+        );
+        assert_eq!(
+            storage.accepted_sequence,
+            Some(9),
+            "the writer's own watermarks still reach the UI as facts"
+        );
+
+        // The owner's verified readiness is the fact, whatever else the writer reports.
+        owner.persistence.resume_ready = true;
+        assert!(storage_state(&owner, &writer).can_resume);
+    }
+
+    /// One `(identity, content version)` pair is one canonical payload, even when the same fact is
+    /// projected a second time.
+    ///
+    /// The projection owner folds an admitted fact once, but the same effect can legitimately reach
+    /// the projection again — a commit the owner's snapshot already carried, a durable step retried
+    /// after a real writer failure, or a re-subscription. Every pass must deliver the *same bytes*
+    /// for a `(item_id, revision)` pair: a pass that restamped the projection clock would hand the
+    /// durable writer two different payloads under one version, which the store's own revision fence
+    /// rejects as a real save fault instead of the idempotent rewrite it is. This pins that a repeat
+    /// projection reuses the version, placement and timestamps of the payload it already delivered.
+    #[tokio::test]
+    async fn reprojecting_an_unchanged_effect_keeps_one_canonical_payload() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let sink = ThreadStorageSink::new(
+            store.clone(),
+            pl_protocol::Thread::placeholder("stable-payload"),
+        )
+        .await?;
+        let chat = store.chat_session("stable-payload").await?;
+        // The commit sequence is deliberately far above the item's own content version, so a sequence
+        // leaking into the version shows up as a value change instead of a coincidence.
+        let write = visible_input_ticket("stable-payload", 9, "stable-input")?;
+        let mut projection = live_projection();
+        let first = projection.project_committed(
+            &chat,
+            &sink.0.thread,
+            &write.effect,
+            &write.checkpoint.state,
+        )?;
+        let second = projection.project_committed(
+            &chat,
+            &sink.0.thread,
+            &write.effect,
+            &write.checkpoint.state,
+        )?;
+        assert_eq!(
+            first.items[0].revision, 1,
+            "a first delivery takes the projection's own content version, not the commit sequence"
+        );
+        assert_eq!(
+            serde_json::to_vec(&first.items)?,
+            serde_json::to_vec(&second.items)?,
+            "a repeat projection of an unchanged fact is byte-identical, so one version never names two payloads"
+        );
+        Ok(())
+    }
+
+    /// The durable row carries the item's own **content version**, never the effect sequence that
+    /// committed it, and a cold read of the same history file observes the same value.
+    ///
+    /// A save receipt is a fact about one exact `(identity, content version)` pair. Substituting the
+    /// commit sequence for the version would let an acknowledgement vouch for a payload the store
+    /// never wrote, so both ends are pinned here: the shared session confirms exactly the revision
+    /// the projection published, and a separate history handle — the cold path, which decodes the
+    /// durable row itself instead of reading live projection state — returns that same revision.
+    #[tokio::test]
+    async fn the_durable_row_keeps_the_items_own_content_version_across_a_cold_read() -> Result<()>
+    {
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let sink = ThreadStorageSink::new(
+            store.clone(),
+            pl_protocol::Thread::placeholder("revision-fence"),
+        )
+        .await?;
+        let chat = store.chat_session("revision-fence").await?;
+        let view = chat.open_chat(pl_core::chat::ChatFocus::Latest).await?;
+        // The commit sequence is deliberately far above the item's first content version: the
+        // projection decides the content version, and the writer has to store that exact value.
+        let write = visible_input_ticket("revision-fence", 9, "revision-input")?;
+        // No test projection task here: the test hands the one fact over itself, exactly like the
+        // Thread's observation worker, so the publish/hand-off/confirm order is deterministic.
+        let mut projection = live_projection();
+        let prepared = projection.project_committed(
+            &chat,
+            &sink.0.thread,
+            &write.effect,
+            &write.checkpoint.state,
+        )?;
+        // The projection publishes before it hands the same immutable batch to the reliable queue.
+        for item in &prepared.items {
+            chat.publish(chat_item(item.clone(), false)?)?;
+        }
+        sink.admit("revision-fence", write)?;
+        sink.0.channel.prepare(prepared);
+        tokio::time::timeout(Duration::from_secs(5), sink.flush("revision-fence", 9)).await??;
+
+        let published = snapshot_item(&view, "revision-input");
+        // The real allocation entry point is pinned, not just "different from the commit sequence":
+        // a fresh projection's first delivery of a new identity is that identity's content version 1.
+        assert_eq!(
+            published.revision, 1,
+            "a first delivery takes the projection's own content version, not the commit sequence"
+        );
+        assert_ne!(
+            published.revision, 9,
+            "a content version is the item's own fact, never the commit sequence"
+        );
+        assert!(
+            published.saved,
+            "the writer confirms exactly the revision the projection published"
+        );
+
+        let path = store
+            .thread_storage_dir("revision-fence")
+            .join("history.sqlite");
+        let cold =
+            crate::studio::storage::history::HistoryStore::open(&path, "revision-fence").await?;
+        let durable = cold.items_for_turn("visible-turn").await?;
+        assert_eq!(durable.len(), 1);
+        assert_eq!(durable[0].id, "revision-input");
+        assert_eq!(
+            durable[0].revision, published.revision,
+            "the persisted row carries the same content version the live projection confirmed"
+        );
+        Ok(())
+    }
+
+    /// An acknowledgement for a revision the identity already left behind confirms nothing.
+    ///
+    /// The save watermark is a fact about one exact payload. A receipt that names an older content
+    /// version must not mark the newer body durable: the newer payload stays unsaved until its own
+    /// revision is acknowledged, so a late receipt can never stand in for a write that never
+    /// happened.
+    #[tokio::test]
+    async fn an_acknowledgement_of_an_older_revision_never_confirms_the_newer_payload() -> Result<()>
+    {
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let chat = store.chat_session("stale-ack").await?;
+        let view = chat.open_chat(pl_core::chat::ChatFocus::Latest).await?;
+
+        chat.publish_preview(revised_preview("stale-ack", "revised", 1, 1, "first body")?)?;
+        chat.publish_preview(revised_preview(
+            "stale-ack",
+            "revised",
+            1,
+            2,
+            "second body",
+        )?)?;
+        assert_eq!(snapshot_item(&view, "revised").revision, 2);
+
+        // The stale receipt names revision 1 while the identity already advanced to revision 2.
+        chat.confirm_saved("revised", 1);
+        assert!(
+            !snapshot_item(&view, "revised").saved,
+            "an acknowledgement of a revision the identity left behind confirms nothing"
+        );
+
+        chat.confirm_saved("revised", 2);
+        assert!(
+            snapshot_item(&view, "revised").saved,
+            "only the exact published revision becomes the saved watermark"
+        );
+        Ok(())
+    }
+
+    /// The archive duty a real command capture owes after its append failed.
+    ///
+    /// It re-materializes the accepted chunk through the real local backend and then archives the
+    /// fragment with the real content-addressed store, so the reference the retry names is a genuine
+    /// durable resource and not a stand-in.
+    #[derive(Debug)]
+    struct CaptureRepairObligation {
+        backend: pl_tool::command::LocalCommandBackend,
+        archive: crate::resource_store::FileResourceStore,
+        capture_file: std::path::PathBuf,
+        call_id: String,
+        committed_len: u64,
+        pending: Vec<u8>,
+        retries: Arc<AtomicUsize>,
+    }
+
+    impl pl_core::thread::cold::OutputRetryObligation for CaptureRepairObligation {
+        fn identity(&self) -> String {
+            self.capture_file.display().to_string()
+        }
+        fn retry(&self) -> pl_core::thread::cold::OutputRetryFuture<'_> {
+            Box::pin(async move {
+                self.retries.fetch_add(1, Ordering::SeqCst);
+                // The real backend truncates the fragment back to its committed offset and re-appends
+                // exactly the accepted chunk with the same framing a successful append would produce,
+                // so a repeated retry reproduces the same bytes instead of appending them twice.
+                pl_tool::command::CommandBackend::repair_output_chunk(
+                    &self.backend,
+                    &self.capture_file,
+                    pl_tool::command::CommandCaptureStream::Stdout,
+                    self.committed_len,
+                    &self.pending,
+                )
+                .await
+                .map_err(|error| pl_core::thread::cold::ColdStoreError {
+                    source: Box::new(std::io::Error::other(error.to_string())),
+                })?;
+                let reference = self
+                    .archive
+                    .retain_command_capture(&self.capture_file)
+                    .await
+                    .map_err(|error| pl_core::thread::cold::ColdStoreError {
+                        source: Box::new(error),
+                    })?;
+                Ok(pl_core::thread::cold::OutputRetryOutcome::StoredWithRepair(
+                    pl_core::thread::cold::OutputRepair {
+                        call_id: self.call_id.clone(),
+                        reference,
+                    },
+                ))
+            })
+        }
+        fn received_bytes(&self) -> u64 {
+            self.committed_len.saturating_add(self.pending.len() as u64)
+        }
+        fn location(&self) -> String {
+            self.capture_file.display().to_string()
+        }
+        fn kind(&self) -> pl_core::thread::cold::StorageFaultKind {
+            pl_core::thread::cold::StorageFaultKind::WriteFailed
+        }
+    }
+
+    /// A command whose capture append really failed, so its archive still owes the accepted bytes.
+    #[derive(Debug)]
+    struct FailedAppendCaptureTool {
+        backend: pl_tool::command::LocalCommandBackend,
+        archive: crate::resource_store::FileResourceStore,
+        capture_file: std::path::PathBuf,
+        committed_len: u64,
+        pending: Vec<u8>,
+        retries: Arc<AtomicUsize>,
+        created: Arc<Mutex<Vec<Arc<CaptureRepairObligation>>>>,
+    }
+
+    impl Tool for FailedAppendCaptureTool {
+        async fn execute(
+            &self,
+            input: OpaquePayload,
+            context: CallContext,
+        ) -> Result<ToolOutput, ToolError> {
+            let obligation = Arc::new(CaptureRepairObligation {
+                backend: self.backend.clone(),
+                archive: self.archive.clone(),
+                capture_file: self.capture_file.clone(),
+                call_id: context.call_id.clone(),
+                committed_len: self.committed_len,
+                pending: self.pending.clone(),
+                retries: self.retries.clone(),
+            });
+            self.created.lock().unwrap().push(obligation.clone());
+            let source = pl_core::thread::cold::ColdStoreError {
+                source: Box::new(std::io::Error::other("capture append failed")),
+            };
+            let fault = pl_core::thread::cold::OutputStorageFault::new(
+                pl_core::thread::cold::StorageFaultKind::WriteFailed,
+                Arc::new(source),
+            )
+            .with_obligation(obligation);
+            Err(ToolError::new(fault).with_output(ToolOutput::new(
+                input.clone(),
+                vec![ContextContent::Text {
+                    text: Arc::from("accepted so far"),
+                }],
+            )))
+        }
+    }
+
+    #[derive(Debug)]
+    struct CaptureModel;
+
+    impl ModelSession for CaptureModel {
+        async fn prepare(
+            &mut self,
+            request: ModelRequest,
+        ) -> Result<PreparedModelCall, ModelError> {
+            Ok(PreparedModelCall::new(async move {
+                Ok(ModelStepOutput {
+                    attempt_id: request.attempt_id,
+                    base_context_revision: request.context.revision,
+                    content: vec![ContextContent::Text {
+                        text: Arc::from("calling capture"),
+                    }],
+                    tool_calls: vec![ModelToolCall {
+                        call_id: "capture-1".to_owned(),
+                        tool_id: "capture".to_owned(),
+                        arguments: OpaquePayload::text("capture"),
+                    }],
+                    private_context: None,
+                    usage: Default::default(),
+                })
+            }))
+        }
+
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+
+    /// The owner facts one stuck wait is diagnosed from, so a timeout names a stage instead of a bare
+    /// deadline and a real owner bug is not masked by a longer one.
+    fn stage_facts(snapshot: &ThreadSnapshot) -> String {
+        format!(
+            "fault={:?} generation={} phase={:?} obligations={} resume_required={} resume_ready={} \
+             commit={} durable={}",
+            snapshot.persistence.fault,
+            snapshot.persistence.fault_generation,
+            snapshot.persistence.execution_phase,
+            snapshot.persistence.output_obligations.len(),
+            snapshot.persistence.resume_required,
+            snapshot.persistence.resume_ready,
+            snapshot.commit_sequence,
+            snapshot.persistence.durable_sequence,
+        )
+    }
+
+    /// Waits until the authoritative snapshot satisfies `predicate`, tagging `stage` on timeout.
+    ///
+    /// The subscription yields the current snapshot first, so a boundary that already landed is observed
+    /// without waiting for an unrelated new frame — the exact shape of the earlier hang — and the timeout
+    /// reports the stage and the last owner facts so the production cause is located, not hidden.
+    async fn await_stage(
+        thread: &ThreadHandle,
+        stage: &str,
+        predicate: impl Fn(&ThreadSnapshot) -> bool,
+    ) -> Result<ThreadSnapshot> {
+        let mut snapshots = thread.subscribe();
+        let reached = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let snapshot = snapshots.next().await.expect("thread stays observable");
+                if predicate(&snapshot) {
+                    return snapshot;
+                }
+            }
+        })
+        .await;
+        reached.map_err(|_| {
+            anyhow::anyhow!(
+                "stage `{stage}` was not reached: {}",
+                stage_facts(&thread.snapshot())
+            )
+        })
+    }
+
+    /// The reference a repaired capture stored reaches the durable tool result, not just memory.
+    ///
+    /// The append failed after the fragment already held a partial write, so the retry must repair
+    /// the fragment through the real local backend before archiving it: the archived bytes are the
+    /// accepted content, verbatim and without duplication. The writer must then record that reference
+    /// on the tool identity it was committed under — on the projected item *and* on the delivery
+    /// history keeps — so the UI and a cold reopen can both locate the complete output, and the pause
+    /// must stay closed until the archive really landed.
+    #[tokio::test]
+    async fn a_repaired_capture_reference_reaches_the_durable_tool_result() -> Result<()> {
+        use pl_core::context::ResourceReader;
+        use pl_core::thread::cold::OutputRetryObligation as _;
+
+        let (temp, store, sink) = sink("archive-repair").await?;
+        let resources_root = temp.path().join("resources");
+        std::fs::create_dir_all(&resources_root)?;
+        let archive = crate::resource_store::FileResourceStore::new(resources_root);
+        let backend = pl_tool::command::LocalCommandBackend::new(temp.path().to_path_buf());
+
+        let capture_file = temp.path().join("capture.fragment");
+        let committed = b"accepted line one\n".to_vec();
+        let pending = b"accepted line two".to_vec();
+        // The failed append left the fragment short of the bytes already accepted and published live:
+        // a few bytes of the pending chunk were written, without their framing and without the rest.
+        let mut partial = committed.clone();
+        partial.extend_from_slice(&pending[..4]);
+        std::fs::write(&capture_file, &partial)?;
+        let mut expected = committed.clone();
+        expected.extend_from_slice(b"=== STDOUT ===\n");
+        expected.extend_from_slice(&pending);
+        expected.push(b'\n');
+
+        let retries = Arc::new(AtomicUsize::new(0));
+        let created: Arc<Mutex<Vec<Arc<CaptureRepairObligation>>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let thread =
+            ThreadHandle::start("archive-repair".into(), DynModelSession::new(CaptureModel))?;
+        thread
+            .register_tools(vec![Registration::new(
+                "capture".into(),
+                OpaquePayload::text("Tool capture"),
+                FailedAppendCaptureTool {
+                    backend,
+                    archive: archive.clone(),
+                    capture_file: capture_file.clone(),
+                    committed_len: committed.len() as u64,
+                    pending: pending.clone(),
+                    retries: retries.clone(),
+                    created: created.clone(),
+                },
+            )?])
+            .await?;
+        thread
+            .attach_storage(ColdStoreHandle::new(sink.clone()))
+            .await?;
+
+        let runner = tokio::spawn({
+            let thread = thread.clone();
+            async move {
+                thread
+                    .run_turn(TurnInput {
+                        turn_id: "capture-turn".into(),
+                        attempt_prefix: "capture".into(),
+                        content: vec![ContextContent::Text {
+                            text: Arc::from("run capture"),
+                        }],
+                        max_model_steps: ModelStepLimit::Limited(
+                            std::num::NonZeroU32::new(1).expect("positive model step limit"),
+                        ),
+                        cancellation: CancellationToken::new(),
+                    })
+                    .await
+            }
+        });
+        let faulted = await_stage(&thread, "typed storage fault latch", |snapshot| {
+            snapshot.persistence.resume_required
+        })
+        .await?;
+        assert_eq!(
+            faulted.persistence.fault,
+            Some(pl_core::thread::cold::StorageFaultKind::WriteFailed)
+        );
+        let generation = faulted.persistence.fault_generation;
+        assert_eq!(
+            faulted.persistence.output_obligations.len(),
+            1,
+            "the failed capture owes exactly one archive obligation"
+        );
+        assert!(
+            !faulted.persistence.resume_ready,
+            "a failed archive must not offer a continue before its bytes are stored"
+        );
+
+        // The requirement is that the owed obligation blocks continuation, not that the Turn reaches
+        // one particular phase: with a one-step limit the Turn may simply end after the fault, and no
+        // later phase frame is guaranteed to be published. Stopping the driver and refusing the
+        // explicit continue while the obligation is still owed proves the real boundary.
+        drop(runner);
+        assert!(
+            !thread.snapshot().persistence.output_obligations.is_empty(),
+            "the failed capture is still owed before the retry: {}",
+            stage_facts(&thread.snapshot())
+        );
+        assert!(
+            thread.resume_storage(generation).await.is_err(),
+            "the pause stays closed until the archive obligation is re-stored"
+        );
+
+        thread.retry_output_storage().await?;
+        thread.flush().await?;
+        assert_eq!(
+            retries.load(Ordering::SeqCst),
+            1,
+            "the real repair and archive run exactly once for the failed capture"
+        );
+
+        let history = store.history("archive-repair").await?;
+        let fact = history
+            .tool_task("task:capture-1")
+            .await?
+            .context("the committed tool task is durable")?;
+        let delivery = fact.delivery.context("the committed delivery is durable")?;
+        let reference = delivery
+            .delivered_context
+            .iter()
+            .find_map(|content| match content {
+                ContextContent::Resource { reference } => Some(reference.clone()),
+                _ => None,
+            })
+            .context("the repaired reference is recorded on the committed delivery")?;
+        assert!(
+            reference.id().starts_with("pl.studio.resource:"),
+            "the delivery records the real content-addressed archive reference"
+        );
+        let stored_bytes =
+            ResourceReader::read(&archive, reference.clone(), CancellationToken::new()).await?;
+        assert_eq!(
+            stored_bytes.as_ref(),
+            expected.as_slice(),
+            "the archive stores the accepted bytes verbatim, once, without the partial write"
+        );
+        let items = history.items_for_turn("capture-turn").await?;
+        let output = items
+            .iter()
+            .find_map(|item| match item.state() {
+                pl_protocol::ThreadItemState::Tool(tool) => tool.terminal_output(),
+                _ => None,
+            })
+            .context("the repaired call keeps its durable terminal result")?;
+        let referenced = serde_json::to_value(&reference)?;
+        assert_eq!(
+            output
+                .output_artifacts()
+                .iter()
+                .filter(|artifact| *artifact == &referenced)
+                .count(),
+            1,
+            "the durable item carries the repaired reference exactly once"
+        );
+
+        // Off-window stage: the bounded live window is not a save authority. A window that never saw
+        // the commit — no GUI open, a slow reader, or a rolled-over window — must still project the
+        // repair from the already-committed body, so the canonical item and its content version come
+        // from the single projection owner and the durable row is a pure confirmation. A second,
+        // already-committed tool identity with no reference yet is written through the writer's own
+        // durable commit path, then repaired by a fresh window that has to read it back.
+        // The durable identity the single projection owner derives from the call id, kept identical to
+        // `order::tool_id` so the owner's own history lookup finds exactly this committed row.
+        let off_window_id = format!("tool:{}:capture-2", "capture-2".len());
+        let off_window_item = pl_protocol::ThreadItem::new(
+            off_window_id.clone(),
+            "archive-repair".to_owned(),
+            "capture-turn".to_owned(),
+            41,
+            1,
+            1,
+            1,
+            pl_protocol::ThreadItemState::Tool(pl_protocol::ThreadToolItem::new(
+                pl_protocol::ThreadToolInvocation::new(
+                    "capture-2".to_owned(),
+                    "capture".to_owned(),
+                    "{}".to_owned(),
+                ),
+                pl_protocol::ThreadToolState::Succeeded(pl_protocol::SucceededThreadTool::new(
+                    1,
+                    pl_protocol::ThreadToolOutput::new(
+                        "accepted so far".to_owned(),
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                    ),
+                )),
+            )),
+        );
+        history
+            .commit_effect(
+                1_000_000,
+                EffectCommit {
+                    items: std::slice::from_ref(&off_window_item),
+                    rolled_back_turns: &Default::default(),
+                    identities: &[],
+                    messages: &[],
+                    receipts: &[],
+                    tasks: &[],
+                    deliveries: &[],
+                    delivery_repairs: &[],
+                    attempt: None,
+                },
+            )
+            .await?;
+        let repair_only = ThreadEffectBatch {
+            thread_id: "archive-repair".to_owned(),
+            sequence: 1,
+            committed_at: 1,
+            delivery_repairs: Arc::from([pl_core::thread::cold::OutputRepair {
+                call_id: "capture-2".to_owned(),
+                reference: reference.clone(),
+            }]),
+            ..Default::default()
+        };
+        let mut off_window = crate::studio::thread_projection::LiveProjection::new();
+        crate::studio::thread_projection::seed_repaired_targets(
+            &mut off_window,
+            &history,
+            &repair_only,
+        )
+        .await?;
+        assert!(
+            off_window.holds_terminal_tool(&off_window_id),
+            "the off-window repair reads the committed body back before projecting it"
+        );
+        let chat = store.chat_session("archive-repair").await?;
+        let packaged = off_window.project_committed(
+            &chat,
+            &pl_protocol::Thread::placeholder("archive-repair"),
+            &repair_only,
+            &ThreadSnapshot::default(),
+        )?;
+        let repackaged = packaged
+            .items
+            .iter()
+            .find(|item| item.id == off_window_id)
+            .context("the off-window repair is projected at its original identity")?;
+        assert_eq!(
+            repackaged.ordinal, off_window_item.ordinal,
+            "the supplement keeps the committed position instead of taking a new one"
+        );
+        assert_eq!(
+            repackaged.revision,
+            off_window_item.revision + 1,
+            "the single projection owner assigns the content version; the writer never invents one"
+        );
+        let repackaged_output = match repackaged.state() {
+            pl_protocol::ThreadItemState::Tool(tool) => tool.terminal_output(),
+            _ => None,
+        }
+        .context("the off-window supplement keeps the terminal tool result")?;
+        assert_eq!(
+            repackaged_output
+                .output_artifacts()
+                .iter()
+                .filter(|artifact| *artifact == &referenced)
+                .count(),
+            1,
+            "the off-window projection appends the reference exactly once"
+        );
+
+        // The caller can only continue once the obligation and its repair really landed.
+        thread.resume_storage(generation).await?;
+        assert!(!thread.snapshot().persistence.resume_required);
+
+        // A repeated retry reproduces the same bytes and the same reference instead of appending twice.
+        let obligation = created
+            .lock()
+            .unwrap()
+            .first()
+            .cloned()
+            .expect("the tool created its obligation");
+        let again = obligation.retry().await?;
+        let pl_core::thread::cold::OutputRetryOutcome::StoredWithRepair(repaired) = again else {
+            anyhow::bail!("the repeated retry must name the same repaired reference");
+        };
+        assert_eq!(repaired.reference, reference);
+        assert_eq!(
+            std::fs::read(&capture_file)?,
+            expected,
+            "repeating the repair reproduces the fragment instead of duplicating the chunk"
+        );
+        assert_eq!(retries.load(Ordering::SeqCst), 2);
+        thread.close().await?;
+        Ok(())
+    }
+
+    /// Re-materializes a whole multi-chunk capture plan through the real local backend, then archives
+    /// the fragment: the same shape core retries for a failed command capture.
+    #[derive(Debug)]
+    struct CapturePlanObligation {
+        backend: pl_tool::command::LocalCommandBackend,
+        archive: crate::resource_store::FileResourceStore,
+        capture_file: std::path::PathBuf,
+        call_id: String,
+        plan: pl_tool::command::CaptureRepair,
+        retries: Arc<AtomicUsize>,
+    }
+
+    impl pl_core::thread::cold::OutputRetryObligation for CapturePlanObligation {
+        fn identity(&self) -> String {
+            self.capture_file.display().to_string()
+        }
+        fn retry(&self) -> pl_core::thread::cold::OutputRetryFuture<'_> {
+            Box::pin(async move {
+                self.retries.fetch_add(1, Ordering::SeqCst);
+                // Replay the plan in acceptance order: one truncation back to the backend-confirmed
+                // offset, then every accepted chunk re-appended with its own framing.
+                let mut committed_len = self.plan.committed_len;
+                for chunk in &self.plan.chunks {
+                    committed_len = pl_tool::command::CommandBackend::repair_output_chunk(
+                        &self.backend,
+                        &self.capture_file,
+                        chunk.stream,
+                        committed_len,
+                        &chunk.pending,
+                    )
+                    .await
+                    .map_err(|error| {
+                        pl_core::thread::cold::ColdStoreError {
+                            source: Box::new(std::io::Error::other(error.to_string())),
+                        }
+                    })?;
+                }
+                let reference = self
+                    .archive
+                    .retain_command_capture(&self.capture_file)
+                    .await
+                    .map_err(|error| pl_core::thread::cold::ColdStoreError {
+                        source: Box::new(error),
+                    })?;
+                Ok(pl_core::thread::cold::OutputRetryOutcome::StoredWithRepair(
+                    pl_core::thread::cold::OutputRepair {
+                        call_id: self.call_id.clone(),
+                        reference,
+                    },
+                ))
+            })
+        }
+        fn received_bytes(&self) -> u64 {
+            self.plan.committed_len
+        }
+        fn location(&self) -> String {
+            self.capture_file.display().to_string()
+        }
+        fn kind(&self) -> pl_core::thread::cold::StorageFaultKind {
+            pl_core::thread::cold::StorageFaultKind::WriteFailed
+        }
+    }
+
+    /// Two streams' accepted chunks survive one reader's partial capture write.
+    ///
+    /// The first stdout append failed after writing part of its chunk, and the stderr reader had
+    /// already accepted (and published) a chunk. Both must be re-materialized verbatim, once, in
+    /// acceptance order: the second append must not land past the fault, and a repeated retry must not
+    /// duplicate or truncate either chunk. The archived reference must read back the whole fragment.
+    #[tokio::test]
+    async fn a_two_stream_capture_repair_replays_every_accepted_chunk_once() -> Result<()> {
+        use pl_core::context::ResourceReader;
+        use pl_core::thread::cold::OutputRetryObligation as _;
+
+        let temp = tempfile::tempdir()?;
+        let resources_root = temp.path().join("resources");
+        std::fs::create_dir_all(&resources_root)?;
+        let archive = crate::resource_store::FileResourceStore::new(resources_root);
+        let backend = pl_tool::command::LocalCommandBackend::new(temp.path().to_path_buf());
+
+        // The committed offset comes from the real backend's confirmed writes, not a hand-computed or
+        // swallowed fragment length: prepare the header, then append the chunk the capture already
+        // stored. That returned length is exactly what a repair truncates back to.
+        let target = pl_tool::command::CommandBackend::output_target(
+            &backend,
+            "session",
+            "exec",
+            "capture-2",
+            "capture",
+        )
+        .await?;
+        pl_tool::command::CommandBackend::prepare_output(&backend, &target, "capture", "/tmp")
+            .await?;
+        let capture_file = target.capture_file().to_path_buf();
+        let committed = b"committed line\n".to_vec();
+        let committed_len = pl_tool::command::CommandBackend::append_output_chunk(
+            &backend,
+            &target,
+            pl_tool::command::CommandCaptureStream::Stdout,
+            &committed,
+        )
+        .await?;
+        let committed_prefix = std::fs::read(&capture_file)?;
+        assert_eq!(
+            committed_len,
+            committed_prefix.len() as u64,
+            "the repair offset is the backend-confirmed fragment length"
+        );
+
+        let stdout_pending = b"first failed stdout chunk".to_vec();
+        let stderr_pending = b"second stream accepted chunk".to_vec();
+        // The failed append left its framing and a few bytes of its chunk past the confirmed offset;
+        // the stderr chunk was accepted and published before the fault, so it is still owed.
+        {
+            use std::io::Write as _;
+            let mut fragment = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&capture_file)?;
+            fragment.write_all(b"=== STDOUT ===\n")?;
+            fragment.write_all(&stdout_pending[..7])?;
+        }
+
+        let expected = {
+            let mut expected = committed_prefix;
+            expected.extend_from_slice(b"=== STDOUT ===\n");
+            expected.extend_from_slice(&stdout_pending);
+            expected.push(b'\n');
+            expected.extend_from_slice(b"=== STDERR ===\n");
+            expected.extend_from_slice(&stderr_pending);
+            expected.push(b'\n');
+            expected
+        };
+
+        let retries = Arc::new(AtomicUsize::new(0));
+        let obligation = Arc::new(CapturePlanObligation {
+            backend,
+            archive: archive.clone(),
+            capture_file: capture_file.clone(),
+            call_id: "capture-2".to_owned(),
+            plan: pl_tool::command::CaptureRepair {
+                committed_len,
+                chunks: vec![
+                    pl_tool::command::CaptureRepairChunk {
+                        stream: pl_tool::command::CommandCaptureStream::Stdout,
+                        pending: Arc::from(stdout_pending.clone()),
+                    },
+                    pl_tool::command::CaptureRepairChunk {
+                        stream: pl_tool::command::CommandCaptureStream::Stderr,
+                        pending: Arc::from(stderr_pending.clone()),
+                    },
+                ],
+            },
+            retries: retries.clone(),
+        });
+
+        let first = obligation.retry().await?;
+        let pl_core::thread::cold::OutputRetryOutcome::StoredWithRepair(first) = first else {
+            anyhow::bail!("the repair must name the stored reference");
+        };
+        assert_eq!(
+            std::fs::read(&capture_file)?,
+            expected,
+            "the retry stores both accepted chunks verbatim, in order, without the partial write"
+        );
+        let stored =
+            ResourceReader::read(&archive, first.reference.clone(), CancellationToken::new())
+                .await?;
+        assert_eq!(
+            stored.as_ref(),
+            expected.as_slice(),
+            "the archived reference reads back the whole accepted fragment"
+        );
+
+        let again = obligation.retry().await?;
+        let pl_core::thread::cold::OutputRetryOutcome::StoredWithRepair(again) = again else {
+            anyhow::bail!("the repeated retry must name the same stored reference");
+        };
+        assert_eq!(again.reference, first.reference);
+        assert_eq!(
+            std::fs::read(&capture_file)?,
+            expected,
+            "the repeated retry reproduces the same fragment instead of duplicating a chunk"
+        );
+        assert_eq!(retries.load(Ordering::SeqCst), 2);
+        Ok(())
+    }
+
+    use pl_tool::command::CommandBackend as _;
+
+    /// A command backend whose capture append is held and then failed, over in-memory IO.
+    ///
+    /// The read/repair and header capabilities delegate to a real [`pl_tool::command::LocalCommandBackend`],
+    /// but `spawn` hands back a [`pl_tool::command::ManagedCommand`] over duplex pipes the test feeds
+    /// directly, and `append_output_chunk` waits for a gate and then fails like a real disk write error.
+    /// That makes the operation's single writer task — not a hand-made plan — the thing that observes the
+    /// fault.
+    struct ScriptedCaptureBackend {
+        inner: pl_tool::command::LocalCommandBackend,
+        stdout: std::sync::Mutex<Option<pl_tool::command::CommandReader>>,
+        stderr: std::sync::Mutex<Option<pl_tool::command::CommandReader>>,
+        exit: Arc<Notify>,
+        gate: Arc<Notify>,
+    }
+
+    impl std::fmt::Debug for ScriptedCaptureBackend {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter
+                .debug_struct("ScriptedCaptureBackend")
+                .finish_non_exhaustive()
+        }
+    }
+
+    impl pl_tool::command::CommandBackend for ScriptedCaptureBackend {
+        type Error = pl_protocol::PureError;
+
+        async fn resolve_cwd(
+            &self,
+            cwd: Option<&std::path::Path>,
+            allow_workspace_escape: bool,
+        ) -> Result<String, Self::Error> {
+            self.inner.resolve_cwd(cwd, allow_workspace_escape).await
+        }
+
+        async fn output_target(
+            &self,
+            session_id: &str,
+            tool_id: &str,
+            call_id: &str,
+            command: &str,
+        ) -> Result<pl_tool::command::CommandOutputTarget, Self::Error> {
+            self.inner
+                .output_target(session_id, tool_id, call_id, command)
+                .await
+        }
+
+        async fn spawn(
+            &self,
+            _request: pl_tool::command::CommandSpawnRequest,
+        ) -> Result<pl_tool::command::ManagedCommand, Self::Error> {
+            let stdout = self.stdout.lock().expect("stdout reader").take();
+            let stderr = self.stderr.lock().expect("stderr reader").take();
+            let exit = self.exit.clone();
+            Ok(pl_tool::command::ManagedCommand::new(
+                None,
+                pl_tool::command::CommandIo {
+                    stdin: None,
+                    stdout,
+                    stderr,
+                },
+                move |_cancellation| async move {
+                    exit.notified().await;
+                    Ok(pl_tool::command::CommandExit { exit_code: Some(0) })
+                },
+            ))
+        }
+
+        async fn prepare_output(
+            &self,
+            target: &pl_tool::command::CommandOutputTarget,
+            command: &str,
+            working_directory: &str,
+        ) -> Result<u64, Self::Error> {
+            self.inner
+                .prepare_output(target, command, working_directory)
+                .await
+        }
+
+        async fn append_output_chunk(
+            &self,
+            _target: &pl_tool::command::CommandOutputTarget,
+            _stream: pl_tool::command::CommandCaptureStream,
+            _chunk: &[u8],
+        ) -> Result<u64, Self::Error> {
+            // Hold the operation's single writer until the test has confirmed both streams' accepted
+            // chunks, then fail the append the way a real capture write error would.
+            self.gate.notified().await;
+            Err(pl_protocol::PureError::ToolExecutionFailed {
+                tool: "exec".to_owned(),
+                error: "capture append failed".to_owned(),
+            })
+        }
+
+        async fn repair_output_chunk(
+            &self,
+            capture_file: &std::path::Path,
+            stream: pl_tool::command::CommandCaptureStream,
+            committed_len: u64,
+            chunk: &[u8],
+        ) -> Result<u64, Self::Error> {
+            self.inner
+                .repair_output_chunk(capture_file, stream, committed_len, chunk)
+                .await
+        }
+
+        async fn publish_output(
+            &self,
+            target: &pl_tool::command::CommandOutputTarget,
+        ) -> Result<(), Self::Error> {
+            self.inner.publish_output(target).await
+        }
+
+        async fn collect_output_artifacts(
+            &self,
+            target: &pl_tool::command::CommandOutputTarget,
+            sizes: pl_tool::command::CommandOutputSizes,
+        ) -> Result<Vec<serde_json::Value>, Self::Error> {
+            self.inner.collect_output_artifacts(target, sizes).await
+        }
+    }
+
+    /// Signals once both command streams have published an accepted chunk.
+    #[derive(Debug, Default)]
+    struct BothStreamsSeen {
+        stdout: AtomicUsize,
+        stderr: AtomicUsize,
+        both: Notify,
+    }
+
+    impl pl_tool::command::CommandOutputObserver for BothStreamsSeen {
+        fn output_chunk(
+            &self,
+            stream: pl_tool::command::CommandOutputStream,
+            chunk: &[u8],
+            _revision: u64,
+        ) {
+            let counter = match stream {
+                pl_tool::command::CommandOutputStream::Stdout => &self.stdout,
+                pl_tool::command::CommandOutputStream::Stderr => &self.stderr,
+            };
+            counter.fetch_add(chunk.len().max(1), Ordering::SeqCst);
+            if self.stdout.load(Ordering::SeqCst) > 0 && self.stderr.load(Ordering::SeqCst) > 0 {
+                self.both.notify_one();
+            }
+        }
+    }
+
+    /// The real command lifecycle retains and replays a two-stream capture fault.
+    ///
+    /// This drives the operation, not a hand-made plan: both readers accept *and publish* a chunk from
+    /// their stream, the operation's single writer is held until then and only then fails its append,
+    /// and the scripted process then exits. So the retained repair plan must hold both streams' accepted
+    /// chunks, the terminal result must not be a success, and replaying the plan through the real local
+    /// backend must archive exactly those bytes under one reference that reads back whole.
+    #[tokio::test]
+    async fn a_two_stream_capture_fault_is_retained_and_replayed_by_the_lifecycle() -> Result<()> {
+        use pl_core::context::ResourceReader;
+
+        let temp = tempfile::tempdir()?;
+        let resources_root = temp.path().join("resources");
+        std::fs::create_dir_all(&resources_root)?;
+        let archive = crate::resource_store::FileResourceStore::new(resources_root);
+
+        let (mut stdout_writer, stdout_reader) = tokio::io::duplex(1024);
+        let (mut stderr_writer, stderr_reader) = tokio::io::duplex(1024);
+        let gate = Arc::new(Notify::new());
+        let exit = Arc::new(Notify::new());
+        let backend = ScriptedCaptureBackend {
+            inner: pl_tool::command::LocalCommandBackend::new(temp.path().to_path_buf()),
+            stdout: std::sync::Mutex::new(Some(
+                Box::pin(stdout_reader) as pl_tool::command::CommandReader
+            )),
+            stderr: std::sync::Mutex::new(Some(
+                Box::pin(stderr_reader) as pl_tool::command::CommandReader
+            )),
+            exit: exit.clone(),
+            gate: gate.clone(),
+        };
+        let manager = Arc::new(pl_tool::command::CommandProcessManager::new(Arc::new(
+            backend,
+        )));
+
+        let seen = Arc::new(BothStreamsSeen::default());
+        let observer: Arc<dyn pl_tool::command::CommandOutputObserver> = seen.clone();
+        let request = pl_tool::command::CommandStartRequest {
+            command: "scripted".to_owned(),
+            cwd: Some(temp.path().to_path_buf()),
+            allow_workspace_escape: false,
+            timeout: Duration::from_secs(30),
+            yield_time: Duration::ZERO,
+            max_output_chars: 4096,
+            session_id: "two-stream-lifecycle".to_owned(),
+            tool_id: "task-two-stream-lifecycle".to_owned(),
+            call_id: "task-two-stream-lifecycle".to_owned(),
+            cancellation_token: None,
+            output_observer: Some(observer),
+        };
+        let runner = {
+            let manager = manager.clone();
+            tokio::spawn(
+                async move { manager.run_task("task-two-stream-lifecycle", request).await },
+            )
+        };
+
+        tokio::io::AsyncWriteExt::write_all(&mut stdout_writer, b"OUT-1\n").await?;
+        tokio::io::AsyncWriteExt::write_all(&mut stderr_writer, b"ERR-1\n").await?;
+        tokio::time::timeout(Duration::from_secs(30), seen.both.notified())
+            .await
+            .context("both streams should have published an accepted chunk")?;
+
+        // Both accepted chunks are queued in the one plan; now let the held append fail for real, then
+        // close the streams and exit the scripted process so the operation settles.
+        gate.notify_one();
+        drop(stdout_writer);
+        drop(stderr_writer);
+        exit.notify_one();
+
+        let snapshot = match tokio::time::timeout(Duration::from_secs(30), runner).await {
+            Ok(Ok(Ok(snapshot))) => snapshot,
+            Ok(Ok(Err(error))) => {
+                anyhow::bail!("the operation returned an error instead of a snapshot: {error}")
+            }
+            Ok(Err(error)) => anyhow::bail!("the operation task failed: {error}"),
+            Err(_) => {
+                anyhow::bail!("the operation never settled: the capture writer did not drain")
+            }
+        };
+
+        assert!(
+            matches!(
+                &snapshot.output_failure,
+                Some(pl_tool::command::CommandCaptureFailure::Write { .. })
+            ),
+            "the real append failure must surface as a typed capture write failure: {:?}",
+            snapshot.output_failure
+        );
+        assert!(
+            snapshot.state.final_result().is_some(),
+            "the snapshot is only returned once the operation settled"
+        );
+        assert!(
+            !matches!(
+                snapshot.state.final_result(),
+                Some(pl_tool::command::CommandProcessFinalResult::Succeeded { .. })
+            ),
+            "a capture write failure must never be reported as a successful command"
+        );
+
+        let plan = snapshot
+            .capture_repair()
+            .cloned()
+            .context("both accepted chunks must stay owed after the failed append")?;
+        assert_eq!(
+            plan.chunks.len(),
+            2,
+            "both streams' accepted chunks are retained"
+        );
+        assert!(
+            plan.chunks.iter().any(|chunk| {
+                chunk.stream == pl_tool::command::CommandCaptureStream::Stdout
+                    && &chunk.pending[..] == b"OUT-1\n".as_slice()
+            }),
+            "the stdout chunk is retained verbatim"
+        );
+        assert!(
+            plan.chunks.iter().any(|chunk| {
+                chunk.stream == pl_tool::command::CommandCaptureStream::Stderr
+                    && &chunk.pending[..] == b"ERR-1\n".as_slice()
+            }),
+            "the stderr chunk is retained verbatim"
+        );
+
+        // Replay the plan through the real local backend and archive it: the stored reference must read
+        // back exactly the accepted bytes, in acceptance order, with the failed append left off.
+        let real = pl_tool::command::LocalCommandBackend::new(temp.path().to_path_buf());
+        let mut committed_len = plan.committed_len;
+        for chunk in &plan.chunks {
+            committed_len = real
+                .repair_output_chunk(
+                    &snapshot.capture_file,
+                    chunk.stream,
+                    committed_len,
+                    &chunk.pending,
+                )
+                .await?;
+        }
+        let reference = archive
+            .retain_command_capture(&snapshot.capture_file)
+            .await?;
+        let stored = ResourceReader::read(&archive, reference, CancellationToken::new()).await?;
+        let stored = String::from_utf8_lossy(stored.as_ref());
+        assert!(
+            stored.contains("OUT-1"),
+            "the archive keeps the stdout chunk: {stored}"
+        );
+        assert!(
+            stored.contains("ERR-1"),
+            "the archive keeps the stderr chunk: {stored}"
+        );
+
         Ok(())
     }
 }

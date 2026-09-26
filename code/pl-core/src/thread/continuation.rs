@@ -121,7 +121,7 @@ impl Owner {
             tokio::select! {
                 Some(completion) = futures::StreamExt::next(&mut self.background), if !self.background.is_empty() => self.finish_background(completion),
                 message = self.mailbox.recv(), if !self.mailbox.is_closed() || !self.mailbox.is_empty() => {
-                    if let Some(message) = message { self.process_mailbox(message); }
+                    if let Some(message) = message { self.dispatch_mailbox(message).await; }
                 }
             }
         }

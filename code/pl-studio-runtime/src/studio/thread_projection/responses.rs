@@ -2,7 +2,10 @@
 use super::{ProjectionError, content::text_content};
 use pl_core::{
     context::ContextContent,
-    model::ModelStepOutput,
+    model::{
+        AggregateChannel, ModelStepOutput, ModelTextChannel, ObservedItemKind,
+        ObservedPartIdentity, ObservedPartKind,
+    },
     thread::{AttemptOutcome, ThreadSnapshot},
 };
 use pl_model::completion::{
@@ -56,6 +59,20 @@ pub(in crate::studio) fn started_channels(
         }
     }
     channels
+}
+
+/// Whether a commit's own receipt cannot carry the provider presentation parts it started.
+///
+/// Only a bounded reception qualifies: a failed, cancelled or interrupted stream stopped before the
+/// provider's authoritative item, so the prefix the window already received stays on the identity it
+/// was shown on. A normally received response ([`AttemptOutcome::Committed`]) — and a response the
+/// workflow rejected after receiving it ([`AttemptOutcome::Rejected`]) — always carries its complete
+/// provider parts, so its committed content is never taken from a subscriber's view of a preview.
+pub(in crate::studio) fn keeps_bounded_preview(outcome: &AttemptOutcome) -> bool {
+    !matches!(
+        outcome,
+        AttemptOutcome::Committed(_) | AttemptOutcome::Rejected { .. }
+    )
 }
 
 /// Closes preview parts absent from a terminal receipt (notably a bounded failure preview).
@@ -329,6 +346,23 @@ pub(super) fn project_attempt(
             ));
         }
         return Ok(items);
+    }
+    // The provider itemized this attempt, so its canonical content is the provider parts — never a
+    // second aggregate identity for the same text, and never an empty `reasoning` row that no provider
+    // part produced. A bounded reception closes the started identity with the prefix the window
+    // already received; a normally received response always carries those parts in its own receipt,
+    // so an empty part set here means the authoritative output was lost. Failing closed keeps a
+    // partial preview body from being committed as that response's content.
+    if finalize
+        .iter()
+        .any(|id| id.starts_with(&super::order::presentation_prefix(&attempt.attempt_id)))
+    {
+        if keeps_bounded_preview(&attempt.outcome) {
+            return Ok(items);
+        }
+        return Err(ProjectionError::UnsupportedOutput(
+            "terminal receipt lost its committed provider presentation identity".into(),
+        ));
     }
     if let Some(reasoning) = response.reasoning.filter(|text| !text.is_empty()) {
         items.push(ThreadItem::new(
@@ -606,38 +640,92 @@ fn failure_content(error: &pl_core::model::ModelError) -> Result<ResponseContent
     Ok(content)
 }
 
+/// Projects the live observation of one attempt, without re-decoding a producer payload.
+///
+/// An aggregate observation is the preview of a whole channel before the adapter itemizes the
+/// response; provider observations regroup by their stable item identity. This is a read of the
+/// observation snapshot, so it materializes text only where this projection needs it.
 fn progress_content(
     progress: &pl_core::model::ModelProgress,
 ) -> Result<ResponseContent, ProjectionError> {
-    let presentation_items = progress
-        .presentation
-        .iter()
-        .map(|payload| {
-            if payload.format() != "pl.model.presentation-item" || payload.version() != 1 {
-                return Err(ProjectionError::UnsupportedOutput(
-                    "unsupported model presentation preview".into(),
-                ));
+    let mut text = String::new();
+    let mut reasoning = String::new();
+    let mut items: Vec<CompletionPresentationItem> = Vec::new();
+    for part in progress.parts() {
+        let identity = match part.identity() {
+            ObservedPartIdentity::Aggregate { channel } => {
+                match channel {
+                    AggregateChannel::Text => text.push_str(&part.text()),
+                    AggregateChannel::Reasoning => reasoning.push_str(&part.text()),
+                }
+                continue;
             }
-            serde_json::from_str(payload.content()).map_err(ProjectionError::Encoding)
-        })
-        .collect::<Result<Vec<CompletionPresentationItem>, _>>()?;
-    let reasoning = progress
-        .reasoning
-        .as_ref()
-        .map(|payload| {
-            if payload.format() != "text/plain" || payload.version() != 1 {
-                return Err(ProjectionError::UnsupportedOutput(
-                    "unsupported live reasoning format".into(),
-                ));
+            ObservedPartIdentity::Provider(identity) => identity,
+        };
+        let kind = match identity.item_kind {
+            ObservedItemKind::Text(channel) => {
+                CompletionPresentationItemKind::Text(trace_channel(channel))
             }
-            Ok(payload.content().to_owned())
-        })
-        .transpose()?;
+            ObservedItemKind::Reasoning => CompletionPresentationItemKind::Reasoning,
+        };
+        let part_kind = match identity.part {
+            ObservedPartKind::OutputText => CompletionPresentationPartKind::OutputText,
+            ObservedPartKind::ReasoningText => CompletionPresentationPartKind::ReasoningText,
+            ObservedPartKind::SummaryText => CompletionPresentationPartKind::SummaryText,
+        };
+        if !matches!(
+            (identity.item_kind, part_kind),
+            (
+                ObservedItemKind::Text(_),
+                CompletionPresentationPartKind::OutputText
+            ) | (
+                ObservedItemKind::Reasoning,
+                CompletionPresentationPartKind::ReasoningText
+                    | CompletionPresentationPartKind::SummaryText
+            )
+        ) {
+            return Err(ProjectionError::UnsupportedOutput(
+                "provider presentation part does not match its item".into(),
+            ));
+        }
+        let observed_part = CompletionPresentationPart {
+            content_index: identity.content_index,
+            provider_part_id: None,
+            kind: part_kind,
+            text: part.text(),
+        };
+        let item_id: &str = identity.item_id.as_ref();
+        // The output index can arrive after streaming starts, so only the provider item id groups
+        // parts; a late index completes the item instead of starting a second one.
+        match items
+            .iter_mut()
+            .find(|item| item.provider_item_id == item_id)
+        {
+            Some(item) => {
+                item.output_index = item.output_index.or(identity.output_index);
+                item.parts.push(observed_part);
+            }
+            None => items.push(CompletionPresentationItem {
+                provider_item_id: item_id.to_owned(),
+                output_index: identity.output_index,
+                kind,
+                parts: vec![observed_part],
+            }),
+        }
+    }
     Ok(ResponseContent {
-        text: text_content(&progress.content),
-        reasoning,
-        presentation_items,
+        text,
+        reasoning: (!reasoning.is_empty()).then_some(reasoning),
+        presentation_items: items,
     })
+}
+
+fn trace_channel(channel: ModelTextChannel) -> pl_protocol::trace::TraceTextChannel {
+    match channel {
+        ModelTextChannel::User => pl_protocol::trace::TraceTextChannel::User,
+        ModelTextChannel::Commentary => pl_protocol::trace::TraceTextChannel::Commentary,
+        ModelTextChannel::Final => pl_protocol::trace::TraceTextChannel::Final,
+    }
 }
 
 fn response_content(output: &ModelStepOutput) -> Result<ResponseContent, ProjectionError> {

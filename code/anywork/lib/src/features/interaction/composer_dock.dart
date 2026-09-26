@@ -24,9 +24,16 @@ import 'user_input_dock.dart';
 part 'composer_attachments.dart';
 
 class ComposerDock extends ConsumerWidget {
-  const ComposerDock({required this.workspace, super.key});
+  const ComposerDock({
+    required this.workspace,
+    this.compact = false,
+    super.key,
+  });
 
   final AgentWorkspaceView workspace;
+
+  /// 矮窗口紧凑布局：收起留白与输入行数，但发送/停止等操作保持不变。
+  final bool compact;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -42,7 +49,9 @@ class ComposerDock extends ConsumerWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 7, 12, 12),
+        padding: compact
+            ? const EdgeInsets.fromLTRB(12, 4, 12, 6)
+            : const EdgeInsets.fromLTRB(12, 7, 12, 12),
         child: Align(
           alignment: Alignment.center,
           child: ConstrainedBox(
@@ -57,7 +66,11 @@ class ComposerDock extends ConsumerWidget {
                 : interaction == null
                 ? workspace.composerMode == AgentComposerMode.runtimeDriven
                       ? _RuntimeDrivenAgentDock(workspace: workspace)
-                      : _PromptComposer(workspace: workspace, enabled: true)
+                      : _PromptComposer(
+                          workspace: workspace,
+                          enabled: true,
+                          compact: compact,
+                        )
                 : _InteractionDock(
                     workspace: workspace,
                     interaction: interaction,
@@ -193,10 +206,15 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
 }
 
 class _PromptComposer extends ConsumerWidget {
-  const _PromptComposer({required this.workspace, required this.enabled});
+  const _PromptComposer({
+    required this.workspace,
+    required this.enabled,
+    this.compact = false,
+  });
 
   final AgentWorkspaceView workspace;
   final bool enabled;
+  final bool compact;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -210,6 +228,7 @@ class _PromptComposer extends ConsumerWidget {
       permissionMode: workspace.permissionMode,
       enabled: enabled,
       isBusy: workspace.isBusy,
+      compact: compact,
       clipboard: ref.read(clipboardImageReaderProvider),
       selectorBar: workspace.thread.isRoot
           ? Wrap(
@@ -291,6 +310,7 @@ class _PromptComposerPanel extends StatefulWidget {
     required this.onRemoveAttachment,
     this.onStop,
     this.selectorBar,
+    this.compact = false,
   });
 
   final ComposerThreadState composer;
@@ -308,6 +328,9 @@ class _PromptComposerPanel extends StatefulWidget {
   final Future<void> Function(String draftId) onRemoveAttachment;
   final VoidCallback? onStop;
   final Widget? selectorBar;
+
+  /// 矮窗口紧凑布局：收起面板留白与输入最小行数，操作按钮保持不变。
+  final bool compact;
 
   @override
   State<_PromptComposerPanel> createState() => _PromptComposerPanelState();
@@ -465,7 +488,9 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
           : colors.outlineVariant.withValues(alpha: 0.86),
       radius: StudioRadii.lg,
       shadow: false,
-      padding: const EdgeInsets.fromLTRB(12, 8, 10, 10),
+      padding: widget.compact
+          ? const EdgeInsets.fromLTRB(12, 6, 10, 6)
+          : const EdgeInsets.fromLTRB(12, 8, 10, 10),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -484,7 +509,7 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
               controller: _controller,
               focusNode: _inputFocusNode,
               enabled: widget.enabled && !composer.isSubmissionPending,
-              minLines: 3,
+              minLines: widget.compact ? 2 : 3,
               maxLines: 8,
               decoration: InputDecoration(
                 hintText: context.l10n.composerHint,

@@ -1,8 +1,10 @@
 mod accounting;
+mod activity;
 mod agent;
 mod agent_profile;
 pub mod agent_session;
 mod billing;
+mod chat_window;
 mod error;
 mod event;
 mod id;
@@ -28,6 +30,11 @@ mod workflow;
 pub use accounting::{
     InferenceAccounting, PricingMode, PricingOutcome, UnpricedReason, UsageReport, UsageStatus,
 };
+pub use activity::{
+    ACTIVITY_SUMMARY_LIMIT, ThreadActivity, ThreadActivityArguments, ThreadActivityContentPart,
+    ThreadActivityDetail, ThreadActivityDetailQuery, ThreadActivityKind, ThreadActivityToolDetail,
+    ThreadActivityToolEntry, ThreadActivityToolState, ThreadActivityTools,
+};
 pub use agent::*;
 pub use agent_profile::{
     AgentProfileSnapshot, AgentWorkspaceAssignmentSnapshot, AgentWorkspaceDisposition,
@@ -45,6 +52,11 @@ pub use billing::{
     InferenceBillingAppend, InferenceBillingRecord, InferenceModelObservation,
     InferenceOrchestrationMetrics, InferenceTiming, InferenceTokenUsage, ModelMatchState,
     ModelPricingSnapshot, TurnBillingRecord,
+};
+pub use chat_window::{
+    ChatWindowChange, ChatWindowDirection, ChatWindowFocus, ChatWindowItem, ChatWindowLifecycle,
+    ChatWindowPriority, ChatWindowQuery, ChatWindowSnapshot, ChatWindowUpdate, ThreadContentField,
+    ThreadFieldChange, ThreadFieldUpdate,
 };
 pub use error::{PureError, Result};
 pub use event::{
@@ -88,7 +100,9 @@ pub use provider_catalog::{
 };
 // 持久化观测契约（队列压力、逐 Thread 水位）同时由 runtime 协调器与其上层
 // bridge/HTTP 适配器命名，因此在 crate 根重导出，消费方无需再拼 `studio::` 路径。
-pub use studio::{PersistenceQueueSnapshot, ThreadPersistenceSnapshot};
+pub use studio::{
+    PersistenceQueueSnapshot, ThreadPersistenceSnapshot, ThreadStorageExecution, ThreadStorageState,
+};
 pub use thread::mode::{ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId};
 pub use thread::{
     CacheUsageSummary, THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition,

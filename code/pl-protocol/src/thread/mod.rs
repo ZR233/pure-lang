@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
-    InteractionRequest, McpHealthSnapshot, RuntimeCostAmount, ThreadItem, ThreadItemDelta,
-    ThreadModeId, TodoListSnapshot, Turn,
+    InteractionRequest, McpHealthSnapshot, RuntimeCostAmount, ThreadItem, ThreadModeId,
+    TodoListSnapshot, Turn,
 };
 
-pub const THREAD_SCHEMA_VERSION: u32 = 13;
+pub const THREAD_SCHEMA_VERSION: u32 = 14;
 
 /// Timeline 游标 token 的版本号。
 ///
@@ -136,6 +136,15 @@ pub struct ThreadSnapshot {
     pub interactions: Vec<InteractionRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<ThreadRuntimeSnapshot>,
+    /// 当前执行活动的权威小摘要；`None` 表示当前没有活动。
+    ///
+    /// 它是独立于 ChatView 历史窗口的 typed 投影：窗口只决定展示哪些历史条目，活动只描述当前
+    /// 在做什么。完整正文不在快照里，按活动身份按需读取。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<crate::ThreadActivity>,
+    /// Thread 的存储状态；`None` 表示该投影没有可报告的存储事实（不是“健康”）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage: Option<crate::ThreadStorageState>,
 }
 
 impl ThreadSnapshot {
@@ -147,6 +156,8 @@ impl ThreadSnapshot {
             active_turn: None,
             interactions: Vec::new(),
             runtime: None,
+            activity: None,
+            storage: None,
         }
     }
 }
@@ -267,20 +278,25 @@ pub enum ThreadNotification {
     TurnCompleted {
         turn: Turn,
     },
-    ItemStarted {
-        item: Box<ThreadItem>,
-    },
-    ItemDelta {
-        delta: ThreadItemDelta,
-    },
-    ItemCompleted {
-        item: Box<ThreadItem>,
-    },
     InteractionChanged {
         interaction: Box<InteractionRequest>,
     },
     ThreadRuntimeUpdated {
         runtime: Box<ThreadRuntimeSnapshot>,
+    },
+    /// 当前执行活动变化；`None` 表示当前没有活动（Turn 已结束或尚未开始）。
+    ///
+    /// 帧只在活动实际变化时发出，并只携带小型 typed 摘要与身份；完整正文按活动身份按需读取。
+    ActivityChanged {
+        activity: Option<Box<crate::ThreadActivity>>,
+    },
+    /// Thread 存储状态变化；`None` 表示当前没有可报告的存储事实（未知，不是“健康”）。
+    ///
+    /// 帧只在存储状态实际变化时发出，携带 typed 故障类别、代数、水位与恢复阶段——故障类别来自
+    /// 协调器的 typed 值，绝不从错误文本推断。快照首帧已带权威存储状态，后续帧只在它变化时补发，
+    /// 因此正文更新不会额外走一遍状态流。
+    StorageChanged {
+        storage: Option<Box<crate::ThreadStorageState>>,
     },
     Lagged {
         dropped: u64,

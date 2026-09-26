@@ -193,3 +193,46 @@ AsyncValue<TimelinePaneView?> agentTimeline(Ref ref, String threadId) {
     ),
   );
 }
+
+/// 固定活动条的唯一输入。
+///
+/// 完全由后端 typed 活动投影、typed 存储状态与待处理交互派生；展开详情是 controller
+/// 按活动身份**按需**读取的结果（不依赖消息窗口、不查 SQL 历史）。没有任何窗口可见性
+/// 推断或默认阶段。
+///
+/// 待接线：后端状态流暂无 storage 通知，存储事实目前只在快照刷新时更新（见
+/// activity-contract §6/§8）。这里不解析错误字符串、也不在本地猜测“已恢复”。
+@riverpod
+AsyncValue<ConversationActivityView?> conversationActivity(
+  Ref ref,
+  String threadId,
+) {
+  return ref.watch(
+    studioControllerProvider.select(
+      (asyncState) => asyncState.whenData((studioState) {
+        if (studioState.selectedThreadId != threadId) return null;
+        final workspace = studioState.workspacesByThread[threadId];
+        if (workspace == null) return null;
+        final ui =
+            studioState.workspaceUiByThread[threadId] ??
+            const WorkspaceUiState();
+        final interaction = studioState.activeInteraction;
+        final scoped = interaction != null && interaction.threadId == threadId
+            ? interaction
+            : null;
+        final activity = workspace.activity;
+        final detailState = ui.activityDetail;
+        final matches =
+            activity != null && detailState.matches(activity.identity);
+        return projectConversationActivity(
+          activity: activity,
+          storage: workspace.storage,
+          interaction: scoped,
+          detail: matches ? detailState.detail : null,
+          detailsLoading: matches && detailState.loading,
+          detailsError: matches ? detailState.error : null,
+        );
+      }),
+    ),
+  );
+}

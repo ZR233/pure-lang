@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,14 +25,21 @@ use lifecycle::{CommandLifecycle, spawn_lifecycle_task, wait_for_process_activit
 use snapshot::{message_for_state, truncate_text};
 use state::CommandProcessTransition;
 pub use state::{
-    CommandProcessFailure, CommandProcessFinalResult, CommandProcessLifecycle,
-    CommandTerminationReason, DrainingCommandProcess, FinalCommandProcess, RunningCommandProcess,
-    TerminatingCommandProcess,
+    CaptureRepair, CaptureRepairChunk, CommandCaptureFailure, CommandProcessFailure,
+    CommandProcessFinalResult, CommandProcessLifecycle, CommandTerminationReason,
+    DrainingCommandProcess, FinalCommandProcess, RunningCommandProcess, TerminatingCommandProcess,
 };
-use stream_io::{read_stderr, read_stdout};
+use stream_io::{read_stderr, read_stdout, run_capture_writer};
 
 const DEFAULT_MAX_PROCESSES: usize = 16;
 const INTERNAL_BUFFER_BYTES: usize = 64 * 1024;
+/// Largest total capture one command operation may write to disk.
+///
+/// stdout and stderr share this one budget, so a command that never stops writing cannot grow the
+/// capture file without bound. It matches the reliable output ceiling core reserves for one
+/// operation, so the durable capture and the output core can retain stay the same order of magnitude
+/// instead of the capture silently exceeding what the rest of the pipeline can hold.
+pub const MAX_CAPTURE_BYTES: u64 = 16 * 1024 * 1024;
 static NEXT_PROCESS_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug)]
@@ -73,6 +80,19 @@ struct CommandProcessEntry {
     state: Mutex<CommandProcessState>,
     notify: Notify,
     output_observer: Option<Arc<dyn CommandOutputObserver>>,
+    /// Wakes the operation's single capture writer task when an accepted chunk or a state change may
+    /// give it work.
+    ///
+    /// stdout and stderr readers only accept chunks into the shared plan and notify this; the one
+    /// writer task drains the plan to the backend, so both streams keep accepting up to the shared
+    /// budget without ever waiting on disk. `notify_one` keeps a permit when the writer is between
+    /// drains, so an accepted chunk is never silently dropped.
+    capture_wake: Notify,
+    /// Asks the lifecycle to terminate the process after a hard output failure.
+    ///
+    /// The read tasks hold a clone, so a capture that can no longer continue stops the process tree
+    /// immediately instead of leaving it running while its output is silently dropped.
+    output_failure: CancellationToken,
 }
 
 impl std::fmt::Debug for CommandProcessEntry {
@@ -95,6 +115,31 @@ struct CommandProcessState {
     pending_stdout: HeadTailBuffer,
     pending_stderr: HeadTailBuffer,
     output_revision: u64,
+    /// Durable capture bytes written so far; stdout and stderr share this operation budget.
+    capture_bytes: u64,
+    /// Length of the capture fragment the backend last confirmed writing.
+    ///
+    /// The prepared header before any chunk, then updated to the exact length each confirmed append
+    /// reported. A repair truncates back to this fact, so it never depends on a fragment-length read
+    /// that could fail and be mistaken for "nothing written".
+    capture_committed_len: u64,
+    /// Accepted capture chunks the backend has not confirmed writing yet, in acceptance order.
+    ///
+    /// Both streams push here through one plan, so a chunk one reader already accepted survives the
+    /// other reader's failed append instead of being overwritten or appended past the fault. Bounded
+    /// by [`MAX_CAPTURE_BYTES`]: each entry already counted against the shared budget.
+    capture_pending: VecDeque<CaptureRepairChunk>,
+    /// Whether a capture write already failed, so no further chunk may be appended.
+    capture_write_failed: bool,
+    /// Whether the operation's single capture writer has drained the plan and stopped.
+    ///
+    /// The operation may only publish its terminal result once this is set: the writer still draining
+    /// the accepted plan is what turns "the process exited" into "every accepted byte is written or
+    /// owed as one repair", so a snapshot taken before it settles could report a success that has not
+    /// captured the bytes the observers already saw.
+    capture_drained: bool,
+    /// Exact reason a hard output capture failure terminated this operation, if any.
+    output_failure: Option<CommandCaptureFailure>,
 }
 
 pub struct CommandStartRequest {
@@ -147,6 +192,33 @@ pub struct CommandOutputSnapshot {
     pub message: String,
     pub output_revision: u64,
     pub output_artifacts: Vec<serde_json::Value>,
+    /// Typed reason the durable capture could not continue, when a hard output failure ended it.
+    ///
+    /// `None` for a normal exit; a producer maps the category to its own storage boundary without
+    /// parsing [`CommandOutputSnapshot::message`].
+    pub output_failure: Option<CommandCaptureFailure>,
+    /// Accepted capture chunks a failed capture did not store, in acceptance order.
+    ///
+    /// Derived from the operation's one capture plan when the snapshot is taken, so a retry replays
+    /// every accepted chunk (not only the ones the first failing append saw).
+    capture_plan: Option<CaptureRepair>,
+    /// Length of the capture fragment the backend last confirmed writing.
+    ///
+    /// The accepted bytes this operation really holds are this length plus every chunk still owed, so
+    /// a reported size never depends on a fragment-length read that could fail and understate it.
+    pub capture_committed_len: u64,
+}
+
+impl CommandOutputSnapshot {
+    /// The accepted bytes a failed capture append could not write, when the failure left a repair.
+    ///
+    /// A write failure that reached the capture file part-way keeps the offset the backend last
+    /// confirmed and every accepted chunk it did not store, so a producer re-materializes those bytes
+    /// before it archives anything. `None` means every accepted chunk is already on disk, so no repair
+    /// is owed.
+    pub fn capture_repair(&self) -> Option<&CaptureRepair> {
+        self.capture_plan.as_ref()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +233,13 @@ pub enum CommandOutputStream {
 /// 用于把后台进程输出投影到上层 timeline 或其他 live 观察通道。
 pub trait CommandOutputObserver: Send + Sync + 'static {
     fn output_chunk(&self, stream: CommandOutputStream, chunk: &[u8], revision: u64);
+    /// Reports a hard capture failure the moment the reader observes it.
+    ///
+    /// The reader calls this under the failing operation's own boundary, *before* the process tree
+    /// finishes terminating and draining, so an observer that holds the running call's channel can
+    /// latch the typed fault while the call is still in flight instead of only when `execute`
+    /// unwinds. The default is a no-op so a preview-only observer need not care.
+    fn output_failed(&self, _failure: &CommandCaptureFailure) {}
 }
 
 #[derive(Debug, Default)]
@@ -178,6 +257,15 @@ where
 {
     pub fn new(backend: Arc<B>) -> Self {
         Self::with_max_processes(backend, DEFAULT_MAX_PROCESSES)
+    }
+
+    /// The host backend this manager drives, shared so a repair can re-materialize accepted bytes.
+    ///
+    /// A caller that holds an accepted capture fragment a failed append could not write reaches the
+    /// same backend through this handle, so the repair writes through the one backend that owns the
+    /// capture path instead of a parallel copy.
+    pub fn backend(&self) -> Arc<B> {
+        self.backend.clone()
     }
 
     pub fn with_max_processes(backend: Arc<B>, max_processes: usize) -> Self {
@@ -248,7 +336,8 @@ where
             )
             .await
             .map_err(|error| tool_error("exec", error))?;
-        self.backend
+        let capture_committed_len = self
+            .backend
             .prepare_output(&output_target, &request.command, &working_directory)
             .await
             .map_err(|error| tool_error("exec", error))?;
@@ -293,13 +382,20 @@ where
         let stdout_open = stdout.is_some();
         let stderr_open = stderr.is_some();
         let stdin = child.take_stdin();
+        let output_failure = CancellationToken::new();
         let entry = Arc::new(CommandProcessEntry {
             process_id: process_id.clone(),
             output_target,
             stdin: Mutex::new(stdin),
-            state: Mutex::new(CommandProcessState::new(stdout_open, stderr_open)),
+            state: Mutex::new(CommandProcessState::new(
+                stdout_open,
+                stderr_open,
+                capture_committed_len,
+            )),
             notify: Notify::new(),
+            capture_wake: Notify::new(),
             output_observer: request.output_observer,
+            output_failure: output_failure.clone(),
         });
         {
             let mut state = self.state.lock().await;
@@ -314,14 +410,19 @@ where
                 timeout: request.timeout,
                 task_cancellation: request.cancellation_token,
                 manager_cancellation: self.lifetime.0.clone(),
+                output_failure,
             },
         );
 
+        // The single capture writer owns the shared fragment. It is spawned here, before the readers,
+        // so it is already waiting on `capture_wake` when the first chunk is accepted; a wake-up that
+        // races the spawn is still held as a permit, so no accepted chunk is lost.
+        tokio::spawn(run_capture_writer(entry.clone(), self.backend.clone()));
         if let Some(stdout) = stdout {
-            tokio::spawn(read_stdout(entry.clone(), stdout, self.backend.clone()));
+            tokio::spawn(read_stdout(entry.clone(), stdout));
         }
         if let Some(stderr) = stderr {
-            tokio::spawn(read_stderr(entry.clone(), stderr, self.backend.clone()));
+            tokio::spawn(read_stderr(entry.clone(), stderr));
         }
         Ok(entry)
     }
@@ -432,6 +533,20 @@ where
         self.state.lock().await.entries.get(process_id).cloned()
     }
 
+    /// Reads a live operation's current snapshot without consuming it.
+    ///
+    /// The producer path uses this the moment a capture failure is observed, so it can build the
+    /// typed storage fault — and its retriable obligation — from the operation's stable capture path
+    /// before the process tree has finished draining. `None` once the operation is no longer known.
+    pub async fn snapshot(
+        &self,
+        process_id: &str,
+        max_output_chars: usize,
+    ) -> Option<CommandOutputSnapshot> {
+        let entry = self.entry(process_id).await?;
+        self.snapshot_entry(&entry, max_output_chars).await.ok()
+    }
+
     async fn snapshot_after_wait(
         &self,
         process_id: &str,
@@ -505,6 +620,8 @@ impl CommandProcessEntry {
         };
         let stdout = truncate_text(&stdout, max_output_chars);
         let stderr = truncate_text(&stderr, max_output_chars);
+        let capture_plan = state.capture_repair();
+        let capture_committed_len = state.capture_committed_len;
         (
             CommandOutputSnapshot {
                 state: state.lifecycle.clone(),
@@ -516,6 +633,9 @@ impl CommandProcessEntry {
                 message,
                 output_revision: state.output_revision,
                 output_artifacts: Vec::new(),
+                output_failure: state.output_failure.clone(),
+                capture_plan,
+                capture_committed_len,
             },
             sizes,
         )

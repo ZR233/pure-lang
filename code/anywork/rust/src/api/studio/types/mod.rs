@@ -8,6 +8,7 @@ pub mod response;
 pub mod runtime;
 pub mod settings;
 pub mod ssh;
+pub mod thread_activity;
 pub mod thread_stream;
 pub mod updater;
 
@@ -21,5 +22,6 @@ pub use response::*;
 pub use runtime::*;
 pub use settings::*;
 pub use ssh::*;
+pub use thread_activity::*;
 pub use thread_stream::*;
 pub use updater::*;
