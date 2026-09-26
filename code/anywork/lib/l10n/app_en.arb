@@ -1,6 +1,5 @@
 {
   "promptAccepted": "Accepted",
-  "composerEscStopHint": "Esc to stop",
   "composerSendAndContinue": "Send and continue",
   "appTitle": "anywork",
   "sidebarProjects": "Projects",
@@ -275,6 +274,16 @@
   "composerWorkspaceModeLocal": "Local directory",
   "composerWorkspaceModeWorktree": "New worktree",
   "statusPlannerModel": "Main agent model",
+  "statusModelRouteUnavailable": "Current model unavailable; show reason",
+  "statusModelRouteUnavailableDetail": "Current model unavailable: {reason}",
+  "@statusModelRouteUnavailableDetail": {
+    "placeholders": {"reason": {"type": "String"}}
+  },
+  "statusModelRouteUnavailableFallback": "The current model route is unavailable. Check the provider and model settings.",
+  "statusModelSwitchWhileRunning": "This session is running or waiting for input, so the model cannot be changed yet. Stop the current run or wait for it to finish.",
+  "statusModelSwitchWhileWorkflowActive": "The current workflow is still active, so the model cannot be changed yet. Wait for the workflow to finish.",
+  "statusModelSwitchWhileInactive": "This session is closing, closed, or unavailable due to an error. Restore it before changing the model.",
+  "statusModelNoticeDismiss": "Dismiss model notice",
   "statusExecutorModel": "Executor model",
   "statusReasoningEffort": "Reasoning effort",
   "statusContextLabel": "Context",

@@ -13,9 +13,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get promptAccepted => 'Accepted';
 
   @override
-  String get composerEscStopHint => 'Esc to stop';
-
-  @override
   String get composerSendAndContinue => 'Send and continue';
 
   @override
@@ -545,6 +542,34 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusPlannerModel => 'Main agent model';
+
+  @override
+  String get statusModelRouteUnavailable =>
+      'Current model unavailable; show reason';
+
+  @override
+  String statusModelRouteUnavailableDetail(String reason) {
+    return 'Current model unavailable: $reason';
+  }
+
+  @override
+  String get statusModelRouteUnavailableFallback =>
+      'The current model route is unavailable. Check the provider and model settings.';
+
+  @override
+  String get statusModelSwitchWhileRunning =>
+      'This session is running or waiting for input, so the model cannot be changed yet. Stop the current run or wait for it to finish.';
+
+  @override
+  String get statusModelSwitchWhileWorkflowActive =>
+      'The current workflow is still active, so the model cannot be changed yet. Wait for the workflow to finish.';
+
+  @override
+  String get statusModelSwitchWhileInactive =>
+      'This session is closing, closed, or unavailable due to an error. Restore it before changing the model.';
+
+  @override
+  String get statusModelNoticeDismiss => 'Dismiss model notice';
 
   @override
   String get statusExecutorModel => 'Executor model';

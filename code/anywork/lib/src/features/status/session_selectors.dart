@@ -166,6 +166,9 @@ class ModelRoleSelector extends StatelessWidget {
     required this.effort,
     required this.onSelected,
     this.available = true,
+    this.unavailableReason,
+    this.blockedReason,
+    this.onExplain,
     super.key,
   });
 
@@ -175,66 +178,116 @@ class ModelRoleSelector extends StatelessWidget {
   final String? effort;
   final ModelRouteChanged onSelected;
   final bool available;
+  final String? unavailableReason;
+  final String? blockedReason;
+  final ValueChanged<String>? onExplain;
 
   @override
   Widget build(BuildContext context) {
     final options = modelOptions(providers);
-    if (options.isEmpty) {
-      return const SizedBox.shrink();
-    }
     final current = modelForRoute(providers, providerId, model);
     final selectedKey = current?.key;
-    return UpwardPopupMenu<String>(
-      key: StudioDriverKeys.model,
-      tooltip: context.l10n.statusPlannerModel,
-      initialValue: selectedKey,
-      onSelected: (key) {
-        final option = options.firstWhere((option) => option.key == key);
-        final nextEffort = option.reasoningEfforts.contains(effort)
-            ? effort
-            : option.reasoningEfforts.firstOrNull;
-        onSelected(option.providerId, option.model, nextEffort);
-      },
-      itemBuilder: (context) => [
-        for (final option in options)
-          PopupMenuItem(
-            key: StudioDriverKeys.modelOption(option.providerId, option.model),
-            value: option.key,
-            child: SizedBox(
-              width: 260,
-              child: Row(
-                children: [
-                  const Icon(Icons.smart_toy_outlined, size: 18),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(option.label, overflow: TextOverflow.ellipsis),
-                        if (option.inputModalities.isNotEmpty)
-                          Text(
-                            option.inputModalities
-                                .map(context.modalityLabel)
-                                .join(' · '),
-                            key: StudioDriverKeys.modelCapabilityTags(
-                              option.providerId,
-                              option.model,
-                            ),
-                            style: Theme.of(context).textTheme.labelSmall,
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
+    final warning = !available || current == null;
+    final selectionBlockedReason =
+        blockedReason ??
+        (options.isEmpty
+            ? context.l10n.statusModelRouteUnavailableFallback
+            : null);
+    void explain(String message) {
+      if (onExplain case final callback?) {
+        callback(message);
+      } else {
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(
+          SnackBar(content: Text(message), showCloseIcon: true),
+        );
+      }
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (warning)
+          SizedBox.square(
+            dimension: 32,
+            child: IconButton(
+              key: const ValueKey('model-route-warning'),
+              padding: EdgeInsets.zero,
+              tooltip: context.l10n.statusModelRouteUnavailable,
+              onPressed: () => explain(
+                unavailableReason?.isNotEmpty == true
+                    ? context.l10n.statusModelRouteUnavailableDetail(
+                        unavailableReason!,
+                      )
+                    : context.l10n.statusModelRouteUnavailableFallback,
+              ),
+              icon: Icon(
+                Icons.warning_amber_outlined,
+                size: 15,
+                color: Theme.of(context).colorScheme.error,
               ),
             ),
           ),
+        UpwardPopupMenu<String>(
+          key: StudioDriverKeys.model,
+          tooltip: selectionBlockedReason ?? context.l10n.statusPlannerModel,
+          initialValue: selectedKey,
+          enabled: selectionBlockedReason == null,
+          onBlockedTap: selectionBlockedReason == null
+              ? null
+              : () => explain(selectionBlockedReason),
+          onSelected: (key) {
+            final option = options.firstWhere((option) => option.key == key);
+            final nextEffort = option.reasoningEfforts.contains(effort)
+                ? effort
+                : option.reasoningEfforts.firstOrNull;
+            onSelected(option.providerId, option.model, nextEffort);
+          },
+          itemBuilder: (context) => [
+            for (final option in options)
+              PopupMenuItem(
+                key: StudioDriverKeys.modelOption(
+                  option.providerId,
+                  option.model,
+                ),
+                value: option.key,
+                child: SizedBox(
+                  width: 260,
+                  child: Row(
+                    children: [
+                      const Icon(Icons.smart_toy_outlined, size: 18),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(option.label, overflow: TextOverflow.ellipsis),
+                            if (option.inputModalities.isNotEmpty)
+                              Text(
+                                option.inputModalities
+                                    .map(context.modalityLabel)
+                                    .join(' · '),
+                                key: StudioDriverKeys.modelCapabilityTags(
+                                  option.providerId,
+                                  option.model,
+                                ),
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+          child: _ControlItem(
+            label: model,
+            enabled: selectionBlockedReason == null,
+          ),
+        ),
       ],
-      child: _ControlItem(
-        label: model,
-        enabled: true,
-        warning: !available || current == null,
-      ),
     );
   }
 }
@@ -247,6 +300,8 @@ class ReasoningEffortSelector extends StatelessWidget {
     required this.model,
     required this.effort,
     required this.onSelected,
+    this.blockedReason,
+    this.onExplain,
     super.key,
   });
 
@@ -255,6 +310,8 @@ class ReasoningEffortSelector extends StatelessWidget {
   final String model;
   final String? effort;
   final ModelRouteChanged onSelected;
+  final String? blockedReason;
+  final ValueChanged<String>? onExplain;
 
   @override
   Widget build(BuildContext context) {
@@ -266,8 +323,12 @@ class ReasoningEffortSelector extends StatelessWidget {
     final current = efforts.contains(effort) ? effort! : efforts.first;
     return UpwardPopupMenu<String>(
       key: StudioDriverKeys.reasoningEffort,
-      tooltip: context.l10n.statusReasoningEffort,
+      tooltip: blockedReason ?? context.l10n.statusReasoningEffort,
       initialValue: current,
+      enabled: blockedReason == null,
+      onBlockedTap: blockedReason == null
+          ? null
+          : () => onExplain?.call(blockedReason!),
       onSelected: (nextEffort) => onSelected(providerId, model, nextEffort),
       itemBuilder: (context) => [
         for (final effort in efforts)
@@ -283,35 +344,22 @@ class ReasoningEffortSelector extends StatelessWidget {
             ),
           ),
       ],
-      child: _ControlItem(label: current, enabled: true),
+      child: _ControlItem(label: current, enabled: blockedReason == null),
     );
   }
 }
 
 class _ControlItem extends StatelessWidget {
-  const _ControlItem({
-    required this.label,
-    required this.enabled,
-    this.warning = false,
-  });
+  const _ControlItem({required this.label, required this.enabled});
 
   final String label;
   final bool enabled;
-  final bool warning;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (warning) ...[
-          Icon(
-            Icons.warning_amber_outlined,
-            size: 15,
-            color: Theme.of(context).colorScheme.error,
-          ),
-          const SizedBox(width: 4),
-        ],
         StudioMenuLabel(label: label, enabled: enabled, maxWidth: 140),
       ],
     );

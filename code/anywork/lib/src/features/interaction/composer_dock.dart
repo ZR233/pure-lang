@@ -205,7 +205,7 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
   }
 }
 
-class _PromptComposer extends ConsumerWidget {
+class _PromptComposer extends ConsumerStatefulWidget {
   const _PromptComposer({
     required this.workspace,
     required this.enabled,
@@ -217,78 +217,161 @@ class _PromptComposer extends ConsumerWidget {
   final bool compact;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_PromptComposer> createState() => _PromptComposerState();
+}
+
+class _PromptComposerState extends ConsumerState<_PromptComposer> {
+  String? _modelNotice;
+
+  @override
+  void didUpdateWidget(covariant _PromptComposer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.workspace.threadId != widget.workspace.threadId ||
+        oldWidget.workspace.thread.status != widget.workspace.thread.status ||
+        oldWidget.workspace.runtime.hasActiveWorkflow !=
+            widget.workspace.runtime.hasActiveWorkflow ||
+        oldWidget.workspace.runtime.modelRoute !=
+            widget.workspace.runtime.modelRoute) {
+      _modelNotice = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final workspace = widget.workspace;
     final controller = ref.read(studioControllerProvider.notifier);
     final route = workspace.runtime.modelRoute;
     final model = route == null
         ? null
         : modelForRoute(workspace.providers, route.providerId, route.model);
-    return _PromptComposerPanel(
-      composer: workspace.composer,
-      permissionMode: workspace.permissionMode,
-      enabled: enabled,
-      isBusy: workspace.isBusy,
-      compact: compact,
-      clipboard: ref.read(clipboardImageReaderProvider),
-      selectorBar: workspace.thread.isRoot
-          ? Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 2,
-              runSpacing: 4,
-              children: [
-                SessionModeSelector(
-                  mode: workspace.thread.mode,
-                  enabled:
-                      !workspace.runtime.hasActiveWorkflow &&
-                      workspace.thread.status == ThreadStatusView.idle &&
-                      workspace.activeInteraction == null,
-                  onSelected: controller.setThreadMode,
-                ),
-                if (route != null) ...[
-                  ModelRoleSelector(
-                    providers: workspace.providers,
-                    providerId: route.providerId,
-                    model: route.model,
-                    effort: route.effort,
-                    available: route.available,
-                    onSelected: (providerId, model, effort) =>
-                        controller.setThreadModelRoute(
-                          providerId: providerId,
-                          model: model,
-                          effort: effort,
-                        ),
+    final blockedReason = switch (workspace.thread.status) {
+      ThreadStatusView.idle =>
+        workspace.runtime.hasActiveWorkflow
+            ? context.l10n.statusModelSwitchWhileWorkflowActive
+            : null,
+      ThreadStatusView.closing ||
+      ThreadStatusView.closed ||
+      ThreadStatusView.faulted => context.l10n.statusModelSwitchWhileInactive,
+      _ => context.l10n.statusModelSwitchWhileRunning,
+    };
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_modelNotice case final message?)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: StudioPanel(
+              backgroundColor: context.colors.surfaceContainer,
+              borderColor: context.colors.outlineVariant,
+              radius: StudioRadii.lg,
+              padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 18,
+                    color: context.colors.onSurfaceVariant,
                   ),
-                  ReasoningEffortSelector(
-                    providers: workspace.providers,
-                    providerId: route.providerId,
-                    model: route.model,
-                    effort: route.effort,
-                    onSelected: (providerId, model, effort) =>
-                        controller.setThreadModelRoute(
-                          providerId: providerId,
-                          model: model,
-                          effort: effort,
-                        ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 80),
+                      child: SingleChildScrollView(child: Text(message)),
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('model-notice-dismiss'),
+                    tooltip: context.l10n.statusModelNoticeDismiss,
+                    onPressed: () => setState(() => _modelNotice = null),
+                    icon: const Icon(Icons.close, size: 18),
                   ),
                 ],
-              ],
-            )
-          : null,
-      onChanged: (value) =>
-          controller.updateComposer(workspace.threadId, value),
-      onSubmit: () => unawaited(controller.submitComposer(workspace.threadId)),
-      onStop: () => unawaited(controller.stop(workspace.threadId)),
-      inputCapabilities: model?.inputCapabilities ?? const [],
-      onPasteImage: (bytes) =>
-          controller.addClipboardImage(bytes, threadId: workspace.threadId),
-      onReportFailure: (error) =>
-          controller.reportComposerFailure(error, threadId: workspace.threadId),
-      onAddLocal: (paths) =>
-          controller.addLocalAttachments(paths, threadId: workspace.threadId),
-      onAddUrl: (url) =>
-          controller.addRemoteAttachment(url, threadId: workspace.threadId),
-      onRemoveAttachment: (id) =>
-          controller.removeAttachmentDraft(id, threadId: workspace.threadId),
+              ),
+            ),
+          ),
+        _PromptComposerPanel(
+          composer: workspace.composer,
+          permissionMode: workspace.permissionMode,
+          enabled: widget.enabled,
+          isBusy: workspace.isBusy,
+          compact: widget.compact,
+          clipboard: ref.read(clipboardImageReaderProvider),
+          selectorBar: workspace.thread.isRoot
+              ? Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 2,
+                  runSpacing: 4,
+                  children: [
+                    SessionModeSelector(
+                      mode: workspace.thread.mode,
+                      enabled:
+                          !workspace.runtime.hasActiveWorkflow &&
+                          workspace.thread.status == ThreadStatusView.idle &&
+                          workspace.activeInteraction == null,
+                      onSelected: controller.setThreadMode,
+                    ),
+                    if (route != null) ...[
+                      ModelRoleSelector(
+                        providers: workspace.providers,
+                        providerId: route.providerId,
+                        model: route.model,
+                        effort: route.effort,
+                        available: route.available,
+                        unavailableReason: route.unavailableReason,
+                        blockedReason: blockedReason,
+                        onExplain: (message) =>
+                            setState(() => _modelNotice = message),
+                        onSelected: (providerId, model, effort) =>
+                            controller.setThreadModelRoute(
+                              providerId: providerId,
+                              model: model,
+                              effort: effort,
+                            ),
+                      ),
+                      ReasoningEffortSelector(
+                        providers: workspace.providers,
+                        providerId: route.providerId,
+                        model: route.model,
+                        effort: route.effort,
+                        blockedReason: blockedReason,
+                        onExplain: (message) =>
+                            setState(() => _modelNotice = message),
+                        onSelected: (providerId, model, effort) =>
+                            controller.setThreadModelRoute(
+                              providerId: providerId,
+                              model: model,
+                              effort: effort,
+                            ),
+                      ),
+                    ],
+                  ],
+                )
+              : null,
+          onChanged: (value) =>
+              controller.updateComposer(workspace.threadId, value),
+          onSubmit: () =>
+              unawaited(controller.submitComposer(workspace.threadId)),
+          onStop: () => unawaited(controller.stop(workspace.threadId)),
+          inputCapabilities: model?.inputCapabilities ?? const [],
+          onPasteImage: (bytes) =>
+              controller.addClipboardImage(bytes, threadId: workspace.threadId),
+          onReportFailure: (error) => controller.reportComposerFailure(
+            error,
+            threadId: workspace.threadId,
+          ),
+          onAddLocal: (paths) => controller.addLocalAttachments(
+            paths,
+            threadId: workspace.threadId,
+          ),
+          onAddUrl: (url) =>
+              controller.addRemoteAttachment(url, threadId: workspace.threadId),
+          onRemoveAttachment: (id) => controller.removeAttachmentDraft(
+            id,
+            threadId: workspace.threadId,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -529,14 +612,6 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
               },
             ),
           ),
-          if (widget.isBusy)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                context.l10n.composerEscStopHint,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
           if (composer.error case final error?)
             Align(
               alignment: Alignment.centerLeft,

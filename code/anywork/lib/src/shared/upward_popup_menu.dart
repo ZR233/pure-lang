@@ -10,6 +10,7 @@ class UpwardPopupMenu<T> extends StatelessWidget {
     this.initialValue,
     this.onSelected,
     this.enabled = true,
+    this.onBlockedTap,
     this.gap = 8,
     this.constraints,
     super.key,
@@ -21,6 +22,7 @@ class UpwardPopupMenu<T> extends StatelessWidget {
   final T? initialValue;
   final PopupMenuItemSelected<T>? onSelected;
   final bool enabled;
+  final VoidCallback? onBlockedTap;
   final double gap;
   final BoxConstraints? constraints;
 
@@ -30,13 +32,13 @@ class UpwardPopupMenu<T> extends StatelessWidget {
       message: tooltip,
       child: Semantics(
         button: true,
-        enabled: enabled,
+        enabled: enabled || onBlockedTap != null,
         label: tooltip,
         child: Material(
           color: Colors.transparent,
           child: InkWell(
             borderRadius: BorderRadius.circular(6),
-            onTap: enabled ? () => _showMenu(context) : null,
+            onTap: enabled ? () => _showMenu(context) : onBlockedTap,
             child: ExcludeFocus(child: child),
           ),
         ),

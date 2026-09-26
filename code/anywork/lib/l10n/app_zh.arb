@@ -1,6 +1,5 @@
 {
   "promptAccepted": "已受理",
-  "composerEscStopHint": "Esc 停止",
   "composerSendAndContinue": "发送并继续",
   "appTitle": "糊来帮",
   "sidebarProjects": "项目",
@@ -199,6 +198,16 @@
   "composerWorkspaceModeLocal": "本地目录",
   "composerWorkspaceModeWorktree": "新建工作树",
   "statusPlannerModel": "主智能体模型",
+  "statusModelRouteUnavailable": "当前模型不可用，查看原因",
+  "statusModelRouteUnavailableDetail": "当前模型不可用：{reason}",
+  "@statusModelRouteUnavailableDetail": {
+    "placeholders": {"reason": {"type": "String"}}
+  },
+  "statusModelRouteUnavailableFallback": "当前模型路由不可用，请检查供应商和模型设置。",
+  "statusModelSwitchWhileRunning": "会话正在执行或等待处理，暂时无法切换模型。请停止当前执行或等待完成后重试。",
+  "statusModelSwitchWhileWorkflowActive": "当前工作流尚未结束，暂时无法切换模型。请等工作流结束后重试。",
+  "statusModelSwitchWhileInactive": "会话正在关闭、已关闭或出现故障，无法切换模型。请恢复会话后重试。",
+  "statusModelNoticeDismiss": "关闭模型提示",
   "statusExecutorModel": "执行者模型",
   "statusReasoningEffort": "思考强度",
   "statusContextLabel": "上下文",

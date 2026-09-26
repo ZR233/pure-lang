@@ -13,9 +13,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get promptAccepted => '已受理';
 
   @override
-  String get composerEscStopHint => 'Esc 停止';
-
-  @override
   String get composerSendAndContinue => '发送并继续';
 
   @override
@@ -522,6 +519,32 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusPlannerModel => '主智能体模型';
+
+  @override
+  String get statusModelRouteUnavailable => '当前模型不可用，查看原因';
+
+  @override
+  String statusModelRouteUnavailableDetail(String reason) {
+    return '当前模型不可用：$reason';
+  }
+
+  @override
+  String get statusModelRouteUnavailableFallback => '当前模型路由不可用，请检查供应商和模型设置。';
+
+  @override
+  String get statusModelSwitchWhileRunning =>
+      '会话正在执行或等待处理，暂时无法切换模型。请停止当前执行或等待完成后重试。';
+
+  @override
+  String get statusModelSwitchWhileWorkflowActive =>
+      '当前工作流尚未结束，暂时无法切换模型。请等工作流结束后重试。';
+
+  @override
+  String get statusModelSwitchWhileInactive =>
+      '会话正在关闭、已关闭或出现故障，无法切换模型。请恢复会话后重试。';
+
+  @override
+  String get statusModelNoticeDismiss => '关闭模型提示';
 
   @override
   String get statusExecutorModel => '执行者模型';

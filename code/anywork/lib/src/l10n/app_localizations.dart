@@ -104,12 +104,6 @@ abstract class AppLocalizations {
   /// **'Accepted'**
   String get promptAccepted;
 
-  /// No description provided for @composerEscStopHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Esc to stop'**
-  String get composerEscStopHint;
-
   /// No description provided for @composerSendAndContinue.
   ///
   /// In en, this message translates to:
@@ -1051,6 +1045,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Main agent model'**
   String get statusPlannerModel;
+
+  /// No description provided for @statusModelRouteUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Current model unavailable; show reason'**
+  String get statusModelRouteUnavailable;
+
+  /// No description provided for @statusModelRouteUnavailableDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'Current model unavailable: {reason}'**
+  String statusModelRouteUnavailableDetail(String reason);
+
+  /// No description provided for @statusModelRouteUnavailableFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'The current model route is unavailable. Check the provider and model settings.'**
+  String get statusModelRouteUnavailableFallback;
+
+  /// No description provided for @statusModelSwitchWhileRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'This session is running or waiting for input, so the model cannot be changed yet. Stop the current run or wait for it to finish.'**
+  String get statusModelSwitchWhileRunning;
+
+  /// No description provided for @statusModelSwitchWhileWorkflowActive.
+  ///
+  /// In en, this message translates to:
+  /// **'The current workflow is still active, so the model cannot be changed yet. Wait for the workflow to finish.'**
+  String get statusModelSwitchWhileWorkflowActive;
+
+  /// No description provided for @statusModelSwitchWhileInactive.
+  ///
+  /// In en, this message translates to:
+  /// **'This session is closing, closed, or unavailable due to an error. Restore it before changing the model.'**
+  String get statusModelSwitchWhileInactive;
+
+  /// No description provided for @statusModelNoticeDismiss.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss model notice'**
+  String get statusModelNoticeDismiss;
 
   /// No description provided for @statusExecutorModel.
   ///
