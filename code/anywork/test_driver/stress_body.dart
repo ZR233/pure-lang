@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter_driver/flutter_driver.dart';
 
 import 'flutter_driver_session.dart';
+import 'scrolling_journey.dart';
+import 'timeline_scroll.dart' as streaming_scroll;
 // The multi-item stress journey already owns the session-switch flow helpers.
 import 'stress_sessions.dart' show selectedThread, settled, waitForSnapshot;
 
@@ -144,7 +146,15 @@ Future<void> main(List<String> args) async {
     // observation, not a post-terminal one, and it never taps a load-full
     // affordance.
     if (largeBody) {
-      final growing = await _sampleStreamingLargeBody(driver, output);
+      // Observe growth while the interaction companion runs, so its screenshot
+      // cannot consume the remaining stream before growth sampling starts.
+      final observations = await Future.wait<Object?>([
+        streaming_scroll
+            .main([args[0], '${output.path}/streaming-scroll'])
+            .then<Object?>((_) => null),
+        _sampleStreamingLargeBody(driver, output),
+      ]);
+      final growing = observations[1]! as Map<String, Object?>;
       report['streamingGrowth'] = growing;
       checks['largeBodyGrowingFullFollow'] =
           growing['windowPassed'] == true &&
@@ -296,6 +306,11 @@ Future<void> main(List<String> args) async {
     );
     report['selectionCopy'] = selectionCopy;
     checks['crossBlockSelectionCopy'] = selectionCopy['pass'] == true;
+
+    await markStage('wheel_and_scrollbar');
+    final scrolling = await observeTimelineScrolling(args[0], output);
+    report['scrolling'] = scrolling;
+    checks['wheelAndScrollbar'] = scrolling['pass'] == true;
 
     // Read into the interior of the long assistant body, then create a second
     // session and switch back to re-check the reading anchor. The session-switch
@@ -719,7 +734,8 @@ Future<Map<String, Object?>> _sampleStreamingLargeBody(
       continue;
     }
     final bytes = utf8.encode(text).length;
-    if (bytes > _nativeBodyWindowBytes) {
+    final scroll = _timelineScroll(snapshot);
+    if (bytes > _nativeBodyWindowBytes && scroll?['followingBottom'] == true) {
       windowPassed = true;
       final prefixOk = text.startsWith('body-00000 ');
       final sameIdentity = previousId == id;
@@ -735,6 +751,8 @@ Future<Map<String, Object?>> _sampleStreamingLargeBody(
         'prefixOk': prefixOk,
         'grewOverPrevious': grew,
         'terminal': terminal,
+        'followingBottom': scroll?['followingBottom'],
+        'extentAfter': scroll?['extentAfter'],
       });
       previousId = id;
       previousBytes = bytes;

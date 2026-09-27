@@ -8,6 +8,7 @@ import 'package:flutter_driver/flutter_driver.dart';
 
 import 'pointer_scroll.dart';
 import 'raw_tap.dart';
+import 'scrollbar_drag.dart';
 
 Future<void> main(List<String> args) async {
   if (args.length != 2) {
@@ -105,6 +106,16 @@ Future<void> main(List<String> args) async {
       'output prevented the second drag',
     );
     await checkGrowth(state, 'outputAfterSecondDrag');
+    observations['streamingThumbDrag'] = await driver.sendCommand(
+      ScrollbarDrag(timeline, -60),
+    );
+    state = await snapshot();
+    record('thumbWhileStreaming', state);
+    _require(
+      _scroll(state)['followingBottom'] == false,
+      'thumb drag did not detach',
+    );
+    await checkGrowth(state, 'outputAfterThumbDrag');
     await driver.sendCommand(RawTap(find.byValueKey('timeline-jump-latest')));
     state = await waitFor(
       'explicit jump to latest',

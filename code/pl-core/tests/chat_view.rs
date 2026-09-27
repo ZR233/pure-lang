@@ -422,6 +422,39 @@ async fn complete_body_is_read_from_durable_history_once() {
     assert_eq!(body_text(&view.snapshot().items[0]), full);
 }
 
+#[tokio::test]
+async fn focusing_a_visible_saved_reply_preserves_its_delivered_body() {
+    let history = Mutable::default();
+    let session = Session::new(history.clone());
+    let full = "visible reply ".repeat(30_000);
+    let reply = item(1, 1, &full, true);
+    session.publish(reply.clone()).unwrap();
+    let view = session.open_chat(ChatFocus::Latest).await.unwrap();
+    // Live delivery already supplied the full body: no read_complete request
+    // was needed. Saving must not make the first upward scroll reload a preview.
+    history.set(durable(reply));
+    session.confirm_saved("item-1", 1);
+    let before = view.snapshot();
+    assert_eq!(body_text(&before.items[0]), full);
+    assert!(before.items[0].is_saved());
+    let (initial, mut updates) = view.subscribe();
+    let mut client = Client::new(&initial);
+
+    view.focus(ChatFocus::Around("item-1".into()))
+        .await
+        .unwrap();
+    apply_next(&mut client, &mut updates, &view).await;
+    let after = view.snapshot();
+    assert_eq!(after.focus, ChatFocus::Around("item-1".into()));
+    assert_eq!(after.items, before.items);
+    assert_eq!((after.has_older, after.has_newer), (false, false));
+
+    session.publish(item(2, 1, "new reply", false)).unwrap();
+    let reading = view.snapshot();
+    assert_eq!(reading.items, before.items);
+    assert!(reading.has_newer);
+}
+
 /// A view that requested a large in-flight body keeps following it across later revisions.
 ///
 /// A durable but still-streaming body larger than the preview bound is shown as a bounded preview

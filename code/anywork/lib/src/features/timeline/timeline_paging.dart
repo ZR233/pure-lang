@@ -2,59 +2,63 @@ part of 'timeline_view.dart';
 
 extension on _TimelineViewState {
   Widget _itemSliver(List<TimelineRow> rows, {required bool isCenter}) {
+    // ChatView already owns a bounded window. Use its actual row heights for
+    // the thumb's mapping instead of a second layer of lazy height estimates.
+    // Unchanged box children reuse their layout; only visible slivers paint.
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
-      sliver: SliverList(
+      sliver: SliverMainAxisGroup(
         key: ValueKey((isCenter, _centerId)),
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            final row = rows[index];
-            final reasoningExpanded = _expandedReasoningGroups.contains(
-              row.reasoningGroup?.id,
-            );
-            final toolExpanded = _expandedToolGroups.contains(
-              row.toolGroup?.id,
-            );
-            final version = row.renderVersion;
-            final bodyStates = _itemBodyStates(row);
-            final bodyState = _itemBodyCacheKey(bodyStates);
-            final cached = _rowWidgets[row.id];
-            if (cached == null ||
-                cached.version != version ||
-                cached.expanded != reasoningExpanded ||
-                cached.toolExpanded != toolExpanded ||
-                cached.body != bodyState) {
-              _rowWidgets[row.id] = (
-                version: version,
-                expanded: reasoningExpanded,
-                toolExpanded: toolExpanded,
-                body: bodyState,
-                child: _TimelineRowBlock(
-                  key: ValueKey(row.id),
-                  row: row,
-                  isReasoningExpanded: reasoningExpanded,
-                  onToggleReasoning: _toggleReasoning,
-                  isToolGroupExpanded: toolExpanded,
-                  onToggleToolGroup: _toggleToolGroup,
-                  body: bodyStates,
-                ),
-              );
-            }
-            return KeyedSubtree(
-              key: StudioDriverKeys.timelineBlock(row.id),
-              child: SizedBox(
-                key: _rowKeys.putIfAbsent(row.id, GlobalKey.new),
-                child: _rowWidgets[row.id]!.child,
+        slivers: [
+          for (var index = 0; index < rows.length; index++)
+            SliverToBoxAdapter(
+              key: ValueKey(rows[index].id),
+              child: IndexedSemantics(
+                index: index,
+                child: _buildRow(rows[index]),
               ),
-            );
-          },
-          childCount: rows.length,
-          findChildIndexCallback: (key) {
-            final index = rows.indexWhere(
-              (row) => StudioDriverKeys.timelineBlock(row.id) == key,
-            );
-            return index < 0 ? null : index;
-          },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRow(TimelineRow row) {
+    final reasoningExpanded = _expandedReasoningGroups.contains(
+      row.reasoningGroup?.id,
+    );
+    final toolExpanded = _expandedToolGroups.contains(row.toolGroup?.id);
+    final version = row.renderVersion;
+    final bodyStates = _itemBodyStates(row);
+    final bodyState = _itemBodyCacheKey(bodyStates);
+    final cached = _rowWidgets[row.id];
+    if (cached == null ||
+        cached.version != version ||
+        cached.expanded != reasoningExpanded ||
+        cached.toolExpanded != toolExpanded ||
+        cached.body != bodyState) {
+      _rowWidgets[row.id] = (
+        version: version,
+        expanded: reasoningExpanded,
+        toolExpanded: toolExpanded,
+        body: bodyState,
+        child: _TimelineRowBlock(
+          key: ValueKey(row.id),
+          row: row,
+          isReasoningExpanded: reasoningExpanded,
+          onToggleReasoning: _toggleReasoning,
+          isToolGroupExpanded: toolExpanded,
+          onToggleToolGroup: _toggleToolGroup,
+          body: bodyStates,
+        ),
+      );
+    }
+    return KeyedSubtree(
+      key: StudioDriverKeys.timelineBlock(row.id),
+      child: RepaintBoundary(
+        child: SizedBox(
+          key: _rowKeys.putIfAbsent(row.id, GlobalKey.new),
+          child: _rowWidgets[row.id]!.child,
         ),
       ),
     );
@@ -168,8 +172,8 @@ extension on _TimelineViewState {
     );
   }
 
-  String? _anchorRowId(String itemId) {
-    for (final row in widget.rows) {
+  String? _anchorRowId(String itemId, {List<TimelineRow>? rows}) {
+    for (final row in rows ?? widget.rows) {
       if (row.id == itemId ||
           row.part?.id == itemId ||
           row.toolGroup?.items.any((item) => item.id == itemId) == true ||
@@ -178,6 +182,39 @@ extension on _TimelineViewState {
       }
     }
     return null;
+  }
+
+  // A stable center already preserves the anchor when content grows below it.
+  // Only changes between the list origin/center and the visible anchor require
+  // a coordinate rebase. Recentring on every token or wheel tick destroys the
+  // slivers' layout history and changes the scrollbar's mapping under the mouse.
+  bool _needsAnchorRebase(TimelineAnchor anchor, List<TimelineRow> oldRows) {
+    final oldAnchor = _anchorRowId(anchor.itemId, rows: oldRows);
+    final newAnchor = _anchorRowId(anchor.itemId);
+    if (oldAnchor != newAnchor) return true;
+    final oldCenter = _centerId == null
+        ? 0
+        : oldRows.indexWhere((row) => row.id == _centerId);
+    final newCenter = _centerId == null
+        ? 0
+        : widget.rows.indexWhere((row) => row.id == _centerId);
+    if (oldCenter < 0 || newCenter < 0) return true;
+    final oldEnd = math.max(
+      oldCenter,
+      oldRows.indexWhere((row) => row.id == oldAnchor),
+    );
+    final newEnd = math.max(
+      newCenter,
+      widget.rows.indexWhere((row) => row.id == newAnchor),
+    );
+    if (oldEnd != newEnd) return true;
+    for (var index = 0; index < oldEnd; index++) {
+      if (oldRows[index].id != widget.rows[index].id ||
+          oldRows[index].renderVersion != widget.rows[index].renderVersion) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// 记录“最靠上的可见行”的锚点。
@@ -215,7 +252,10 @@ extension on _TimelineViewState {
     _prefetchScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prefetchScheduled = false;
-      if (!mounted || widget.isLoadingOlder || widget.isLoadingNewer) {
+      if (!mounted ||
+          _pointerHeld ||
+          widget.isLoadingOlder ||
+          widget.isLoadingNewer) {
         return;
       }
       final position = _controller.hasClients ? _controller.position : null;

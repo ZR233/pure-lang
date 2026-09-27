@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'raw_tap_extension.dart';
 import 'pointer_scroll_extension.dart';
+import 'scrollbar_drag_extension.dart';
 import 'key_press_extension.dart';
 
 /// Native-only Driver entrypoint. Product and release builds use lib/main.dart.
@@ -26,6 +27,7 @@ void main() {
     commands: <CommandExtension>[
       RawTapCommandExtension(),
       PointerScrollCommandExtension(),
+      ScrollbarDragCommandExtension(),
       KeyPressCommandExtension(),
     ],
   );
@@ -230,12 +232,12 @@ void _visitElements(Element element, void Function(Element) visit) {
   element.visitChildren((Element child) => _visitElements(child, visit));
 }
 
-/// Every production body chunk `Text` currently in the element tree, in paint
-/// order.
+/// Chunks of the longest mounted plain-text body, in paint order. Scope the
+/// observation to one body: the timeline can also mount the user's prompt.
 List<Element> _longBodyTextElements() {
   final root = WidgetsBinding.instance.rootElement;
   if (root == null) return const <Element>[];
-  final result = <Element>[];
+  final bodies = <Element, List<Element>>{};
   _visitElements(root, (Element element) {
     final widget = element.widget;
     if (widget is! Text) return;
@@ -244,10 +246,29 @@ List<Element> _longBodyTextElements() {
     final value = key.value;
     if (value.startsWith(_plainChunkKeyPrefix) ||
         value.startsWith(_plainOpenKeyPrefix)) {
-      result.add(element);
+      element.visitAncestorElements((ancestor) {
+        final key = ancestor.widget.key;
+        if (key is ValueKey<String> && key.value.startsWith('plain-')) {
+          bodies.putIfAbsent(ancestor, () => <Element>[]).add(element);
+          return false;
+        }
+        return true;
+      });
     }
   });
-  return result;
+  var longest = const <Element>[];
+  var longestLength = 0;
+  for (final chunks in bodies.values) {
+    final length = chunks.fold<int>(0, (length, element) {
+      final text = element.widget as Text;
+      return length + (text.data ?? text.textSpan?.toPlainText() ?? '').length;
+    });
+    if (length > longestLength) {
+      longest = chunks;
+      longestLength = length;
+    }
+  }
+  return longest;
 }
 
 /// The `RenderParagraph` a chunk `Text` actually painted into.

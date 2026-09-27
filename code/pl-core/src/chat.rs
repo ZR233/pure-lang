@@ -1693,6 +1693,8 @@ impl ChatView {
         }
     }
 
+    /// Changes reading intent. Focusing an item already in this window preserves
+    /// its delivered bodies and page boundaries; only an absent anchor needs IO.
     pub async fn focus(&self, focus: ChatFocus) -> Result<(), ChatError> {
         let generation = {
             let mut window = self
@@ -1700,6 +1702,15 @@ impl ChatView {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
             window.generation = window.generation.wrapping_add(1);
+            if matches!(&focus, ChatFocus::Around(id) if window.items.iter().any(|item| &item.item_id == id))
+            {
+                window.focus = focus;
+                // Notify outside the window lock: Session uses timeline -> window
+                // ordering. The generation also invalidates older in-flight loads.
+                drop(window);
+                self.session.notify();
+                return Ok(());
+            }
             window.generation
         };
         let (query, anchor) = match &focus {
