@@ -463,7 +463,7 @@ class _CapabilityCard extends StatelessWidget {
   }
 
   IconData _modalityIcon(ModelModalityView modality) => switch (modality) {
-    ModelModalityView.text => Icons.text_fields,
+    ModelModalityView.text => Icons.article_outlined,
     ModelModalityView.image => Icons.image_outlined,
     ModelModalityView.audio => Icons.graphic_eq,
     ModelModalityView.video => Icons.movie_outlined,
