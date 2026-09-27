@@ -108,3 +108,112 @@ async fn recovery_marks_a_pending_tool_interrupted_without_reexecuting_it() {
     original.close().await.unwrap();
     restored.close().await.unwrap();
 }
+
+#[derive(Debug)]
+struct HeldTask(tokio_util::sync::CancellationToken);
+
+impl pl_core::tool::opaque::Tool for HeldTask {
+    async fn execute(
+        &self,
+        _: pl_core::context::OpaquePayload,
+        context: pl_core::tool::opaque::CallContext,
+    ) -> Result<pl_core::tool::ToolOutput, pl_core::tool::opaque::ToolError> {
+        tokio::select! {
+            _ = self.0.cancelled() => {},
+            _ = context.cancellation.cancelled() => {},
+        }
+        Ok(pl_core::tool::ToolOutput::new(
+            pl_core::context::OpaquePayload::text("finished"),
+            vec![text("finished")],
+        ))
+    }
+}
+
+#[tokio::test]
+async fn background_result_identity_survives_consumed_history_pruning_and_recovery() {
+    use pl_core::context::OpaquePayload;
+    use pl_core::thread::{ToolDeliveryTarget, ToolDispatch, inbox::ThreadMessage};
+    use pl_core::tool::opaque::Registration;
+
+    let (model, _) = ScriptedModel::new(&["held"]);
+    let thread =
+        ThreadHandle::start("background-identities".into(), DynModelSession::new(model)).unwrap();
+    // Legacy result IDs remain in durable history even after their resident ledger is pruned.
+    let old_ids: std::collections::BTreeSet<_> = (0..65)
+        .map(|index| format!("task-result:{index}"))
+        .collect();
+    for id in &old_ids {
+        thread
+            .send_message(ThreadMessage {
+                id: id.clone(),
+                source_id: "earlier-task".into(),
+                payload: OpaquePayload::text("earlier result"),
+                context: vec![text("earlier result")],
+            })
+            .await
+            .unwrap();
+    }
+    let release = CancellationToken::new();
+    thread
+        .register_tools(vec![
+            Registration::new(
+                "held".into(),
+                OpaquePayload::text("held task"),
+                HeldTask(release.clone()),
+            )
+            .unwrap(),
+        ])
+        .await
+        .unwrap();
+    thread
+        .step(StepInput {
+            turn_id: "background-turn".into(),
+            attempt_id: "background-attempt".into(),
+            content: vec![text("run task")],
+            cancellation: CancellationToken::new(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(thread.snapshot().consumed_message_identities.len(), 64);
+    let ToolDispatch::Running(task) = thread
+        .execute_tool("background-turn-held".into(), CancellationToken::new())
+        .await
+        .unwrap()
+    else {
+        panic!("held task must remain running")
+    };
+    let checkpoint = thread
+        .checkpoint(thread.snapshot().commit_sequence)
+        .unwrap();
+
+    release.cancel();
+    let delivery = thread
+        .wait_task(&task.id, CancellationToken::new())
+        .await
+        .unwrap();
+    let ToolDeliveryTarget::Inbox { message_id } = delivery.target else {
+        panic!("background result must be delivered through inbox")
+    };
+    assert!(
+        !old_ids.contains(&message_id),
+        "reused durable identity: {message_id}"
+    );
+    let live_message = thread.snapshot().inbox.last().unwrap().clone();
+    assert_eq!(live_message.sequence, 66);
+    assert_eq!(live_message.message.id, message_id);
+    thread.close().await.unwrap();
+
+    let restored =
+        ThreadHandle::resume_without_model("background-identities".into(), Some(checkpoint))
+            .unwrap();
+    let recovered_message = restored.snapshot().inbox.last().unwrap().clone();
+    assert!(!old_ids.contains(&recovered_message.message.id));
+    assert_eq!(recovered_message.sequence, 66);
+    assert_eq!(recovered_message.message.id, message_id);
+    assert!(restored.effects().await.unwrap().iter().any(|batch| {
+        batch.deliveries.iter().any(|delivery| {
+            delivery.call_id == task.call_id && matches!(delivery.outcome, ToolOutcome::Interrupted)
+        })
+    }));
+    restored.close().await.unwrap();
+}

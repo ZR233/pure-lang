@@ -96,22 +96,10 @@ pub(super) fn append_result_message(
     output: &crate::tool::ToolOutput,
     context: Vec<ContextContent>,
 ) -> Result<String, ThreadError> {
-    // A consumed message left the resident queue but keeps its identity in the bounded ledger, so the
-    // uniqueness check has to span both: reusing an already-delivered id would make the durable
-    // message timeline reject the batch instead of appending the task result.
-    let id = unique_id(
-        "task-result",
-        state
-            .inbox
-            .iter()
-            .map(|record| record.message.id.as_str())
-            .chain(
-                state
-                    .consumed_message_identities
-                    .iter()
-                    .map(|identity| identity.id.as_str()),
-            ),
-    )?;
+    // The bounded identity ledger is not an allocator: old IDs remain durable after pruning.
+    // This owner performs identity selection and admission synchronously, so both use the same
+    // checkpointed sequence. Legacy gap-based IDs are smaller than their admission sequence.
+    let id = format!("task-result:{}", inbox::next_sequence(state)?);
     let message = inbox::ThreadMessage {
         id: id.clone(),
         source_id: task.id.clone(),

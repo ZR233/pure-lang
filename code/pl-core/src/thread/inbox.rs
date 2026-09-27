@@ -77,7 +77,7 @@ impl MessageIdentity {
 /// one survives consumption pruning, so a message admitted after every earlier message was consumed
 /// continues the sequence instead of restarting it. A legacy checkpoint that predates the durable
 /// watermark still gets a safe answer because the resident tail and the watermark are considered too.
-fn next_sequence(state: &ThreadSnapshot) -> Result<u64, ThreadError> {
+pub(super) fn next_sequence(state: &ThreadSnapshot) -> Result<u64, ThreadError> {
     state
         .inbox
         .last()
