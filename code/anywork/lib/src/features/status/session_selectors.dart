@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/model_route_selector.dart';
 import '../../shared/studio_driver_keys.dart';
 import '../../shared/upward_popup_menu.dart';
 
@@ -186,7 +187,6 @@ class ModelRoleSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     final options = modelOptions(providers);
     final current = modelForRoute(providers, providerId, model);
-    final selectedKey = current?.key;
     final warning = !available || current == null;
     final selectionBlockedReason =
         blockedReason ??
@@ -229,63 +229,27 @@ class ModelRoleSelector extends StatelessWidget {
               ),
             ),
           ),
-        UpwardPopupMenu<String>(
-          key: StudioDriverKeys.model,
+        ModelRouteSelector(
+          selectorKey: StudioDriverKeys.model,
+          options: options,
+          providerId: providerId,
+          model: model,
+          fieldLabel: context.l10n.statusPlannerModel,
           tooltip: selectionBlockedReason ?? context.l10n.statusPlannerModel,
-          initialValue: selectedKey,
+          compact: true,
+          compactMaxWidth: 140,
           enabled: selectionBlockedReason == null,
           onBlockedTap: selectionBlockedReason == null
               ? null
               : () => explain(selectionBlockedReason),
-          onSelected: (key) {
-            final option = options.firstWhere((option) => option.key == key);
+          onSelected: (option) {
             final nextEffort = option.reasoningEfforts.contains(effort)
                 ? effort
                 : option.reasoningEfforts.firstOrNull;
             onSelected(option.providerId, option.model, nextEffort);
           },
-          itemBuilder: (context) => [
-            for (final option in options)
-              PopupMenuItem(
-                key: StudioDriverKeys.modelOption(
-                  option.providerId,
-                  option.model,
-                ),
-                value: option.key,
-                child: SizedBox(
-                  width: 260,
-                  child: Row(
-                    children: [
-                      const Icon(Icons.smart_toy_outlined, size: 18),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(option.label, overflow: TextOverflow.ellipsis),
-                            if (option.inputModalities.isNotEmpty)
-                              Text(
-                                option.inputModalities
-                                    .map(context.modalityLabel)
-                                    .join(' · '),
-                                key: StudioDriverKeys.modelCapabilityTags(
-                                  option.providerId,
-                                  option.model,
-                                ),
-                                style: Theme.of(context).textTheme.labelSmall,
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-          child: _ControlItem(
-            label: model,
-            enabled: selectionBlockedReason == null,
-          ),
+          optionKeyBuilder: (option) =>
+              StudioDriverKeys.modelOption(option.providerId, option.model),
         ),
       ],
     );
@@ -370,28 +334,7 @@ IconData sessionModeIcon(ThreadModeId mode) {
   return mode == ThreadModeId.simple ? Icons.flash_on : Icons.route_outlined;
 }
 
-class ModelOption {
-  const ModelOption({
-    required this.providerId,
-    required this.model,
-    required this.label,
-    required this.reasoningEfforts,
-    required this.inputCapabilities,
-  });
-
-  final String providerId;
-  final String model;
-  final String label;
-  final List<String> reasoningEfforts;
-  final List<ModelInputCapabilityView> inputCapabilities;
-
-  List<ModelModalityView> get inputModalities =>
-      inputCapabilities.map((capability) => capability.modality).toList();
-
-  String get key => '$providerId::$model';
-}
-
-ModelOption? modelForRoute(
+ModelSelectionOption? modelForRoute(
   List<ProviderSettingsView> providers,
   String providerId,
   String model,
@@ -412,33 +355,20 @@ ModeModelRouteView? modeRouteFor(
       routes.where((route) => route.modeId == ThreadModeId.simple).firstOrNull;
 }
 
-List<ModelOption> modelOptions(List<ProviderSettingsView> providers) {
-  final options = <ModelOption>[];
-  for (final provider in providers) {
-    final models = provider.models.isEmpty
-        ? [
-            ProviderModelView(
-              slug: provider.defaultModel,
-              displayName: provider.defaultModel,
-              reasoningEfforts: const [],
-            ),
-          ]
-        : provider.models;
-    for (final model in models) {
-      if (model.slug.isEmpty) {
-        continue;
-      }
-      options.add(
-        ModelOption(
-          providerId: provider.id,
-          model: model.slug,
-          label:
-              '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
-          reasoningEfforts: model.reasoningEfforts,
-          inputCapabilities: model.inputCapabilities,
-        ),
-      );
-    }
-  }
-  return options;
+List<ModelSelectionOption> modelOptions(List<ProviderSettingsView> providers) {
+  return buildModelSelectionOptions(
+    providers,
+    modelsForProvider: (provider) {
+      final models = provider.models.isEmpty
+          ? [
+              ProviderModelView(
+                slug: provider.defaultModel,
+                displayName: provider.defaultModel,
+                reasoningEfforts: const [],
+              ),
+            ]
+          : provider.models;
+      return models.where((model) => model.slug.isNotEmpty).toList();
+    },
+  );
 }

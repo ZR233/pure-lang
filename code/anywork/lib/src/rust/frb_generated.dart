@@ -531,7 +531,7 @@ abstract class RustLibApi extends BaseApi {
     required String providerId,
     required String model,
     String? effort,
-    required BigInt expectedThreadRevision,
+    required BigInt expectedModelRouteRevision,
     required BigInt expectedSettingsRevision,
   });
 
@@ -3844,7 +3844,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String providerId,
     required String model,
     String? effort,
-    required BigInt expectedThreadRevision,
+    required BigInt expectedModelRouteRevision,
     required BigInt expectedSettingsRevision,
   }) {
     return handler.executeNormal(
@@ -3855,7 +3855,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(providerId, serializer);
           sse_encode_String(model, serializer);
           sse_encode_opt_String(effort, serializer);
-          sse_encode_u_64(expectedThreadRevision, serializer);
+          sse_encode_u_64(expectedModelRouteRevision, serializer);
           sse_encode_u_64(expectedSettingsRevision, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
@@ -3875,7 +3875,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           providerId,
           model,
           effort,
-          expectedThreadRevision,
+          expectedModelRouteRevision,
           expectedSettingsRevision,
         ],
         apiImpl: this,
@@ -3891,7 +3891,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "providerId",
           "model",
           "effort",
-          "expectedThreadRevision",
+          "expectedModelRouteRevision",
           "expectedSettingsRevision",
         ],
       );

@@ -1335,13 +1335,14 @@ class DemoStudioApi
   @override
   Future<ThreadModelRouteUpdateResult> setThreadModelRoute({
     required String threadId,
-    required int expectedThreadRevision,
+    required int expectedModelRouteRevision,
     required int expectedSettingsRevision,
     required String providerId,
     required String model,
     String? effort,
   }) async {
     final current = await readStudioState();
+    _checkSettingsRevision(expectedSettingsRevision);
     final thread = current.threads
         .where((candidate) => candidate.id == threadId)
         .firstOrNull;
@@ -1349,35 +1350,48 @@ class DemoStudioApi
     if (thread == null || !thread.isRoot || workspace == null) {
       throw StateError('unknown root demo thread $threadId');
     }
-    if (workspace.revision != expectedThreadRevision) {
-      throw StateError('thread revision conflict');
+    final previousRoute = workspace.runtime.modelRoute;
+    if (previousRoute == null) {
+      throw StateError('demo thread has no saved model route');
     }
-    final settings = await setModeModelRoute(
-      expectedSettingsRevision: expectedSettingsRevision,
-      mode: thread.mode,
-      providerId: providerId,
-      model: model,
-      effort: effort,
-    );
-    final saved = settings.modeModelRoutes
-        .where((route) => route.modeId == thread.mode)
-        .first;
+    if (previousRoute.revision != expectedModelRouteRevision) {
+      throw StateError('model route revision conflict');
+    }
+    final selected = current.providers
+        .firstWhere((provider) => provider.id == providerId)
+        .allModels
+        .firstWhere((candidate) => candidate.slug == model);
+    final selectedEffort = selected.reasoningEfforts.contains(effort)
+        ? effort
+        : selected.reasoningEfforts.firstOrNull ?? '';
+    _modeRoutes = [
+      for (final route in current.modeModelRoutes)
+        if (route.modeId != thread.mode) route,
+      ModeModelRouteView(
+        modeId: thread.mode,
+        providerId: providerId,
+        model: model,
+        effort: selectedEffort ?? '',
+      ),
+    ];
+    _settingsRevision += 1;
     final runtime = workspace.runtime.copyWith(
       modelRoute: ThreadModelRouteView(
-        providerId: saved.providerId,
-        model: saved.model,
-        effort: saved.effort,
-        revision: (workspace.runtime.modelRoute?.revision ?? 0) + 1,
+        providerId: providerId,
+        model: model,
+        effort: selectedEffort,
+        revision: previousRoute.revision + 1,
         available: true,
       ),
     );
     _workspaces[threadId] = workspace.copyWith(
-      revision: expectedThreadRevision + 1,
+      revision: workspace.revision + 1,
       runtime: runtime,
     );
+    final settings = await readStudioState();
     return (
       runtime: runtime,
-      settings: settings,
+      settings: settings.settingsState,
       modeDefaultSaved: true,
       warning: null,
     );

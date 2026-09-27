@@ -252,15 +252,19 @@ abstract final class StudioDriverKeys {
     String role,
     String providerId,
     String model,
-  ) => ValueKey<String>('settings-role-$role-model-$providerId-$model');
+  ) => ValueKey<String>(
+    'settings-role-${jsonEncode(<String>[role, providerId, model])}',
+  );
 
   static ValueKey<String> modelOption(String providerId, String model) =>
-      ValueKey<String>('model-$providerId-$model');
+      ValueKey<String>('model-${jsonEncode(<String>[providerId, model])}');
 
   static ValueKey<String> modelCapabilityTags(
     String providerId,
     String model,
-  ) => ValueKey<String>('model-$providerId-$model-capabilities');
+  ) => ValueKey<String>(
+    'model-${jsonEncode(<String>[providerId, model])}-capabilities',
+  );
 
   static ValueKey<String> attachmentDraft(String id) =>
       ValueKey<String>('attachment-draft-$id');

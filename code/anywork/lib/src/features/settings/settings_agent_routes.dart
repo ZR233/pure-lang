@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/model_route_selector.dart';
 import '../../shared/studio_driver_keys.dart';
 
 class _AgentRouteConfiguration {
@@ -19,73 +20,84 @@ class _AgentRouteConfiguration {
     BuildContext context,
     WidgetRef ref,
     String role,
-    List<_RoleModelOption> options,
+    List<ModelSelectionOption> options,
   ) {
     final configuredRole = roles
         .where((candidate) => candidate.key == role)
         .firstOrNull;
-    final configuredKey = _roleSelectionKey(role);
-    final configuredResolvable =
-        configuredKey == null ||
-        options.any((option) => option.key == configuredKey);
-    final entries = <_RoleModelOption>[
-      // canonical route 非空但当前 catalog 无法解析时，展示原始值并标记
-      // unavailable，而不是退化为 options.first。
-      if (configuredKey != null && !configuredResolvable)
-        _RoleModelOption.unavailable(
-          providerId: configuredRole?.providerId ?? '',
-          model: configuredRole?.model ?? '',
-          label: context.l10n.settingsAgentRouteUnavailable(
+    final hasConfiguredRoute =
+        configuredRole != null &&
+        (configuredRole.providerId.isNotEmpty ||
+            configuredRole.model.isNotEmpty);
+    final option = hasConfiguredRoute
+        ? options
+              .where(
+                (candidate) =>
+                    candidate.providerId == configuredRole.providerId &&
+                    candidate.model == configuredRole.model,
+              )
+              .firstOrNull
+        : options.firstOrNull;
+    final routeUnavailable = hasConfiguredRoute && option == null;
+    final unresolvedLabel = routeUnavailable
+        ? context.l10n.settingsAgentRouteUnavailable(
             [
-              configuredRole?.providerId ?? '',
-              configuredRole?.model ?? '',
+              configuredRole.providerId,
+              configuredRole.model,
             ].where((part) => part.isNotEmpty).join(' / '),
-          ),
-        ),
-      ...options,
-    ];
+          )
+        : option == null
+        ? context.l10n.settingsDefaultModel
+        : null;
+    final selectedProviderId =
+        option?.providerId ??
+        (hasConfiguredRoute ? configuredRole.providerId : 'default');
     final selectedModel =
-        configuredKey ??
-        (options.isEmpty ? 'default::default' : options.first.key);
-    final selectedOption = entries
-        .where((option) => option.key == selectedModel)
-        .firstOrNull;
-    final option =
-        selectedOption ??
-        (entries.isEmpty
-            ? const _RoleModelOption.defaultOption()
-            : entries.first);
+        option?.model ??
+        (hasConfiguredRoute ? configuredRole.model : 'default');
     final canonicalEffort = configuredRole?.effort;
+    final efforts = option?.reasoningEfforts ?? const <String>[];
+    final defaultEffort = option == null
+        ? null
+        : option.defaultReasoningEffort.isNotEmpty
+        ? option.defaultReasoningEffort
+        : option.reasoningEfforts.firstOrNull;
     final selectedEffort =
-        configuredKey != null &&
-            option.key == configuredKey &&
+        hasConfiguredRoute &&
+            option != null &&
             canonicalEffort != null &&
-            option.efforts.contains(canonicalEffort)
+            efforts.contains(canonicalEffort)
         ? canonicalEffort
-        : option.defaultEffort;
+        : defaultEffort;
 
     return _RoleSettingsRow(
       role: role,
+      selectedProviderId: selectedProviderId,
       selectedModel: selectedModel,
       selectedEffort: selectedEffort,
-      options: entries,
-      efforts: option.efforts,
+      options: options,
+      efforts: efforts,
+      unresolvedLabel: unresolvedLabel,
+      showUnresolvedOption: routeUnavailable,
       onModelChanged: (value) {
-        // 重选当前值（含 unavailable 哨兵项）不产生任何变更。
-        if (value == selectedModel) return;
-        final selected = entries.firstWhere(
-          (candidate) => candidate.key == value,
-        );
+        // 重选当前 provider/model 不产生任何变更。
+        if (value.providerId == selectedProviderId &&
+            value.model == selectedModel) {
+          return;
+        }
         ref
             .read(studioControllerProvider.notifier)
             .setModelRole(
               roleKey: role,
-              providerId: selected.providerId,
-              model: selected.model,
-              effort: selected.defaultEffort,
+              providerId: value.providerId,
+              model: value.model,
+              effort: value.defaultReasoningEffort.isNotEmpty
+                  ? value.defaultReasoningEffort
+                  : value.reasoningEfforts.firstOrNull,
             );
       },
       onEffortChanged: (value) {
+        if (option == null) return;
         ref
             .read(studioControllerProvider.notifier)
             .setModelRole(
@@ -98,55 +110,24 @@ class _AgentRouteConfiguration {
     );
   }
 
-  String? _roleSelectionKey(String roleKey) {
-    final role = roles.where((role) => role.key == roleKey).firstOrNull;
-    if (role == null || (role.providerId.isEmpty && role.model.isEmpty)) {
-      return null;
-    }
-    return '${role.providerId}::${role.model}';
-  }
-
-  List<_RoleModelOption> _roleModelOptions(
-    BuildContext context,
+  List<ModelSelectionOption> _roleModelOptions(
     List<ProviderSettingsView> providers,
   ) {
-    final options = <_RoleModelOption>[];
-    for (final provider in providers) {
-      final models = provider.models.isEmpty
-          ? [
-              ProviderModelView(
-                slug: provider.defaultModel,
-                displayName: provider.defaultModel,
-                reasoningEfforts: const [],
-              ),
-            ]
-          : provider.models;
-      for (final model in models) {
-        if (model.slug.isEmpty) {
-          continue;
-        }
-        final modalities = model.inputCapabilities
-            .map((capability) => context.modalityLabel(capability.modality))
-            .join('/');
-        options.add(
-          _RoleModelOption(
-            providerId: provider.id,
-            model: model.slug,
-            label: [
-              '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
-              if (modalities.isNotEmpty) modalities,
-              context.modelProtocolLabel(model.wireProtocol),
-              context.modelConnectionLabel(model.connectionMode),
-            ].join(' · '),
-            efforts: model.reasoningEfforts,
-            defaultEffort: model.defaultReasoningEffort.isNotEmpty
-                ? model.defaultReasoningEffort
-                : model.reasoningEfforts.firstOrNull,
-          ),
-        );
-      }
-    }
-    return options;
+    return buildModelSelectionOptions(
+      providers,
+      modelsForProvider: (provider) {
+        final models = provider.models.isEmpty
+            ? [
+                ProviderModelView(
+                  slug: provider.defaultModel,
+                  displayName: provider.defaultModel,
+                  reasoningEfforts: const [],
+                ),
+              ]
+            : provider.models;
+        return models.where((model) => model.slug.isNotEmpty).toList();
+      },
+    );
   }
 }
 
@@ -169,7 +150,7 @@ class AgentRouteControls extends ConsumerWidget {
       providers: providers,
       roles: roles,
     );
-    final options = section._roleModelOptions(context, providers);
+    final options = section._roleModelOptions(providers);
     return section._buildRoleRow(context, ref, role, options);
   }
 }
@@ -177,46 +158,45 @@ class AgentRouteControls extends ConsumerWidget {
 class _RoleSettingsRow extends StatelessWidget {
   const _RoleSettingsRow({
     required this.role,
+    required this.selectedProviderId,
     required this.selectedModel,
     required this.selectedEffort,
     required this.options,
     required this.efforts,
+    required this.unresolvedLabel,
+    required this.showUnresolvedOption,
     required this.onModelChanged,
     required this.onEffortChanged,
   });
 
   final String role;
+  final String selectedProviderId;
   final String selectedModel;
   final String? selectedEffort;
-  final List<_RoleModelOption> options;
+  final List<ModelSelectionOption> options;
   final List<String> efforts;
-  final ValueChanged<String> onModelChanged;
+  final String? unresolvedLabel;
+  final bool showUnresolvedOption;
+  final ValueChanged<ModelSelectionOption> onModelChanged;
   final ValueChanged<String> onEffortChanged;
 
   @override
   Widget build(BuildContext context) {
-    final modelEntries = options.isEmpty
-        ? const [_RoleModelOption.defaultOption()]
-        : options;
-    final modelSelector = _RoleSelectField(
+    final modelSelector = ModelRouteSelector(
       selectorKey: StudioDriverKeys.settingsRoleModel(role),
-      label: context.l10n.settingsModelField,
-      value: selectedModel,
-      options: [
-        for (final option in modelEntries)
-          _RoleSelectOption(
-            key: StudioDriverKeys.settingsRoleModelOption(
-              role,
-              option.providerId,
-              option.model,
-            ),
-            value: option.key,
-            label: option.isFallback
-                ? context.l10n.settingsDefaultModel
-                : option.label,
-          ),
-      ],
-      onChanged: options.isEmpty ? null : onModelChanged,
+      fieldLabel: context.l10n.settingsModelField,
+      options: options,
+      providerId: selectedProviderId,
+      model: selectedModel,
+      unresolvedLabel: unresolvedLabel,
+      showUnresolvedOption: showUnresolvedOption,
+      enabled: options.isNotEmpty,
+      onSelected: onModelChanged,
+      optionKeyBuilder: (option) => StudioDriverKeys.settingsRoleModelOption(
+        role,
+        option.providerId,
+        option.model,
+      ),
     );
     final effortSelector = _RoleSelectField(
       selectorKey: StudioDriverKeys.settingsRoleEffort(role),
@@ -328,46 +308,4 @@ class _RoleSelectOption {
   final Key key;
   final String value;
   final String label;
-}
-
-class _RoleModelOption {
-  const _RoleModelOption({
-    required this.providerId,
-    required this.model,
-    required this.label,
-    required this.efforts,
-    required this.defaultEffort,
-  });
-
-  const _RoleModelOption.defaultOption()
-    : providerId = 'default',
-      model = 'default',
-      label = 'default',
-      efforts = const [],
-      defaultEffort = null;
-
-  /// canonical route 无法解析时的展示项：保留原始 provider/model 与
-  /// `key`，不提供任何 effort 候选，因此只改 effort 不会改写 provider/model。
-  const _RoleModelOption.unavailable({
-    required String providerId,
-    required String model,
-    required String label,
-  }) : this(
-         providerId: providerId,
-         model: model,
-         label: label,
-         efforts: const [],
-         defaultEffort: null,
-       );
-
-  final String providerId;
-  final String model;
-  final String label;
-  final List<String> efforts;
-  final String? defaultEffort;
-
-  String get key => '$providerId::$model';
-
-  /// 无可用 provider/model 时的哨兵项；canonical key 仍是 `default::default`。
-  bool get isFallback => key == 'default::default';
 }

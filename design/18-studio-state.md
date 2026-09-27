@@ -24,6 +24,13 @@ Settings snapshot 以 `modeModelRoutes` 暴露全局 Mode 默认 selector，并�
 系统子代理 route；Thread runtime snapshot 另行暴露当前 Thread 的 typed `modelRoute`、revision
 与 available 状态。两者职责不同，GUI 不用 Mode 默认值覆盖已有 Thread 的 route。
 
+已有 Thread 的模型切换请求携带 `expectedModelRouteRevision`，取自客户端已观察到的
+canonical `modelRoute.revision`。该令牌对应模型路由 extension 的版本，既不是订阅通知
+计数，也不是 owner journal 的提交序号。运行时通过 route extension 的原子并发检查拒绝
+过时请求，不无条件覆盖或自动重试写入；失败保留原路由并向会话输入区反馈错误。
+成功响应中的 canonical route 与 settings 更新选择状态，Flutter 不人为递增 workspace
+订阅 revision；通知水位仍只由状态流维护。
+
 Product event 携带完整领域 snapshot 或明确 revision：ProjectDirectoryChanged、
 ThreadDirectoryChanged、AgentDirectoryChanged、ModeCatalogChanged、ThreadRuntimeChanged
 等。Dart reducer 拒绝旧 revision，并可用一次全量 snapshot 从 stream lag 恢复；它不自行

@@ -113,7 +113,7 @@ pub async fn set_thread_model_route(
     provider_id: String,
     model: String,
     effort: Option<String>,
-    expected_thread_revision: u64,
+    expected_model_route_revision: u64,
     expected_settings_revision: u64,
 ) -> Result<BridgeThreadModelRouteUpdateResponse, BridgeError> {
     let bridge = active_bridge().await?;
@@ -122,7 +122,7 @@ pub async fn set_thread_model_route(
         .save_thread_model_route(
             &thread_id,
             pl_protocol::studio::SetThreadModelRouteRequest {
-                expected_thread_revision,
+                expected_model_route_revision,
                 expected_settings_revision,
                 provider_id,
                 model,

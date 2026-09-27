@@ -309,6 +309,18 @@ impl StudioRuntime {
             }
             .into());
         }
+        let route_extension_id = crate::studio::model_route::MODEL_ROUTE_EXTENSION;
+        let previous = state
+            .extensions
+            .get(route_extension_id)
+            .context("Thread has no saved model route")?;
+        if previous.revision != request.expected_model_route_revision {
+            return Err(crate::ConfigRuntimeError::StaleRevision {
+                expected: request.expected_model_route_revision,
+                actual: previous.revision,
+            }
+            .into());
+        }
         let mode = crate::studio::thread_projection::saved_mode(&state)?
             .unwrap_or_else(|| record.mode.clone());
         let mode_definition = self
@@ -328,23 +340,31 @@ impl StudioRuntime {
             .models
             .resolve_route(StudioRole::Planner.id(), &selector)?;
         crate::mode::validate_thread_mode_model(Some(&mode_definition), &route.model)?;
-        let previous = state
-            .extensions
-            .get(crate::studio::model_route::MODEL_ROUTE_EXTENSION)
-            .context("Thread has no saved model route")?;
-        thread
+        match thread
             .queue_deferred_model_update_if_current(
                 Self::deferred_model_update(&route, &settings.config)?,
-                pl_core::thread::DeferredModelUpdatePrecondition::commit_sequence(
-                    request.expected_thread_revision,
+                pl_core::thread::DeferredModelUpdatePrecondition::extension(
+                    route_extension_id,
+                    Some(request.expected_model_route_revision),
                 ),
                 vec![pl_core::thread::extensions::ExtensionMutation::Put {
-                    id: crate::studio::model_route::MODEL_ROUTE_EXTENSION.into(),
-                    expected_revision: Some(previous.revision),
+                    id: route_extension_id.into(),
+                    expected_revision: Some(request.expected_model_route_revision),
                     payload: crate::studio::model_route::encode(&selector)?,
                 }],
             )
-            .await?;
+            .await
+        {
+            Ok(_) => {}
+            Err(pl_core::thread::ThreadError::ExtensionConflict {
+                id,
+                expected: Some(expected),
+                actual: Some(actual),
+            }) if id == route_extension_id => {
+                return Err(crate::ConfigRuntimeError::StaleRevision { expected, actual }.into());
+            }
+            Err(error) => return Err(error.into()),
+        }
         self.tool_catalog_updates.notify_one();
 
         let mut mode_default_saved = false;

@@ -79,7 +79,7 @@ pub struct SetModeModelRouteRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SetThreadModelRouteRequest {
-    pub expected_thread_revision: u64,
+    pub expected_model_route_revision: u64,
     pub expected_settings_revision: u64,
     pub provider_id: String,
     pub model: String,

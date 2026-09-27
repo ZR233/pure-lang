@@ -100,7 +100,7 @@ abstract class StudioApi {
   });
   Future<ThreadModelRouteUpdateResult> setThreadModelRoute({
     required String threadId,
-    required int expectedThreadRevision,
+    required int expectedModelRouteRevision,
     required int expectedSettingsRevision,
     required String providerId,
     required String model,
@@ -801,7 +801,7 @@ class FrbStudioApi
   @override
   Future<ThreadModelRouteUpdateResult> setThreadModelRoute({
     required String threadId,
-    required int expectedThreadRevision,
+    required int expectedModelRouteRevision,
     required int expectedSettingsRevision,
     required String providerId,
     required String model,
@@ -814,7 +814,7 @@ class FrbStudioApi
         providerId: providerId,
         model: model,
         effort: effort,
-        expectedThreadRevision: BigInt.from(expectedThreadRevision),
+        expectedModelRouteRevision: BigInt.from(expectedModelRouteRevision),
         expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
       ),
     );

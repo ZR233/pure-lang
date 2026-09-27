@@ -1895,31 +1895,69 @@ class StudioController extends _$StudioController {
     if (target == null || !_acceptsAttachments(current.composer, target)) {
       return;
     }
-    final expectedThreadRevision = workspace.revision;
-    final response = await _api.setThreadModelRoute(
-      threadId: thread.id,
-      expectedThreadRevision: expectedThreadRevision,
-      expectedSettingsRevision: current.settingsRevision,
-      providerId: providerId,
-      model: model,
-      effort: effort ?? target.reasoningEfforts.firstOrNull,
-    );
+    final modelRoute = workspace.runtime.modelRoute;
+    if (modelRoute == null) {
+      state = AsyncData(
+        _withWorkspaceUi(
+          current,
+          thread.id,
+          (ui) => ui.copyWith(
+            composer: ui.composer.reportFailure(
+              StateError('Current Thread model route is unavailable.'),
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    final ThreadModelRouteUpdateResult response;
+    try {
+      response = await _api.setThreadModelRoute(
+        threadId: thread.id,
+        expectedModelRouteRevision: modelRoute.revision,
+        expectedSettingsRevision: current.settingsRevision,
+        providerId: providerId,
+        model: model,
+        effort: effort ?? target.reasoningEfforts.firstOrNull,
+      );
+    } catch (error) {
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest == null ||
+          !latest.threads.any((candidate) => candidate.id == thread.id)) {
+        return;
+      }
+      state = AsyncData(
+        _withWorkspaceUi(
+          latest,
+          thread.id,
+          (ui) => ui.copyWith(composer: ui.composer.reportFailure(error)),
+        ),
+      );
+      return;
+    }
+    if (!ref.mounted) return;
     final latest = state.value;
     if (latest == null) return;
     var next = applySettingsState(latest, response.settings);
     final latestWorkspace = next.workspacesByThread[thread.id];
     if (latestWorkspace != null) {
-      next = next.copyWith(
-        workspacesByThread: {
-          ...next.workspacesByThread,
-          thread.id: latestWorkspace.copyWith(
-            revision: latestWorkspace.revision > expectedThreadRevision
-                ? latestWorkspace.revision
-                : expectedThreadRevision + 1,
-            runtime: response.runtime,
-          ),
-        },
-      );
+      final latestRouteRevision = latestWorkspace.runtime.modelRoute?.revision;
+      final responseRoute = response.runtime.modelRoute;
+      if (responseRoute != null &&
+          (latestRouteRevision == null ||
+              responseRoute.revision >= latestRouteRevision)) {
+        next = next.copyWith(
+          workspacesByThread: {
+            ...next.workspacesByThread,
+            thread.id: latestWorkspace.copyWith(
+              runtime: latestWorkspace.runtime.copyWith(
+                modelRoute: responseRoute,
+              ),
+            ),
+          },
+        );
+      }
     }
     if (response.warning case final warning?) {
       next = _withWorkspaceUi(

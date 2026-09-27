@@ -3691,7 +3691,7 @@ fn wire__crate__api__studio__handlers__thread__set_thread_model_route_impl(
             let api_provider_id = <String>::sse_decode(&mut deserializer);
             let api_model = <String>::sse_decode(&mut deserializer);
             let api_effort = <Option<String>>::sse_decode(&mut deserializer);
-            let api_expected_thread_revision = <u64>::sse_decode(&mut deserializer);
+            let api_expected_model_route_revision = <u64>::sse_decode(&mut deserializer);
             let api_expected_settings_revision = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
@@ -3703,7 +3703,7 @@ fn wire__crate__api__studio__handlers__thread__set_thread_model_route_impl(
                                 api_provider_id,
                                 api_model,
                                 api_effort,
-                                api_expected_thread_revision,
+                                api_expected_model_route_revision,
                                 api_expected_settings_revision,
                             )
                             .await?;

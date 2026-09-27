@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/model_route_selector.dart';
 import 'agent_workspace_mode_label.dart';
 import 'settings_common.dart';
 
@@ -97,69 +98,50 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
                   l10n.settingsAgentProfileInstructionsField,
                   maxLines: 6,
                 ),
-                DropdownButtonFormField<String>(
-                  key: const ValueKey('agent-profile-provider'),
-                  initialValue: _providerId.isEmpty ? null : _providerId,
-                  decoration: InputDecoration(
-                    labelText: l10n.settingsAgentProfileProviderField,
-                  ),
-                  items: [
-                    if (_providerUnavailable)
-                      DropdownMenuItem(
-                        value: _providerId,
-                        child: Text(
-                          l10n.settingsAgentRouteUnavailable(_providerId),
-                        ),
-                      ),
-                    for (final provider in widget.providers)
-                      DropdownMenuItem(
-                        value: provider.id,
-                        child: Text(provider.name),
-                      ),
-                  ],
-                  onChanged: (providerId) {
-                    if (providerId == null) return;
-                    setState(() {
-                      _providerId = providerId;
-                      _model = _modelsFor(providerId).firstOrNull?.slug ?? '';
-                      _effort = _canonicalEffort(null);
-                    });
-                  },
-                  validator: (value) =>
-                      value == null ? l10n.settingsAgentProfileRequired : null,
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  key: ValueKey('agent-profile-model-$_providerId'),
+                FormField<String>(
                   initialValue: _model.isEmpty ? null : _model,
-                  decoration: InputDecoration(
-                    labelText: l10n.settingsModelField,
-                  ),
-                  items: [
-                    if (_modelUnavailable)
-                      DropdownMenuItem(
-                        value: _model,
-                        child: Text(l10n.settingsAgentRouteUnavailable(_model)),
-                      ),
-                    for (final model in _modelsFor(_providerId))
-                      DropdownMenuItem(
-                        value: model.slug,
-                        child: Text(
-                          model.displayName.isEmpty
-                              ? model.slug
-                              : model.displayName,
-                        ),
-                      ),
-                  ],
-                  onChanged: (model) {
-                    if (model == null) return;
-                    setState(() {
-                      _model = model;
-                      _effort = _canonicalEffort(null);
-                    });
+                  validator: (value) => _providerId.isEmpty || value == null
+                      ? l10n.settingsAgentProfileRequired
+                      : null,
+                  builder: (field) {
+                    final options = _modelSelectionOptions;
+                    final providerName =
+                        widget.providers
+                            .where((provider) => provider.id == _providerId)
+                            .firstOrNull
+                            ?.name ??
+                        _providerId;
+                    final unavailableLabel =
+                        _providerUnavailable || _modelUnavailable
+                        ? l10n.settingsAgentRouteUnavailable(
+                            [
+                              providerName,
+                              _model,
+                            ].where((part) => part.isNotEmpty).join(' / '),
+                          )
+                        : null;
+                    return ModelRouteSelector(
+                      selectorKey: ValueKey('agent-profile-model-$_providerId'),
+                      fieldLabel: l10n.settingsModelField,
+                      options: options,
+                      providerId: _providerId,
+                      model: _model,
+                      unresolvedLabel: unavailableLabel,
+                      showUnresolvedOption: unavailableLabel != null,
+                      enabled: options.isNotEmpty,
+                      errorText: field.errorText,
+                      onSelected: (option) {
+                        setState(() {
+                          _providerId = option.providerId;
+                          _model = option.model;
+                          _effort = _canonicalEffort(null);
+                        });
+                        field.didChange(
+                          option.model.isEmpty ? null : option.model,
+                        );
+                      },
+                    );
                   },
-                  validator: (value) =>
-                      value == null ? l10n.settingsAgentProfileRequired : null,
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String?>(
@@ -295,12 +277,17 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
 
   List<String> get _efforts => _selectedModel?.reasoningEfforts ?? const [];
 
-  /// canonical 值与当前 catalog 脱节时仅在展示层标记 unavailable。
   bool get _providerUnavailable =>
       _providerId.isNotEmpty &&
       !widget.providers.any((provider) => provider.id == _providerId);
 
   bool get _modelUnavailable => _model.isNotEmpty && _selectedModel == null;
+
+  List<ModelSelectionOption> get _modelSelectionOptions =>
+      buildModelSelectionOptions(
+        widget.providers,
+        modelsForProvider: (provider) => provider.allModels,
+      );
 
   bool get _effortUnavailable => _effort != null && !_efforts.contains(_effort);
 
