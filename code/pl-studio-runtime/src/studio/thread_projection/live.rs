@@ -1019,9 +1019,19 @@ impl LiveProjection {
         state: &ThreadSnapshot,
         _applied: u64,
     ) -> Result<(), ProjectionError> {
+        self.stream_model_progress(chat, thread, state).await?;
+        self.stream_tool_progress(state, chat)
+    }
+
+    async fn stream_model_progress(
+        &mut self,
+        chat: &Session,
+        thread: &pl_protocol::Thread,
+        state: &ThreadSnapshot,
+    ) -> Result<(), ProjectionError> {
         let Some(preview) = state.model_progress.as_ref() else {
             self.preview_attempt = None;
-            self.clear_previews();
+            self.clear_model_previews();
             return Ok(());
         };
         let Some(attempt) = state
@@ -1036,7 +1046,7 @@ impl LiveProjection {
         // no longer apply.
         if self.preview_attempt.as_deref() != Some(preview.attempt_id.as_str()) {
             self.preview_attempt = Some(preview.attempt_id.clone());
-            self.clear_previews();
+            self.clear_model_previews();
         }
         let progress = &preview.progress;
         // The producer retires the whole-channel aggregate observation the moment it itemizes the
@@ -1169,7 +1179,6 @@ impl LiveProjection {
             self.publish_preview(chat, &id, &attempt.turn_id, revision, &entry)?;
             self.store_preview(id, entry);
         }
-        self.stream_tool_progress(state, chat)?;
         Ok(())
     }
 
@@ -1758,12 +1767,19 @@ impl LiveProjection {
         }
     }
 
-    /// Releases every in-flight preview, e.g. when the observed attempt changes.
-    fn clear_previews(&mut self) {
-        self.previews.clear();
+    /// Model attempts do not own background tools: preserve their observation baselines until
+    /// their own committed result or retained-fact release retires them.
+    fn clear_model_previews(&mut self) {
+        self.previews.retain(|id, preview| {
+            if preview.observed.is_none() {
+                return true;
+            }
+            self.previews_bytes = self
+                .previews_bytes
+                .saturating_sub(preview_bytes(id, preview));
+            false
+        });
         self.observed.clear();
-        // The retained bytes of an empty table, by the same `preview_entry_bytes` formula.
-        self.previews_bytes = 0;
     }
 
     /// Adds one committed payload to the report facts of its Turn.

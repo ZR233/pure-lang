@@ -1235,7 +1235,7 @@ class RealtimeJourney {
     }
   }
 
-  /// Narrows the GUI window through the driver's X11 window control, checks the
+  /// Narrows the GUI window through the driver's native window control, checks the
   /// layout is still usable and that the real window width really shrank, then
   /// restores the geometry read before the request.
   ///
@@ -1270,49 +1270,48 @@ class RealtimeJourney {
       );
       return;
     }
-    final narrowedShell = await _settleAfterResize(
-      wideShell,
-      expectNarrower: true,
-    );
-    final narrowSnapshot = await snapshot();
-    await shot('window-narrow');
-    // The core layout must still be present at the narrow width.
-    await driver.waitFor(
-      find.byValueKey('composer-input'),
-      timeout: const Duration(seconds: 10),
-    );
-    await driver.waitFor(
-      find.byValueKey('timeline-scrollable'),
-      timeout: const Duration(seconds: 10),
-    );
-    checks['narrowWindowUsable'] = true;
-    final narrowWidth = narrow.applied!.width;
-    final narrowViewport = _viewportDimension(timelineScroll(narrowSnapshot));
-
+    DriverRect? narrowedShell;
+    double? narrowViewport;
+    late WindowResizeResult restored;
     final original = narrow.original!;
-    final restored = resizeOwnedWindow(
-      guiPid: guiPid,
-      width: original.width,
-      height: original.height,
-    );
+    try {
+      narrowedShell = await _settleAfterResize(wideShell, expectNarrower: true);
+      final narrowSnapshot = await snapshot();
+      await shot('window-narrow');
+      await driver.waitFor(
+        find.byValueKey('composer-input'),
+        timeout: const Duration(seconds: 10),
+      );
+      await driver.waitFor(
+        find.byValueKey('timeline-scrollable'),
+        timeout: const Duration(seconds: 10),
+      );
+      checks['narrowWindowUsable'] = true;
+      narrowViewport = _viewportDimension(timelineScroll(narrowSnapshot));
+    } finally {
+      restored = resizeOwnedWindow(
+        guiPid: guiPid,
+        width: original.width,
+        height: original.height,
+      );
+      await _writeResizeDiagnostics(narrow, restored);
+      if (!restored.resized) {
+        throw StateError('could not restore GUI window: ${restored.reason}');
+      }
+    }
+    final narrowWidth = narrow.applied!.width;
     final restoredShell = await _settleAfterResize(
       narrowedShell ?? wideShell,
       expectNarrower: false,
     );
     final restoredSnapshot = await snapshot();
     await shot('window-restored');
-    final restoredWidth = restored.resized ? restored.applied!.width : null;
+    final restoredWidth = restored.applied!.width;
     final restoredViewport = _viewportDimension(
       timelineScroll(restoredSnapshot),
     );
     await _writeResizeDiagnostics(narrow, restored);
-    if (restoredWidth == null) {
-      pendingEvidence.add(
-        'window resize: the original size ${original.width}x${original.height} '
-        'could not be restored (${restored.reason}); raw outcomes: '
-        '[${restored.diagnostics.join(' | ')}]; the window width change is pending',
-      );
-    } else if (narrowWidth < restoredWidth) {
+    if (narrowWidth < restoredWidth) {
       checks['narrowWindowNarrower'] = true;
     } else {
       // The X resize request was accepted but the window manager kept the width;
@@ -1592,19 +1591,15 @@ class RealtimeJourney {
         width: original.width,
         height: original.height,
       );
+      if (!restored.resized) {
+        await _writeResizeDiagnostics(narrow, restored);
+        throw StateError('could not restore GUI window: ${restored.reason}');
+      }
       final restoredShell = await _settleAfterResize(
         narrowedShell ?? beforeShell,
         expectNarrower: false,
       );
       counts['activityRestoredShellWidth'] = restoredShell?.width;
-      if (!restored.resized) {
-        pendingEvidence.add(
-          'activity layout: the original window size '
-          '${original.width}x${original.height} could not be restored '
-          '(${restored.reason}); raw outcomes: '
-          '[${restored.diagnostics.join(' | ')}]',
-        );
-      }
     }
   }
 

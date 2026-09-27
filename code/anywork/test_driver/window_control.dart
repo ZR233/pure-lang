@@ -2,7 +2,16 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
+import 'package:ffi/ffi.dart' as ffi;
+import 'package:win32/win32.dart' as win32;
+
+part 'window_control_windows.dart';
+
 /// Driver-side window control for the native GUI running on this host.
+///
+/// Windows enumerates the unique visible window owned by the reported GUI PID,
+/// changes its physical client size without activation, and verifies the result.
+/// Both platforms return the original physical dimensions for exact restoration.
 ///
 /// There is no product window-management API, so acceptance resizes the GUI
 /// window from the driver script process. The target is provable in two ways:
@@ -34,7 +43,7 @@ class WindowGeometry {
   final int width;
   final int height;
 
-  /// `xwininfo` map state: `IsViewable` means the window is really mapped.
+  /// Whether the native window is visible (X11 `IsViewable` on Linux).
   final bool mapped;
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -59,7 +68,7 @@ class WindowResizeResult {
   /// requested size.
   final bool resized;
 
-  /// The X11 window id (`0x…`) proven to belong to the GUI process.
+  /// The native window id (`0x…`) proven to belong to the GUI process.
   final String? windowId;
 
   /// Why the resize was refused or did not take effect; null on success.
@@ -82,10 +91,11 @@ WindowResizeResult resizeOwnedWindow({
   required int width,
   required int height,
 }) {
+  if (Platform.isWindows) {
+    return _resizeWindowsWindow(guiPid, width, height);
+  }
   if (!Platform.isLinux) {
-    return _refused(
-      'driver window resize is only implemented for the Linux/X11 runner',
-    );
+    return _refused('driver window resize requires Windows or Linux/X11');
   }
   final diagnostics = <String>[];
   final gui = _readGuiProcessEnvironment(guiPid);

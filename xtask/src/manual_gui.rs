@@ -577,7 +577,7 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
                 git.success(),
                 "failed to initialize isolated stress project"
             );
-            let mut command = Command::new("dart");
+            let mut command = process::path_command("dart", &[]);
             command
                 .current_dir(&app_dir)
                 .args(["run", "test_driver/stress_probe.dart", &vm_url])
@@ -1192,7 +1192,7 @@ fn capture(
     output: &Path,
     interrupt: &mpsc::Receiver<()>,
 ) -> Result<()> {
-    let mut command = Command::new("dart");
+    let mut command = process::path_command("dart", &[]);
     command
         .current_dir(app_dir)
         .args(["run", "test_driver/manual_capture.dart", vm_url])
@@ -1231,7 +1231,7 @@ fn start_stress_turn(
     stage: &Path,
     interrupt: &mpsc::Receiver<()>,
 ) -> Result<()> {
-    let mut command = Command::new("dart");
+    let mut command = process::path_command("dart", &[]);
     command
         .current_dir(app_dir)
         .args(["run", "test_driver/stress_start.dart", vm_url])
@@ -1270,7 +1270,7 @@ fn run_stress_sessions(
     stage: &Path,
     interrupt: &mpsc::Receiver<()>,
 ) -> Result<()> {
-    let mut command = Command::new("dart");
+    let mut command = process::path_command("dart", &[]);
     command
         .current_dir(app_dir)
         .args(["run", "test_driver/stress_sessions.dart", vm_url])
@@ -1564,7 +1564,7 @@ fn start_statistics_driver(
     } else {
         "0".to_owned()
     };
-    let mut command = Command::new("dart");
+    let mut command = process::path_command("dart", &[]);
     command
         .current_dir(app_dir)
         .args(["run", "test_driver/statistics_journey.dart", phase, vm_url])
@@ -2932,7 +2932,7 @@ fn start_stress_body_driver(
     stage: &Path,
 ) -> Result<OwnedProcess> {
     let log = File::create(stage.with_extension("driver.log"))?;
-    let mut command = Command::new("dart");
+    let mut command = process::path_command("dart", &[]);
     command
         .current_dir(context.app_dir)
         .args(["run", "test_driver/stress_body.dart", vm_url])
@@ -2969,7 +2969,7 @@ fn start_realtime_driver(
     stage: &Path,
 ) -> Result<OwnedProcess> {
     let log = File::create(stage.with_extension("driver.log"))?;
-    let mut command = Command::new("dart");
+    let mut command = process::path_command("dart", &[]);
     command
         .current_dir(app_dir)
         .args(["run", "test_driver/realtime_journey.dart", vm_url])
@@ -3038,7 +3038,7 @@ fn start_history_lock_driver(
     stage: &Path,
 ) -> Result<OwnedProcess> {
     let log = File::create(stage.with_extension("driver.log"))?;
-    let mut command = Command::new("dart");
+    let mut command = process::path_command("dart", &[]);
     command
         .current_dir(app_dir)
         .args(["run", "test_driver/history_writer_journey.dart", vm_url])
@@ -3145,7 +3145,7 @@ fn start_history_fault_driver(
     stage: &Path,
 ) -> Result<OwnedProcess> {
     let log = File::create(stage.with_extension("driver.log"))?;
-    let mut command = Command::new("dart");
+    let mut command = process::path_command("dart", &[]);
     command
         .current_dir(app_dir)
         .args(["run", "test_driver/history_fault_journey.dart", vm_url])
