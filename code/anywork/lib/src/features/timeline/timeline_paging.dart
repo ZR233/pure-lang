@@ -1,26 +1,20 @@
 part of 'timeline_view.dart';
 
 extension on _TimelineViewState {
-  Widget _itemSliver(List<TimelineRow> rows, {required bool isCenter}) {
-    // ChatView already owns a bounded window. Use its actual row heights for
-    // the thumb's mapping instead of a second layer of lazy height estimates.
-    // Unchanged box children reuse their layout; only visible slivers paint.
-    return SliverPadding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      sliver: SliverMainAxisGroup(
-        key: ValueKey((isCenter, _centerId)),
-        slivers: [
-          for (var index = 0; index < rows.length; index++)
-            SliverToBoxAdapter(
-              key: ValueKey(rows[index].id),
-              child: IndexedSemantics(
-                index: index,
-                child: _buildRow(rows[index]),
-              ),
-            ),
-        ],
-      ),
-    );
+  double _estimateRowExtent(int? index, double width) {
+    if (index == null || index >= widget.rows.length) return 80;
+    final row = widget.rows[index];
+    final text = row.part?.text;
+    if (text != null && text.isNotEmpty) {
+      final scale = _textScale;
+      final columns = math.max(12, width / (8 * scale));
+      return 56 + (text.length / columns).ceil() * 22.0 * scale;
+    }
+    return switch (row.type) {
+      TimelineRowType.toolGroup => 110,
+      TimelineRowType.reasoningSummary => 80,
+      _ => 100,
+    };
   }
 
   Widget _buildRow(TimelineRow row) {
@@ -32,11 +26,17 @@ extension on _TimelineViewState {
     final bodyStates = _itemBodyStates(row);
     final bodyState = _itemBodyCacheKey(bodyStates);
     final cached = _rowWidgets[row.id];
-    if (cached == null ||
-        cached.version != version ||
-        cached.expanded != reasoningExpanded ||
-        cached.toolExpanded != toolExpanded ||
-        cached.body != bodyState) {
+    final defer =
+        _deferStreamingUpdates &&
+        cached != null &&
+        row.part != null &&
+        !isTerminalTimelineStatus(row.part!.status);
+    if (!defer &&
+        (cached == null ||
+            cached.version != version ||
+            cached.expanded != reasoningExpanded ||
+            cached.toolExpanded != toolExpanded ||
+            cached.body != bodyState)) {
       _rowWidgets[row.id] = (
         version: version,
         expanded: reasoningExpanded,
@@ -55,11 +55,14 @@ extension on _TimelineViewState {
       );
     }
     return KeyedSubtree(
-      key: StudioDriverKeys.timelineBlock(row.id),
-      child: RepaintBoundary(
-        child: SizedBox(
-          key: _rowKeys.putIfAbsent(row.id, GlobalKey.new),
-          child: _rowWidgets[row.id]!.child,
+      key: ValueKey(row.id),
+      child: KeyedSubtree(
+        key: StudioDriverKeys.timelineBlock(row.id),
+        child: RepaintBoundary(
+          child: SizedBox(
+            key: _rowKeys.putIfAbsent(row.id, GlobalKey.new),
+            child: _rowWidgets[row.id]!.child,
+          ),
         ),
       ),
     );
@@ -185,31 +188,13 @@ extension on _TimelineViewState {
     return null;
   }
 
-  // A stable center already preserves the anchor when content grows below it.
-  // Only changes between the list origin/center and the visible anchor require
-  // a coordinate rebase. Recentring on every token or wheel tick destroys the
-  // slivers' layout history and changes the scrollbar's mapping under the mouse.
   bool _needsAnchorRebase(TimelineAnchor anchor, List<TimelineRow> oldRows) {
-    final oldAnchor = _anchorRowId(anchor.itemId, rows: oldRows);
-    final newAnchor = _anchorRowId(anchor.itemId);
-    if (oldAnchor != newAnchor) return true;
-    final oldCenter = _centerId == null
-        ? 0
-        : oldRows.indexWhere((row) => row.id == _centerId);
-    final newCenter = _centerId == null
-        ? 0
-        : widget.rows.indexWhere((row) => row.id == _centerId);
-    if (oldCenter < 0 || newCenter < 0) return true;
-    final oldEnd = math.max(
-      oldCenter,
-      oldRows.indexWhere((row) => row.id == oldAnchor),
-    );
-    final newEnd = math.max(
-      newCenter,
-      widget.rows.indexWhere((row) => row.id == newAnchor),
-    );
-    if (oldEnd != newEnd) return true;
-    for (var index = 0; index < oldEnd; index++) {
+    final oldId = _anchorRowId(anchor.itemId, rows: oldRows);
+    final newId = _anchorRowId(anchor.itemId);
+    final oldIndex = oldRows.indexWhere((row) => row.id == oldId);
+    final newIndex = widget.rows.indexWhere((row) => row.id == newId);
+    if (oldIndex != newIndex || oldId != newId) return true;
+    for (var index = 0; index <= oldIndex; index++) {
       if (oldRows[index].id != widget.rows[index].id ||
           oldRows[index].renderVersion != widget.rows[index].renderVersion) {
         return true;

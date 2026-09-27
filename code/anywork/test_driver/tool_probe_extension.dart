@@ -33,6 +33,11 @@ class ToolProbeExtension extends CommandExtension {
             skipOffstage: false,
           )
         : finderFactory.createFinder(probe.finder);
+    if (probe.action == 'observe' && target.evaluate().isEmpty) {
+      return _ProbeResult([
+        {'mounted': false},
+      ]);
+    }
     Map<String, Object?> sample() {
       final box = target.evaluate().single.renderObject! as RenderBox;
       final offset = box.localToGlobal(Offset.zero);

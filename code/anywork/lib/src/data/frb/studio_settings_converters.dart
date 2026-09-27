@@ -45,6 +45,9 @@ ProviderModelView _customModelSettingsFromFrb(
   frb.BridgeCustomModelSettingsDto value,
 ) {
   return ProviderModelView(
+    inputCapabilities: value.inputCapabilities
+        .map(_modelInputCapabilityFromFrb)
+        .toList(),
     contextWindow: value.contextWindow.toInt(),
     maxOutputTokens: value.maxOutputTokens.toInt(),
     slug: value.slug,

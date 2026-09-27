@@ -167,6 +167,11 @@ fn bridge_custom_model_settings(
     model: pl_protocol::studio::StudioCustomModelSettings,
 ) -> BridgeCustomModelSettingsDto {
     BridgeCustomModelSettingsDto {
+        input_capabilities: model
+            .input_capabilities
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         context_window: model.context_window,
         max_output_tokens: model.max_output_tokens,
         slug: model.slug,

@@ -651,26 +651,11 @@ abstract final class StudioDriverState {
       };
 }
 
-/// Timeline 的只读滚动几何诊断。
-///
-/// 它只描述**实际渲染出来的**滚动几何（`CustomScrollView` 的 center 拆分、跟随状态、
-/// [ScrollPosition] 的 min/max/pixels、视口高度、贴底留白与当前锚点），供驱动快照与人工
-/// 验收判断“末尾是否贴底、内容是否填满视口、上翻历史有没有被抢”：
-///
-/// - 贴底：`extentAfter ≈ 0`；
-/// - 内容比视口短（整段靠底）：`maxScrollExtent == 0 && pixels == 0 && bottomSlack > 0`；
-/// - 退化几何（内容贴顶 + 下方空白）：`centerId != null && pixels >= 0` 且 `centerId`
-///   起正向区高度 < `viewportDimension`；
-/// - 上翻历史：`centerId != null && pixels < 0`，`anchor` 与上一帧一致；
-/// - 拖动是否被状态机吞掉：`userDragUpdates` 是真实拖动累计次数、`programmaticScroll` 是
-///   当前是否把滚动当成程序化滚动忽略。两者一起读即可区分“拖动到达滚动视图但位置被复位”
-///   与“拖动没有到达滚动视图”，不必从截图倒推（见 `timeline_view.dart` 的
-///   `_restorePendingPosition` / `_handleScrollUpdate`）。
+/// Read-only timeline geometry and lazy row count for native Driver observation.
 class TimelineScrollDiagnostic {
   const TimelineScrollDiagnostic({
     required this.threadId,
-    required this.centerId,
-    required this.centerIndex,
+    required this.mountedRowCount,
     required this.rowCount,
     required this.followingBottom,
     required this.detachedByUser,
@@ -692,11 +677,8 @@ class TimelineScrollDiagnostic {
 
   final String? threadId;
 
-  /// `CustomScrollView.center` 当前锚定的行；为空表示正向区独占整个消息列。
-  final String? centerId;
-
-  /// [centerId] 在窗口里的下标；[centerId] 为空时为 -1。
-  final int centerIndex;
+  /// Rows currently mounted in the viewport and its small cache area.
+  final int mountedRowCount;
 
   final int rowCount;
   final bool followingBottom;
@@ -743,8 +725,7 @@ class TimelineScrollDiagnostic {
 
   Map<String, Object?> toJson() => {
     'threadId': threadId,
-    'centerId': centerId,
-    'centerIndex': centerIndex,
+    'mountedRowCount': mountedRowCount,
     'rowCount': rowCount,
     'followingBottom': followingBottom,
     'detachedByUser': detachedByUser,

@@ -71,6 +71,25 @@ pub fn gui_tool_scroll_script() -> Vec<Step> {
         ("Tool scroll multiple", 80, 0, 3),
         ("Tool scroll failed", 0, 0, 1),
     ] {
+        if prompt == "Tool scroll multiple" {
+            script.add(|step| {
+                Step::prompt(
+                    Protocol::ResponsesHttp,
+                    prompt,
+                    step,
+                    Reply::Sse(responses_tool_calls(
+                        "scroll-discover",
+                        "fixture-model",
+                        &[RealtimeToolCall {
+                            item_id: "scroll-item-discover",
+                            call_id: "scroll-call-discover",
+                            name: "discover_tools",
+                            arguments: json!({"query": "view_image"}).to_string(),
+                        }],
+                    )),
+                )
+            });
+        }
         let calls = identities[next_identity..next_identity + count]
             .iter()
             .map(|&(item_id, call_id)| {
@@ -79,6 +98,14 @@ pub fn gui_tool_scroll_script() -> Vec<Step> {
                 } else {
                     format!("i=1; while [ \"$i\" -le {lines} ]; do printf 'line-%s tool output\\n' \"$i\"; i=$((i+1)); done # {}", "argument ".repeat(padding / 9))
                 };
+                if matches!(item_id, "scroll-item-b" | "scroll-item-c") {
+                    return RealtimeToolCall {
+                        item_id,
+                        call_id,
+                        name: "view_image",
+                        arguments: json!({"path": "tool-image.png"}).to_string(),
+                    };
+                }
                 RealtimeToolCall {
                     item_id,
                     call_id,
@@ -108,6 +135,17 @@ pub fn gui_tool_scroll_script() -> Vec<Step> {
             .map(|line| format!("{prompt} following paragraph {line}.\n\n"))
             .collect::<String>();
         script.add(|step| {
+            if prompt == "Tool scroll multiple" {
+                // Image results add a media message after the user prompt.
+                // Match the owning tool result rather than the last user role.
+                return Step::tool_output(
+                    Protocol::ResponsesHttp,
+                    "scroll-call-c",
+                    "",
+                    step,
+                    Reply::Sse(responses_text(&tail, "scroll-tail", "fixture-model")),
+                );
+            }
             Step::prompt(
                 Protocol::ResponsesHttp,
                 prompt,

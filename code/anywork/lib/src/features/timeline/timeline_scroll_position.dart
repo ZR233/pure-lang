@@ -3,11 +3,10 @@ part of 'timeline_view.dart';
 /// Content growth is a layout correction, not a new scrolling activity.
 /// Keeping it here avoids post-frame jumpTo calls that cancel pointer gestures.
 class _TimelineScrollController extends ScrollController {
-  _TimelineScrollController(this.followingBottom, this.restoreTarget)
+  _TimelineScrollController(this.followingBottom)
     : super(keepScrollOffset: false);
 
   final bool Function() followingBottom;
-  final double? Function() restoreTarget;
 
   @override
   ScrollPosition createScrollPosition(
@@ -19,7 +18,6 @@ class _TimelineScrollController extends ScrollController {
     context: context,
     oldPosition: oldPosition,
     followingBottom: followingBottom,
-    restoreTarget: restoreTarget,
   );
 }
 
@@ -29,18 +27,15 @@ class _TimelineScrollPosition extends ScrollPositionWithSingleContext {
     required super.context,
     required super.oldPosition,
     required this.followingBottom,
-    required this.restoreTarget,
   }) : super(keepScrollOffset: false);
 
   final bool Function() followingBottom;
-  final double? Function() restoreTarget;
 
   @override
   bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
-    // Resolve both initial placement and preview -> full-body restoration
-    // against this layout's bounds, before an idle activity can start a bounce
-    // using a stale, temporarily out-of-range coordinate.
-    final target = followingBottom() ? maxScrollExtent : restoreTarget();
+    // Follow the tail during layout, including corrections to estimated heights.
+    // Explicit history restoration uses the indexed list and painted row geometry.
+    final target = followingBottom() ? maxScrollExtent : null;
     if (target != null) {
       final clamped = target.clamp(minScrollExtent, maxScrollExtent).toDouble();
       if (pixels != clamped) {
@@ -59,7 +54,7 @@ class _TimelineScrollPosition extends ScrollPositionWithSingleContext {
     // applyContentDimensions has already resolved explicit layout intent. Do
     // not let RangeMaintainingScrollPhysics reinterpret that coordinate using
     // the old window's bounds. Manual scrolling retains Flutter's physics.
-    if (followingBottom() || restoreTarget() != null) return true;
+    if (followingBottom()) return true;
     return super.correctForNewDimensions(oldPosition, newPosition);
   }
 }

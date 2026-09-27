@@ -5,7 +5,7 @@ import 'package:flutter_driver/flutter_driver.dart';
 import 'flutter_driver_session.dart';
 
 Future<void> main(List<String> args) async {
-  if (args.length != 4) {
+  if (args.length < 4) {
     stderr.writeln(
       'usage: stress_start.dart VM_URL PROJECT_DIR PROMPT STAGE_FILE',
     );
@@ -25,7 +25,14 @@ Future<void> main(List<String> args) async {
     await stage('sidebar_ready');
     await driver.tap(find.byValueKey('sidebar-open-project'));
     await stage('project_dialog');
-    await driver.tap(find.byValueKey('add-project-local'));
+    final ssh = args
+        .skip(4)
+        .where((arg) => arg.startsWith('--ssh-target='))
+        .firstOrNull
+        ?.substring('--ssh-target='.length);
+    await driver.tap(
+      find.byValueKey(ssh == null ? 'add-project-local' : 'add-project-remote'),
+    );
     await driver
         .waitFor(
           find.byValueKey('add-project-continue-ready'),
@@ -33,26 +40,54 @@ Future<void> main(List<String> args) async {
         )
         .timeout(const Duration(seconds: 15));
     await driver.tap(find.byValueKey('add-project-continue-ready'));
-    await stage('path_dialog');
-    try {
-      await File('${args[3]}.png').writeAsBytes(
-        await driver.screenshot().timeout(const Duration(seconds: 10)),
+    if (ssh != null) {
+      final target = ssh.split('@');
+      if (target.length != 2) throw ArgumentError('Expected user@host');
+      await driver.tap(find.byValueKey('add-project-new-connection'));
+      for (final field in {
+        'ssh-server-alias-input':
+            'anywork-image-acceptance-${DateTime.now().millisecondsSinceEpoch}',
+        'ssh-server-host-input': target[1],
+        'ssh-server-username-input': target[0],
+      }.entries) {
+        await driver.tap(find.byValueKey(field.key));
+        await driver.enterText(field.value);
+      }
+      await driver.tap(find.byValueKey('ssh-server-save'));
+      await driver.waitFor(
+        find.byValueKey('ssh-directory-list'),
+        timeout: const Duration(seconds: 120),
       );
-      await File('${args[3]}.tree').writeAsString(
-        await driver.renderTree().timeout(const Duration(seconds: 10)),
+      await driver.tap(find.byValueKey('ssh-directory-path-input'));
+      await driver.enterText(args[1]);
+      await driver.tap(find.byValueKey('ssh-directory-go'));
+      await driver.waitFor(
+        find.byValueKey('ssh-directory-current-${args[1]}'),
+        timeout: const Duration(seconds: 30),
       );
-    } catch (_) {
-      // Diagnostic capture cannot decide whether the form itself can continue.
+      await driver.tap(find.byValueKey('ssh-open-current-directory'));
+    } else {
+      await stage('path_dialog');
+      try {
+        await File('${args[3]}.png').writeAsBytes(
+          await driver.screenshot().timeout(const Duration(seconds: 10)),
+        );
+        await File('${args[3]}.tree').writeAsString(
+          await driver.renderTree().timeout(const Duration(seconds: 10)),
+        );
+      } catch (_) {
+        // Diagnostic capture cannot decide whether the form itself can continue.
+      }
+      await driver
+          .waitFor(find.byValueKey('project-path-input'))
+          .timeout(const Duration(seconds: 30));
+      await driver.tap(find.byValueKey('project-path-input'));
+      await driver.enterText(args[1]);
+      await driver
+          .waitFor(find.byValueKey('project-path-submit'))
+          .timeout(const Duration(seconds: 15));
+      await driver.tap(find.byValueKey('project-path-submit'));
     }
-    await driver
-        .waitFor(find.byValueKey('project-path-input'))
-        .timeout(const Duration(seconds: 30));
-    await driver.tap(find.byValueKey('project-path-input'));
-    await driver.enterText(args[1]);
-    await driver
-        .waitFor(find.byValueKey('project-path-submit'))
-        .timeout(const Duration(seconds: 15));
-    await driver.tap(find.byValueKey('project-path-submit'));
     await stage('project_submitted');
     await driver
         .waitFor(
@@ -61,6 +96,18 @@ Future<void> main(List<String> args) async {
         )
         .timeout(const Duration(seconds: 60));
     await stage('composer_ready');
+    if (args.contains('--attach-image')) {
+      await File('${args[3]}-composer.json')
+          .writeAsString(await driver.requestData('snapshot'));
+      await driver.tap(find.byValueKey('composer-attachment-entry'));
+      await driver.tap(find.byValueKey('composer-attachment-local'));
+      await driver.waitFor(
+        find.byValueKey('attachment-draft-rail'),
+        timeout: const Duration(seconds: 30),
+      );
+      await File('${args[3]}-attachment.png')
+          .writeAsBytes(await driver.screenshot());
+    }
     await driver.tap(find.byValueKey('composer-input'));
     await driver.enterText(args[2]);
     await driver

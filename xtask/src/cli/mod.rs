@@ -71,6 +71,9 @@ pub(crate) struct ManualGuiOptions {
     /// Directory for sanitized evidence (defaults to target/manual-gui/<timestamp>-<pid>).
     #[arg(long, value_name = "DIR")]
     pub(crate) output: Option<PathBuf>,
+    /// Run tool-scroll against an explicitly supplied SSH test host (user@host).
+    #[arg(long, value_name = "USER@HOST")]
+    pub(crate) ssh_target: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]

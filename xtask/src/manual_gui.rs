@@ -3,7 +3,10 @@ use crate::paths;
 use crate::process;
 use anyhow::{Context, Result, bail, ensure};
 use pl_model::config::{ProviderConfig, ProviderId};
-use pl_model::model::{ModelInfo, ModelTransportProfile};
+use pl_model::model::{
+    MediaRepresentation, MediaWireFormat, ModelInfo, ModelInputCapability, ModelInputSource,
+    ModelMediaInputProfile, ModelModality, ModelTransportProfile,
+};
 use pl_model::provider::ProviderEndpoint;
 use pl_studio_runtime::config::StudioConfig;
 use sea_orm::sqlx::{
@@ -332,6 +335,10 @@ impl Drop for OwnedProcess {
 }
 
 pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
+    ensure!(
+        options.ssh_target.is_none() || options.scenario == "tool-scroll",
+        "--ssh-target is supported only by --scenario tool-scroll"
+    );
     // The statistics, realtime and history-writer journeys are fully driven by
     // Flutter Driver and reviewed from captured evidence, so they do not require
     // an interactive stdin.
@@ -553,6 +560,11 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     if options.scenario == "stress" {
         gui_command.arg("--profile");
     }
+    if options.scenario == "tool-scroll" {
+        gui_command
+            .arg("--driver-attachment")
+            .arg(app_dir.join("test_driver/fixtures/tool-image.png"));
+    }
     let mut gui = match OwnedProcess::start(&mut gui_command, false) {
         Ok(gui) => gui,
         Err(error) => {
@@ -577,8 +589,11 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
                 .arg(working.path().join("tool-scroll-project"))
                 .stdout(Stdio::from(log.try_clone()?))
                 .stderr(Stdio::from(log));
+            if let Some(target) = &options.ssh_target {
+                command.arg(target);
+            }
             let mut driver = OwnedProcess::start(&mut command, false)?;
-            let deadline = Instant::now() + Duration::from_secs(240);
+            let deadline = Instant::now() + Duration::from_secs(600);
             let status = loop {
                 if let Some(status) = driver.child.try_wait()? {
                     driver.stopped = true;
@@ -851,6 +866,22 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         fixture_state == "completed",
         "fixture {fixture_state}; verdict remains pending"
     );
+    if options.scenario == "tool-scroll" {
+        let counts: Vec<_> = requests
+            .as_ref()
+            .into_iter()
+            .flatten()
+            .map(|request| count_inline_images(&request["body"]))
+            .collect();
+        fs::write(
+            output.join("image-requests.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({"inlineImageCounts": counts}))?,
+        )?;
+        ensure!(
+            counts.iter().any(|count| *count >= 3),
+            "provider did not receive the sent image and both tool-read images"
+        );
+    }
     if options.scenario == "stress" {
         // The probe must have really moved the typed content window toward older
         // content and saturated it at its capacity. Its own reported `capacity`
@@ -1159,6 +1190,18 @@ fn write_config(home: &Path, ready: &FixtureReady) -> Result<()> {
         .binding
         .set_transport(ModelTransportProfile::responses_http());
     model.binding.request.api_model = None;
+    if ready.scenario == "tool-scroll" {
+        model.capabilities.input.push(ModelInputCapability::media(
+            ModelModality::Image,
+            vec![ModelInputSource::Local],
+        ));
+        model.binding.request.media.push(ModelMediaInputProfile {
+            modality: ModelModality::Image,
+            wire: MediaWireFormat::ResponsesInputImage,
+            first_send: vec![MediaRepresentation::DataUrl],
+            replay: vec![MediaRepresentation::DataUrl],
+        });
+    }
     let provider_id = ProviderId::new(format!("gui-fixture-{}", std::process::id()))?;
     let provider = ProviderConfig::from_explicit_models(
         ProviderEndpoint::compatible("Local GUI fixture", &ready.base_url),
@@ -3459,6 +3502,24 @@ fn count_gui_errors(source: &Path) -> Result<usize> {
                 || line.contains("ERROR:flutter/runtime")
         })
         .count())
+}
+
+fn count_inline_images(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Object(fields) => {
+            usize::from(
+                fields.get("type").and_then(serde_json::Value::as_str) == Some("input_image")
+                    && fields
+                        .get("image_url")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|url| {
+                            url.starts_with("data:image/") && url.contains(";base64,")
+                        }),
+            ) + fields.values().map(count_inline_images).sum::<usize>()
+        }
+        serde_json::Value::Array(values) => values.iter().map(count_inline_images).sum(),
+        _ => 0,
+    }
 }
 
 fn sanitize_requests(source: &Path, destination: &Path) -> Result<()> {

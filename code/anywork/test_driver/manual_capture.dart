@@ -98,8 +98,7 @@ Map<String, Object?>? _timelineScroll(Map<String, dynamic> snapshot) {
   final anchor = scroll['anchor'];
   return {
     'threadId': scroll['threadId'],
-    'centerId': scroll['centerId'],
-    'centerIndex': scroll['centerIndex'],
+    'mountedRowCount': scroll['mountedRowCount'],
     'rowCount': scroll['rowCount'],
     'followingBottom': scroll['followingBottom'],
     'detachedByUser': scroll['detachedByUser'],

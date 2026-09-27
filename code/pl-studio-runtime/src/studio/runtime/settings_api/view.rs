@@ -207,6 +207,7 @@ fn custom_model_settings(model: &ModelInfo) -> StudioCustomModelSettings {
         .map(|parameter| parameter.candidates.as_slice())
         .unwrap_or_default();
     StudioCustomModelSettings {
+        input_capabilities: model.capabilities.input.iter().map(Into::into).collect(),
         context_window: model.context_window.unwrap_or(32_000),
         max_output_tokens: model.max_output_tokens.unwrap_or(4_096),
         slug: model.slug.clone(),

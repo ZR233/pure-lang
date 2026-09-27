@@ -8,20 +8,66 @@ import 'tool_probe.dart';
 import 'stress_start.dart' as start;
 
 Future<void> main(List<String> args) async {
-  if (args.length == 3 && args[2] != '--observe-only') {
+  String? remoteProject;
+  if (args.length >= 3 && args[2] != '--observe-only') {
     final fixtures = Directory('${args[2]}/scroll-fixture');
     await fixtures.create(recursive: true);
     for (var i = 0; i < 240; i++) {
       await File('${fixtures.path}/entry-${i.toString().padLeft(3, '0')}.txt')
           .writeAsString('Tool scrolling fixture\n');
     }
+    await File('test_driver/fixtures/tool-image.png')
+        .copy('${args[2]}/tool-image.png');
     final git = await Process.run('git', ['init', '-q', args[2]]);
     if (git.exitCode != 0) throw StateError('Fixture project: ${git.stderr}');
+    if (args.length == 4) {
+      final target = args[3];
+      if (!RegExp(r'^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+$').hasMatch(target)) {
+        throw ArgumentError('Expected SSH user@host');
+      }
+      final created = await Process.run('ssh', [
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'ConnectTimeout=10',
+        target,
+        'mktemp -d /tmp/anywork-image-acceptance-XXXXXXXX',
+      ]);
+      remoteProject = (created.stdout as String).trim();
+      if (created.exitCode != 0 ||
+          !RegExp(r'^/tmp/anywork-image-acceptance-[a-zA-Z0-9]+$')
+              .hasMatch(remoteProject)) {
+        throw StateError('Remote fixture directory: ${created.stderr}');
+      }
+      final copied = await Process.run('scp', [
+        '-q',
+        '-r',
+        '${args[2]}/scroll-fixture',
+        '${args[2]}/tool-image.png',
+        '$target:$remoteProject/',
+      ]);
+      if (copied.exitCode != 0) {
+        throw StateError('Remote fixtures: ${copied.stderr}');
+      }
+      final initialized = await Process.run('ssh', [
+        '-o',
+        'BatchMode=yes',
+        target,
+        'git init -q $remoteProject',
+      ]);
+      if (initialized.exitCode != 0) {
+        throw StateError('Remote git: ${initialized.stderr}');
+      }
+      await File('${args[1]}/remote-project.txt')
+          .writeAsString('$target:$remoteProject\n');
+    }
     await start.main([
       args[0],
-      args[2],
+      remoteProject ?? args[2],
       'Tool scroll short',
       '${args[1]}/start-stage',
+      '--attach-image',
+      if (remoteProject != null) '--ssh-target=${args[3]}',
     ]);
   }
   final driver = await FlutterDriver.connect(dartVmServiceUrl: args[0]);
@@ -48,6 +94,8 @@ Future<void> main(List<String> args) async {
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
+    await File('${output.path}/incomplete-answer.json')
+        .writeAsString(jsonEncode(await snapshot()));
     throw StateError('Tool fixture did not complete: $marker');
   }
 
@@ -62,7 +110,40 @@ Future<void> main(List<String> args) async {
     final viewHeight = view['height'] as num;
     for (var i = 0; i < 80; i++) {
       final geometry = await probe(target, 'observe');
-      final top = ((geometry['samples'] as List).last['top'] as num).toDouble();
+      final sample = (geometry['samples'] as List).last as Map;
+      if (sample['mounted'] == false) {
+        final state = await snapshot();
+        final rows = (state['workspace'] as Map)['timeline'] as List;
+        final key = (target as ByValueKey).keyValue as String;
+        final targetIndex = rows.indexWhere(
+          (row) =>
+              key.contains(row['id'] as String) ||
+              ((row['tools'] as List?) ?? []).any(
+                (tool) => key.contains(tool['itemId'] as String),
+              ),
+        );
+        final anchor = (state['timelineScroll'] as Map)['anchor'] as Map?;
+        final anchorIndex = rows.indexWhere(
+          (row) =>
+              row['id'] == anchor?['itemId'] ||
+              ((row['tools'] as List?) ?? []).any(
+                (tool) => tool['itemId'] == anchor?['itemId'],
+              ),
+        );
+        if (targetIndex < 0 || anchorIndex < 0) {
+          throw StateError('Cannot locate lazy tool row: $key');
+        }
+        await probe(
+          timeline,
+          'wheelOutside',
+          dy:
+              (targetIndex < anchorIndex ? -1 : 1) *
+              viewHeight.toDouble() *
+              0.8,
+        );
+        continue;
+      }
+      final top = (sample['top'] as num).toDouble();
       if ((top - y).abs() < 1) return;
       // A fully clipped sliver has a paint extent of zero; its transform is
       // not a distance-to-item estimate. Traverse by viewport steps until the
@@ -79,7 +160,36 @@ Future<void> main(List<String> args) async {
 
   try {
     await driver.sendCommand(SetFrameSync(false));
-    await waitAnswer('Tool scroll short');
+    final firstAnswer = await waitAnswer('Tool scroll short');
+    final sentImages =
+        ((firstAnswer['workspace'] as Map)['historyAttachments'] as List)
+            .where(
+              (attachment) =>
+                  attachment['source'] != 'tool' &&
+                  attachment['modality'] == 'image',
+            )
+            .toList();
+    if (sentImages.length != 1) throw StateError('Sent image was not archived');
+    final sentImageId = (sentImages.single as Map)['id'] as String;
+    final firstRows = (firstAnswer['workspace'] as Map)['timeline'] as List;
+    await place(
+      find.byValueKey('timeline-block-${firstRows.first['id']}'),
+      ((await probe(timeline, 'observe'))['samples'].last['top'] as num)
+          .toDouble(),
+    );
+    await driver.sendCommand(
+      RawTap(find.byValueKey('history-attachment-$sentImageId')),
+    );
+    await driver.waitFor(find.byValueKey('timeline-image-dialog-$sentImageId'));
+    await File('${output.path}/sent-image-dialog.png')
+        .writeAsBytes(await driver.screenshot());
+    await driver.sendCommand(RawTap(find.byValueKey('timeline-image-close')));
+    evidence['sentImage'] = {
+      'archived': true,
+      'dialogOpened': true,
+      'remoteProject': remoteProject,
+    };
+    await driver.sendCommand(RawTap(find.byValueKey('timeline-jump-latest')));
     for (final kind
         in args.contains('--observe-only')
             ? <String>[]
@@ -90,6 +200,15 @@ Future<void> main(List<String> args) async {
       await waitAnswer('Tool scroll $kind');
     }
     var s = await snapshot();
+    final lazy = s['timelineScroll'] as Map;
+    evidence['lazyRows'] = {
+      'windowRows': lazy['rowCount'],
+      'mountedRows': lazy['mountedRowCount'],
+    };
+    if ((lazy['rowCount'] as num) <= 8 ||
+        (lazy['mountedRowCount'] as num) >= (lazy['rowCount'] as num)) {
+      throw StateError('Long timeline eagerly mounted its whole window');
+    }
     if ((s['timelineWindow'] as Map)['hasOlder'] == true) {
       await driver.requestData('load-older');
       final deadline = DateTime.now().add(const Duration(seconds: 10));
@@ -140,6 +259,58 @@ Future<void> main(List<String> args) async {
                   .firstWhere((r) => r['id'] == row['id'])
               as Map;
       await place(summary, 120);
+      final imageTools = (row['tools'] as List)
+          .where((tool) => tool['name'] == 'view_image')
+          .toList();
+      if (imageTools.isNotEmpty) {
+        final entries = <String>[];
+        for (final tool in imageTools) {
+          final attachments = tool['attachments'] as List;
+          if (tool['status'] != 'succeeded' || attachments.isEmpty) {
+            throw StateError('view_image did not archive its image');
+          }
+          entries.add('${tool['callId']}:${attachments.single['id']}');
+        }
+        final first = entries.first;
+        final toggle = find.byValueKey('view-image-toggle-$first');
+        final thumbnail = find.byValueKey('view-image-thumbnail-$first');
+        await driver.sendCommand(RawTap(toggle));
+        await driver.waitFor(thumbnail, timeout: const Duration(seconds: 10));
+        await driver.sendCommand(RawTap(thumbnail));
+        await driver.waitFor(find.byValueKey('view-image-dialog-$first'));
+        await File('${output.path}/agent-read-image-dialog.png')
+            .writeAsBytes(await driver.screenshot());
+        await driver.sendCommand(
+          RawTap(find.byValueKey('timeline-image-close')),
+        );
+        if ((await probe(
+              find.byValueKey('view-image-thumbnail-${entries.last}'),
+              'observe',
+            ))['samples'].last['mounted'] !=
+            false) {
+          throw StateError('Distinct image calls share expansion state');
+        }
+        // Recycle the containing row, then return without toggling it again.
+        final jump = find.byValueKey('timeline-jump-latest');
+        await driver.sendCommand(RawTap(jump));
+        await driver.waitForAbsent(
+          thumbnail,
+          timeout: const Duration(seconds: 10),
+        );
+        await place(summary, 120);
+        await driver.waitFor(thumbnail, timeout: const Duration(seconds: 10));
+        await File('${output.path}/agent-read-image-recycled.png')
+            .writeAsBytes(await driver.screenshot());
+        await driver.sendCommand(RawTap(toggle));
+        await driver.waitForAbsent(thumbnail);
+        evidence['agentReadImage'] = {
+          'distinctCalls': entries.length,
+          'dialogOpened': true,
+          'survivedRowRecycling': true,
+          'collapsed': true,
+        };
+        await place(summary, 120);
+      }
       final opened = await probe(summary, 'tap');
       final record = <String, Object?>{'index': index, 'groupOpen': opened};
       cases.add(record);
@@ -190,8 +361,8 @@ Future<void> main(List<String> args) async {
       await File('${output.path}/case-$index-collapsed.png')
           .writeAsBytes(await driver.screenshot());
     }
-    // Leave one group open, establish a later center by opening another group,
-    // then read back into the earlier group and expand its nested tool.
+    // Leave one group open, visit a later group, then return to the earlier
+    // group and expand its nested tool after its row has been recycled.
     stdout.writeln('tool_scroll_reverse');
     final earlier = groups[1] as Map;
     final later = groups[3] as Map;
@@ -214,6 +385,68 @@ Future<void> main(List<String> args) async {
         .writeAsBytes(await driver.screenshot());
     await place(earlierTile, 125);
     evidence['reverseCollapse'] = await probe(earlierTile, 'tap');
+    final imageGroup = groups.cast<Map>().firstWhere(
+      (group) =>
+          (group['tools'] as List).any((tool) => tool['name'] == 'view_image'),
+    );
+    final imageTool = (imageGroup['tools'] as List).firstWhere(
+      (tool) => tool['name'] == 'view_image',
+    ) as Map;
+    final imageId =
+        '${imageTool['callId']}:${(imageTool['attachments'] as List).first['id']}';
+    final originalThread = (s['navigation'] as Map)['selectedThreadId'];
+    await driver.sendCommand(RawTap(find.byValueKey('sidebar-new-session')));
+    await driver.waitFor(
+      find.byValueKey('start-page-selectors'),
+      timeout: const Duration(seconds: 10),
+    );
+    await driver.sendCommand(
+      RawTap(find.byValueKey('thread-row-$originalThread')),
+    );
+    final reopenDeadline = DateTime.now().add(const Duration(seconds: 15));
+    while (true) {
+      final reopened = await snapshot();
+      final workspace = reopened['workspace'] as Map?;
+      if (reopened['navigation']['selectedThreadId'] == originalThread &&
+          workspace?['syncState'] == 'ready' &&
+          ((workspace?['timeline'] as List?) ?? []).any(
+            (row) => row['id'] == imageGroup['id'],
+          )) {
+        break;
+      }
+      if (DateTime.now().isAfter(reopenDeadline)) {
+        throw StateError('Historical image window did not reopen');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    await place(
+      find.byValueKey('timeline-tool-group-summary-${imageGroup['id']}'),
+      120,
+    );
+    await driver.sendCommand(
+      RawTap(find.byValueKey('view-image-toggle-$imageId')),
+    );
+    await driver.waitFor(
+      find.byValueKey('view-image-thumbnail-$imageId'),
+      timeout: const Duration(seconds: 10),
+    );
+    await File('${output.path}/agent-read-image-reopened.png')
+        .writeAsBytes(await driver.screenshot());
+    (evidence['agentReadImage'] as Map)['reopenedFromHistory'] = true;
+    await place(
+      find.byValueKey('timeline-block-${firstRows.first['id']}'),
+      ((await probe(timeline, 'observe'))['samples'].last['top'] as num)
+          .toDouble(),
+    );
+    await driver.sendCommand(
+      RawTap(find.byValueKey('history-attachment-$sentImageId')),
+    );
+    await driver.waitFor(find.byValueKey('timeline-image-dialog-$sentImageId'));
+    await File('${output.path}/sent-image-reopened.png')
+        .writeAsBytes(await driver.screenshot());
+    await driver.sendCommand(RawTap(find.byValueKey('timeline-image-close')));
+    (evidence['sentImage'] as Map)['reopenedFromHistory'] = true;
+
     bool headerStable(Object? probe) {
       final samples = (probe as Map)['samples'] as List;
       final initial = samples.first['top'] as num;

@@ -5635,18 +5635,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return BridgeCustomModelSettingsDto(
-      contextWindow: dco_decode_u_64(arr[0]),
-      maxOutputTokens: dco_decode_u_64(arr[1]),
-      slug: dco_decode_String(arr[2]),
-      displayName: dco_decode_String(arr[3]),
-      reasoningEfforts: dco_decode_list_String(arr[4]),
-      baseInstructions: dco_decode_String(arr[5]),
-      wireProtocol: dco_decode_String(arr[6]),
-      supportedConnectionModes: dco_decode_list_String(arr[7]),
-      defaultConnectionMode: dco_decode_String(arr[8]),
+      inputCapabilities: dco_decode_list_bridge_model_input_capability(arr[0]),
+      contextWindow: dco_decode_u_64(arr[1]),
+      maxOutputTokens: dco_decode_u_64(arr[2]),
+      slug: dco_decode_String(arr[3]),
+      displayName: dco_decode_String(arr[4]),
+      reasoningEfforts: dco_decode_list_String(arr[5]),
+      baseInstructions: dco_decode_String(arr[6]),
+      wireProtocol: dco_decode_String(arr[7]),
+      supportedConnectionModes: dco_decode_list_String(arr[8]),
+      defaultConnectionMode: dco_decode_String(arr[9]),
     );
   }
 
@@ -12380,6 +12381,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_inputCapabilities = sse_decode_list_bridge_model_input_capability(
+      deserializer,
+    );
     var var_contextWindow = sse_decode_u_64(deserializer);
     var var_maxOutputTokens = sse_decode_u_64(deserializer);
     var var_slug = sse_decode_String(deserializer);
@@ -12390,6 +12394,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_supportedConnectionModes = sse_decode_list_String(deserializer);
     var var_defaultConnectionMode = sse_decode_String(deserializer);
     return BridgeCustomModelSettingsDto(
+      inputCapabilities: var_inputCapabilities,
       contextWindow: var_contextWindow,
       maxOutputTokens: var_maxOutputTokens,
       slug: var_slug,
@@ -20902,6 +20907,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_bridge_model_input_capability(
+      self.inputCapabilities,
+      serializer,
+    );
     sse_encode_u_64(self.contextWindow, serializer);
     sse_encode_u_64(self.maxOutputTokens, serializer);
     sse_encode_String(self.slug, serializer);

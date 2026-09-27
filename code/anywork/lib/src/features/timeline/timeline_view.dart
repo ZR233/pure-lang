@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
+import 'package:super_sliver_list/super_sliver_list.dart';
 
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
@@ -121,18 +122,12 @@ class _TimelineViewState extends State<TimelineView> {
   static const _bottomThreshold = 80.0;
 
   late final ScrollController _controller = _TimelineScrollController(
-    () =>
-        _followingBottom &&
-        !_detachedByUser &&
-        !_pointerHeld &&
-        _centerId == null,
-    () {
-      final anchor = _pendingRestore.anchor;
-      return _restoreClamped && !_pointerHeld && anchor != null
-          ? _restoreTargetPixels(anchor)
-          : null;
-    },
+    () => _followingBottom && !_detachedByUser && !_pointerHeld,
   );
+  final ListController _listController = ListController();
+  Timer? _streamingIdleTimer;
+  bool _deferStreamingUpdates = false;
+  int _restoreAttempts = 0;
   final Map<String, _TimelineScrollSnapshot> _threadScroll = {};
   final Set<String> _expandedReasoningGroups = {};
   final Set<String> _expandedToolGroups = {};
@@ -142,6 +137,8 @@ class _TimelineViewState extends State<TimelineView> {
   bool _programmaticScroll = false;
   bool _pointerHeld = false;
   bool _keyboardScrolling = false;
+  bool _userScrollActive = false;
+  double _textScale = 1;
   bool _resumeAfterNewerPage = false;
   bool _bottomScrollScheduled = false;
   bool _olderLoadRequested = false;
@@ -171,7 +168,6 @@ class _TimelineViewState extends State<TimelineView> {
   /// - 计数不增长 → 手势/命中测试没有到达滚动视图，问题不在锚点逻辑里。
   int _userDragUpdates = 0;
 
-  final _centerKey = GlobalKey();
   final _viewportKey = GlobalKey();
   final Map<String, GlobalKey> _rowKeys = {};
   final Map<
@@ -185,7 +181,6 @@ class _TimelineViewState extends State<TimelineView> {
     })
   >
   _rowWidgets = {};
-  String? _centerId;
 
   /// 最近一次拖动方向是否朝更早的内容（`ScrollDirection.forward`）。
   ///
@@ -279,6 +274,8 @@ class _TimelineViewState extends State<TimelineView> {
       _lastSelectedText = null;
       _imageLoader.clear();
       _bottomSlack = 0;
+      _streamingIdleTimer?.cancel();
+      _deferStreamingUpdates = false;
       _restoreThreadState();
       _contentVersion = _timelineContentVersion(
         widget.rows,
@@ -328,6 +325,18 @@ class _TimelineViewState extends State<TimelineView> {
     final anchor = restoreIntent ?? _captureAnchor(rows: oldWidget.rows);
     final hasNewEvent = _hasNewTimelineEvent(oldWidget, widget);
     _contentVersion = nextContentVersion;
+    if (_listController.isAttached) {
+      for (var index = 0; index < oldWidget.rows.length; index++) {
+        if (index >= _listController.numberOfItems) break;
+        if (index >= widget.rows.length ||
+            oldWidget.rows[index].id != widget.rows[index].id ||
+            oldWidget.rows[index].renderVersion !=
+                widget.rows[index].renderVersion) {
+          _listController.invalidateExtent(index);
+        }
+      }
+    }
+
     // 贴在窗口末尾时，内容变化（追加 / 历史分页 / 窗口替换）都保持跟随：`hasNewer`
     // 只表示窗口之外还有更新条目（由「跳到最新」入口表达），不代表读者离开了末尾。
     // 之前这里要求 `!hasNewer`，于是历史分页会把跟随态写成非跟随锚点，重开时又围绕
@@ -354,6 +363,8 @@ class _TimelineViewState extends State<TimelineView> {
     StudioDriverState.publishTimelineScroll(null);
     _controller.removeListener(_handleScrollPositionChanged);
     _controller.dispose();
+    _listController.dispose();
+    _streamingIdleTimer?.cancel();
     _loadingTimer?.cancel();
     _imageLoader.clear();
     super.dispose();
@@ -361,6 +372,7 @@ class _TimelineViewState extends State<TimelineView> {
 
   @override
   Widget build(BuildContext context) {
+    _textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
     _schedulePrefetch();
     final activeTurn = widget.turn?.state.isBusy == true ? widget.turn : null;
     if (widget.rows.isEmpty &&
@@ -385,6 +397,7 @@ class _TimelineViewState extends State<TimelineView> {
     final activeIds = rows.map((row) => row.id).toSet();
     _rowKeys.removeWhere((id, _) => !activeIds.contains(id));
     _rowWidgets.removeWhere((id, _) => !activeIds.contains(id));
+    _imageLoader.retainWindow(widget.threadId, rows);
     // 展开态按稳定分组身份保存，但只保留仍在窗口内的身份：历史分页淘汰/切回
     // 不留下再也用不到的 id，避免集合无界增长。
     _expandedReasoningGroups.retainAll({
@@ -469,10 +482,6 @@ class _TimelineViewState extends State<TimelineView> {
           if (anchor != null) _prepareAnchorRestore(anchor);
         }
         _viewportWidth = constraints.maxWidth;
-        final centerIndex = math.max(
-          0,
-          rows.indexWhere((row) => row.id == _centerId),
-        );
         return SizedBox(
           key: _viewportKey,
           child: Listener(
@@ -481,6 +490,7 @@ class _TimelineViewState extends State<TimelineView> {
               // 按下即暂停跟随，给滚动条与内容手势相同的优先级。
               _pointerHeld = true;
               _restoreClamped = false;
+              _deferStreamingDuringScroll();
             },
             onPointerUp: (_) => _releasePointer(),
             onPointerCancel: (_) => _releasePointer(),
@@ -497,6 +507,8 @@ class _TimelineViewState extends State<TimelineView> {
                         notification.depth == 0 &&
                         !_programmaticScroll) {
                       _keyboardScrolling = false;
+                      _userScrollActive = false;
+                      _resumeStreamingAfterIdle();
                       _saveThreadState(widget.threadId);
                     }
                     return false;
@@ -508,42 +520,34 @@ class _TimelineViewState extends State<TimelineView> {
                       scrollBehavior: ScrollConfiguration.of(context)
                           .copyWith(scrollbars: false),
                       physics: const AlwaysScrollableScrollPhysics(),
-                      center: _centerKey,
                       key: StudioDriverKeys.timeline,
                       controller: _controller,
+                      scrollCacheExtent: const ScrollCacheExtent.pixels(600),
                       slivers: [
-                        // SliverMainAxisGroup already traverses its children in
-                        // reverse growth order; keep chronological source order.
-                        _itemSliver(
-                          rows.take(centerIndex).toList(),
-                          isCenter: false,
-                        ),
-                        // 正向区（center 起）整体贴底：留白只在布局期以
-                        // `paintOrigin` 表达，不进 `scrollExtent`，因此既不会
-                        // 变成可滚动内容，也不会改变 item 锚点。只有反向区为空
-                        // （center 就是第一行）时才启用贴底；上翻历史拆出反向区后
-                        // 几何与普通 sliver 完全一致。
                         _BottomAlignedSliver(
-                          key: _centerKey,
-                          alignShortContentToBottom: centerIndex == 0,
                           onSlackChanged: _handleBottomSlackChanged,
-                          child: SliverMainAxisGroup(
-                            slivers: [
-                              _itemSliver(
-                                rows.skip(centerIndex).toList(),
-                                isCenter: true,
+                          child: SliverPadding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            sliver: SuperSliverList(
+                              key: ValueKey(widget.threadId),
+                              listController: _listController,
+                              extentEstimation: _estimateRowExtent,
+                              delayPopulatingCacheArea: false,
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) => index == rows.length
+                                    ? _TimelineTail(planSummary: planSummary)
+                                    : _buildRow(rows[index]),
+                                childCount: rows.length + 1,
+                                addAutomaticKeepAlives: false,
+                                findChildIndexCallback: (key) {
+                                  if (key is! ValueKey<String>) return null;
+                                  final index = rows.indexWhere(
+                                    (row) => row.id == key.value,
+                                  );
+                                  return index < 0 ? null : index;
+                                },
                               ),
-                              SliverPadding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 24,
-                                ),
-                                sliver: SliverToBoxAdapter(
-                                  child: _TimelineTail(
-                                    planSummary: planSummary,
-                                  ),
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ],
@@ -615,6 +619,8 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _handleKeyboardScroll(ScrollDirection direction) {
+    _deferStreamingDuringScroll();
+    _resumeStreamingAfterIdle();
     _keyboardScrolling = true;
     _restoreClamped = false;
     _programmaticScroll = false;
@@ -629,14 +635,21 @@ class _TimelineViewState extends State<TimelineView> {
 
   void _releasePointer() {
     _pointerHeld = false;
+    _resumeStreamingAfterIdle();
     _scheduleGeometrySync();
     _schedulePrefetch();
     if (_followingBottom && !_detachedByUser) _scheduleBottomScroll();
   }
 
   bool _handleUserScroll(UserScrollNotification notification) {
+    if (notification.depth == 0) {
+      _userScrollActive = notification.direction != ScrollDirection.idle;
+      if (!_userScrollActive) _resumeStreamingAfterIdle();
+    }
     if (notification.depth == 0 &&
         notification.direction != ScrollDirection.idle) {
+      _deferStreamingDuringScroll();
+      _resumeStreamingAfterIdle();
       // 不足一屏时 pixels 不会变化，但用户仍能选择向旧/向新补页。
       _restoreClamped = false;
       _handleScrollPositionChanged(direction: notification.direction);
@@ -649,6 +662,7 @@ class _TimelineViewState extends State<TimelineView> {
   /// 同时识别键盘/滚动条引起的位移；内层滚动不改变外层阅读意图。
   bool _handleScrollUpdate(ScrollUpdateNotification notification) {
     if (notification.depth != 0) return false;
+    if (!_programmaticScroll) _resumeStreamingAfterIdle();
     if (notification.dragDetails != null) {
       _userDragUpdates += 1;
       // 读者主动接管位置：放弃尚未被布局表达的恢复意图（不再回落到原锚点）。
@@ -703,10 +717,7 @@ class _TimelineViewState extends State<TimelineView> {
     // 的事实：据此恢复跟随会直接吞掉待恢复的锚点。
     final nearBottom = _isNearBottom() && !widget.hasNewer && !_restoreClamped;
     if (nearBottom && direction == ScrollDirection.reverse && !pullingAway) {
-      if (!_followingBottom ||
-          _detachedByUser ||
-          _pendingNewEvents != 0 ||
-          _centerId != null) {
+      if (!_followingBottom || _detachedByUser || _pendingNewEvents != 0) {
         if (_pointerHeld) {
           _resumeAfterNewerPage = true;
           _saveThreadState(widget.threadId);
@@ -749,12 +760,6 @@ class _TimelineViewState extends State<TimelineView> {
 
   void _scrollToBottom() {
     if (!_controller.hasClients || _pointerHeld) return;
-    if (_centerId != null) {
-      // 有 `center` 拆分时“末尾”不能用当前 maxScrollExtent 表达：拆分下正向区只覆盖
-      // 内容尾部，max 已被钳成 0。归一拆分并按清掉后的几何落到末尾。
-      _followLatestBottom();
-      return;
-    }
     final position = _controller.position;
     if ((position.pixels - position.maxScrollExtent).abs() > 0.5) {
       _programmaticScroll = true;
@@ -792,64 +797,39 @@ class _TimelineViewState extends State<TimelineView> {
   void _jumpToLatest() {
     // 显式跳最新后不立即向旧自动补页；下一次上翻手势再恢复向旧阅读。
     _scrollingOlder = false;
-    // 跟随最新必须归一 `center` 拆分，否则“跳到最新”只会落到拆分下那个被钳成 0 的
-    // maxScrollExtent 上（也就是停在拆分点，而不是内容末尾）。
     _followLatestBottom();
     widget.onJumpToLatest?.call();
     _scheduleBottomScroll();
   }
 
-  /// Explicitly resume following; ordinary content growth is handled in layout.
   void _followLatestBottom() {
-    final needsReset =
-        !_followingBottom ||
-        _detachedByUser ||
-        _pendingNewEvents != 0 ||
-        _centerId != null;
-    if (!needsReset) return;
-    if (_centerId != null && _controller.hasClients) {
-      final target = _followBottomPixels(_controller.position);
-      if (target != null) {
-        _programmaticScroll = true;
-        try {
-          _controller.position.correctPixels(target);
-        } finally {
-          _programmaticScroll = false;
-        }
-      }
-    }
     setState(() {
       _followingBottom = true;
       _detachedByUser = false;
       _pendingNewEvents = 0;
-      _centerId = null;
-      // 明确的“跟随最新”取代尚未表达的阅读锚点。
       _restoreClamped = false;
       _resumeAfterNewerPage = false;
+      _deferStreamingUpdates = false;
     });
+    _scheduleBottomScroll();
     _saveThreadState(widget.threadId);
   }
 
-  /// 清掉 `center` 拆分后，内容末尾对应的滚动位置。
-  ///
-  /// 正向区独占内容后 `maxScrollExtent = 内容高度 - 视口高度`；内容高度 = 反向区滚动
-  /// 范围（`minScrollExtent` 的绝对值）+ 正向区滚动范围（`center` sliver 的
-  /// `geometry.scrollExtent`，含收束区）。内容比视口短时为 0：此时贴底由
-  /// [_BottomAlignedSliver] 直接表达。
-  double? _followBottomPixels(ScrollPosition position) {
-    final forward = _forwardScrollExtent();
-    if (forward == null) return null;
-    final reverse = position.minScrollExtent < 0
-        ? -position.minScrollExtent
-        : 0.0;
-    final bottom = reverse + forward - position.viewportDimension;
-    return bottom > 0 ? bottom : 0.0;
+  void _deferStreamingDuringScroll() {
+    _streamingIdleTimer?.cancel();
+    if (_detachedByUser || !_isNearBottom()) _deferStreamingUpdates = true;
   }
 
-  /// `center` 起正向区（消息行 + 收束区）的滚动范围。
-  double? _forwardScrollExtent() {
-    final sliver = _centerKey.currentContext?.findRenderObject();
-    return sliver is RenderSliver ? sliver.geometry?.scrollExtent : null;
+  void _resumeStreamingAfterIdle() {
+    _streamingIdleTimer?.cancel();
+    _streamingIdleTimer = Timer(const Duration(milliseconds: 160), () {
+      if (!mounted || !_deferStreamingUpdates || _pointerHeld) return;
+      final anchor = _captureAnchor();
+      setState(() {
+        _deferStreamingUpdates = false;
+        if (_detachedByUser && anchor != null) _prepareAnchorRestore(anchor);
+      });
+    });
   }
 
   void _toggleReasoning(String groupId) {
@@ -910,9 +890,7 @@ class _TimelineViewState extends State<TimelineView> {
     if (!_detachedByUser || _restoreClamped) return;
     final anchor = _captureAnchor();
     if (anchor == null) return;
-    // An ExpansionTile owns its animation, but the timeline owns reading
-    // coordinates. Rebase before its first layout so a reverse-growing sliver
-    // cannot move the clicked header by the animated detail height.
+    // Capture the visible item before the detail changes its height.
     setState(() => _prepareAnchorRestore(anchor));
   }
 
@@ -941,14 +919,8 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _syncTimelineGeometry() {
-    final position = _controller.hasClients ? _controller.position : null;
-    if (position != null && !_pointerHeld && _hasDegenerateSplit(position)) {
-      // 拆分几何表达不了这个阅读位置：换成未拆分布局并按同一坐标换算（见
-      // [_collapseSplitToForwardLayout]），不把它当成“想跟随最新”。
-      _collapseSplitToForwardLayout(position);
-      return;
-    }
-    // 布局已经负责落位；这里只确认恢复完成，再发布位置，不启动新的滚动活动。
+    _restoreVisibleAnchor();
+    // 索引定位和真实几何校正后确认恢复完成，再发布位置。
     if (_refreshRestorePending()) _saveThreadState(widget.threadId);
     if (_resumeAfterNewerPage &&
         !_programmaticScroll &&
@@ -1015,90 +987,15 @@ class _TimelineViewState extends State<TimelineView> {
     if (ids.isNotEmpty) onVisible(ids);
   }
 
-  /// 是否处于“有 `center` 拆分 + 正向区填不满视口”的退化几何。
-  ///
-  /// 判据只看本帧实际几何：`pixels >= 0` 时反向区绘制范围为 0（视口按
-  /// `centerOffset = -pixels` 给负向区分配 paint extent），正向区自身又比视口短，
-  /// 于是内容底部到视口底部之间必然空着。用户主动上翻（`pixels < 0`）时反向区可见，
-  /// 不满足该判据，阅读位置不会被抢。`center` 落在首行时没有反向区，几何与普通正向
-  /// 列表一致（贴底由 [_BottomAlignedSliver] 表达），同样不在此列。
-  ///
-  /// 这只描述几何能不能表达当前阅读位置，与“读者是否想跟随最新”无关：旧窗口
-  /// （`hasNewer == true`）同样可能退化，修复方式是换布局表示而不是改跟随状态。
-  bool _hasDegenerateSplit(ScrollPosition position) {
-    if (_centerId == null || position.pixels < -0.5) return false;
-    if (widget.rows.indexWhere((row) => row.id == _centerId) <= 0) return false;
-    final forward = _forwardScrollExtent();
-    if (forward == null) return false;
-    return forward < position.viewportDimension - 0.5;
-  }
-
-  /// 正向区比视口短时换布局表示：整个窗口行序回到正向区，同一阅读位置按未拆分坐标换算。
-  ///
-  /// 只转换坐标与布局，不判定读者想跟随最新，也不改 `followingBottom/detachedByUser`：
-  /// 拆分几何里视口顶部对应内容偏移 `pixels`，未拆分布局把反向区的内容也算进同一串行，
-  /// 因此同一视觉位置就是 `-minScrollExtent + pixels`（`-minScrollExtent` 即拆分下排在
-  /// `center` 之前的行高度之和）。换算结果按未拆分布局的滚动范围钳位——未拆分布局的
-  /// `maxScrollExtent` 就是内容末尾（见 [_followBottomPixels]），所以正向区短于一屏时
-  /// 落点是内容末尾：锚点行仍在视口内，只是不再在视口顶部硬留一片空白。
-  ///
-  /// 目标值用**清掉拆分后**的几何算好后直接写入 `pixels`，因此下一帧就是最终位置，
-  /// 不存在“先停在拆分点再跳”的中间帧。
-  void _collapseSplitToForwardLayout(ScrollPosition position) {
-    final reverse = position.minScrollExtent < 0
-        ? position.minScrollExtent
-        : 0.0;
-    final forwardMax = math.max(
-      0.0,
-      _followBottomPixels(position) ?? position.pixels,
-    );
-    final target = (position.pixels - reverse)
-        .clamp(0.0, forwardMax)
-        .toDouble();
-    _programmaticScroll = true;
-    try {
-      position.correctPixels(target);
-    } finally {
-      _programmaticScroll = false;
-    }
-    setState(() {
-      _centerId = null;
-      // The short forward half cannot express the old split coordinate. The
-      // equivalent clamped forward layout is now the completed restoration.
-      _restoreClamped = false;
-    });
-    // 落位后的阅读位置就是新锚点，同步给外层，避免下一次内容变化又拿旧的末行锚点重建拆分。
-    _saveThreadState(widget.threadId);
-  }
-
-  /// 发布只读滚动几何诊断（驱动快照 `timelineScroll`）。
-  ///
-  /// 读取方式：`cargo xtask run-gui --driver` 后发 Flutter Driver 的 `snapshot` 命令
-  /// （`flutter_driver_command: {"command":"snapshot"}`），取 `timelineScroll` 字段：
-  /// `centerId/centerIndex`（是否仍有拆分）、`followingBottom/detachedByUser`、
-  /// `pixels/minScrollExtent/maxScrollExtent/viewportDimension/extentAfter`（末尾是否
-  /// 贴底、内容是否填满视口：贴底即 `extentAfter ≈ 0`，短内容即 `maxScrollExtent == 0`
-  /// 且 `pixels == 0`）、`bottomSlack` 与当前 `anchor`；
-  /// `programmaticScroll`（当前是否把滚动当成程序化滚动忽略）与 `userDragUpdates`
-  /// （真实拖动累计次数）。定位“上翻历史不动”时先看后两个字段：拖动后 `userDragUpdates`
-  /// 增长而 `pixels` 没变，说明手势到达了滚动视图、位置被本状态机复位；不增长则说明手势
-  /// 没有到达滚动视图，与锚点/贴底几何无关。
-  ///
-  /// `restorePending`/`restoreAnchor` 描述“切回会话后锚点恢复是否还等正文长度”，语义是
-  /// **帧末按实际滚动范围复核过的**（见 [_refreshRestorePending]）：正文先以有界预览出现时
-  /// 目标 offset 会被钳位，此时 `restorePending` 为 `true`、`restoreAnchor` 是读者的原始
-  /// 身份 + offset，而 `anchor` 只是钳位结果；完整正文把滚动范围撑高、UI 重新落位之后
-  /// `restorePending` 归 `false`，`anchor` 就是读者原来的身份 + offset（`== restoreAnchor`）。
-  /// 读者主动接管位置（拖动 / 滚轮 / 跳最新）会直接清掉待恢复意图，此时 `restorePending`
-  /// 同样归 `false`，`anchor` 是读者接管后的位置。
+  /// Driver reports both window size and actually mounted lazy rows.
   void _publishScrollDiagnostic() {
     final position = _controller.hasClients ? _controller.position : null;
-    final centerIndex = widget.rows.indexWhere((row) => row.id == _centerId);
     StudioDriverState.publishTimelineScroll(
       TimelineScrollDiagnostic(
         threadId: widget.threadId,
-        centerId: _centerId,
-        centerIndex: _centerId == null ? -1 : math.max(0, centerIndex),
+        mountedRowCount: _rowKeys.values
+            .where((key) => key.currentContext != null)
+            .length,
         rowCount: widget.rows.length,
         followingBottom: _followingBottom,
         detachedByUser: _detachedByUser,
@@ -1111,13 +1008,9 @@ class _TimelineViewState extends State<TimelineView> {
         bottomSlack: _bottomSlack,
         hasNewer: widget.hasNewer,
         showJumpToLatest: _showJumpToLatest,
-        // 只读诊断：当前是否把滚动通知当成程序化滚动忽略（见 [_restorePendingPosition]），
-        // 以及真实拖动累计观测到的滚动更新次数（见 [_userDragUpdates]）。
         programmaticScroll: _programmaticScroll,
         userDragUpdates: _userDragUpdates,
         anchor: _captureAnchor(),
-        // 只读诊断：恢复意图是否还没被当前布局表达（正文仍是预览 → 目标被钳位，等完整正文
-        // 撑高滚动范围后重新落位，见 [_refreshRestorePending]）。
         restorePending: _restoreClamped,
         restoreAnchor: _pendingRestore.anchor,
       ),
@@ -1129,119 +1022,107 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _prepareAnchorRestore(TimelineAnchor anchor) {
-    final rowId = _anchorRowId(anchor.itemId);
-    if (rowId == null) return;
-    _programmaticScroll = true;
-    if (_controller.hasClients) {
-      _controller.position.correctPixels(-anchor.offset);
-    }
-    _centerId = rowId;
+    if (_pointerHeld || _keyboardScrolling || _userScrollActive) return;
     _pendingRestore = _TimelineRestore.anchor(anchor);
     _restoreClamped = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _restorePendingPosition();
-    });
+    _restoreAttempts = 0;
+    _scheduleGeometrySync();
   }
 
-  /// 恢复本线程的阅读位置。
-  ///
-  /// 跟随底部时**不做 center 拆分**：`_centerId` 留空，整个窗口都落在正向区，
-  /// 贴底几何（[_BottomAlignedSliver]）才能成立，短会话重开后也贴底而不是“内容在
-  /// 顶部 + 下方大块空白”。`center` 拆分只对“已脱离底部、正在上翻历史”的阅读位置
-  /// 有意义，那种状态按记录下来的**身份 + offset** 原样恢复，反向区与 item 锚点语义
-  /// 不变；锚点行就是窗口末行时同样成立（那条末行可能是一条高于视口的长答复，读者正停
-  /// 在它的开头/中间）。
-  ///
-  /// 拆分几何表达不了这个位置（正向区比视口短）时不丢锚点：由 [_syncTimelineGeometry]
-  /// 换成未拆分布局并按同一坐标换算（见 [_collapseSplitToForwardLayout]）。锚点行还没
-  /// 进入窗口时先留空 `center`，由 [didUpdateWidget] 在行到位后按同一身份补建。
   void _restoreThreadState() {
-    _programmaticScroll = true;
+    _programmaticScroll = false;
     _pointerHeld = false;
     _keyboardScrolling = false;
+    _userScrollActive = false;
     _resumeAfterNewerPage = false;
     _scrollingOlder = true;
     final snapshot = _threadScroll[widget.threadId];
     final anchor = widget.anchor ?? snapshot?.anchor;
-    final detachedAnchor = anchor != null && !anchor.followingBottom
-        ? anchor
-        : null;
-    final anchorRowId = detachedAnchor == null
-        ? null
-        : _anchorRowId(detachedAnchor.itemId);
-    if (detachedAnchor == null) {
-      _followingBottom = true;
-      _detachedByUser = false;
-      _pendingNewEvents = 0;
-      _centerId = null;
-      _pendingRestore = const _TimelineRestore.bottom();
-      _restoreClamped = false;
-    } else {
-      // 读者的明确阅读意图：身份 + offset，且非跟随。
-      _followingBottom = false;
-      _detachedByUser = true;
-      _pendingNewEvents = snapshot?.pendingNewEvents ?? 0;
-      if (anchorRowId != null && _controller.hasClients) {
-        _controller.position.correctPixels(-detachedAnchor.offset);
-      }
-      _centerId = anchorRowId;
-      _pendingRestore = _TimelineRestore.anchor(detachedAnchor);
-      // 换会话/重开时不能沿用上一会话的旧标记：意图刚建立，还没经本会话的几何复核，
-      // 先当作“未被表达”，由帧末的 [_refreshRestorePending] 按实际滚动范围确认或保持。
-      _restoreClamped = true;
-    }
+    final detached = anchor != null && !anchor.followingBottom;
+    _followingBottom = !detached;
+    _detachedByUser = detached;
+    _pendingNewEvents = detached ? snapshot?.pendingNewEvents ?? 0 : 0;
+    _pendingRestore = detached
+        ? _TimelineRestore.anchor(anchor)
+        : const _TimelineRestore.bottom();
+    _restoreClamped = detached;
+    _restoreAttempts = 0;
     _olderLoadRequested = false;
     _newerLoadRequested = false;
     _updateLoadingIndicator();
   }
 
   void _restorePendingPosition() {
-    // Layout owns the coordinate. End suppression even for an empty view so
-    // later user input cannot get stuck classified as programmatic scrolling.
-    _programmaticScroll = false;
-    if (_refreshRestorePending()) _saveThreadState(widget.threadId);
     _scheduleGeometrySync();
     _schedulePrefetch();
   }
 
-  /// 当前布局下把锚点行落到记录 offset 需要的滚动位置；本帧表达不了时为 `null`。
-  ///
-  /// 锚点行必须就是 `center` 拆分点（正向区首行，其内容偏移为 0），此时行顶的视觉偏移
-  /// 恒为 `-pixels`，所以 `-offset` 就是目标滚动量。行还没进入窗口、或退化几何已经把拆分
-  /// 换成未拆分布局（见 [_collapseSplitToForwardLayout]）时返回 `null`：前者等 [didUpdateWidget]
-  /// 在行到位后按同一身份补建拆分，后者由同一入口在内容变化时按同一身份重建。
-  double? _restoreTargetPixels(TimelineAnchor anchor) {
-    if (_centerId == null || _centerId != _anchorRowId(anchor.itemId)) {
-      return null;
+  /// Locate an unbuilt row by index, then correct against its painted position.
+  /// A bounded number of frames settles estimates. A still-short preview retains
+  /// the intent until its canonical body arrives; it never spins a frame loop.
+  void _restoreVisibleAnchor() {
+    if (!_restoreClamped ||
+        _pointerHeld ||
+        _userScrollActive ||
+        _keyboardScrolling ||
+        !_controller.hasClients ||
+        !_listController.isAttached ||
+        _restoreAttempts >= 3) {
+      return;
     }
-    return -anchor.offset;
+    final anchor = _pendingRestore.anchor;
+    if (anchor == null) return;
+    final rowId = _anchorRowId(anchor.itemId);
+    final index = widget.rows.indexWhere((row) => row.id == rowId);
+    if (index < 0) return;
+    _restoreAttempts++;
+    _programmaticScroll = true;
+    try {
+      final target = _restoreTargetPixels(anchor);
+      if (target == null) {
+        _listController.jumpToItem(
+          index: index,
+          scrollController: _controller,
+          alignment: 0,
+        );
+      } else {
+        final position = _controller.position;
+        final clamped = target
+            .clamp(position.minScrollExtent, position.maxScrollExtent)
+            .toDouble();
+        if ((position.pixels - clamped).abs() > 0.5) {
+          _controller.jumpTo(clamped);
+        }
+      }
+    } finally {
+      _programmaticScroll = false;
+    }
+    _scheduleGeometrySync();
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
-  /// Complete restoration only after layout has expressed the requested offset.
-  /// A preview may still clamp it; user input cancels the pending intent.
+  double? _restoreTargetPixels(TimelineAnchor anchor) {
+    final rowId = _anchorRowId(anchor.itemId);
+    final box = _rowKeys[rowId]?.currentContext?.findRenderObject();
+    final viewport = _viewportKey.currentContext?.findRenderObject();
+    if (box is! RenderBox ||
+        !box.hasSize ||
+        !box.attached ||
+        viewport is! RenderBox ||
+        !_controller.hasClients) {
+      return null;
+    }
+    final top =
+        box.localToGlobal(Offset.zero, ancestor: viewport).dy - _bottomSlack;
+    return _controller.position.pixels + top - anchor.offset;
+  }
+
   bool _refreshRestorePending() {
-    if (!_restoreClamped) return false;
+    if (!_restoreClamped || _pointerHeld) return false;
     final anchor = _pendingRestore.anchor;
-    if (anchor == null) {
-      // 没有阅读意图（跟随底部）：没有待表达的东西。
-      _restoreClamped = false;
-      return false;
-    }
-    if (!_controller.hasClients) return false;
-    // 明确的“跟随最新”已经取代尚未表达的阅读意图（例如恢复期间按了「跳到最新」）。
-    if (_followingBottom && !_detachedByUser) {
-      _restoreClamped = false;
-      return false;
-    }
+    if (anchor == null || !_controller.hasClients) return false;
     final target = _restoreTargetPixels(anchor);
-    if (target == null) return false;
-    final position = _controller.position;
-    final clamped = target
-        .clamp(position.minScrollExtent, position.maxScrollExtent)
-        .toDouble();
-    if ((clamped - target).abs() > 0.5 ||
-        (position.pixels - target).abs() > 0.5) {
-      // 正文仍是有界预览：滚动范围还表达不了目标，保持 pending，等它撑高后的帧末复核。
+    if (target == null || (_controller.position.pixels - target).abs() > 0.5) {
       return false;
     }
     _restoreClamped = false;

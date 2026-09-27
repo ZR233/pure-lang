@@ -400,25 +400,7 @@ fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
             .to_string(),
         },
         capabilities: ModelCapabilitiesDto {
-            input: capabilities
-                .input
-                .iter()
-                .map(|capability| ModelInputCapabilityDto {
-                    modality: modality_descriptor(capability.modality),
-                    sources: capability
-                        .sources
-                        .iter()
-                        .copied()
-                        .map(input_source_descriptor)
-                        .collect(),
-                    max_count: capability.limits.max_count,
-                    max_bytes: capability.limits.max_bytes,
-                    max_total_bytes: capability.limits.max_total_bytes,
-                    max_width: capability.limits.max_width,
-                    max_height: capability.limits.max_height,
-                    media_types: capability.limits.media_types.clone(),
-                })
-                .collect(),
+            input: capabilities.input.iter().map(Into::into).collect(),
             output: capabilities
                 .output
                 .iter()
@@ -470,4 +452,24 @@ fn stable_revision(bytes: &[u8]) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("{hash:016x}")
+}
+
+impl From<&crate::model::ModelInputCapability> for ModelInputCapabilityDto {
+    fn from(capability: &crate::model::ModelInputCapability) -> Self {
+        Self {
+            modality: modality_descriptor(capability.modality),
+            sources: capability
+                .sources
+                .iter()
+                .copied()
+                .map(input_source_descriptor)
+                .collect(),
+            max_count: capability.limits.max_count,
+            max_bytes: capability.limits.max_bytes,
+            max_total_bytes: capability.limits.max_total_bytes,
+            max_width: capability.limits.max_width,
+            max_height: capability.limits.max_height,
+            media_types: capability.limits.media_types.clone(),
+        }
+    }
 }

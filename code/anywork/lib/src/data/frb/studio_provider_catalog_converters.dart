@@ -58,26 +58,9 @@ ProviderModelView _providerModelFromCatalog(frb.BridgeModelDescriptor model) {
     contextWindow: model.contextWindow?.toInt(),
     maxContextWindow: model.maxContextWindow?.toInt(),
     maxOutputTokens: model.maxOutputTokens?.toInt(),
-    inputCapabilities: [
-      for (final capability in model.capabilities.input)
-        ModelInputCapabilityView(
-          modality: _modelModalityFromFrb(capability.modality),
-          sources: [
-            for (final source in capability.sources)
-              switch (source) {
-                frb.BridgeModelInputSource.local => ModelInputSourceView.local,
-                frb.BridgeModelInputSource.remoteUrl =>
-                  ModelInputSourceView.remoteUrl,
-              },
-          ],
-          maxCount: capability.maxCount,
-          maxBytes: capability.maxBytes?.toInt(),
-          maxTotalBytes: capability.maxTotalBytes?.toInt(),
-          maxWidth: capability.maxWidth,
-          maxHeight: capability.maxHeight,
-          mediaTypes: capability.mediaTypes,
-        ),
-    ],
+    inputCapabilities: model.capabilities.input
+        .map(_modelInputCapabilityFromFrb)
+        .toList(),
     outputModalities: [
       for (final modality in model.capabilities.output)
         _modelModalityFromFrb(modality),
@@ -115,3 +98,22 @@ ModelModalityView _modelModalityFromFrb(frb.BridgeModelModality modality) {
     frb.BridgeModelModality.file => ModelModalityView.file,
   };
 }
+
+ModelInputCapabilityView _modelInputCapabilityFromFrb(
+  frb.BridgeModelInputCapability capability,
+) => ModelInputCapabilityView(
+  modality: _modelModalityFromFrb(capability.modality),
+  sources: [
+    for (final source in capability.sources)
+      switch (source) {
+        frb.BridgeModelInputSource.local => ModelInputSourceView.local,
+        frb.BridgeModelInputSource.remoteUrl => ModelInputSourceView.remoteUrl,
+      },
+  ],
+  maxCount: capability.maxCount,
+  maxBytes: capability.maxBytes?.toInt(),
+  maxTotalBytes: capability.maxTotalBytes?.toInt(),
+  maxWidth: capability.maxWidth,
+  maxHeight: capability.maxHeight,
+  mediaTypes: capability.mediaTypes,
+);

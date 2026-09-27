@@ -245,6 +245,7 @@ pub struct BridgeProviderSettingsDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeCustomModelSettingsDto {
+    pub input_capabilities: Vec<BridgeModelInputCapability>,
     pub context_window: u64,
     pub max_output_tokens: u64,
     pub slug: String,
@@ -431,7 +432,8 @@ pub struct BridgeModelCapabilities {
     pub freeform_tools: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub enum BridgeModelModality {
     Text,
     Image,
@@ -440,13 +442,15 @@ pub enum BridgeModelModality {
     File,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub enum BridgeModelInputSource {
     Local,
     RemoteUrl,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeModelInputCapability {
     pub modality: BridgeModelModality,
     pub sources: Vec<BridgeModelInputSource>,
@@ -561,20 +565,7 @@ impl From<pl_protocol::ModelDescriptor> for BridgeModelDescriptor {
                     .capabilities
                     .input
                     .into_iter()
-                    .map(|capability| BridgeModelInputCapability {
-                        modality: bridge_modality(capability.modality),
-                        sources: capability
-                            .sources
-                            .into_iter()
-                            .map(bridge_input_source)
-                            .collect(),
-                        max_count: capability.max_count,
-                        max_bytes: capability.max_bytes,
-                        max_total_bytes: capability.max_total_bytes,
-                        max_width: capability.max_width,
-                        max_height: capability.max_height,
-                        media_types: capability.media_types,
-                    })
+                    .map(Into::into)
                     .collect(),
                 output: model
                     .capabilities
@@ -633,5 +624,24 @@ fn bridge_input_source(source: pl_protocol::ModelInputSourceDto) -> BridgeModelI
     match source {
         pl_protocol::ModelInputSourceDto::Local => BridgeModelInputSource::Local,
         pl_protocol::ModelInputSourceDto::RemoteUrl => BridgeModelInputSource::RemoteUrl,
+    }
+}
+
+impl From<pl_protocol::ModelInputCapabilityDto> for BridgeModelInputCapability {
+    fn from(capability: pl_protocol::ModelInputCapabilityDto) -> Self {
+        Self {
+            modality: bridge_modality(capability.modality),
+            sources: capability
+                .sources
+                .into_iter()
+                .map(bridge_input_source)
+                .collect(),
+            max_count: capability.max_count,
+            max_bytes: capability.max_bytes,
+            max_total_bytes: capability.max_total_bytes,
+            max_width: capability.max_width,
+            max_height: capability.max_height,
+            media_types: capability.media_types,
+        }
     }
 }

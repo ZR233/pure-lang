@@ -2,6 +2,27 @@ part of 'timeline_view.dart';
 
 class _ThreadImageLoader {
   final Map<String, Future<Uint8List>> _images = {};
+  final Set<String> expandedEntries = {};
+
+  void retainWindow(String? threadId, List<TimelineRow> rows) {
+    final attachments = <String>{};
+    final entries = <String>{};
+    for (final row in rows) {
+      attachments.addAll(
+        row.part?.attachments.map((item) => item.id) ?? const <String>[],
+      );
+      final group = row.toolGroup;
+      if (group == null) continue;
+      for (final entry in _toolImageEntries(group.items)) {
+        attachments.add(entry.attachment.id);
+        entries.add(entry.entryId);
+      }
+    }
+    expandedEntries.retainAll(entries);
+    _images.removeWhere(
+      (key, _) => !attachments.any((id) => key == '$threadId\u0000$id'),
+    );
+  }
 
   Future<Uint8List> load(
     String threadId,
@@ -13,7 +34,10 @@ class _ThreadImageLoader {
     _images.remove('$threadId\u0000$attachmentId');
   }
 
-  void clear() => _images.clear();
+  void clear() {
+    _images.clear();
+    expandedEntries.clear();
+  }
 }
 
 class _ThreadImageCacheScope extends InheritedWidget {
@@ -248,7 +272,9 @@ class _ThreadToolImageEntry extends ConsumerStatefulWidget {
 }
 
 class _ThreadToolImageEntryState extends ConsumerState<_ThreadToolImageEntry> {
-  bool _expanded = false;
+  bool get _expanded =>
+      _ThreadImageCacheScope.of(context).expandedEntries
+          .contains(widget.entryId);
   Future<Uint8List>? _image;
 
   @override
@@ -257,7 +283,6 @@ class _ThreadToolImageEntryState extends ConsumerState<_ThreadToolImageEntry> {
     if (widget.threadId != oldWidget.threadId ||
         widget.entryId != oldWidget.entryId ||
         widget.attachment.id != oldWidget.attachment.id) {
-      _expanded = false;
       _image = null;
     }
   }
@@ -271,7 +296,15 @@ class _ThreadToolImageEntryState extends ConsumerState<_ThreadToolImageEntry> {
   );
 
   void _toggle() {
-    setState(() => _expanded = !_expanded);
+    final loader = _ThreadImageCacheScope.of(context);
+    context
+        .findAncestorStateOfType<_TimelineViewState>()
+        ?._handleToolDetailsChanged();
+    setState(() {
+      if (!loader.expandedEntries.remove(widget.entryId)) {
+        loader.expandedEntries.add(widget.entryId);
+      }
+    });
     if (_expanded) {
       context
           .findAncestorStateOfType<_TimelineViewState>()

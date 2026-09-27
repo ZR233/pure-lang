@@ -53,6 +53,7 @@ pub struct StudioProviderSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudioCustomModelSettings {
+    pub input_capabilities: Vec<crate::ModelInputCapabilityDto>,
     pub context_window: u64,
     pub max_output_tokens: u64,
     pub slug: String,

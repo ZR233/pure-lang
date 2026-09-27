@@ -33,8 +33,8 @@ Future<Map<String, Object?>> observeTimelineScrolling(
       (sample) =>
           sample['viewportDimension'] == wheel.first['viewportDimension'],
     );
-    observations['wheelCoordinatesStable'] = wheel.every(
-      (sample) => sample['centerId'] == wheel.first['centerId'],
+    observations['forwardCoordinates'] = wheel.every(
+      (sample) => sample['minScrollExtent'] == 0,
     );
     observations['wheelDetached'] = wheel.last['followingBottom'] == false;
     observations['wheelContinuous'] = List.generate(wheel.length - 1, (index) {
@@ -67,7 +67,7 @@ Future<Map<String, Object?>> observeTimelineScrolling(
     observations['thumbDownContinuous'] = monotonic(down, true);
     observations['pass'] = [
       'wheelViewportStable',
-      'wheelCoordinatesStable',
+      'forwardCoordinates',
       'wheelDetached',
       'wheelContinuous',
       'thumbUpContinuous',

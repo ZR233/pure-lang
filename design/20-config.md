@@ -194,6 +194,9 @@ default_temperature、max_output_tokens、pricing、parameters、binding（trans
 允许来源和限制；两者不完整或无法把持久快照重新编码时该 modality 校验失败；未知模型
 默认 text-only；非视觉模型即使 provider wire API 接受图片字段，也会在任何附件 IO 和
 凭据读取前被拒绝；PDF 使用 file modality。
+Settings 的自定义模型快照必须携带同源的 typed input capabilities（modality、来源和限制），
+经 FRB 投影到 Flutter，与内置 catalog 共用转换逻辑。附件入口不能因自定义模型元数据
+在展示链路中丢失而退化为 text-only；本地和 SSH 项目使用同一能力判断。
 
 ModelPricing 明确区分未知价格与包含费率的定义：货币不做汇率转换；输入、缓存读、缓存写
 与输出按互斥类别计费，reasoning 已包含在输出内；用量或费率缺失时标记未计价；关闭计价

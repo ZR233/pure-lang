@@ -4885,6 +4885,9 @@ impl SseDecode for crate::api::studio::types::chat::BridgeContentField {
 impl SseDecode for crate::api::studio::types::settings::BridgeCustomModelSettingsDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_inputCapabilities = <Vec<
+            crate::api::studio::types::settings::BridgeModelInputCapability,
+        >>::sse_decode(deserializer);
         let mut var_contextWindow = <u64>::sse_decode(deserializer);
         let mut var_maxOutputTokens = <u64>::sse_decode(deserializer);
         let mut var_slug = <String>::sse_decode(deserializer);
@@ -4895,6 +4898,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeCustomModelSetting
         let mut var_supportedConnectionModes = <Vec<String>>::sse_decode(deserializer);
         let mut var_defaultConnectionMode = <String>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeCustomModelSettingsDto {
+            input_capabilities: var_inputCapabilities,
             context_window: var_contextWindow,
             max_output_tokens: var_maxOutputTokens,
             slug: var_slug,
@@ -13180,6 +13184,7 @@ impl flutter_rust_bridge::IntoDart
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.input_capabilities.into_into_dart().into_dart(),
             self.context_window.into_into_dart().into_dart(),
             self.max_output_tokens.into_into_dart().into_dart(),
             self.slug.into_into_dart().into_dart(),
@@ -20934,6 +20939,10 @@ impl SseEncode for crate::api::studio::types::chat::BridgeContentField {
 impl SseEncode for crate::api::studio::types::settings::BridgeCustomModelSettingsDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<crate::api::studio::types::settings::BridgeModelInputCapability>>::sse_encode(
+            self.input_capabilities,
+            serializer,
+        );
         <u64>::sse_encode(self.context_window, serializer);
         <u64>::sse_encode(self.max_output_tokens, serializer);
         <String>::sse_encode(self.slug, serializer);
