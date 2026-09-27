@@ -607,20 +607,23 @@ struct LiveOwner {
 impl LiveOwner {
     async fn open(
         projector: &ObservationServices,
-        id: &str,
+        handle: &ThreadHandle,
         snapshot: &ThreadSnapshot,
         thread: pl_protocol::Thread,
         feed: Arc<ThreadLiveFeed>,
         channel: Arc<HistoryChannel>,
         persistence: Option<&pl_protocol::ThreadPersistenceSnapshot>,
     ) -> Result<Self> {
+        let id = thread.id.as_str();
         let chat = projector.store.chat_session(id).await?;
         let usage = live_usage(projector, id, snapshot);
         // The one cold read of a projection: the durable facts of work that already started before
         // this owner existed. Everything the commit and preview paths resolve afterwards comes from
         // these tables, so a re-activated Thread never waits on a history reader mid-Turn.
         let mut projection = LiveProjection::new();
-        let (seed_items, hidden) = cold_seed(projector, id, snapshot).await?;
+        let retained = handle.effects().await?;
+        let (seed_items, hidden) =
+            cold_seed(&projector.store, &thread, snapshot, &channel, &retained).await?;
         projection.seed(seed_items, hidden);
         // Seed the activity projection from the very snapshot this owner was installed on, so a
         // subscriber that opens mid-Turn immediately sees the authoritative current activity.
@@ -655,7 +658,7 @@ impl LiveOwner {
         // duplicate of a Turn already retained is dropped by the same identity/revision guard.
         if let Some(turn) = projector
             .store
-            .history(id)
+            .history(&owner.thread.id)
             .await?
             .newest_terminal_turn()
             .await?
@@ -887,57 +890,113 @@ impl Drop for LiveOwner {
 /// once, together with the hidden dispositions of the inputs still in play, closes that gap without
 /// putting a history read on the commit or preview path.
 async fn cold_seed(
-    projector: &ObservationServices,
-    id: &str,
+    store: &StudioStore,
+    thread: &pl_protocol::Thread,
     snapshot: &ThreadSnapshot,
+    channel: &HistoryChannel,
+    retained: &[Arc<pl_core::thread::ThreadEffectBatch>],
 ) -> Result<(
     Vec<pl_protocol::ThreadItem>,
     std::collections::BTreeSet<String>,
 )> {
-    let mut turn_ids = snapshot
-        .turns
-        .iter()
-        .filter(|turn| turn.state == pl_core::thread::TurnState::Running)
-        .map(|turn| turn.turn_id.clone())
-        .collect::<Vec<_>>();
-    if let Some(newest) = snapshot.turns.last()
-        && !turn_ids.contains(&newest.turn_id)
+    use std::collections::BTreeSet;
+
+    // Capture before reading history: core may already have pruned the terminal Turn from
+    // its current snapshot, but the reliable queue still owns the recovery commit's references.
+    let pending = channel.unprojected_writes();
+    let mut turn_ids = BTreeSet::new();
+    let mut input_ids = BTreeSet::new();
+    let mut item_ids = BTreeSet::new();
+    for state in
+        std::iter::once(snapshot).chain(pending.iter().map(|write| &write.checkpoint.state))
     {
-        turn_ids.push(newest.turn_id.clone());
-    }
-    if turn_ids.is_empty() && snapshot.inbox.is_empty() && snapshot.inputs.is_empty() {
-        return Ok((Vec::new(), std::collections::BTreeSet::new()));
-    }
-    let history = projector.store.history(id).await?;
-    let mut items = Vec::new();
-    for turn_id in &turn_ids {
-        items.extend(history.items_for_turn(turn_id).await?);
-    }
-    // Pending parent messages have no Turn yet. Their already-published identity/version
-    // must survive activation just as it survives the live projection's retained window.
-    let pending_messages =
-        history
-            .existing_items(snapshot.inbox.iter().map(|record| {
-                crate::studio::thread_projection::order::message_id(&record.message.id)
-            }))
-            .await?;
-    for (id, item) in pending_messages {
-        if !items.iter().any(|existing| existing.id == id) {
-            items.push(item);
+        for turn in state.turns.iter() {
+            turn_ids.insert(turn.turn_id.clone());
+            input_ids.extend(turn.input_id.iter().cloned());
         }
+        input_ids.extend(state.inputs.iter().map(|record| record.input.id.clone()));
+        item_ids.extend(
+            state.inbox.iter().map(|record| {
+                crate::studio::thread_projection::order::message_id(&record.message.id)
+            }),
+        );
     }
-    let mut input_ids = snapshot
-        .inputs
-        .iter()
-        .map(|record| record.input.id.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    for turn in snapshot.turns.iter() {
-        if let Some(input_id) = &turn.input_id {
-            input_ids.insert(input_id.clone());
+    for write in &pending {
+        // Reuse the projection's identity enumeration, including tool results whose attempt
+        // already left the checkpoint. Do not maintain a second interpretation of effect kinds.
+        let referenced = crate::studio::thread_projection::project_effect_items(
+            thread,
+            &write.checkpoint.state,
+            &write.effect,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        )?;
+        for item in referenced.items {
+            if !item.turn_id.is_empty() {
+                turn_ids.insert(item.turn_id.clone());
+            }
+            item_ids.insert(item.id);
+        }
+        input_ids.extend(referenced.unresolved_inputs);
+        item_ids.extend(referenced.unresolved_calls);
+    }
+    // Storage admission may lag behind core publication. These immutable effects remain in core
+    // until durable acknowledgement, including recovery facts absent from both the pruned snapshot
+    // and the admission queue. Enumerate their references before the first history read.
+    for effect in retained {
+        if let Some(turn) = &effect.turn {
+            turn_ids.insert(turn.turn_id.clone());
+            input_ids.extend(turn.input_id.iter().cloned());
+        }
+        if let Some(attempt) = &effect.attempt {
+            turn_ids.insert(attempt.turn_id.clone());
+        }
+        for change in effect.inputs.iter() {
+            use pl_core::thread::input::InputChange;
+            input_ids.insert(match change {
+                InputChange::Accepted(record) => record.input.id.clone(),
+                InputChange::Transition { id, .. } => id.clone(),
+            });
+        }
+        for task in effect.tasks.iter() {
+            turn_ids.insert(task.turn_id.clone());
+        }
+        item_ids.extend(
+            effect
+                .tasks
+                .iter()
+                .map(|record| &record.call_id)
+                .chain(effect.permissions.iter().map(|record| &record.call_id))
+                .chain(effect.deliveries.iter().map(|record| &record.call_id))
+                .chain(effect.delivery_repairs.iter().map(|record| &record.call_id))
+                .map(|id| crate::studio::thread_projection::order::tool_id(id)),
+        );
+        item_ids.extend(
+            effect.inbox.iter().map(|record| {
+                crate::studio::thread_projection::order::message_id(&record.message.id)
+            }),
+        );
+    }
+    item_ids.extend(input_ids.iter().cloned());
+    if turn_ids.is_empty() && item_ids.is_empty() {
+        return Ok((Vec::new(), BTreeSet::new()));
+    }
+    let history = store.history(&thread.id).await?;
+    let mut items = history.existing_items(item_ids).await?;
+    turn_ids.extend(
+        items
+            .values()
+            .filter(|item| !item.turn_id.is_empty())
+            .map(|item| item.turn_id.clone()),
+    );
+    for turn_id in turn_ids {
+        for item in history.items_for_turn(&turn_id).await? {
+            items.insert(item.id.clone(), item);
         }
     }
     let hidden = history.hidden_input_identities(input_ids).await?;
-    Ok((items, hidden))
+    Ok((items.into_values().collect(), hidden))
 }
 
 /// Cumulative usage the live projection folds further effects onto.
@@ -1217,6 +1276,7 @@ impl ProjectionWorker {
         let Self {
             services,
             id,
+            thread,
             state,
             recovered_through,
             feed,
@@ -1231,7 +1291,7 @@ impl ProjectionWorker {
             *live = Some(
                 LiveOwner::open(
                     services,
-                    id,
+                    thread,
                     snapshot,
                     product,
                     Arc::clone(feed),
@@ -1315,6 +1375,152 @@ impl ProjectionWorker {
             None => None,
         };
         directory::publish(services, product, snapshot, summary).await?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod storage_fault_tests {
+    use super::*;
+    use crate::studio::storage::thread_writer::ThreadStorageSink;
+    use pl_core::{
+        context::OpaquePayload,
+        thread::{
+            ThreadCheckpoint, ThreadEffectBatch, TurnRecord, TurnState,
+            cold::ColdStore,
+            input::{InputChange, InputRecord, InputState, ThreadInput},
+        },
+    };
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn recovery_projection_loads_references_pruned_from_the_current_snapshot() -> Result<()> {
+        recovery_projection(false).await?;
+        recovery_projection(true).await
+    }
+
+    async fn recovery_projection(delayed_admission: bool) -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let thread = pl_protocol::Thread::placeholder("recovered-hidden-input");
+        let sink = ThreadStorageSink::new(store.clone(), thread.clone()).await?;
+        let channel = store.thread_persistence().history_channel(&thread.id);
+        let chat = store.chat_session(&thread.id).await?;
+        let input_id = "interaction:approved:continuation";
+        let turn = TurnRecord {
+            input_id: Some(input_id.into()),
+            turn_id: "interrupted-turn".into(),
+            state: TurnState::Running,
+            model_steps: 0,
+            elapsed_ms: None,
+        };
+        let input = InputRecord {
+            input: ThreadInput {
+                id: input_id.into(),
+                payload: OpaquePayload::new(
+                    "pl.studio.interaction-continuation",
+                    1,
+                    r#"{"interactionId":"approved","presentation":"hidden"}"#,
+                )?,
+                context: Vec::new(),
+            },
+            accepted_sequence: 1,
+            ordinal: 1,
+            revision: 1,
+            delivery: Default::default(),
+            state: InputState::Consumed {
+                turn_id: turn.turn_id.clone(),
+                attempt_id: "attempt".into(),
+            },
+        };
+        let state = ThreadSnapshot {
+            commit_sequence: 1,
+            inputs: Arc::from([input.clone()]),
+            turns: Arc::from([turn.clone()]),
+            ..Default::default()
+        };
+        let write = ThreadWrite {
+            effect: Arc::new(ThreadEffectBatch {
+                thread_id: thread.id.clone(),
+                sequence: 1,
+                committed_at: 1,
+                inputs: Arc::from([InputChange::Accepted(input)]),
+                turn: Some(turn.clone()),
+                ..Default::default()
+            }),
+            checkpoint: ThreadCheckpoint::capture_transfer(thread.id.clone(), 1, state),
+            output_claim: None,
+        };
+        sink.admit(&thread.id, write.clone())?;
+        let mut projection = LiveProjection::new();
+        let (_, prepared) =
+            projection.advance(&chat, &thread, &write.effect, &write.checkpoint.state)?;
+        assert!(channel.prepare(prepared));
+        tokio::time::timeout(Duration::from_secs(5), sink.flush(&thread.id, 1)).await??;
+        drop(projection);
+
+        let interrupted = TurnRecord {
+            state: TurnState::Interrupted,
+            ..turn
+        };
+        let state = ThreadSnapshot {
+            commit_sequence: 2,
+            turns: Arc::from([interrupted.clone()]),
+            ..Default::default()
+        };
+        let recovery = ThreadWrite {
+            effect: Arc::new(ThreadEffectBatch {
+                thread_id: thread.id.clone(),
+                sequence: 2,
+                committed_at: 2,
+                turn: Some(interrupted.clone()),
+                ..Default::default()
+            }),
+            checkpoint: ThreadCheckpoint::capture_transfer(thread.id.clone(), 2, state),
+            output_claim: None,
+        };
+        let current = recovery.checkpoint.clone().pruned().state;
+        assert!(current.turns.is_empty());
+        // Admission can be delayed by storage pressure until after observer installation.
+        if !delayed_admission {
+            sink.admit(&thread.id, recovery.clone())?;
+        }
+        let retained = if delayed_admission {
+            assert!(channel.next_unprojected().is_none());
+            vec![recovery.effect.clone()]
+        } else {
+            Vec::new()
+        };
+        let (items, hidden) = cold_seed(&store, &thread, &current, &channel, &retained).await?;
+        let mut restored = LiveProjection::new();
+        restored.seed(items, hidden);
+        restored.stream(&chat, &thread, &current, 2).await?;
+        if delayed_admission {
+            sink.admit(&thread.id, recovery.clone())?;
+        }
+        let prepared = restored.project_committed(
+            &chat,
+            &thread,
+            &recovery.effect,
+            &recovery.checkpoint.state,
+        )?;
+        assert!(channel.prepare(prepared));
+        tokio::time::timeout(Duration::from_secs(5), sink.flush(&thread.id, 2)).await??;
+        let history = store.history(&thread.id).await?;
+        assert_eq!(history.watermark().await?, 2);
+        assert!(history.existing_items([input_id.into()]).await?.is_empty());
+        assert!(
+            history
+                .hidden_input_identities([input_id.into()])
+                .await?
+                .contains(input_id)
+        );
+        let saved = history
+            .newest_terminal_turn()
+            .await?
+            .context("saved interrupted turn")?;
+        assert_eq!(saved.id, interrupted.turn_id);
+        assert!(matches!(saved.state, pl_protocol::TurnState::Cancelled(_)));
         Ok(())
     }
 }

@@ -17,7 +17,7 @@ pub(super) fn completion_id(id: &str) -> String {
     format!("completion:{}:{id}", id.len())
 }
 
-pub(super) fn tool_id(id: &str) -> String {
+pub(in crate::studio) fn tool_id(id: &str) -> String {
     format!("tool:{}:{id}", id.len())
 }
 

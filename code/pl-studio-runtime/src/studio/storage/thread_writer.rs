@@ -593,6 +593,21 @@ impl HistoryChannel {
             .map(|queued| queued.write.clone())
     }
 
+    /// Captures the bounded, ordered projection backlog for one observer initialization.
+    /// Only immutable handles are cloned under the queue lock; history reads happen afterwards.
+    pub(in crate::studio) fn unprojected_writes(&self) -> Vec<Arc<ThreadWrite>> {
+        let progress = self
+            .progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        progress
+            .effects
+            .iter()
+            .filter(|queued| queued.prepared.is_none())
+            .map(|queued| queued.write.clone())
+            .collect()
+    }
+
     /// Publishes the failure of one admitted fact's projection.
     ///
     /// The writer never projects an effect itself, so a fact the projection owner cannot project is
