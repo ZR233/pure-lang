@@ -13,8 +13,8 @@ use pl_protocol::remote::{
     REMOTE_PROTOCOL_VERSION, RemoteDirectoryListing, RemoteHello, RemoteRequest, RemoteResponse,
     RemoteWorkspaceOpened,
 };
+use process_wrap::tokio::ChildWrapper;
 use serde::{Deserialize, Serialize};
-use tokio::process::Child;
 use tokio::sync::{Mutex, RwLock, watch};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -76,7 +76,8 @@ pub enum SshConnectionState {
 
 struct SshConnection {
     client: RemoteClient,
-    process: Arc<Mutex<Child>>,
+    process: Arc<Mutex<Box<dyn ChildWrapper>>>,
+    heartbeat: CancellationToken,
     execution_environment: ExecutionEnvironment,
 }
 
@@ -282,11 +283,13 @@ impl SshManager {
         match result {
             Ok((connection, hello)) => {
                 let client = connection.client.clone();
+                let heartbeat = connection.heartbeat.clone();
                 let execution_environment = connection.execution_environment.clone();
                 self.connections
                     .lock()
                     .await
                     .insert(server_id.to_string(), Arc::new(connection));
+                self.spawn_heartbeat(server_id.to_string(), client.clone(), heartbeat);
                 self.reopen_known_workspaces(server_id, &client, &execution_environment)
                     .await;
                 self.set_state(
@@ -353,9 +356,11 @@ impl SshManager {
     ) -> Result<RemoteDirectoryListing, RemoteClientError> {
         let _operation = self.admit_connection().await?;
         let client = self.client(server_id).await?;
-        let reply = client
-            .request(RemoteRequest::BrowseDirectories { path }, &[])
-            .await?;
+        let reply = tokio::select! {
+            biased;
+            () = self.closing.cancelled() => return Err(RemoteClientError::ManagerClosing),
+            reply = client.request(RemoteRequest::BrowseDirectories { path }, &[]) => reply?,
+        };
         match reply.response {
             RemoteResponse::Directories(listing) => Ok(listing),
             response => Err(RemoteClientError::Protocol(format!(
@@ -411,7 +416,11 @@ impl SshManager {
         {
             return Ok(host);
         }
-        let files = open_workspace(&client, path).await?;
+        let files = tokio::select! {
+            biased;
+            () = self.closing.cancelled() => return Err(RemoteClientError::ManagerClosing),
+            files = open_workspace(&client, path) => files?,
+        };
         let client = files.client().clone();
         let workspace_id = files.workspace_id().to_string();
         let canonical_path = files.canonical_path().to_string();
@@ -455,20 +464,20 @@ impl SshManager {
         let mut prepared = ssh_command(profile, &self.ssh_config).await?;
         prepared
             .command
+            .command_mut()
             .arg(ssh::posix_remote_command(&format!("exec {remote_path}")))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
+            .stderr(Stdio::piped());
         let mut child = prepared.command.spawn().map_err(|error| {
             RemoteClientError::Protocol(format!("failed to start ssh: {error}"))
         })?;
         let stdin = child
-            .stdin
+            .stdin()
             .take()
             .ok_or_else(|| RemoteClientError::Protocol("ssh process has no stdin".to_string()))?;
         let stdout = child
-            .stdout
+            .stdout()
             .take()
             .ok_or_else(|| RemoteClientError::Protocol("ssh process has no stdout".to_string()))?;
         let client = RemoteClient::from_streams(stdout, stdin);
@@ -492,10 +501,8 @@ impl SshManager {
             Err(reason) => {
                 // A failed bootstrap never becomes a managed connection. Close and reap the
                 // local SSH transport before reporting its bounded initialization diagnostic.
-                child.kill().await.map_err(|error| {
-                    RemoteClientError::Protocol(format!("failed to reap SSH bootstrap: {error}"))
-                })?;
-                let diagnostic = ssh::initialization_diagnostic(child.stderr.take()).await?;
+                ssh::terminate_ssh_child(&mut child, "bootstrap").await?;
+                let diagnostic = ssh::initialization_diagnostic(child.stderr().take()).await?;
                 return Err(RemoteClientError::Protocol(format!(
                     "SSH helper initialization failed: {reason}; {diagnostic}"
                 )));
@@ -515,7 +522,7 @@ impl SshManager {
                 hello.protocol_version, REMOTE_PROTOCOL_VERSION
             )));
         }
-        if let Some(mut stderr) = child.stderr.take() {
+        if let Some(mut stderr) = child.stderr().take() {
             let client = client.clone();
             let closing = self.closing.clone();
             let server_id = profile.alias.clone();
@@ -546,6 +553,7 @@ impl SshManager {
             SshConnection {
                 client,
                 process: Arc::new(Mutex::new(child)),
+                heartbeat: CancellationToken::new(),
                 execution_environment: execution_environment_from_hello(&hello)?,
             },
             hello,
@@ -640,6 +648,41 @@ impl SshManager {
         });
     }
 
+    fn spawn_heartbeat(
+        &self,
+        server_id: String,
+        client: RemoteClient,
+        cancelled: CancellationToken,
+    ) {
+        let closing = self.closing.clone();
+        self.operations.spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    biased;
+                    () = closing.cancelled() => break,
+                    () = cancelled.cancelled() => break,
+                    () = client.wait_disconnected() => break,
+                    _ = interval.tick() => {}
+                }
+                let result = tokio::select! {
+                    biased;
+                    () = closing.cancelled() => break,
+                    () = cancelled.cancelled() => break,
+                    // A large frame can occupy the writer for longer than one tick.
+                    // Its inbound bytes renew the helper lease until control can flush.
+                    result = client.heartbeat() => result,
+                };
+                if result.is_err() {
+                    tracing::warn!(%server_id, "SSH heartbeat failed; closing transport");
+                    let _ = client.close().await;
+                    break;
+                }
+            }
+        });
+    }
+
     async fn reconnect_with_backoff(&self, server_id: String) {
         const DELAYS: [u64; 6] = [1, 2, 4, 8, 15, 30];
         let mut attempt = 0_u32;
@@ -684,12 +727,15 @@ impl SshManager {
             .cloned()
             .unwrap_or_default();
         for path in paths {
-            let Ok(Ok(files)) = tokio::time::timeout(
-                std::time::Duration::from_secs(15),
-                open_workspace(client, path.clone()),
-            )
-            .await
-            else {
+            let opened = tokio::select! {
+                biased;
+                () = self.closing.cancelled() => break,
+                opened = tokio::time::timeout(
+                    std::time::Duration::from_secs(15),
+                    open_workspace(client, path.clone()),
+                ) => opened,
+            };
+            let Ok(Ok(files)) = opened else {
                 continue;
             };
             let workspace_id = files.workspace_id().to_string();

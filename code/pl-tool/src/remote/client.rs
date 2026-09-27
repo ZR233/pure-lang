@@ -22,6 +22,11 @@ struct PendingRequest {
     _permit: OwnedSemaphorePermit,
 }
 
+struct ControlFrame {
+    frame: EncodedFrame,
+    written: oneshot::Sender<io::Result<()>>,
+}
+
 struct TransportLifetime {
     cancellation: CancellationToken,
     completion: Shared<BoxFuture<'static, Result<(), Arc<tokio::task::JoinError>>>>,
@@ -89,6 +94,7 @@ impl std::fmt::Debug for RemoteProcessChannels {
 
 struct RemoteClientInner {
     writer: mpsc::Sender<EncodedFrame>,
+    control_writer: mpsc::Sender<ControlFrame>,
     capacity: Arc<Semaphore>,
     pending: Mutex<HashMap<u64, PendingRequest>>,
     processes: Mutex<HashMap<String, RemoteProcessChannels>>,
@@ -136,8 +142,10 @@ impl RemoteClient {
         W: AsyncWrite + Send + Unpin + 'static,
     {
         let (sender, receiver) = mpsc::channel(REQUEST_CAPACITY);
+        let (control_writer, control_frames) = mpsc::channel(1);
         let inner = Arc::new(RemoteClientInner {
             writer: sender,
+            control_writer,
             capacity: Arc::new(Semaphore::new(REQUEST_CAPACITY)),
             pending: Mutex::new(HashMap::new()),
             processes: Mutex::new(HashMap::new()),
@@ -147,7 +155,7 @@ impl RemoteClient {
             disconnect_reason: Default::default(),
         });
         let read = tokio::spawn(read_loop(reader, inner.clone()));
-        let write = tokio::spawn(write_loop(writer, receiver, inner.clone()));
+        let write = tokio::spawn(write_loop(writer, receiver, control_frames, inner.clone()));
         let transport = Arc::new(TransportLifetime {
             cancellation: inner.disconnected.clone(),
             completion: async move {
@@ -301,6 +309,35 @@ impl RemoteClient {
         })
     }
 
+    /// Writes a one-way lease heartbeat without consuming ordinary request capacity.
+    pub(crate) async fn heartbeat(&self) -> Result<(), RemoteClientError> {
+        self.send_control(RemoteRequest::Heartbeat).await
+    }
+
+    /// Flushes the one-way shutdown frame locally; remote cleanup is not acknowledged.
+    pub(crate) async fn request_shutdown(&self) -> Result<(), RemoteClientError> {
+        self.send_control(RemoteRequest::Shutdown).await
+    }
+
+    async fn send_control(&self, request: RemoteRequest) -> Result<(), RemoteClientError> {
+        if self.is_disconnected() {
+            return Err(RemoteClientError::Disconnected);
+        }
+        let frame = encode_frame(None, RemoteMessage::Request(request), &[])?;
+        let (written, completed) = oneshot::channel();
+        tokio::select! {
+            biased;
+            () = self.inner.disconnected.cancelled() => return Err(RemoteClientError::Disconnected),
+            result = self.inner.control_writer.send(ControlFrame { frame, written }) => {
+                result.map_err(|_| RemoteClientError::Disconnected)?;
+            }
+        }
+        completed
+            .await
+            .map_err(|_| RemoteClientError::Disconnected)??;
+        Ok(())
+    }
+
     /// First transport failure, excluding request contents and credentials.
     pub fn disconnect_reason(&self) -> Option<String> {
         self.inner
@@ -361,22 +398,42 @@ impl Drop for DisconnectOnExit {
 async fn write_loop<W>(
     mut writer: W,
     mut frames: mpsc::Receiver<EncodedFrame>,
+    mut controls: mpsc::Receiver<ControlFrame>,
     inner: Arc<RemoteClientInner>,
 ) where
     W: AsyncWrite + Unpin,
 {
     let _disconnect = DisconnectOnExit(inner.disconnected.clone());
-    tokio::select! {
-        biased;
-        _ = inner.disconnected.cancelled() => {},
-        _ = async {
-            while let Some(frame) = frames.recv().await {
-                if let Err(error) = frame.write(&mut writer).await {
-                    retain_disconnect_reason(&inner, format!("write transport: {}", error.kind()));
-                    break;
-                }
-            }
-        } => {},
+    loop {
+        let (frame, receipt) = tokio::select! {
+            biased;
+            _ = inner.disconnected.cancelled() => break,
+            control = controls.recv() => match control {
+                Some(control) => (control.frame, Some(control.written)),
+                None => break,
+            },
+            frame = frames.recv() => match frame {
+                Some(frame) => (frame, None),
+                None => break,
+            },
+        };
+        let result = tokio::select! {
+            biased;
+            _ = inner.disconnected.cancelled() => break,
+            result = frame.write(&mut writer) => result,
+        };
+        if let Some(receipt) = receipt {
+            let _ = receipt.send(
+                result
+                    .as_ref()
+                    .map(|_| ())
+                    .map_err(|error| io::Error::new(error.kind(), error.to_string())),
+            );
+        }
+        if let Err(error) = result {
+            retain_disconnect_reason(&inner, format!("write transport: {}", error.kind()));
+            break;
+        }
     }
     // Dropping the stream is mandatory even when cancellation interrupted a frame.
     drop(writer);

@@ -16,11 +16,13 @@ use crate::ServerError;
 use crate::codec::read_frame;
 use crate::path::{WorkspaceRegistry, io_error, remote_error};
 
+mod lease;
 mod outbound;
 mod process;
 mod read_range;
 mod write;
 
+use lease::LeaseReader;
 use outbound::Outbound;
 use process::ProcessRegistry;
 
@@ -59,7 +61,15 @@ where
         shell: shell.clone(),
     }));
     let (processes, mut registry_task) = ProcessRegistry::new(writer.clone(), shell);
-    let outcome = serve_requests(reader, &writer, &state, &processes).await;
+    let (reader, activity) = LeaseReader::new(reader);
+    let outcome = tokio::select! {
+        biased;
+        result = serve_requests(reader, &writer, &state, &processes) => result,
+        () = lease::wait_expired(activity) => Err(ServerError::Io(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "remote helper heartbeat lease expired",
+        ))),
+    };
     // EOF, malformed input and write failures all seal the byte stream before cleanup.
     writer.close();
     let cleanup = processes.terminate_all().await;
@@ -81,14 +91,15 @@ where
 {
     let mut handlers = tokio::task::JoinSet::new();
     let outcome = receive_requests(reader, writer, state, processes, &mut handlers).await;
-    if !matches!(outcome, Ok(RequestEnd::Shutdown { .. })) {
-        writer.close();
-    }
+    writer.close();
     let cleanup = processes.terminate_all().await;
     let mut handler_failure = None;
     while let Some(result) = handlers.join_next().await {
         match result {
             Ok(Ok(())) => {}
+            // Once the connection is sealed, ordinary replies have no receiver.
+            // Real writer failures are reported by writer_task below.
+            Ok(Err(ServerError::Io(_))) => {}
             Ok(Err(error)) => {
                 handler_failure.get_or_insert(error);
             }
@@ -98,24 +109,13 @@ where
         }
     }
     cleanup.map_err(ServerError::Cleanup)?;
-    let end = outcome?;
-    match end {
-        // EOF has deliberately closed the writer. In-flight replies are abandoned,
-        // while cleanup and genuine writer failures still propagate independently.
-        RequestEnd::Disconnected => Ok(()),
-        RequestEnd::Shutdown { request_id } => {
-            if let Some(error) = handler_failure {
-                return Err(error);
-            }
-            write_response(writer, request_id, RemoteResponse::Ack, &[]).await?;
-            Ok(())
-        }
-    }
+    outcome?;
+    handler_failure.map_or(Ok(()), Err)
 }
 
 enum RequestEnd {
     Disconnected,
-    Shutdown { request_id: Option<u64> },
+    Shutdown,
 }
 
 async fn receive_requests<R>(
@@ -166,7 +166,20 @@ where
             }
         };
         if matches!(request, RemoteRequest::Shutdown) {
-            return Ok(RequestEnd::Shutdown { request_id });
+            if request_id.is_some() || !frame.body.is_empty() {
+                return Err(
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid shutdown frame").into(),
+                );
+            }
+            return Ok(RequestEnd::Shutdown);
+        }
+        if matches!(request, RemoteRequest::Heartbeat) {
+            if request_id.is_some() || !frame.body.is_empty() {
+                return Err(
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid heartbeat frame").into(),
+                );
+            }
+            continue;
         }
         // Control remains reachable even when all ordinary request slots are occupied.
         if let RemoteRequest::Terminate { process_id } = request {
@@ -269,10 +282,10 @@ async fn handle_request(
             processes.terminate(&process_id).await?;
             Ok(ack())
         }
-        RemoteRequest::Shutdown => {
-            processes.terminate_all().await?;
-            Ok(ack())
-        }
+        RemoteRequest::Heartbeat | RemoteRequest::Shutdown => Err(remote_error(
+            RemoteErrorCode::InvalidRequest,
+            "connection control must use the control lane",
+        )),
     }
 }
 

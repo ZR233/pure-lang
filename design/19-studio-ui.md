@@ -15,7 +15,8 @@ integration 验收，不能伪造原生 provider、文件系统或进程能力�
 data 层负责 FRB DTO 到 domain 的一次转换；reducer 接收小型 canonical state snapshot、历史 page
 和增量 notification；
 Widget 只负责展示与发命令。窗口关闭必须等待 typed shutdown 完成并回收 Flutter、DTD、
-MCP/LSP 和 child process tree。
+MCP/LSP 和本地 child process tree；远端 helper 在 GUI 退出或 SSH 失联后由心跳租约
+自行清理，窗口不等待远端退出确认。shutdown 失败取消本次正常关窗，展示错误并允许重试。
 shutdown 成功后 bridge 可先于进度流订阅解除初始化；订阅取消仅在 bridge 仍可用时调用
 native cancel，随后始终释放 Dart 侧订阅与句柄，不得在 `RustLib.dispose()` 后调用 FRB API。
 Timeline Markdown 使用 `gpt_markdown` 的现代解析管线与内置 autolink，不传递旧版

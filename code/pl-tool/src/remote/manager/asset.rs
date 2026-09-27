@@ -156,6 +156,7 @@ pub(super) async fn upload_helper(
     let mut prepared = ssh_command(profile, ssh_config).await?;
     prepared
         .command
+        .command_mut()
         .arg(posix_remote_command(&script))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

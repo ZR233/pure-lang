@@ -189,10 +189,19 @@ impl StudioRuntime {
                 ));
             self.external_runtimes.lsp.shutdown().await;
             self.external_runtimes.lsp_state.stopped().await?;
-            self.ssh_manager.shutdown().await?;
             Ok::<_, anyhow::Error>(())
         }
         .await;
+        // Remote processes must lose their lease even when an earlier shutdown stage fails.
+        let remote_shutdown = self.ssh_manager.shutdown().await;
+        let shutdown = match (shutdown, remote_shutdown) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(error.into()),
+            (Err(error), Err(remote_error)) => {
+                Err(error.context(format!("SSH shutdown also failed: {remote_error}")))
+            }
+        };
         if let Err(error) = shutdown {
             let _ = self
                 .runtime_state

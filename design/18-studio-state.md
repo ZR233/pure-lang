@@ -77,8 +77,10 @@ canonical snapshot，Flutter 原子替换 Settings 领域，不只修改本地 d
 ## 18.5 Shutdown
 
 shutdown 命令阻止新 mutation，停止/等待活动 Turn，flush 所有 Thread checkpoint，关闭
-Agent、MCP、LSP 与订阅，最后发布 Stopped。GUI 只有收到该终态才可正常销毁 engine；
-Driver harness 还需确认完整原生子进程树已退出。
+Agent、MCP、LSP 与订阅，最后发布 Stopped。前序阶段失败仍须执行 SSH 连接收束并合并
+错误。GUI 只有收到该终态才可正常销毁 engine；远端 helper 的停止由单向关闭及 30 秒
+心跳租约保证，不把等待 SSH 失联作为 GUI 退出条件。Driver harness 仍须确认本地原生
+子进程树已退出。
 
 ## 18.6 自动 title 生命周期
 

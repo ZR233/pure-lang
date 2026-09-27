@@ -11,7 +11,10 @@ typed Studio 功能并展示 canonical snapshot；SSH 服务器管理、连接�
 远端 helper 是随 SSH stdio channel 生存的能力代理，只维护 workspace handle 与进程 handle。
 它不包含 Thread/Turn、Tool schema、权限、Git/worktree、Skills、LSP 协议、模型、数据库、
 Timeline、重试或会话持久化；不监听端口、不 daemonize，也不支持断线后的进程重附着。SSH
-EOF、显式 shutdown 或本地取消必须回收 helper 启动的全部进程组。
+连接每 5 秒发送单向心跳；helper 连续 30 秒没有收到心跳或其他入站数据（包括帧体读取
+进度）时封闭新请求并回收全部命令监督器及其后代。EOF、单向 shutdown、写入失败和租约
+过期走同一清理路径。正常 GUI 退出只尝试写入关闭帧，不等待远端确认或 SSH 失联。每个
+命令监督器先发 SIGTERM，2 秒后升级为 SIGKILL，并等待后代退出；helper 完成清理后退出。
 
 ## 22.2 最小协议
 
@@ -34,8 +37,8 @@ EOF、显式 shutdown 或本地取消必须回收 helper 启动的全部进程�
 尊重远端配置，不额外补入固定目录；同一连接不重复加载配置，重连重新采集。本地 process
 worker 的环境策略不受影响。
 
-控制面只提供 `hello`、GUI 专用的 `browseDirectories`、`openWorkspace`、`closeWorkspace`
-和 `shutdown`。文件面只提供远端事实所必需的 `stat`、`readBytes`、`writeAtomic`、
+协议版本为 v6，客户端与 helper 必须同步更新。控制面只提供 `hello`、单向 `heartbeat`、GUI 专用的 `browseDirectories`、
+`openWorkspace`、`closeWorkspace` 和单向 `shutdown`。文件面只提供远端事实所必需的 `stat`、`readBytes`、`writeAtomic`、
 `listDirectory`、`createDirectory`、`removePath`、`renamePath` 与 `copyPath`；文本解码、
 glob、patch/diff、工具 JSON、图片识别和 Skill 解析留在本地 core。helper 必须用远端文件
 系统事实完成 canonicalize、链接分类与 workspace 越界拒绝。进程面提供 `spawn`、
@@ -107,14 +110,16 @@ workspace host；断线自动重连完成新的 hello 后替换旧 descriptor；
 developer 内容及其 prompt cache generation。
 
 SSH 连接、平台探测、helper 上传和协议握手都通过统一后台进程工厂启动系统 OpenSSH：Windows
-不弹出额外命令行窗口；Unix 使用独立进程组并在丢弃时回收进程。SSH 通道只承载标准输入
+不弹出额外命令行窗口，并用关闭即终止进程树的 Job Object；Linux 使用独立进程组和父进程
+死亡信号。正常关闭停止心跳、尝试写入单向 shutdown，再关闭本地 transport 并有界回收
+本地 SSH 进程；关闭帧未送达时由远端心跳租约兜底。SSH 通道只承载标准输入
 输出协议，因此固定关闭伪终端与 X11 转发，不打开交互式终端或图形会话；SSH 以 BatchMode
 运行，只接受 ssh-agent 与密钥等非交互认证，不注入密码或 askpass。
 
 连接状态穷尽为 disconnected、connecting、ready、reconnecting 与 failed。SSH 建连超时为 15 秒，存活探测每 15 秒一次、连续三次无响应后断开；平台与资产
 探测最多等待 30 秒，资产上传最多等待 120 秒，helper 握手最多等待 25 秒，目录重开最多
-等待 15 秒。超时关闭并回收所属 SSH 进程；关闭旧连接先等待 5 秒、再终止并最多等待 5
-秒；失败保留回收责任。传输保存首次失败阶段与有界诊断，持续排空进程错误输出，密码不
+等待 15 秒。超时关闭并回收所属 SSH 进程；本地进程回收失败保留责任，远端失联不阻止
+GUI 退出。传输保存首次失败阶段与有界诊断，持续排空进程错误输出，密码不
 进入诊断。单个本地输出接收端关闭只丢弃该端的迟到输出，不使同一连接上的其他进程和
 文件操作断线；真实协议错误仍关闭连接。断线使当前远端工具立即以稳定
 `remoteDisconnected` 失败，不透明重放写入或 stdin；core 以 1、2、4、8、15、30 秒退避

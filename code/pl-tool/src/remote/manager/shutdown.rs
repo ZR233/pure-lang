@@ -20,28 +20,22 @@ impl SshManager {
     pub(super) async fn close_connection(&self, server_id: &str) -> Result<(), RemoteClientError> {
         let connection = self.connections.lock().await.get(server_id).cloned();
         if let Some(connection) = connection {
-            connection.client.close().await?;
-            let mut process = connection.process.lock().await;
-            if tokio::time::timeout(std::time::Duration::from_secs(5), process.wait())
+            connection.heartbeat.cancel();
+            if !connection.client.is_disconnected() {
+                // Only local frame flush is observed. The remote lease handles loss of SSH.
+                if let Ok(Err(error)) = tokio::time::timeout(
+                    std::time::Duration::from_millis(250),
+                    connection.client.request_shutdown(),
+                )
                 .await
-                .is_err()
-            {
-                process.start_kill().map_err(|error| {
-                    RemoteClientError::Protocol(format!(
-                        "failed to terminate SSH for {server_id}: {error}"
-                    ))
-                })?;
+                {
+                    tracing::warn!(%server_id, %error, "SSH shutdown frame was not written");
+                }
             }
-            tokio::time::timeout(std::time::Duration::from_secs(5), process.wait())
-                .await
-                .map_err(|_| {
-                    RemoteClientError::Protocol(format!("SSH cleanup timed out for {server_id}"))
-                })?
-                .map_err(|error| {
-                    RemoteClientError::Protocol(format!(
-                        "failed to reap SSH for {server_id}: {error}"
-                    ))
-                })?;
+            let transport = connection.client.close().await;
+            let mut process = connection.process.lock().await;
+            super::ssh::terminate_ssh_child(&mut process, server_id).await?;
+            transport?;
             drop(process);
             let removed = self.connections.lock().await.remove(server_id);
             drop(removed);

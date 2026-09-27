@@ -146,6 +146,18 @@ abstract class AppLocalizations {
   /// **'Shutting down safely'**
   String get shutdownTitle;
 
+  /// No description provided for @shutdownFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Shutdown failed'**
+  String get shutdownFailed;
+
+  /// No description provided for @shutdownRetryExit.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry exit'**
+  String get shutdownRetryExit;
+
   /// No description provided for @shutdownPhaseStoppingSubscriptions.
   ///
   /// In en, this message translates to:

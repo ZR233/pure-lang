@@ -82,14 +82,18 @@ class _StudioLifecycleCoordinatorState
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) {
-      unawaited(_shutdown());
+      unawaited(_shutdown().catchError((Object _) {}));
     }
   }
 
   @override
   Future<AppExitResponse> didRequestAppExit() async {
-    await _shutdown();
-    return AppExitResponse.exit;
+    try {
+      await _shutdown();
+      return AppExitResponse.exit;
+    } on Object {
+      return AppExitResponse.cancel;
+    }
   }
 
   @override
@@ -97,14 +101,28 @@ class _StudioLifecycleCoordinatorState
     WidgetsBinding.instance.removeObserver(this);
     // 卸载兜底：此时 overlay 与 provider container 均已销毁，只执行关机，
     // 不再向已销毁的 progress notifier 写状态。
-    unawaited(_shutdownFuture ??= _disposeShutdown());
+    unawaited(
+      (_shutdownFuture ??= _disposeShutdown()).catchError((Object _) {}),
+    );
     super.dispose();
   }
 
   /// 幂等共享同一个 shutdown future；默认路径先呈现关机阶段 overlay，
   /// 等待 write-behind 落库排空（FlushingPersistence pending=0）后才放行退出。
   Future<void> _shutdown() {
-    return _shutdownFuture ??= (widget.shutdown ?? _defaultShutdown)();
+    final running = _shutdownFuture;
+    if (running != null) return running;
+    late final Future<void> attempt;
+    attempt = Future<void>.sync(widget.shutdown ?? _defaultShutdown).then(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {
+        if (identical(_shutdownFuture, attempt)) _shutdownFuture = null;
+        if (mounted) _shutdownProgress.fail(error);
+        Error.throwWithStackTrace(error, stackTrace);
+      },
+    );
+    _shutdownFuture = attempt;
+    return attempt;
   }
 
   Future<void> _defaultShutdown() {

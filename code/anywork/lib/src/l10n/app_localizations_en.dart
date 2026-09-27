@@ -34,6 +34,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get shutdownTitle => 'Shutting down safely';
 
   @override
+  String get shutdownFailed => 'Shutdown failed';
+
+  @override
+  String get shutdownRetryExit => 'Retry exit';
+
+  @override
   String get shutdownPhaseStoppingSubscriptions => 'Stopping subscriptions';
 
   @override

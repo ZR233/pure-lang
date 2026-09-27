@@ -44,7 +44,13 @@ fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(pl_remote_helper::run_stdio())?;
+    let result = runtime.block_on(pl_remote_helper::run_stdio());
+    // Tokio's stdin reader uses a blocking thread. A lost SSH connection can
+    // leave that thread inside an uncancelable read after the lease expires.
+    // The server has already joined command cleanup here, so bound runtime
+    // shutdown and let process exit release the remaining stdin reader.
+    runtime.shutdown_timeout(std::time::Duration::from_millis(250));
+    result?;
     Ok(())
 }
 

@@ -85,3 +85,31 @@ pub fn wrap_background_command(command: TokioCommand) -> CommandWrap {
     }
     command
 }
+
+/// Binds an SSH transport to its GUI parent as well as the normal process-tree owner.
+/// A killed Linux GUI cannot run Rust destructors, so the kernel must end the SSH leader.
+pub fn wrap_parent_bound_command(command: TokioCommand) -> CommandWrap {
+    let wrapped = wrap_background_command(command);
+    #[cfg(target_os = "linux")]
+    let wrapped = {
+        let mut wrapped = wrapped;
+        let parent = std::process::id();
+        // SAFETY: the hook only makes async-signal-safe libc calls in the forked child.
+        // Checking the original PPID closes the race between fork and PR_SET_PDEATHSIG.
+        unsafe {
+            wrapped.command_mut().pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::getppid() != parent as libc::pid_t {
+                    return Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+                }
+                Ok(())
+            });
+        }
+        wrapped
+    };
+    #[cfg(not(target_os = "linux"))]
+    let wrapped = wrapped;
+    wrapped
+}

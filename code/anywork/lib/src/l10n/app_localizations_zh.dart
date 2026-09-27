@@ -34,6 +34,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get shutdownTitle => '正在安全退出';
 
   @override
+  String get shutdownFailed => '退出失败';
+
+  @override
+  String get shutdownRetryExit => '重试退出';
+
+  @override
   String get shutdownPhaseStoppingSubscriptions => '正在停止订阅';
 
   @override

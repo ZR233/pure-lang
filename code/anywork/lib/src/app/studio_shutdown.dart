@@ -1,4 +1,7 @@
+import 'dart:ui' show AppExitType;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -10,13 +13,24 @@ import '../shared/studio_driver_state.dart';
 
 part 'studio_shutdown.g.dart';
 
-/// 当前关机进度；null 表示未在关机。
+class StudioShutdownView {
+  const StudioShutdownView({this.progress, this.error});
+
+  final StudioShutdownProgress? progress;
+  final String? error;
+}
+
+/// 当前关机进度或失败状态；两者均为空表示未在关机。
 @Riverpod(keepAlive: true)
 class StudioShutdownProgressState extends _$StudioShutdownProgressState {
   @override
-  StudioShutdownProgress? build() => null;
+  StudioShutdownView build() => const StudioShutdownView();
 
-  void update(StudioShutdownProgress progress) => state = progress;
+  void update(StudioShutdownProgress progress) =>
+      state = StudioShutdownView(progress: progress);
+
+  void fail(Object error) =>
+      state = StudioShutdownView(error: error.toString());
 }
 
 /// 顺序关闭 runtime：先订阅关机进度流再触发 shutdown，保证阶段事件可达。
@@ -51,18 +65,59 @@ class StudioShutdownOverlay extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final progress = ref.watch(studioShutdownProgressStateProvider);
-    if (progress == null) return child;
+    final shutdown = ref.watch(studioShutdownProgressStateProvider);
+    if (shutdown.progress == null && shutdown.error == null) return child;
     return Stack(
       children: [
         child,
         Positioned.fill(
           child: ColoredBox(
             color: Theme.of(context).colorScheme.scrim.withValues(alpha: 0.45),
-            child: Center(child: _ShutdownProgressCard(progress: progress)),
+            child: Center(
+              child: shutdown.error != null
+                  ? _ShutdownFailureCard(error: shutdown.error!)
+                  : _ShutdownProgressCard(progress: shutdown.progress!),
+            ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ShutdownFailureCard extends StatelessWidget {
+  const _ShutdownFailureCard({required this.error});
+
+  final String error;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              l10n.shutdownFailed,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Text(error, maxLines: 5, overflow: TextOverflow.ellipsis),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => ServicesBinding.instance.exitApplication(
+                AppExitType.cancelable,
+              ),
+              child: Text(l10n.shutdownRetryExit),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

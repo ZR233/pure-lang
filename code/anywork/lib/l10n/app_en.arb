@@ -7,6 +7,8 @@
   "sidebarLoadingMore": "Loading more sessions…",
   "sidebarLoadError": "Failed to load more sessions",
   "shutdownTitle": "Shutting down safely",
+  "shutdownFailed": "Shutdown failed",
+  "shutdownRetryExit": "Retry exit",
   "shutdownPhaseStoppingSubscriptions": "Stopping subscriptions",
   "shutdownPhaseCancellingTurns": "Stopping active turns",
   "shutdownPhaseFlushingPersistence": "Saving sessions",

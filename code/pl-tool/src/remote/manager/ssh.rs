@@ -3,14 +3,15 @@
 //! 连接参数（端口、用户、私钥、代理）由 `~/.ssh/config` 的 Host 别名解析，
 //! 这里只传别名本身；BatchMode 固定关闭交互认证与提示。
 
+use process_wrap::tokio::{ChildWrapper, CommandWrap};
 use tokio::process::Command;
 
 use super::SshServerProfile;
 use crate::remote::RemoteClientError;
-use pl_remote_helper::process::configure_background_command;
+use pl_remote_helper::process::wrap_parent_bound_command;
 
 pub(super) struct PreparedSshCommand {
-    pub(super) command: Command,
+    pub(super) command: CommandWrap,
 }
 
 pub(super) fn validate_profile(profile: &SshServerProfile) -> Result<(), RemoteClientError> {
@@ -60,8 +61,9 @@ pub(super) async fn ssh_command(
         command.arg("-F").arg(ssh_config.path());
     }
     command.arg("--").arg(&profile.alias);
-    configure_background_command(&mut command);
-    Ok(PreparedSshCommand { command })
+    Ok(PreparedSshCommand {
+        command: wrap_parent_bound_command(command),
+    })
 }
 
 /// OpenSSH invokes the account shell; all bootstrap syntax belongs to POSIX sh.
@@ -75,7 +77,10 @@ pub(super) async fn run_ssh_capture(
     remote_command: &str,
 ) -> Result<String, RemoteClientError> {
     let mut prepared = ssh_command(profile, ssh_config).await?;
-    prepared.command.arg(posix_remote_command(remote_command));
+    prepared
+        .command
+        .command_mut()
+        .arg(posix_remote_command(remote_command));
     let output = run_bounded_ssh(
         &mut prepared.command,
         None,
@@ -93,30 +98,30 @@ pub(super) async fn run_ssh_capture(
         .map_err(|error| RemoteClientError::Protocol(format!("ssh output is not UTF-8: {error}")))
 }
 
-/// Owns the child through timeout cleanup. Dropping the caller also kills the child,
-/// with Tokio retaining responsibility for reaping it.
+/// Owns the child through bounded timeout cleanup. Dropping the caller also
+/// requests termination through the process-tree wrapper.
 pub(super) async fn run_bounded_ssh(
-    command: &mut Command,
+    command: &mut CommandWrap,
     input: Option<&[u8]>,
     stage: &'static str,
     timeout: std::time::Duration,
 ) -> Result<std::process::Output, RemoteClientError> {
     use tokio::io::AsyncWriteExt;
     command
+        .command_mut()
         .stdin(if input.is_some() {
             std::process::Stdio::piped()
         } else {
             std::process::Stdio::null()
         })
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true);
+        .stderr(std::process::Stdio::piped());
     let mut child = command.spawn().map_err(|error| {
         RemoteClientError::Protocol(format!("SSH {stage} spawn failed: {error}"))
     })?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let stdin = child.stdin.take();
+    let stdout = child.stdout().take();
+    let stderr = child.stderr().take();
+    let stdin = child.stdin().take();
     let operation = async {
         let write = async {
             if let (Some(mut stdin), Some(bytes)) = (stdin, input) {
@@ -145,14 +150,35 @@ pub(super) async fn run_bounded_ssh(
                 Err(_) => "timed out".into(),
                 Ok(Ok(_)) => unreachable!(),
             };
-            child.kill().await.map_err(|error| {
-                RemoteClientError::Protocol(format!(
-                    "SSH {stage} cleanup failed after {reason}: {error}"
-                ))
-            })?;
+            terminate_ssh_child(&mut child, stage)
+                .await
+                .map_err(|error| {
+                    RemoteClientError::Protocol(format!(
+                        "SSH {stage} cleanup failed after {reason}: {error}"
+                    ))
+                })?;
             Err(RemoteClientError::Protocol(format!("SSH {stage} {reason}")))
         }
     }
+}
+
+/// Requests process-tree termination and bounds the local reap wait. The caller
+/// retains the wrapper until this attempt finishes or reports a cleanup error.
+pub(super) async fn terminate_ssh_child(
+    child: &mut Box<dyn ChildWrapper>,
+    stage: &str,
+) -> Result<(), RemoteClientError> {
+    let termination = child.start_kill();
+    tokio::time::timeout(std::time::Duration::from_secs(2), child.wait())
+        .await
+        .map_err(|_| RemoteClientError::Protocol(format!("SSH {stage} cleanup timed out")))?
+        .map_err(|error| {
+            RemoteClientError::Protocol(format!("failed to reap SSH {stage}: {error}"))
+        })?;
+    if let Err(error) = termination {
+        tracing::debug!(%stage, %error, "SSH termination request failed, but the process exited");
+    }
+    Ok(())
 }
 
 async fn capture_bounded<R: tokio::io::AsyncRead + Unpin>(
