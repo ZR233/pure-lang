@@ -84,7 +84,7 @@ impl<B: WorkspaceFileBackend + 'static, H: ToolMediaHost> ThreadViewImageTool<B,
         }
     }
 
-    /// Installs a deferred image reader without framework control permissions.
+    /// Installs an immediately visible image reader without framework control permissions.
     ///
     /// # Errors
     /// Returns invalid registry identity errors.
@@ -92,7 +92,6 @@ impl<B: WorkspaceFileBackend + 'static, H: ToolMediaHost> ThreadViewImageTool<B,
         let authorization = self.authorization.clone();
         Ok(
             Registration::new(TOOL_VIEW_IMAGE.into(), declaration, self)?
-                .deferred()
                 .with_authorization(authorization),
         )
     }

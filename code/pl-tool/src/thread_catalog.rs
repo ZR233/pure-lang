@@ -49,7 +49,7 @@ impl ThreadBuiltin {
             Self::Sleep => crate::session::SleepTool::declaration(),
             Self::ViewImage => schema::<crate::image::ViewImageInput>(
                 crate::image::TOOL_VIEW_IMAGE,
-                "Read a workspace image using this prepared model's image capability. Original bytes and the model-visible image are retained for history replay.",
+                "Open a local or SSH workspace image so you can inspect screenshots and other image files. Pass its path in the current workspace; SSH paths must be workspace-relative POSIX paths. The image is retained for model context and history replay. Requires image input support from the current model.",
             ),
             Self::StatPath => schema::<crate::file::PathInput>(
                 "stat_path",

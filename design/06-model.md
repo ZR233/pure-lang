@@ -226,7 +226,9 @@ pl-model 在准备阶段通过资源访问端口把稳定附件引用 materializ
 存储，也不解析本地路径。同一 modality 批次选择同一种表示；provider 文件上传失败只能在推理请求
 发出前整批切换到下一条 profile 路线，流建立后不得自动重发。
 
-代理主动读取图片使用独立的 `view_image` 工具和工具媒体上下文条目。MCP typed image result 只有
+代理主动读取图片使用直接可见的 `view_image` 工具和工具媒体上下文条目，不要求先通过
+`discover_tools` 猜出工具名。本地与 SSH 工作区使用同一工具声明、图片归一化及归档流程；路径
+由当前工作区的文件 backend 解析，SSH 路径采用工作区相对 POSIX 形式。MCP typed image result 只有
 在调用它的精确模型同样声明 image 输入、完整快照 replay profile，且当前 Thread 安装 attachment
 runtime 时才进入相同通道；否则图片块只产生有界诊断文本，不持久化为仅供 UI 使用的附件。工具
 成功结果仍先以普通 typed tool result 闭合 provider tool call；同一批次的全部结果闭合后，core
