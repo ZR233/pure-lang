@@ -5,7 +5,7 @@ use clap::Parser;
 use pl_provider_fixture::{
     FixtureServer, GUI_SCENARIOS, ReadyFile, gui_history_fault_script, gui_history_lock_script,
     gui_realtime_script, gui_script, gui_statistics_script, gui_stress_body_large_script,
-    gui_stress_body_script, gui_stress_script,
+    gui_stress_body_script, gui_stress_script, gui_tool_scroll_script,
 };
 
 #[derive(Parser)]
@@ -30,6 +30,7 @@ async fn main() -> Result<()> {
     );
     let steps = match scenario {
         "gui" => gui_script(),
+        "tool-scroll" => gui_tool_scroll_script(),
         "stress" => gui_stress_script(),
         "stress-body" => gui_stress_body_script(),
         "stress-body-large" => gui_stress_body_large_script(),

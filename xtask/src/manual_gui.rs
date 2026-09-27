@@ -343,6 +343,7 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             | "stress-body-large"
             | "history-lock"
             | "history-fault"
+            | "tool-scroll"
     ) {
         ensure!(
             io::stdin().is_terminal(),
@@ -566,6 +567,48 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         let vm_url = wait_for_vm(&gui_log_path, &mut gui, &mut fixture, &interrupt_rx)?;
         let mut probe = None;
         println!("Native GUI is ready. Evidence: {}", output.display());
+        if options.scenario == "tool-scroll" {
+            let log = File::create(output.join("tool-scroll-driver.log"))?;
+            let mut command = Command::new("dart");
+            command
+                .current_dir(&app_dir)
+                .args(["run", "test_driver/tool_scroll_journey.dart", &vm_url])
+                .arg(&output)
+                .arg(working.path().join("tool-scroll-project"))
+                .stdout(Stdio::from(log.try_clone()?))
+                .stderr(Stdio::from(log));
+            let mut driver = OwnedProcess::start(&mut command, false)?;
+            let deadline = Instant::now() + Duration::from_secs(240);
+            let status = loop {
+                if let Some(status) = driver.child.try_wait()? {
+                    driver.stopped = true;
+                    break status;
+                }
+                ensure!(
+                    !gui.exited()?,
+                    "GUI exited during tool expansion observation"
+                );
+                ensure!(
+                    !fixture.exited()?,
+                    "fixture exited during tool expansion observation"
+                );
+                ensure!(
+                    interrupt_rx.try_recv().is_err(),
+                    "tool expansion observation cancelled"
+                );
+                ensure!(
+                    Instant::now() < deadline,
+                    "tool expansion observation timed out"
+                );
+                thread::sleep(Duration::from_millis(100));
+            };
+            capture(&app_dir, &home, &vm_url, &output, &interrupt_rx)?;
+            ensure!(
+                status.success(),
+                "tool expansion observation failed: {status}"
+            );
+            return Ok(());
+        }
         if options.scenario == "stress" {
             let project = working.path().join("stress-project");
             fs::create_dir(&project)?;

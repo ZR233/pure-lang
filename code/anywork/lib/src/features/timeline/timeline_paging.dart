@@ -49,6 +49,7 @@ extension on _TimelineViewState {
           onToggleReasoning: _toggleReasoning,
           isToolGroupExpanded: toolExpanded,
           onToggleToolGroup: _toggleToolGroup,
+          onToolDetailsChanged: _handleToolDetailsChanged,
           body: bodyStates,
         ),
       );

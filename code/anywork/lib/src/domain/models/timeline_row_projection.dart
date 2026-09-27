@@ -364,7 +364,7 @@ int _timelineRowRenderVersion(TimelineEntry part) {
 /// 正文指纹：长度 + 有界尾部样本。
 ///
 /// 渲染版本只需要"内容变了没有"；对整串取哈希会让大正文在每次投影/增量时都被
-/// 重新遍历。正文本身已被客户端预算约束，这里再用长度与定长样本即可（长度单调变
+/// 重新遍历。正文完整性由窗口决定，这里只用长度与定长样本（长度单调变
 /// 化，尾部样本捕捉等长滑动）。
 Object? _bodyFingerprint(String? text) {
   if (text == null || text.isEmpty) return text;

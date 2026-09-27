@@ -113,6 +113,7 @@ class _TimelineRowBlock extends StatelessWidget {
     required this.onToggleReasoning,
     required this.isToolGroupExpanded,
     required this.onToggleToolGroup,
+    required this.onToolDetailsChanged,
     this.body = const [],
     super.key,
   });
@@ -122,6 +123,7 @@ class _TimelineRowBlock extends StatelessWidget {
   final ValueChanged<String> onToggleReasoning;
   final bool isToolGroupExpanded;
   final ValueChanged<String> onToggleToolGroup;
+  final VoidCallback onToolDetailsChanged;
 
   /// 该行底层超大条目的完整正文状态；空列表表示该行不需要回源。
   ///
@@ -212,6 +214,7 @@ class _TimelineRowBlock extends StatelessWidget {
                       onToggleReasoning: onToggleReasoning,
                       isToolGroupExpanded: isToolGroupExpanded,
                       onToggleToolGroup: onToggleToolGroup,
+                      onToolDetailsChanged: onToolDetailsChanged,
                     ),
                   ),
                   if (!row.saved)
@@ -298,7 +301,7 @@ class _Avatar extends StatelessWidget {
 
 /// 折叠条目的完整正文提示：可见的加载 / 失败 / 重试路径。
 ///
-/// 推理 / 工具 / raw 载荷仍收敛到客户端预算，展开后按底层条目身份给出显式补齐入口；补齐
+/// 推理 / 工具 / raw 的窗口预览按底层条目身份给出显式补齐入口；补齐
 /// 进行中显示加载态；失败时显示错误与重试。智能体正文不在此列：它由窗口按身份自动补齐，
 /// 因此既不显示分页/折叠入口，也不需要读者点击加载。所有状态只改变该条目的载荷，不改变
 /// 身份、ordinal 或用户阅读位置。
@@ -396,6 +399,7 @@ class _RowCard extends StatelessWidget {
     required this.onToggleReasoning,
     required this.isToolGroupExpanded,
     required this.onToggleToolGroup,
+    required this.onToolDetailsChanged,
     super.key,
   });
 
@@ -404,6 +408,7 @@ class _RowCard extends StatelessWidget {
   final ValueChanged<String> onToggleReasoning;
   final bool isToolGroupExpanded;
   final ValueChanged<String> onToggleToolGroup;
+  final VoidCallback onToolDetailsChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -460,6 +465,7 @@ class _RowCard extends StatelessWidget {
         group: row.toolGroup!,
         expanded: isToolGroupExpanded,
         onToggle: () => onToggleToolGroup(row.toolGroup!.id),
+        onDetailsChanged: onToolDetailsChanged,
       ),
       TimelineRowType.skillActivation => _SkillActivationPart(
         key: StudioDriverKeys.timelineSkillActivation(row.part!.id),

@@ -512,9 +512,10 @@ class _TimelineViewState extends State<TimelineView> {
                       key: StudioDriverKeys.timeline,
                       controller: _controller,
                       slivers: [
-                        // 反向区：center 之前的历史行，按反序排布，不参与贴底几何。
+                        // SliverMainAxisGroup already traverses its children in
+                        // reverse growth order; keep chronological source order.
                         _itemSliver(
-                          rows.take(centerIndex).toList().reversed.toList(),
+                          rows.take(centerIndex).toList(),
                           isCenter: false,
                         ),
                         // 正向区（center 起）整体贴底：留白只在布局期以
@@ -903,6 +904,16 @@ class _TimelineViewState extends State<TimelineView> {
         _expandedToolGroups.add(groupId);
       }
     });
+  }
+
+  void _handleToolDetailsChanged() {
+    if (!_detachedByUser || _restoreClamped) return;
+    final anchor = _captureAnchor();
+    if (anchor == null) return;
+    // An ExpansionTile owns its animation, but the timeline owns reading
+    // coordinates. Rebase before its first layout so a reverse-growing sliver
+    // cannot move the clicked header by the animated detail height.
+    setState(() => _prepareAnchorRestore(anchor));
   }
 
   /// 记录 [_BottomAlignedSliver] 在**布局期**算出的贴底留白。

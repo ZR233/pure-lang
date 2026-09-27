@@ -34,7 +34,7 @@ pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
 /// The coordinator's ready-file check, the fixture CLI parser and the script
 /// selection all read this single list, so a scenario can no longer be accepted
 /// by one of them and rejected by another.
-pub const GUI_SCENARIOS: [&str; 8] = [
+pub const GUI_SCENARIOS: [&str; 9] = [
     "gui",
     "stress",
     "stress-body",
@@ -43,7 +43,82 @@ pub const GUI_SCENARIOS: [&str; 8] = [
     "realtime",
     "history-lock",
     "history-fault",
+    "tool-scroll",
 ];
+
+/// Real file listings and a long shell argument for observing tool expansion.
+/// Each prompt is followed by enough text to put its tools inside the timeline.
+pub fn gui_tool_scroll_script() -> Vec<Step> {
+    let mut script = RealtimeScript::new();
+    let title = session_title_prompt("Tool scroll short");
+    script.optional_title(&title);
+    let identities = [
+        ("scroll-item-short", "scroll-call-short"),
+        ("scroll-item-medium", "scroll-call-medium"),
+        ("scroll-item-long", "scroll-call-long"),
+        ("scroll-item-arguments", "scroll-call-arguments"),
+        ("scroll-item-a", "scroll-call-a"),
+        ("scroll-item-b", "scroll-call-b"),
+        ("scroll-item-c", "scroll-call-c"),
+        ("scroll-item-failed", "scroll-call-failed"),
+    ];
+    let mut next_identity = 0;
+    for (prompt, lines, padding, count) in [
+        ("Tool scroll short", 1, 0, 1),
+        ("Tool scroll medium", 12, 0, 1),
+        ("Tool scroll long", 200, 0, 1),
+        ("Tool scroll arguments", 12, 12_000, 1),
+        ("Tool scroll multiple", 80, 0, 3),
+        ("Tool scroll failed", 0, 0, 1),
+    ] {
+        let calls = identities[next_identity..next_identity + count]
+            .iter()
+            .map(|&(item_id, call_id)| {
+                let command = if cfg!(windows) {
+                    format!("1..{lines} | ForEach-Object {{ Write-Output ('line-' + $_ + ' tool output') }} # {}", "argument ".repeat(padding / 9))
+                } else {
+                    format!("i=1; while [ \"$i\" -le {lines} ]; do printf 'line-%s tool output\\n' \"$i\"; i=$((i+1)); done # {}", "argument ".repeat(padding / 9))
+                };
+                RealtimeToolCall {
+                    item_id,
+                    call_id,
+                    name: if padding > 0 { TOOL_EXEC_NAME } else { "list_files" },
+                    arguments: if padding > 0 {
+                        realtime_exec_arguments(&command, None)
+                    } else {
+                        json!({"path":"scroll-fixture", "limit":lines}).to_string()
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+        next_identity += count;
+        script.add(|step| {
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                prompt,
+                step,
+                Reply::Sse(responses_tool_calls(
+                    "scroll-tools",
+                    "fixture-model",
+                    &calls,
+                )),
+            )
+        });
+        let tail = (0..45)
+            .map(|line| format!("{prompt} following paragraph {line}.\n\n"))
+            .collect::<String>();
+        script.add(|step| {
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                prompt,
+                step,
+                Reply::Sse(responses_text(&tail, "scroll-tail", "fixture-model")),
+            )
+        });
+        script.optional_title(&title);
+    }
+    script.finish()
+}
 
 pub const GUI_STRESS_PROMPT: &str = "Stream the local GUI stress fixture";
 pub const STRESS_EVENT_COUNT: usize = 20_000;

@@ -370,9 +370,8 @@ StudioState applyTimelinePage(
                 workspaceRevision: workspace.revision,
               ) ??
               existing;
-    merged[item.id] = boundThreadItemBody(
-      selected,
-      previewOmittedUnits: pagePreviewOmitted[item.id] ?? 0,
+    merged[item.id] = selected.copyWith(
+      bodyOmittedUnits: pagePreviewOmitted[item.id] ?? 0,
     );
   }
   final items = merged.values.toList()..sort(_compareItems);

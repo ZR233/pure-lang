@@ -62,13 +62,11 @@ class FrbChatWindow implements StudioChatWindow {
   bool _closed = false;
 
   StudioChatItem _item(frb_chat_types.BridgeChatItem item) => StudioChatItem(
-    boundThreadItemBody(
-      _threadItemFromFrb(item.item).copyWith(
-        saved: item.saved,
-        executionTerminal:
-            item.lifecycle == frb_chat_types.BridgeChatLifecycle.terminal,
-      ),
-      previewOmittedUnits: _frbInt(item.omittedBytes),
+    _threadItemFromFrb(item.item).copyWith(
+      saved: item.saved,
+      executionTerminal:
+          item.lifecycle == frb_chat_types.BridgeChatLifecycle.terminal,
+      bodyOmittedUnits: _frbInt(item.omittedBytes),
     ),
     saved: item.saved,
     lifecycle: item.lifecycle == frb_chat_types.BridgeChatLifecycle.terminal

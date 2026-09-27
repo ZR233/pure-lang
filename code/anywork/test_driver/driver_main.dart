@@ -16,6 +16,7 @@ import 'raw_tap_extension.dart';
 import 'pointer_scroll_extension.dart';
 import 'scrollbar_drag_extension.dart';
 import 'key_press_extension.dart';
+import 'tool_probe_extension.dart';
 
 /// Native-only Driver entrypoint. Product and release builds use lib/main.dart.
 void main() {
@@ -29,6 +30,7 @@ void main() {
       PointerScrollCommandExtension(),
       ScrollbarDragCommandExtension(),
       KeyPressCommandExtension(),
+      ToolProbeExtension(),
     ],
   );
   SchedulerBinding.instance.addTimingsCallback(_recordFrameTimings);

@@ -429,6 +429,7 @@ abstract final class StudioDriverState {
                         if (item.tool case final tool?)
                           {
                             'name': tool.name,
+                            'itemId': item.id,
                             'callId': tool.callId ?? tool.toolCallId,
                             'status': item.status,
                             'arguments': tool.arguments,
