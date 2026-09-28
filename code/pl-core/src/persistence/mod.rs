@@ -4,6 +4,7 @@ mod history;
 pub mod migration;
 mod repository;
 mod sqlite;
+mod thread_history;
 mod thread_journal;
 mod writer;
 
@@ -14,6 +15,7 @@ use std::sync::Arc;
 
 use crate::storage::SessionEntryChange;
 pub use sqlite::{SessionStoreError, SqliteSessionOptions};
+pub use thread_history::{ThreadEffectPage, ThreadEffectQuery};
 pub use writer::SqliteSessionStore;
 
 /// Observable writer state. Errors retain their typed cause; pending facts remain owned in memory.

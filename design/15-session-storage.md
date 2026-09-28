@@ -399,6 +399,15 @@ delivery、扩展与运行事实、以及未结束 attempt 的诊断正文。
 
 ## 15.5 会话历史数据库
 
+`pl-core::persistence::SqliteSessionStore` 保存通用 Thread effect，与下文 Studio 的产品
+`history.sqlite` 是不同的存储适配器。使用前者的嵌入式宿主通过
+`read_thread_effect` / `query_thread_effects` 按 Thread 身份和 commit 序号读取已提交
+effect；core 校验存储信封完整性、Thread 归属和序号键。宿主只将这些通用事实投影为自己的
+Turn、工具调用和审查记录，不读取 `session_entries` 表、不解码
+`pl.resource.thread-commit.*` 存储键，也不从当前 checkpoint 重建已退出内存窗口的历史。
+宿主提供的可见会话内容与长历史窗口经 `Session`/`ChatView` 读取；配置文件和业务状态仍由
+产品宿主管理。
+
 每个 Thread 使用独立 `history.sqlite`，面向稳定条目和 keyset 分页，不保存完整执行 journal。
 该文件位于应用 home 下的 `~/.anywork/v2/sessions/<storage-key>/history.sqlite`，`<storage-key>`
 是 Thread id 的 SHA-256 十六进制摘要（布局见 [17](./17-studio-storage.md) §17.1）。

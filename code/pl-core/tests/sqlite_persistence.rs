@@ -2,7 +2,9 @@ mod support;
 
 use pl_core::context::OpaquePayload;
 use pl_core::model::DynModelSession;
-use pl_core::persistence::{ResourceAdmissionError, SqliteSessionOptions, SqliteSessionStore};
+use pl_core::persistence::{
+    ResourceAdmissionError, SqliteSessionOptions, SqliteSessionStore, ThreadEffectQuery,
+};
 use pl_core::thread::cold::ColdStoreHandle;
 use pl_core::thread::{ThreadEffectBatch, ThreadHandle, TurnOutcome, TurnState};
 
@@ -23,20 +25,155 @@ async fn a_thread_turn_is_durable_in_the_sqlite_cold_store() {
     thread.flush().await.unwrap();
     let snapshot = thread.snapshot();
     assert!(snapshot.persistence.durable_sequence >= snapshot.commit_sequence);
-    let history = store.replay_entries("stored-thread", None).await.unwrap();
+    let history = store
+        .query_thread_effects(
+            "stored-thread",
+            ThreadEffectQuery {
+                before_sequence: None,
+                limit: 32,
+            },
+        )
+        .await
+        .unwrap();
     let turns: Vec<_> = history
+        .effects
         .iter()
-        .filter(|entry| entry.id.starts_with("pl.resource.thread-commit."))
-        .filter_map(|entry| {
-            let payload =
-                OpaquePayload::new(&*entry.type_id, entry.schema_version, &*entry.payload).unwrap();
-            ThreadEffectBatch::decode(&payload).unwrap().turn
-        })
+        .filter_map(|effect| effect.turn.as_ref())
         .collect();
     assert!(turns.iter().any(|turn| {
         turn.turn_id == "stored-turn" && turn.state == TurnState::Finished(TurnOutcome::Completed)
     }));
     thread.close().await.unwrap();
+    store.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn thread_effect_queries_page_by_sequence_and_keep_threads_isolated() {
+    let directory = tempfile::tempdir().unwrap();
+    let options = SqliteSessionOptions {
+        path: directory.path().join("thread-history.sqlite"),
+    };
+    let store = SqliteSessionStore::open(options.clone()).await.unwrap();
+    for (thread_id, turns) in [("first", 3), ("second", 1)] {
+        let (model, _) = ScriptedModel::new(&[]);
+        let thread = ThreadHandle::start(thread_id.into(), DynModelSession::new(model)).unwrap();
+        thread
+            .attach_storage(ColdStoreHandle::new(store.clone()))
+            .await
+            .unwrap();
+        for index in 0..turns {
+            thread
+                .run_turn(turn(&format!("{thread_id}-{index}")))
+                .await
+                .unwrap();
+        }
+        thread.flush().await.unwrap();
+        thread.close().await.unwrap();
+    }
+    store.shutdown().await.unwrap();
+    let store = SqliteSessionStore::open(options).await.unwrap();
+    let mut cursor = None;
+    let mut sequences = Vec::new();
+    loop {
+        let page = store
+            .query_thread_effects(
+                "first",
+                ThreadEffectQuery {
+                    before_sequence: cursor,
+                    limit: 2,
+                },
+            )
+            .await
+            .unwrap();
+        sequences.extend(page.effects.iter().map(|effect| effect.sequence));
+        match page.next_before_sequence {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert!(sequences.len() > 2);
+    assert!(sequences.windows(2).all(|pair| pair[0] > pair[1]));
+    assert_eq!(
+        sequences.len(),
+        sequences
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+    );
+    for sequence in sequences {
+        let effect = store
+            .read_thread_effect("first", sequence)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(effect.thread_id, "first");
+        assert_eq!(effect.sequence, sequence);
+    }
+    assert!(
+        store
+            .read_thread_effect("second", u64::MAX)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .query_thread_effects(
+                "missing",
+                ThreadEffectQuery {
+                    before_sequence: None,
+                    limit: 2,
+                }
+            )
+            .await
+            .unwrap()
+            .effects
+            .is_empty()
+    );
+    assert!(
+        store
+            .query_thread_effects(
+                "first",
+                ThreadEffectQuery {
+                    before_sequence: None,
+                    limit: 0,
+                }
+            )
+            .await
+            .is_err()
+    );
+    store.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn thread_effect_queries_reject_mismatched_ownership() {
+    let store = SqliteSessionStore::open_memory().await.unwrap();
+    let effect = ThreadEffectBatch {
+        thread_id: "other".into(),
+        sequence: 1,
+        ..Default::default()
+    };
+    store
+        .register_resource(
+            "claimed",
+            "thread-commit.00000000000000000001",
+            effect.encode().unwrap(),
+        )
+        .unwrap();
+    store.flush().await.unwrap();
+    assert!(store.read_thread_effect("claimed", 1).await.is_err());
+    assert!(
+        store
+            .query_thread_effects(
+                "claimed",
+                ThreadEffectQuery {
+                    before_sequence: None,
+                    limit: 1,
+                }
+            )
+            .await
+            .is_err()
+    );
     store.shutdown().await.unwrap();
 }
 
