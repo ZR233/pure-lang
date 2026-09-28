@@ -257,6 +257,7 @@ pub trait ColdStore: Send + Sync + fmt::Debug + 'static {
     ///
     /// The plain SQLite store accounts for portable model usage here. Product stores that own
     /// richer pricing and timing may leave this untouched and fold the same effect in their writer.
+    /// A synchronous implementation must advance `applied_sequence` and be idempotent on retry.
     fn fold_usage(&self, _summary: &mut UsageSummary, _effect: &ThreadEffectBatch) {}
     /// Reserves an observed presentation identity synchronously, before a coalescing preview
     /// can discard it. Backends without ordered presentation storage need not reserve anything.
@@ -1346,7 +1347,20 @@ impl Owner {
             return;
         };
         self.state.persistence.attached = true;
-        while let Some(pending) = self.pending_effects.front() {
+        while let Some(pending) = self.pending_effects.front_mut() {
+            // Commits made before storage was attached already have transfer checkpoints. Fold
+            // them in order before admission so each retained checkpoint carries its own total.
+            if pending.write.effect.sequence
+                > pending
+                    .write
+                    .checkpoint
+                    .state
+                    .usage_summary
+                    .applied_sequence
+            {
+                store.fold_usage(&mut self.state.usage_summary, &pending.write.effect);
+                pending.write.checkpoint.state.usage_summary = self.state.usage_summary.clone();
+            }
             let sequence = pending.write.effect.sequence;
             match store.0.admit(&self.id, pending.write.clone()) {
                 Ok(()) => {

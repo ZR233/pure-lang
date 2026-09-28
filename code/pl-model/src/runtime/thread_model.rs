@@ -253,7 +253,7 @@ fn failure(
     ModelError {
         details: None,
         kind,
-        usage: ModelUsage::default(),
+        usage: Box::default(),
         source: Some(Box::new(source)),
     }
 }
@@ -265,5 +265,6 @@ fn usage(report: &pl_protocol::UsageReport) -> ModelUsage {
         cache_read_tokens: report.cache_read_tokens,
         cache_write_tokens: report.cache_write_tokens,
         reasoning_tokens: report.reasoning_tokens,
+        total_tokens: report.total_tokens,
     }
 }

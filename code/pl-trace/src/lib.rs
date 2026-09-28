@@ -80,7 +80,9 @@ struct UsageAccumulator {
 impl UsageAccumulator {
     fn add(&mut self, usage: &pl_core::model::ModelUsage) {
         let Some(total) = &mut self.total else {
-            self.total = Some(usage.clone());
+            let mut first = usage.clone();
+            first.total_tokens = known_total(usage);
+            self.total = Some(first);
             return;
         };
         total.input_tokens = sum_known(total.input_tokens, usage.input_tokens);
@@ -88,7 +90,16 @@ impl UsageAccumulator {
         total.cache_write_tokens = sum_known(total.cache_write_tokens, usage.cache_write_tokens);
         total.output_tokens = sum_known(total.output_tokens, usage.output_tokens);
         total.reasoning_tokens = sum_known(total.reasoning_tokens, usage.reasoning_tokens);
+        total.total_tokens = sum_known(total.total_tokens, known_total(usage));
     }
+}
+fn known_total(usage: &pl_core::model::ModelUsage) -> Option<u64> {
+    usage.total_tokens.or_else(|| {
+        usage
+            .input_tokens
+            .zip(usage.output_tokens)
+            .and_then(|(input, output)| input.checked_add(output))
+    })
 }
 fn sum_known(left: Option<u64>, right: Option<u64>) -> Option<u64> {
     left.zip(right)

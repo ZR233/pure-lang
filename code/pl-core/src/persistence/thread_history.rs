@@ -94,7 +94,7 @@ impl SqliteSessionStore {
     }
 }
 
-fn decode_effect(
+pub(super) fn decode_effect(
     row: sea_orm::QueryResult,
     thread_id: &str,
 ) -> Result<ThreadEffectBatch, SessionStoreError> {

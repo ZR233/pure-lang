@@ -15,7 +15,7 @@ impl SqliteSessionStore {
     /// 返回的 checkpoint 是 core 保存的 pruned、inline 重启 DTO：正文全部内联，没有需要外部
     /// blob 才能补齐的引用，可直接交给 owner 恢复。pl-core 在这里验证存储信封、内容 hash、Thread
     /// 身份、checkpoint schema 版本、`state_revision`/`state.commit_sequence` 一致性、
-    /// `history_fence` 与状态 revision 的关系，以及在 `history_fence` 处的已保存 effect 的
+    /// `history_fence` 与状态 revision 的关系、用量折叠水位，以及在 `history_fence` 处的已保存 effect 的
     /// 完整性、归属和序号。
     ///
     /// # Errors
@@ -38,6 +38,11 @@ impl SqliteSessionStore {
             return Ok(None);
         };
         let checkpoint = decode_checkpoint(row, thread_id)?;
+        if checkpoint.state.usage_summary.applied_sequence != checkpoint.state_revision {
+            return Err(SessionStoreError::Invalid(
+                "Thread checkpoint usage summary is behind its revision".into(),
+            ));
+        }
         // 复用 typed 历史入口的校验，不能只凭同名行存在就发布可恢复 checkpoint。
         if self
             .read_thread_effect(thread_id, checkpoint.history_fence)
@@ -52,7 +57,7 @@ impl SqliteSessionStore {
     }
 }
 
-fn decode_checkpoint(
+pub(super) fn decode_checkpoint(
     row: sea_orm::QueryResult,
     thread_id: &str,
 ) -> Result<ThreadCheckpoint, SessionStoreError> {

@@ -12,10 +12,10 @@ mod writer;
 
 /// Current SQLite cold-history format. Unsupported formats are never automatically reset.
 ///
-/// Schema 8 adds the per-Thread current-state checkpoint table, written in the same transaction as
-/// the effect it belongs to. Older data is upgraded only through the explicit
+/// Schema 9 backfills portable usage into schema-8 Thread checkpoints from saved effects.
+/// Older data is upgraded only through the explicit
 /// [`migration::migrate_to_current`] path; opening a database never converts or discards it.
-pub const SESSION_SCHEMA_VERSION: i64 = 8;
+pub const SESSION_SCHEMA_VERSION: i64 = 9;
 
 use std::sync::Arc;
 

@@ -19,10 +19,14 @@ pub(crate) fn fold_effect(summary: &mut UsageSummary, effect: &ThreadEffectBatch
         summary.turn_decode_millis = 0;
     }
     if let Some(attempt) = &effect.attempt {
-        if let Some(binding) = &attempt.usage_binding {
-            summary.model.clone_from(&binding.model);
-            summary.context_window = binding.context_window;
-        }
+        summary.model = attempt
+            .usage_binding
+            .as_ref()
+            .map_or_else(String::new, |binding| binding.model.clone());
+        summary.context_window = attempt
+            .usage_binding
+            .as_ref()
+            .and_then(|binding| binding.context_window);
         match &attempt.outcome {
             AttemptOutcome::Running => {}
             AttemptOutcome::Interrupted => {
@@ -48,27 +52,78 @@ pub(crate) fn fold_effect(summary: &mut UsageSummary, effect: &ThreadEffectBatch
 fn add_usage(summary: &mut UsageSummary, usage: &ModelUsage, turn_id: &str) {
     let input = usage.input_tokens.unwrap_or(0);
     let output = usage.output_tokens.unwrap_or(0);
-    let total = input.saturating_add(output);
-    summary.inference_count = summary.inference_count.saturating_add(1);
-    summary.prompt_tokens = summary.prompt_tokens.saturating_add(input);
-    summary.completion_tokens = summary.completion_tokens.saturating_add(output);
-    summary.cached_prompt_tokens = summary
-        .cached_prompt_tokens
-        .saturating_add(usage.cache_read_tokens.unwrap_or(0));
-    summary.cache_write_tokens = summary
-        .cache_write_tokens
-        .saturating_add(usage.cache_write_tokens.unwrap_or(0));
-    summary.reasoning_tokens = summary
-        .reasoning_tokens
-        .saturating_add(usage.reasoning_tokens.unwrap_or(0));
-    summary.total_tokens = summary.total_tokens.saturating_add(total);
-    if usage.input_tokens.is_some() || usage.output_tokens.is_some() {
-        summary.latest_context_tokens = total;
+    let derived_total = usage
+        .input_tokens
+        .zip(usage.output_tokens)
+        .and_then(|(input, output)| input.checked_add(output));
+    let total = usage.total_tokens.or(derived_total);
+    let invalid_cache = usage.input_tokens.is_some_and(|input| {
+        usage
+            .cache_read_tokens
+            .unwrap_or(0)
+            .checked_add(usage.cache_write_tokens.unwrap_or(0))
+            .is_none_or(|cached| cached > input)
+    });
+    let invalid_reasoning = usage
+        .output_tokens
+        .zip(usage.reasoning_tokens)
+        .is_some_and(|(output, reasoning)| reasoning > output);
+    let reported_sides = usage.input_tokens.is_some() && usage.output_tokens.is_some();
+    let invalid_total = reported_sides
+        && (derived_total.is_none()
+            || usage
+                .total_tokens
+                .is_some_and(|reported| Some(reported) != derived_total));
+    let valid = !invalid_total && !invalid_cache && !invalid_reasoning;
+    let complete = reported_sides && valid;
+    summary.has_incomplete_usage |= !complete || usage.cache_read_tokens.is_none();
+    add_counter(
+        &mut summary.inference_count,
+        1,
+        &mut summary.has_incomplete_usage,
+    );
+    add_counter(
+        &mut summary.prompt_tokens,
+        input,
+        &mut summary.has_incomplete_usage,
+    );
+    add_counter(
+        &mut summary.completion_tokens,
+        output,
+        &mut summary.has_incomplete_usage,
+    );
+    add_counter(
+        &mut summary.cached_prompt_tokens,
+        usage.cache_read_tokens.unwrap_or(0),
+        &mut summary.has_incomplete_usage,
+    );
+    add_counter(
+        &mut summary.cache_write_tokens,
+        usage.cache_write_tokens.unwrap_or(0),
+        &mut summary.has_incomplete_usage,
+    );
+    add_counter(
+        &mut summary.reasoning_tokens,
+        usage.reasoning_tokens.unwrap_or(0),
+        &mut summary.has_incomplete_usage,
+    );
+    if let Some(total) = total {
+        add_counter(
+            &mut summary.total_tokens,
+            total,
+            &mut summary.has_incomplete_usage,
+        );
+        if valid {
+            summary.latest_context_tokens = total;
+        }
     }
     if summary.turn_id == turn_id {
-        summary.turn_completion_tokens = summary.turn_completion_tokens.saturating_add(output);
+        add_counter(
+            &mut summary.turn_completion_tokens,
+            output,
+            &mut summary.has_incomplete_usage,
+        );
     }
-    summary.has_incomplete_usage |= usage.input_tokens.is_none() || usage.output_tokens.is_none();
     // pl-core has no provider price table; products may enrich pricing in their own writer.
     summary.has_unpriced_usage = true;
     if let (Some(input), Some(read)) = (usage.input_tokens, usage.cache_read_tokens)
@@ -77,9 +132,25 @@ fn add_usage(summary: &mut UsageSummary, usage: &ModelUsage, turn_id: &str) {
             .cache_write_tokens
             .is_none_or(|write| write <= input - read)
     {
-        summary.cache_input_tokens = summary.cache_input_tokens.saturating_add(input);
-        summary.cache_read_tokens = summary.cache_read_tokens.saturating_add(read);
+        add_counter(
+            &mut summary.cache_input_tokens,
+            input,
+            &mut summary.cache_incomplete,
+        );
+        add_counter(
+            &mut summary.cache_read_tokens,
+            read,
+            &mut summary.cache_incomplete,
+        );
     } else {
         summary.cache_incomplete = true;
+    }
+    summary.has_incomplete_usage |= summary.cache_incomplete;
+}
+
+fn add_counter(target: &mut u64, increment: u64, incomplete: &mut bool) {
+    match target.checked_add(increment) {
+        Some(value) => *target = value,
+        None => *incomplete = true,
     }
 }

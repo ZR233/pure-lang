@@ -293,7 +293,7 @@ pub(super) fn failure_error(
     ModelError {
         kind,
         details: Some(Box::new(details)),
-        usage,
+        usage: Box::new(usage),
         source: Some(Box::new(failure)),
     }
 }

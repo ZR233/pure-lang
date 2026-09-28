@@ -1674,6 +1674,9 @@ pub struct ModelUsage {
     pub cache_write_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub reasoning_tokens: Option<u64>,
+    /// Provider-reported total, retained even when one side is not reported separately.
+    #[serde(default)]
+    pub total_tokens: Option<u64>,
 }
 
 /// Portable failure classes. Provider-specific details are retained as the error source.
@@ -1697,7 +1700,8 @@ pub struct ModelError {
     #[serde(default)]
     pub details: Option<Box<OpaquePayload>>,
     pub kind: ModelFailureKind,
-    pub usage: ModelUsage,
+    /// Kept out of the inline error value so propagating failures stays cheap as usage grows.
+    pub usage: Box<ModelUsage>,
     /// Formats without an explicit null (TOML state checkpoints) omit an absent source, so the
     /// field must default instead of requiring it during decode.
     #[serde(default)]
@@ -1726,7 +1730,7 @@ impl ModelError {
         Self {
             kind: ModelFailureKind::ImplementationPanicked,
             details: None,
-            usage: ModelUsage::default(),
+            usage: Box::default(),
             source: Some(Box::new(source)),
         }
     }
@@ -1789,7 +1793,7 @@ impl SessionHealth {
             Err(ModelError {
                 details: None,
                 kind: ModelFailureKind::Unavailable,
-                usage: ModelUsage::default(),
+                usage: Box::default(),
                 source: Some(Box::new(std::io::Error::other(
                     "model session requires replacement or is closing",
                 ))),

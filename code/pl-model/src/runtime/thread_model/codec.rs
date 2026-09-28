@@ -495,7 +495,7 @@ fn response_inner(
     let encoded = serde_json::to_string(&frame).map_err(|error| ModelError {
         details: None,
         kind: ModelFailureKind::InvalidResponse,
-        usage: observed_usage.clone(),
+        usage: Box::new(observed_usage.clone()),
         source: Some(Box::new(error)),
     })?;
     let payload = OpaquePayload::new(FRAME_FORMAT, FRAME_VERSION, encoded)

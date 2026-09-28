@@ -29,6 +29,7 @@ async fn sqlite_thread_usage_matches_hot_snapshot_and_restored_checkpoint() {
         cache_read_tokens: Some(20),
         cache_write_tokens: Some(0),
         reasoning_tokens: Some(5),
+        total_tokens: Some(150),
     };
     model.usage_binding = Some(ModelUsageBinding {
         model: "test-model".into(),
@@ -74,6 +75,184 @@ async fn sqlite_thread_usage_matches_hot_snapshot_and_restored_checkpoint() {
         restored.state.usage_summary.context_window,
         hot.context_window
     );
+    reopened.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn sqlite_partial_and_invalid_usage_keep_context_accounting_honest() {
+    for (case, usage, expected_total) in [
+        (
+            "partial",
+            ModelUsage {
+                input_tokens: Some(70),
+                output_tokens: None,
+                ..Default::default()
+            },
+            0,
+        ),
+        (
+            "overflow",
+            ModelUsage {
+                input_tokens: Some(u64::MAX),
+                output_tokens: Some(1),
+                ..Default::default()
+            },
+            0,
+        ),
+        (
+            "total-only",
+            ModelUsage {
+                total_tokens: Some(80),
+                ..Default::default()
+            },
+            80,
+        ),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteSessionStore::open(SqliteSessionOptions {
+            path: directory.path().join("usage.sqlite"),
+        })
+        .await
+        .unwrap();
+        let (mut model, _) = ScriptedModel::new(&[]);
+        model.usage = usage;
+        let thread = ThreadHandle::start(case.into(), DynModelSession::new(model)).unwrap();
+        thread
+            .attach_storage(ColdStoreHandle::new(store.clone()))
+            .await
+            .unwrap();
+        thread.run_turn(turn(case)).await.unwrap();
+        thread.flush().await.unwrap();
+        let summary = thread.snapshot().usage_summary;
+        assert_eq!(summary.inference_count, 1, "{case}");
+        assert!(summary.has_incomplete_usage, "{case}");
+        assert_eq!(summary.total_tokens, expected_total, "{case}");
+        assert_eq!(summary.latest_context_tokens, expected_total, "{case}");
+        assert_eq!(
+            store
+                .read_thread_checkpoint(case)
+                .await
+                .unwrap()
+                .unwrap()
+                .state
+                .usage_summary,
+            summary,
+            "{case}"
+        );
+        thread.close().await.unwrap();
+        store.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn sqlite_attaching_after_a_turn_accounts_retained_effects() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = SqliteSessionStore::open(SqliteSessionOptions {
+        path: directory.path().join("late-attach.sqlite"),
+    })
+    .await
+    .unwrap();
+    let (mut model, _) = ScriptedModel::new(&[]);
+    model.usage = ModelUsage {
+        input_tokens: Some(40),
+        output_tokens: Some(10),
+        cache_read_tokens: Some(0),
+        ..Default::default()
+    };
+    let thread = ThreadHandle::start("late-attach".into(), DynModelSession::new(model)).unwrap();
+    thread.run_turn(turn("first")).await.unwrap();
+    thread
+        .attach_storage(ColdStoreHandle::new(store.clone()))
+        .await
+        .unwrap();
+    thread.flush().await.unwrap();
+    let hot = thread.snapshot().usage_summary;
+    assert_eq!(hot.total_tokens, 50);
+    assert_eq!(hot.inference_count, 1);
+    assert_eq!(
+        store
+            .read_thread_checkpoint("late-attach")
+            .await
+            .unwrap()
+            .unwrap()
+            .state
+            .usage_summary,
+        hot
+    );
+    thread.close().await.unwrap();
+    store.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn sqlite_v8_migration_backfills_checkpoint_usage_from_saved_effects() {
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+
+    let directory = tempfile::tempdir().unwrap();
+    let options = SqliteSessionOptions {
+        path: directory.path().join("old-usage.sqlite"),
+    };
+    let store = SqliteSessionStore::open(options.clone()).await.unwrap();
+    let (mut model, _) = ScriptedModel::new(&[]);
+    model.usage = ModelUsage {
+        input_tokens: Some(40),
+        output_tokens: Some(10),
+        cache_read_tokens: Some(0),
+        ..Default::default()
+    };
+    let thread = ThreadHandle::start("old-usage".into(), DynModelSession::new(model)).unwrap();
+    thread
+        .attach_storage(ColdStoreHandle::new(store.clone()))
+        .await
+        .unwrap();
+    thread.run_turn(turn("first")).await.unwrap();
+    thread.flush().await.unwrap();
+    thread.close().await.unwrap();
+    store.shutdown().await.unwrap();
+
+    // Recreate the v8 checkpoint written before portable accounting existed, preserving all
+    // effect rows. The migration must recover facts from those rows instead of resetting data.
+    let db = sea_orm::Database::connect(format!("sqlite://{}?mode=rw", options.path.display()))
+        .await
+        .unwrap();
+    let row = db
+        .query_one_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT envelope FROM thread_checkpoints WHERE thread_id='old-usage'",
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    let envelope: String = row.try_get("", "envelope").unwrap();
+    let mut checkpoint: ThreadCheckpoint = serde_json::from_str(&envelope).unwrap();
+    checkpoint.state.usage_summary = Default::default();
+    let envelope = serde_json::to_string(&checkpoint).unwrap();
+    let hash = pl_core::context::content_hash(envelope.as_bytes());
+    db.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Sqlite,
+        "UPDATE thread_checkpoints SET envelope=?,payload_hash=? WHERE thread_id='old-usage'",
+        vec![envelope.into(), hash.into()],
+    ))
+    .await
+    .unwrap();
+    db.execute_unprepared("PRAGMA user_version=8")
+        .await
+        .unwrap();
+    db.close().await.unwrap();
+
+    migration::migrate_to_current(options.clone(), |_| Ok(()))
+        .await
+        .unwrap();
+    let reopened = SqliteSessionStore::open(options).await.unwrap();
+    let summary = reopened
+        .read_thread_checkpoint("old-usage")
+        .await
+        .unwrap()
+        .unwrap()
+        .state
+        .usage_summary;
+    assert_eq!(summary.total_tokens, 50);
+    assert_eq!(summary.inference_count, 1);
+    assert!(summary.applied_sequence > 0);
     reopened.shutdown().await.unwrap();
 }
 

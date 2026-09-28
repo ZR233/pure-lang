@@ -417,6 +417,7 @@ pub(crate) fn replay_legacy(
                     || previous.tools != attempt.tools
                     || previous.tool_projection != attempt.tool_projection
                     || previous.request_metadata != attempt.request_metadata
+                    || previous.usage_binding != attempt.usage_binding
                     || previous.input_estimate != attempt.input_estimate
                 {
                     return Err(ThreadError::InvalidOutput);
