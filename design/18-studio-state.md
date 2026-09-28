@@ -339,7 +339,9 @@ Thread runtime 的缓存统计是独立的 typed 投影 `cache_usage`，包含�
 
 入口优先显示宿主系统为 `vscode` URL 协议默认处理应用解析的图标，不使用项目预置图、品牌
 图或 Flutter 通用图标冒充 VS Code。Flutter 通过桌面宿主通道读取系统解析结果，Windows 从
-协议关联的可执行文件读取 Shell 图标，Linux 从 GIO 默认 URI 应用及当前 GTK 图标主题读取；
+协议关联的可执行文件读取 Shell 图标，使用系统图像编码器保留透明通道；Windows 的入口
+可用性也以同一协议关联为准，不依赖 PATH 或默认安装目录。Linux 从 GIO 默认 URI 应用及
+当前 GTK 图标主题读取；
 通道返回图片字节，不持久化图标。只在取得可解码图标时显示图标按钮；若已探测到 VS Code
 可用但系统图标无法获取或无法解码，显示带「在 VS Code 中打开」标签的直接按钮而不是空白、
 「...」菜单或预设图标。图标结果在进程内缓存，demo 与测试可覆写。
@@ -351,5 +353,5 @@ Thread runtime 的缓存统计是独立的 typed 投影 `cache_usage`，包含�
 密钥，连接参数由 `~/.ssh/config` 的 Host 别名解析（见 [22](./22-ssh-remote.md)）。URI
 构建与协议白名单校验是纯函数；实际打开复用外部 URL 启动器，仅放行上述两种 vscode URI
 形态，http/https 白名单不变。启动失败以界面提示回报，不自动重试。VS Code 探测在宿主
-平台层完成：Windows 检查 PATH 与已知安装位置，Linux 检查 PATH 与
+平台层完成：Windows 查询 `vscode` 协议关联，Linux 检查 PATH 与
 `x-scheme-handler/vscode` 处理器；结果缓存于进程内 provider，demo 与测试可覆写。

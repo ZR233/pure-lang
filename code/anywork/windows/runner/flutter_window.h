@@ -34,9 +34,6 @@ class FlutterWindow : public Win32Window {
   // Hosts the application-icon method channel used by the Studio UI.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       application_icon_channel_;
-
-  // GDI+ token owned by this window; zero when GDI+ failed to start.
-  ULONG_PTR gdiplus_token_ = 0;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

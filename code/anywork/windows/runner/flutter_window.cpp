@@ -2,15 +2,16 @@
 
 #include <windows.h>
 
-#include <gdiplus.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <wincodec.h>
+#include <wrl/client.h>
 
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
 
 #include <cstdint>
-#include <cwchar>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -24,6 +25,7 @@ namespace {
 constexpr char kApplicationIconChannel[] =
     "io.github.zr233.anywork/application_icon";
 constexpr char kVsCodeIconMethod[] = "vsCodeIcon";
+constexpr char kVsCodeAvailableMethod[] = "vsCodeAvailable";
 
 // Looks up the executable Windows associates with the `vscode` URL protocol.
 // Returns false when there is no reliable association, so callers never guess
@@ -46,55 +48,44 @@ bool QueryVsCodeExecutable(std::wstring* executable) {
   return !executable->empty();
 }
 
-// Finds the GDI+ encoder CLSID for PNG output.
-bool GetPngEncoderClsid(CLSID* clsid) {
-  UINT count = 0;
-  UINT size = 0;
-  if (Gdiplus::GetImageEncodersSize(&count, &size) != Gdiplus::Ok ||
-      size == 0) {
-    return false;
+// WIC preserves icon alpha and handles legacy masks. COM is initialized by
+// wWinMain; every interface below is released before the method call returns.
+std::vector<uint8_t> EncodeIconAsPng(HICON icon) {
+  using Microsoft::WRL::ComPtr;
+  ComPtr<IWICImagingFactory> factory;
+  ComPtr<IWICBitmap> bitmap;
+  ComPtr<IStream> stream;
+  ComPtr<IWICBitmapEncoder> encoder;
+  ComPtr<IWICBitmapFrameEncode> frame;
+  if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                              CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) ||
+      FAILED(factory->CreateBitmapFromHICON(icon, &bitmap)) ||
+      FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) ||
+      FAILED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) ||
+      FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) ||
+      FAILED(encoder->CreateNewFrame(&frame, nullptr)) ||
+      FAILED(frame->Initialize(nullptr))) {
+    return {};
   }
-  std::vector<uint8_t> buffer(size);
-  auto* encoders = reinterpret_cast<Gdiplus::ImageCodecInfo*>(buffer.data());
-  if (Gdiplus::GetImageEncoders(count, size, encoders) != Gdiplus::Ok) {
-    return false;
+  WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+  if (FAILED(frame->SetPixelFormat(&format)) ||
+      FAILED(frame->WriteSource(bitmap.Get(), nullptr)) ||
+      FAILED(frame->Commit()) || FAILED(encoder->Commit())) {
+    return {};
   }
-  for (UINT index = 0; index < count; ++index) {
-    if (wcscmp(encoders[index].MimeType, L"image/png") == 0) {
-      *clsid = encoders[index].Clsid;
-      return true;
-    }
+  STATSTG stat = {};
+  if (FAILED(stream->Stat(&stat, STATFLAG_NONAME)) ||
+      stat.cbSize.QuadPart == 0 ||
+      stat.cbSize.QuadPart > std::numeric_limits<ULONG>::max() ||
+      FAILED(stream->Seek({}, STREAM_SEEK_SET, nullptr))) {
+    return {};
   }
-  return false;
-}
-
-// Encodes a shell icon as PNG bytes. The HICON stays owned by the caller.
-std::vector<uint8_t> EncodeIconAsPng(HICON icon, const CLSID& encoder_clsid) {
-  std::vector<uint8_t> png;
-  Gdiplus::Bitmap bitmap(icon);
-  if (bitmap.GetLastStatus() != Gdiplus::Ok) {
-    return png;
+  const auto size = static_cast<ULONG>(stat.cbSize.QuadPart);
+  std::vector<uint8_t> png(size);
+  ULONG read = 0;
+  if (FAILED(stream->Read(png.data(), size, &read)) || read != size) {
+    return {};
   }
-  IStream* stream = nullptr;
-  if (CreateStreamOnHGlobal(nullptr, TRUE, &stream) != S_OK) {
-    return png;
-  }
-  if (bitmap.Save(stream, &encoder_clsid, nullptr) == Gdiplus::Ok) {
-    STATSTG stat = {};
-    if (stream->Stat(&stat, STATFLAG_NONAME) == S_OK &&
-        stat.cbSize.QuadPart > 0) {
-      HGLOBAL global = nullptr;
-      if (GetHGlobalFromStream(stream, &global) == S_OK && global != nullptr) {
-        const auto* data = static_cast<const uint8_t*>(GlobalLock(global));
-        if (data != nullptr) {
-          const auto size = static_cast<size_t>(stat.cbSize.QuadPart);
-          png.assign(data, data + size);
-          GlobalUnlock(global);
-        }
-      }
-    }
-  }
-  stream->Release();
   return png;
 }
 
@@ -112,11 +103,7 @@ std::vector<uint8_t> LoadVsCodeIconPng() {
       file_info.hIcon == nullptr) {
     return {};
   }
-  CLSID encoder_clsid;
-  std::vector<uint8_t> png;
-  if (GetPngEncoderClsid(&encoder_clsid)) {
-    png = EncodeIconAsPng(file_info.hIcon, encoder_clsid);
-  }
+  auto png = EncodeIconAsPng(file_info.hIcon);
   DestroyIcon(file_info.hIcon);
   return png;
 }
@@ -145,31 +132,24 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
 
-  // Start GDI+ once for the window so icon encoding reuses the encoder set.
-  Gdiplus::GdiplusStartupInput gdiplus_input;
-  if (Gdiplus::GdiplusStartup(&gdiplus_token_, &gdiplus_input, nullptr) !=
-      Gdiplus::Ok) {
-    gdiplus_token_ = 0;
-  }
-
   application_icon_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(), kApplicationIconChannel,
           &flutter::StandardMethodCodec::GetInstance());
   application_icon_channel_->SetMethodCallHandler(
-      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
-             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
-                 result) {
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method_name() == kVsCodeAvailableMethod) {
+          std::wstring executable;
+          result->Success(
+              flutter::EncodableValue(QueryVsCodeExecutable(&executable)));
+          return;
+        }
         if (call.method_name() != kVsCodeIconMethod) {
           result->NotImplemented();
           return;
         }
-        // GDI+ failed to start: report no icon instead of calling GDI+ APIs. A
-        // null result never blocks application startup or opening the URL.
-        std::vector<uint8_t> png;
-        if (gdiplus_token_ != 0) {
-          png = LoadVsCodeIconPng();
-        }
+        const auto png = LoadVsCodeIconPng();
         if (png.empty()) {
           // No protocol association or no icon: report null, not an error.
           result->Success();
@@ -195,13 +175,9 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   if (application_icon_channel_) {
     // The channel does not unregister its handler on destruction, so drop it
-    // before the window goes away; the handler captured this window.
+    // before the engine goes away.
     application_icon_channel_->SetMethodCallHandler(nullptr);
     application_icon_channel_.reset();
-  }
-  if (gdiplus_token_ != 0) {
-    Gdiplus::GdiplusShutdown(gdiplus_token_);
-    gdiplus_token_ = 0;
   }
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
