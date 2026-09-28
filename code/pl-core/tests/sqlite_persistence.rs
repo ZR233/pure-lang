@@ -17,8 +17,8 @@ use support::{ScriptedModel, turn};
 
 /// Opens the same SQLite file with a second connection so a test can tamper with one row directly.
 ///
-/// The store must be shut down first, which is what releases the writer's file lock; this bypasses
-/// the store's own guards on purpose so the readers below are exercised against hostile rows.
+/// This bypasses the store's own guards on purpose so the readers below are exercised against
+/// hostile rows. A second connection can also corrupt a row after an existing store has opened.
 async fn tamper(options: &SqliteSessionOptions, sql: &str) {
     let url = format!("sqlite://{}?mode=rw", options.path.display());
     let db = sea_orm::Database::connect(url).await.unwrap();
@@ -423,6 +423,48 @@ async fn thread_checkpoint_rejects_corrupt_content_hash() {
 }
 
 #[tokio::test]
+async fn thread_checkpoint_rejects_a_corrupt_fence_effect() {
+    let directory = tempfile::tempdir().unwrap();
+    let options = SqliteSessionOptions {
+        path: directory.path().join("corrupt-fence.sqlite"),
+    };
+    let store = SqliteSessionStore::open(options.clone()).await.unwrap();
+    let (model, _) = ScriptedModel::new(&[]);
+    let thread = ThreadHandle::start("fence-thread".into(), DynModelSession::new(model)).unwrap();
+    thread
+        .attach_storage(ColdStoreHandle::new(store.clone()))
+        .await
+        .unwrap();
+    thread.run_turn(turn("fence-turn")).await.unwrap();
+    thread.close().await.unwrap();
+    let fence = store
+        .read_thread_checkpoint("fence-thread")
+        .await
+        .unwrap()
+        .unwrap()
+        .history_fence;
+    store.shutdown().await.unwrap();
+
+    let reopened = SqliteSessionStore::open(options.clone()).await.unwrap();
+
+    tamper(
+        &options,
+        &format!(
+            "UPDATE session_entries SET payload_hash='invalid' WHERE session_id='fence-thread' AND id='pl.resource.thread-commit.{fence:020}'"
+        ),
+    )
+    .await;
+
+    assert!(
+        reopened
+            .read_thread_checkpoint("fence-thread")
+            .await
+            .is_err()
+    );
+    reopened.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn thread_checkpoint_rejects_cross_thread_row() {
     let directory = tempfile::tempdir().unwrap();
     let options = SqliteSessionOptions {
@@ -553,6 +595,11 @@ async fn migrate_v7_adds_checkpoint_table_without_losing_effects() {
         .unwrap()
         .history_fence;
     thread.close().await.unwrap();
+    assert!(
+        migration::migrate_to_current(options.clone(), |_| Ok(()))
+            .await
+            .is_err()
+    );
     store.shutdown().await.unwrap();
 
     // 退回 schema 7：删除新表并复位版本，保留已验证的 effect/entry/history 数据。
@@ -565,7 +612,15 @@ async fn migrate_v7_adds_checkpoint_table_without_losing_effects() {
         Err(SessionStoreError::UnsupportedSchema { found: 7, .. })
     ));
 
-    migration::migrate_v7(options.clone()).await.unwrap();
+    migration::migrate_v6(options.clone(), |_| Ok(()))
+        .await
+        .unwrap();
+    migration::migrate_to_current(options.clone(), |_| Ok(()))
+        .await
+        .unwrap();
+    migration::migrate_v6(options.clone(), |_| Ok(()))
+        .await
+        .unwrap();
     let reopened = SqliteSessionStore::open(options).await.unwrap();
     // effect 数据保留；尚无 checkpoint 行的旧 Thread 读取为空。
     assert!(

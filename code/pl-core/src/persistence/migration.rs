@@ -8,6 +8,30 @@ use crate::{
 use sea_orm::{ConnectionTrait, Database, TransactionTrait};
 use std::sync::Arc;
 
+/// Upgrades an existing session database through every supported schema step.
+///
+/// The caller owns the surrounding runtime and makes a consistent backup before invoking this
+/// method. This method holds the database's exclusive writer lease across the full upgrade; each
+/// version step commits separately, so retrying after an interruption resumes from the last
+/// committed schema. Normal [`super::SqliteSessionStore::open`] never runs migrations.
+///
+/// # Errors
+/// Rejects a missing database, an active writer, an unsupported version, invalid history,
+/// conversion failure or storage failure without clearing existing data.
+pub async fn migrate_to_current(
+    options: SqliteSessionOptions,
+    transform: impl Fn(&mut ThreadEffectBatch) -> Result<(), SessionStoreError> + Send + Sync,
+) -> Result<(), SessionStoreError> {
+    if !tokio::fs::try_exists(&options.path).await? {
+        return Err(SessionStoreError::Invalid(
+            "session database does not exist".into(),
+        ));
+    }
+    let _lease = sqlite::acquire_database_lock(options.path.clone()).await?;
+    migrate_v6(options.clone(), transform).await?;
+    migrate_v7(options).await
+}
+
 /// Migrates version 6 to 7 in one transaction, preserving entry identities and all history.
 /// The host must hold exclusive runtime/database ownership and make a consistent backup first.
 /// The callback converts only product-owned payloads; it must not perform external side effects.
@@ -30,7 +54,10 @@ pub async fn migrate_v6(
     let result = async {
         let tx = db.begin().await?;
         let version = tx.query_one_raw(sqlite::statement("PRAGMA user_version", vec![])).await?.ok_or_else(|| SessionStoreError::Invalid("missing version".into()))?.try_get::<i64>("", "user_version")?;
-        if version == super::SESSION_SCHEMA_VERSION { tx.commit().await?; return Ok(()); }
+        // A versioned step accepts only its own target or later steps this facade knows about.
+        // Do not tie its no-op range to SESSION_SCHEMA_VERSION: a future schema bump must add a
+        // new step to migrate_to_current, not silently redefine what this migration did.
+        if version == 7 || version == 8 { tx.commit().await?; return Ok(()); }
         if version != 6 { return Err(SessionStoreError::UnsupportedSchema { found: version, supported: super::SESSION_SCHEMA_VERSION }); }
         let sessions = tx.query_all_raw(sqlite::statement("SELECT session_id FROM session_history_heads UNION SELECT session_id FROM session_entries UNION SELECT session_id FROM session_entry_history", vec![])).await?;
         for row in sessions {
@@ -115,7 +142,7 @@ pub async fn migrate_v7(options: SqliteSessionOptions) -> Result<(), SessionStor
             .await?
             .ok_or_else(|| SessionStoreError::Invalid("missing version".into()))?
             .try_get::<i64>("", "user_version")?;
-        if version == super::SESSION_SCHEMA_VERSION {
+        if version == 8 {
             tx.commit().await?;
             return Ok(());
         }

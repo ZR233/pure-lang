@@ -7,6 +7,38 @@ use sea_orm::{
 };
 
 use crate::storage::SessionEntry;
+
+/// One process owns a session database during writing or schema migration.
+pub(super) async fn acquire_database_lock(
+    path: PathBuf,
+) -> Result<std::fs::File, SessionStoreError> {
+    if !path.is_absolute() {
+        return Err(SessionStoreError::Invalid(
+            "session database path must be absolute".into(),
+        ));
+    }
+    tokio::task::spawn_blocking(move || {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let lock_path = path.with_extension("sqlite.lock");
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)?;
+        fs4::FileExt::try_lock(&file).map_err(|error| {
+            SessionStoreError::Invalid(format!(
+                "session database already owned or cannot be locked: {error}"
+            ))
+        })?;
+        Ok::<_, SessionStoreError>(file)
+    })
+    .await
+    .map_err(|_| SessionStoreError::Panicked)?
+}
+
 /// SQLite session database configuration; no product database or ORM handle is required.
 #[derive(Debug, Clone)]
 pub struct SqliteSessionOptions {

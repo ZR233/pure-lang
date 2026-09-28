@@ -8,7 +8,8 @@ crate 依赖方向见 [02](./02-crates.md)；状态与历史存储见 [15](./15-
 
 pl-core 拥有 Thread、Turn、模型和工具调用契约、通用上下文、交互、任务、消息、当前状态
 checkpoint 与不可变 effect；
-model 和 tool 实现核心接口且不相互依赖；trace 只读消费核心观察接口。pl-studio-runtime 拥有
+model 和 tool 实现核心接口；搜索工具消费 model 已解析的能力，依赖方向以 [02](./02-crates.md)
+为准。trace 只读消费核心观察接口。pl-studio-runtime 拥有
 配置持久化、项目、Profile、Mode/workflow/Plan、子代理协调和唯一装配入口，root、child 和
 冷恢复使用同一装配路径。core 不提供默认工具、Git、Skill 或 Profile 自动安装入口：pl-tool
 的工具组只构造工具，Studio 显式注册并单独加入业务 plan/workflow 工具。文件、容器、Skill

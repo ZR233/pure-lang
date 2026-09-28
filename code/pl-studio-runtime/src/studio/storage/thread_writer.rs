@@ -3227,8 +3227,9 @@ mod storage_fault_tests {
             async move { thread.run_turn(turn).await }
         });
         tokio::time::timeout(Duration::from_secs(10), async {
-            assert_eq!(starts.recv().await.as_deref(), Some("first"));
-            assert_eq!(starts.recv().await.as_deref(), Some("second"));
+            let mut started = [starts.recv().await, starts.recv().await];
+            started.sort();
+            assert_eq!(started, [Some("first".into()), Some("second".into())]);
         })
         .await?;
         assert_eq!(

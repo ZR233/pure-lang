@@ -416,10 +416,16 @@ core 的 SQLite 后端把 effect 与它所属的当前状态 checkpoint 作为�
 会话 blob 根，所以超过阈值的正文仍内联在信封里，而不是被替换成它无法再次物化的引用；其序列化
 字节与 effect 一起计入 writer 压力预算。宿主通过 `read_thread_checkpoint(thread_id)` 读取，
 由 core 校验存储信封与内容 hash、Thread 身份、checkpoint schema 版本、`state_revision` 与
-`state.commit_sequence` 的一致性、`history_fence` 不超过状态 revision，以及 `history_fence`
-处确实存在已保存的 effect；宿主不查询 `thread_checkpoints` 表、键或信封本身。当前 core 会话
-schema 为 8，来自 schema 7 的数据库经显式 `migration::migrate_v7` 升级（只新增 checkpoint 表
-并移动版本标记，不重写、不裁剪任何已有 effect/entry/history），`open` 不会自动转换或重建。
+`state.commit_sequence` 的一致性、`history_fence` 不超过状态 revision，并通过同一 typed effect
+读取入口校验 fence 处的完整事实及归属；宿主不查询 `thread_checkpoints` 表、键或信封本身。当前
+core 会话 schema 为 8。宿主在取得独占运行时所有权并完成一致备份后，使用
+`migration::migrate_to_current` 持有数据库独占锁，按版本顺序完成 6→7→8 的显式升级；7→8
+只新增 checkpoint 表并移动版本标记，不重写、不裁剪任何已有 effect/entry/history。每步事务
+独立提交，若在两步之间中断，下次从已提交版本继续。`open` 不会自动转换或重建。
+
+通用 SQLite 后端删除已停止的会话时，通过 `delete_session` 在独占数据库锁下同事务删除该会话
+的 checkpoint、当前资源和历史记录；活跃 writer 拒绝删除，其他会话不受影响。产品目录、
+物理资源与用户文件不属于这项通用删除操作，由宿主按自己的可恢复流程协调。
 
 每个 Thread 使用独立 `history.sqlite`，面向稳定条目和 keyset 分页，不保存完整执行 journal。
 该文件位于应用 home 下的 `~/.anywork/v2/sessions/<storage-key>/history.sqlite`，`<storage-key>`
@@ -632,6 +638,5 @@ admitted 水位，之后的新准入不会把屏障推远；它不启动新工�
 
 未知未来版本、损坏数据、缺失迁移路径和未知必需 producer 格式均失败并保留原始字节；未知但
 仅影响历史展示的载荷以 raw 历史条目保存。迁移不能用清空、默认状态或只有备份没有转换来替代。
-core 会话 schema 从 7 升到 8 时，唯一变化是新增 checkpoint 表并由 `migration::migrate_v7`
-在单个事务内完成；已有 effect、entry 与 history 行原样保留，尚未写过 checkpoint 的旧 Thread
-读取为空，等下一次写入时才落盘。
+core 会话 schema 从 7 升到 8 时，唯一变化是新增 checkpoint 表；已有 effect、entry 与
+history 行原样保留，尚未写过 checkpoint 的旧 Thread 读取为空，等下一次写入时才落盘。

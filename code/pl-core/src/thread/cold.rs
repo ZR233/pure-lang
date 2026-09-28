@@ -475,6 +475,11 @@ impl ColdStoreHandle {
         self.0.pressure(thread_id)
     }
 
+    /// Waits for the fixed effect fence, without transferring store ownership to a tool.
+    pub(crate) async fn flush(&self, thread_id: &str, sequence: u64) -> Result<(), ColdStoreError> {
+        self.0.flush(thread_id, sequence).await
+    }
+
     /// Reads one finished tool task from the durable store, if the backend keeps task facts.
     pub(crate) async fn read_tool_task(
         &self,

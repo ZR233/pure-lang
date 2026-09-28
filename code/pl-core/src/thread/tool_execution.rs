@@ -101,6 +101,8 @@ impl Owner {
         self.task_tokens
             .insert(format!("task:{}", call.call.call_id), cancellation.clone());
         let authorized = call.executor.remains_authorized(&self.tools);
+        let cold = self.cold.clone();
+        let cold_error = self.cold_error.clone();
         let context = crate::tool::opaque::CallContext {
             grant: Default::default(),
             context: call.context.clone(),
@@ -118,7 +120,7 @@ impl Owner {
         Ok(Box::pin(async move {
             let output = if authorized {
                 call.executor
-                    .execute(call.call.arguments.clone(), context)
+                    .execute(call.call.arguments.clone(), context, cold, cold_error)
                     .await
                     .map_err(Arc::new)
             } else {

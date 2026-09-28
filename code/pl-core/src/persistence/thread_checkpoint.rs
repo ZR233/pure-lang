@@ -9,20 +9,18 @@ use sea_orm::ConnectionTrait;
 use super::{SessionStoreError, SqliteSessionStore, sqlite};
 use crate::thread::ThreadCheckpoint;
 
-/// effect 资源键前缀；checkpoint 的 history fence 必须有一条同名 effect。
-const THREAD_COMMIT_PREFIX: &str = "pl.resource.thread-commit.";
-
 impl SqliteSessionStore {
     /// 读取一个 Thread 的最新当前状态 checkpoint，或在从未保存过时返回 `None`。
     ///
     /// 返回的 checkpoint 是 core 保存的 pruned、inline 重启 DTO：正文全部内联，没有需要外部
     /// blob 才能补齐的引用，可直接交给 owner 恢复。pl-core 在这里验证存储信封、内容 hash、Thread
     /// 身份、checkpoint schema 版本、`state_revision`/`state.commit_sequence` 一致性、
-    /// `history_fence` 与状态 revision 的关系，以及在 `history_fence` 处确实存在已保存的 effect。
+    /// `history_fence` 与状态 revision 的关系，以及在 `history_fence` 处的已保存 effect 的
+    /// 完整性、归属和序号。
     ///
     /// # Errors
     /// 拒绝损坏的信封、内容 hash 不匹配、Thread 身份不一致、schema 不支持、revision/fence 不一致，
-    /// 或 fence 指向一条并不存在的 effect。
+    /// 或 fence 指向一条不存在或无效的 effect。
     pub async fn read_thread_checkpoint(
         &self,
         thread_id: &str,
@@ -40,19 +38,12 @@ impl SqliteSessionStore {
             return Ok(None);
         };
         let checkpoint = decode_checkpoint(row, thread_id)?;
-        // checkpoint 与 effect 同事务写入，因此 fence 处必须已经有 effect；缺失说明存储被截断、
-        // 篡改或来自不完整的旧快照，一律 fail closed，绝不返回一个引用未保存历史的 checkpoint。
-        let effect_id = format!("{THREAD_COMMIT_PREFIX}{:020}", checkpoint.history_fence);
-        let effect = self
-            .owner
-            .shared
-            .db
-            .query_one_raw(sqlite::statement(
-                "SELECT id FROM session_entries WHERE session_id=? AND id=?",
-                vec![thread_id.into(), effect_id.into()],
-            ))
-            .await?;
-        if effect.is_none() {
+        // 复用 typed 历史入口的校验，不能只凭同名行存在就发布可恢复 checkpoint。
+        if self
+            .read_thread_effect(thread_id, checkpoint.history_fence)
+            .await?
+            .is_none()
+        {
             return Err(SessionStoreError::Invalid(
                 "Thread checkpoint history fence has no saved effect".into(),
             ));

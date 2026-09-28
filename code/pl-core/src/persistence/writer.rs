@@ -88,27 +88,7 @@ impl SqliteSessionStore {
     /// # Errors
     /// Returns filesystem, database or schema errors without rebuilding an existing database.
     pub async fn open(options: SqliteSessionOptions) -> Result<Self, SessionStoreError> {
-        let path = options.path.clone();
-        let lock = tokio::task::spawn_blocking(move || {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let lock_path = path.with_extension("sqlite.lock");
-            let file = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(lock_path)?;
-            fs4::FileExt::try_lock(&file).map_err(|error| {
-                SessionStoreError::Invalid(format!(
-                    "session database already owned or cannot be locked: {error}"
-                ))
-            })?;
-            Ok::<_, SessionStoreError>(file)
-        })
-        .await
-        .map_err(|_| SessionStoreError::Panicked)??;
+        let lock = sqlite::acquire_database_lock(options.path.clone()).await?;
         Self::start(sqlite::open(Some(options)).await?, Some(lock)).await
     }
 
