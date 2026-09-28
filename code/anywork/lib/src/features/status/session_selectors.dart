@@ -236,8 +236,7 @@ class ModelRoleSelector extends StatelessWidget {
           model: model,
           fieldLabel: context.l10n.statusPlannerModel,
           tooltip: selectionBlockedReason ?? context.l10n.statusPlannerModel,
-          compact: true,
-          compactMaxWidth: 140,
+          labelMaxWidth: 140,
           enabled: selectionBlockedReason == null,
           onBlockedTap: selectionBlockedReason == null
               ? null

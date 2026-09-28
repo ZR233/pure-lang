@@ -6,6 +6,7 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/model_route_selector.dart';
 import '../../shared/studio_driver_keys.dart';
+import 'settings_common.dart';
 
 class _AgentRouteConfiguration {
   const _AgentRouteConfiguration({
@@ -182,21 +183,32 @@ class _RoleSettingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final modelSelector = ModelRouteSelector(
-      selectorKey: StudioDriverKeys.settingsRoleModel(role),
-      fieldLabel: context.l10n.settingsModelField,
-      options: options,
-      providerId: selectedProviderId,
-      model: selectedModel,
-      unresolvedLabel: unresolvedLabel,
-      showUnresolvedOption: showUnresolvedOption,
-      enabled: options.isNotEmpty,
-      onSelected: onModelChanged,
-      optionKeyBuilder: (option) => StudioDriverKeys.settingsRoleModelOption(
-        role,
-        option.providerId,
-        option.model,
-      ),
+    final modelSelector = Row(
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: SettingsFieldLabel(label: context.l10n.settingsModelField),
+        ),
+        Flexible(
+          child: ModelRouteSelector(
+            selectorKey: StudioDriverKeys.settingsRoleModel(role),
+            fieldLabel: context.l10n.settingsModelField,
+            options: options,
+            providerId: selectedProviderId,
+            model: selectedModel,
+            unresolvedLabel: unresolvedLabel,
+            showUnresolvedOption: showUnresolvedOption,
+            enabled: options.isNotEmpty,
+            onSelected: onModelChanged,
+            optionKeyBuilder: (option) =>
+                StudioDriverKeys.settingsRoleModelOption(
+                  role,
+                  option.providerId,
+                  option.model,
+                ),
+          ),
+        ),
+      ],
     );
     final effortSelector = _RoleSelectField(
       selectorKey: StudioDriverKeys.settingsRoleEffort(role),

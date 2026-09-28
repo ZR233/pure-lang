@@ -66,10 +66,13 @@ typedef ModelSelectionOptionKeyBuilder = Key Function(
   ModelSelectionOption option,
 );
 
-/// Shared provider-grouped model picker for session routes and Agent settings.
+/// Shared compact model picker for session routes and Agent settings.
 ///
-/// This widget only presents the supplied choices and reports a selection;
-/// it never chooses a fallback route or persists the result.
+/// This widget renders the session-style quiet trigger with the
+/// provider-grouped popup menu. It only presents the supplied choices and
+/// reports a selection; it never chooses a fallback route or persists the
+/// result. Callers own the surrounding field description and validation
+/// hints because the trigger itself carries no form decoration.
 class ModelRouteSelector extends StatelessWidget {
   const ModelRouteSelector({
     required this.options,
@@ -83,10 +86,8 @@ class ModelRouteSelector extends StatelessWidget {
     this.enabled = true,
     this.tooltip,
     this.onBlockedTap,
-    this.compact = false,
-    this.compactMaxWidth = 180,
+    this.labelMaxWidth = 180,
     this.optionKeyBuilder,
-    this.errorText,
     super.key,
   });
 
@@ -101,10 +102,11 @@ class ModelRouteSelector extends StatelessWidget {
   final bool enabled;
   final String? tooltip;
   final VoidCallback? onBlockedTap;
-  final bool compact;
-  final double compactMaxWidth;
+
+  /// Caps the quiet trigger label so long model names ellipsize instead of
+  /// stretching the surrounding row.
+  final double labelMaxWidth;
   final ModelSelectionOptionKeyBuilder? optionKeyBuilder;
-  final String? errorText;
 
   @override
   Widget build(BuildContext context) {
@@ -114,82 +116,24 @@ class ModelRouteSelector extends StatelessWidget {
     final menuSize = _menuSize(context);
     final contentWidth = math.max(0.0, menuSize.width - 40);
 
-    if (compact) {
-      return UpwardPopupMenu<ModelSelectionOption>(
-        key: selectorKey,
-        tooltip: tooltip ?? fieldLabel,
-        initialValue: selected,
+    return UpwardPopupMenu<ModelSelectionOption>(
+      key: selectorKey,
+      tooltip: tooltip ?? fieldLabel,
+      initialValue: selected,
+      enabled: canSelect,
+      onBlockedTap: canSelect ? null : onBlockedTap,
+      constraints: BoxConstraints(
+        maxWidth: menuSize.width,
+        maxHeight: menuSize.height,
+      ),
+      onSelected: onSelected,
+      itemBuilder: (context) =>
+          _popupItems(context, contentWidth: contentWidth, selected: selected),
+      child: StudioMenuLabel(
+        label: selectedLabel,
         enabled: canSelect,
-        onBlockedTap: canSelect ? null : onBlockedTap,
-        constraints: BoxConstraints(
-          maxWidth: menuSize.width,
-          maxHeight: menuSize.height,
-        ),
-        onSelected: onSelected,
-        itemBuilder: (context) => _popupItems(
-          context,
-          contentWidth: contentWidth,
-          selected: selected,
-        ),
-        child: StudioMenuLabel(
-          label: selectedLabel,
-          enabled: canSelect,
-          maxWidth: compactMaxWidth,
-        ),
-      );
-    }
-
-    return MenuAnchor(
-      style: MenuStyle(
-        maximumSize: WidgetStatePropertyAll(menuSize),
-        padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(vertical: 6),
-        ),
+        maxWidth: labelMaxWidth,
       ),
-      menuChildren: _menuChildren(
-        context,
-        contentWidth: contentWidth,
-        selected: selected,
-        canSelect: canSelect,
-      ),
-      builder: (context, controller, child) {
-        return Tooltip(
-          message: tooltip ?? fieldLabel,
-          child: Semantics(
-            button: true,
-            enabled: canSelect,
-            label: [
-              fieldLabel,
-              selectedLabel,
-            ].where((part) => part.isNotEmpty).join(': '),
-            child: InkWell(
-              key: selectorKey,
-              onTap: canSelect
-                  ? () => controller.isOpen
-                        ? controller.close()
-                        : controller.open()
-                  : null,
-              borderRadius: BorderRadius.circular(4),
-              child: InputDecorator(
-                isEmpty: selectedLabel.isEmpty,
-                isFocused: controller.isOpen,
-                decoration: InputDecoration(
-                  labelText: fieldLabel,
-                  isDense: true,
-                  enabled: canSelect,
-                  errorText: errorText,
-                  suffixIcon: const Icon(Icons.arrow_drop_down),
-                ),
-                child: Text(
-                  selectedLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -241,48 +185,6 @@ class ModelRouteSelector extends StatelessWidget {
       }
     }
     return items;
-  }
-
-  List<Widget> _menuChildren(
-    BuildContext context, {
-    required double contentWidth,
-    required ModelSelectionOption? selected,
-    required bool canSelect,
-  }) {
-    final children = <Widget>[];
-    if (showUnresolvedOption && selected == null && unresolvedLabel != null) {
-      children.add(
-        SizedBox(
-          width: contentWidth,
-          child: _unresolvedEntry(context, unresolvedLabel!),
-        ),
-      );
-    }
-    for (final group in _groups()) {
-      children.add(
-        SizedBox(
-          width: contentWidth,
-          child: _providerHeading(context, group.name),
-        ),
-      );
-      for (final option in group.options) {
-        children.add(
-          MenuItemButton(
-            key: _optionKey(option),
-            onPressed: canSelect ? () => onSelected(option) : null,
-            child: SizedBox(
-              width: contentWidth,
-              child: _modelOptionContents(
-                context,
-                option,
-                selected: option == selected,
-              ),
-            ),
-          ),
-        );
-      }
-    }
-    return children;
   }
 
   List<_ProviderModelGroup> _groups() {

@@ -120,26 +120,62 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
                             ].where((part) => part.isNotEmpty).join(' / '),
                           )
                         : null;
-                    return ModelRouteSelector(
-                      selectorKey: ValueKey('agent-profile-model-$_providerId'),
-                      fieldLabel: l10n.settingsModelField,
-                      options: options,
-                      providerId: _providerId,
-                      model: _model,
-                      unresolvedLabel: unavailableLabel,
-                      showUnresolvedOption: unavailableLabel != null,
-                      enabled: options.isNotEmpty,
-                      errorText: field.errorText,
-                      onSelected: (option) {
-                        setState(() {
-                          _providerId = option.providerId;
-                          _model = option.model;
-                          _effort = _canonicalEffort(null);
-                        });
-                        field.didChange(
-                          option.model.isEmpty ? null : option.model,
-                        );
-                      },
+                    final errorText = field.errorText;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: SettingsFieldLabel(
+                                label: l10n.settingsModelField,
+                              ),
+                            ),
+                            Flexible(
+                              child: ModelRouteSelector(
+                                selectorKey: ValueKey(
+                                  'agent-profile-model-$_providerId',
+                                ),
+                                fieldLabel: l10n.settingsModelField,
+                                options: options,
+                                providerId: _providerId,
+                                model: _model,
+                                unresolvedLabel: unavailableLabel,
+                                showUnresolvedOption: unavailableLabel != null,
+                                enabled: options.isNotEmpty,
+                                onSelected: (option) {
+                                  setState(() {
+                                    _providerId = option.providerId;
+                                    _model = option.model;
+                                    _effort = _canonicalEffort(null);
+                                  });
+                                  field.didChange(
+                                    option.model.isEmpty ? null : option.model,
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (errorText != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4, left: 8),
+                            child: Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                errorText,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .error,
+                                    ),
+                              ),
+                            ),
+                          ),
+                      ],
                     );
                   },
                 ),
