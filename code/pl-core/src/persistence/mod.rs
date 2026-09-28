@@ -3,6 +3,7 @@
 mod history;
 pub mod migration;
 mod repository;
+mod session_delete;
 mod sqlite;
 mod thread_checkpoint;
 mod thread_history;

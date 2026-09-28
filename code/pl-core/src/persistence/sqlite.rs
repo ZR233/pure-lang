@@ -46,6 +46,8 @@ pub enum SessionStoreError {
     Stopped,
     #[error("session writer panicked; pending facts retained")]
     Panicked,
+    #[error("session writer could not shut down after maintenance: {0}")]
+    MaintenanceShutdown(#[source] std::sync::Arc<SessionStoreError>),
 }
 
 impl From<sea_orm::DbErr> for SessionStoreError {
@@ -72,6 +74,7 @@ impl SessionStoreError {
             | Self::Invalid(_)
             | Self::Stopped
             | Self::Panicked => false,
+            Self::MaintenanceShutdown(error) => error.retryable(),
         }
     }
 }

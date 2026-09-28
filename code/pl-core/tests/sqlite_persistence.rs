@@ -164,6 +164,72 @@ async fn thread_effect_queries_page_by_sequence_and_keep_threads_isolated() {
 }
 
 #[tokio::test]
+async fn deleting_a_session_requires_an_exclusive_lease_and_preserves_other_threads() {
+    let directory = tempfile::tempdir().unwrap();
+    let options = SqliteSessionOptions {
+        path: directory.path().join("session-deletion.sqlite"),
+    };
+    let store = SqliteSessionStore::open(options.clone()).await.unwrap();
+    for id in ["expired", "retained"] {
+        let (model, _) = ScriptedModel::new(&[]);
+        let thread = ThreadHandle::start(id.into(), DynModelSession::new(model)).unwrap();
+        thread
+            .attach_storage(ColdStoreHandle::new(store.clone()))
+            .await
+            .unwrap();
+        thread.run_turn(turn(&format!("{id}-turn"))).await.unwrap();
+        thread.close().await.unwrap();
+    }
+    assert!(
+        SqliteSessionStore::delete_session(options.clone(), "expired")
+            .await
+            .is_err()
+    );
+    store.shutdown().await.unwrap();
+
+    assert!(
+        SqliteSessionStore::delete_session(options.clone(), "expired")
+            .await
+            .unwrap()
+    );
+    assert!(
+        !SqliteSessionStore::delete_session(options.clone(), "expired")
+            .await
+            .unwrap()
+    );
+    let store = SqliteSessionStore::open(options).await.unwrap();
+    assert!(
+        store
+            .read_thread_checkpoint("expired")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .query_thread_effects(
+                "expired",
+                ThreadEffectQuery {
+                    before_sequence: None,
+                    limit: 1,
+                },
+            )
+            .await
+            .unwrap()
+            .effects
+            .is_empty()
+    );
+    assert!(
+        store
+            .read_thread_checkpoint("retained")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    store.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn thread_effect_queries_reject_mismatched_ownership() {
     let store = SqliteSessionStore::open_memory().await.unwrap();
     let effect = ThreadEffectBatch {
