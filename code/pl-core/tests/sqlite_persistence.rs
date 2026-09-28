@@ -612,13 +612,10 @@ async fn migrate_v7_adds_checkpoint_table_without_losing_effects() {
         Err(SessionStoreError::UnsupportedSchema { found: 7, .. })
     ));
 
-    migration::migrate_v6(options.clone(), |_| Ok(()))
-        .await
-        .unwrap();
     migration::migrate_to_current(options.clone(), |_| Ok(()))
         .await
         .unwrap();
-    migration::migrate_v6(options.clone(), |_| Ok(()))
+    migration::migrate_to_current(options.clone(), |_| Ok(()))
         .await
         .unwrap();
     let reopened = SqliteSessionStore::open(options).await.unwrap();

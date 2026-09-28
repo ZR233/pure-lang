@@ -33,11 +33,11 @@ pub async fn migrate_to_current(
 }
 
 /// Migrates version 6 to 7 in one transaction, preserving entry identities and all history.
-/// The host must hold exclusive runtime/database ownership and make a consistent backup first.
+/// Called only while `migrate_to_current` holds the database's exclusive lease.
 /// The callback converts only product-owned payloads; it must not perform external side effects.
 /// # Errors
 /// Rejects unsupported versions, damaged history, conversion failures and storage failures.
-pub async fn migrate_v6(
+async fn migrate_v6(
     options: SqliteSessionOptions,
     transform: impl Fn(&mut ThreadEffectBatch) -> Result<(), SessionStoreError> + Send + Sync,
 ) -> Result<(), SessionStoreError> {
@@ -119,12 +119,12 @@ pub async fn migrate_v6(
 /// same transaction as the effect it belongs to (see `design/15` §15.5). The upgrade only creates
 /// that table and moves the version marker; it never rewrites, truncates or re-derives existing
 /// effect, entry or history rows, so an upgraded database keeps every fact it already held. Threads
-/// saved before the upgrade simply report no checkpoint until they next write one. The host must hold
-/// exclusive runtime/database ownership and make a consistent backup first.
+/// saved before the upgrade simply report no checkpoint until they next write one. This step runs
+/// only while `migrate_to_current` holds the database's exclusive lease.
 ///
 /// # Errors
 /// Rejects unsupported versions, a database missing the version-7 tables, and storage failures.
-pub async fn migrate_v7(options: SqliteSessionOptions) -> Result<(), SessionStoreError> {
+async fn migrate_v7(options: SqliteSessionOptions) -> Result<(), SessionStoreError> {
     let mut url =
         url::Url::parse("sqlite:///").map_err(|e| SessionStoreError::Invalid(e.to_string()))?;
     url.set_path(
