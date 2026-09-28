@@ -74,6 +74,12 @@ struct Pending {
     accepted_at: Instant,
     retained_bytes: u64,
     operation: Arc<crate::storage::SessionEntry>,
+    /// Pruned, inline Thread checkpoint committed in the same transaction as `operation`.
+    ///
+    /// Only Thread writes carry one; generic immutable resources leave this `None`. Keeping it on the
+    /// admission record is what lets the writer commit the effect and the exact checkpoint that
+    /// references it atomically, so the durable receipt above cannot advance past a half-written pair.
+    checkpoint: Option<Arc<sqlite::ThreadCheckpointRecord>>,
 }
 
 impl SqliteSessionStore {
@@ -342,6 +348,138 @@ impl SqliteSessionStore {
             accepted_at: Instant::now(),
             retained_bytes: entry.payload.len() as u64,
             operation: Arc::new(entry),
+            checkpoint: None,
+        });
+        publish(&self.owner.shared, &state);
+        drop(state);
+        self.owner.shared.wake.notify_one();
+        Ok(())
+    }
+
+    /// Admits one committed Thread write: the effect and its checkpoint as one atomic unit.
+    ///
+    /// The effect keeps the same immutable resource identity every other Thread commit uses
+    /// (`pl.resource.thread-commit.<sequence>`), so the existing durable receipt and `flush` path are
+    /// unchanged. The checkpoint is reduced to its pruned, inline restart form — core owns no session
+    /// blob root, so oversized bodies stay inline instead of being named by a reference it could not
+    /// materialize again — and is upserted with the effect by the writer's single transaction.
+    ///
+    /// Admission is idempotent: re-admitting an effect already held identically (loaded durable from
+    /// the database or still queued) is a no-op, and the checkpoint was stored in the same write. A
+    /// write whose checkpoint disagrees with its effect, or that targets another Thread, is rejected
+    /// before anything reaches the writer queue.
+    pub(super) fn admit_thread_write(
+        &self,
+        thread_id: &str,
+        write: crate::thread::cold::ThreadWrite,
+    ) -> Result<(), super::ResourceAdmissionError> {
+        use super::ResourceAdmissionError;
+        use crate::storage::SessionEntry;
+        let effect = &write.effect;
+        let checkpoint = write.checkpoint.pruned();
+        let valid_identity = effect.thread_id == thread_id
+            && checkpoint.thread_id == thread_id
+            && !thread_id.is_empty()
+            && checkpoint.schema_version != 0;
+        let valid_fence = checkpoint.history_fence == effect.sequence
+            && checkpoint.state_revision == checkpoint.state.commit_sequence
+            && checkpoint.history_fence <= checkpoint.state_revision;
+        if !valid_identity
+            || !valid_fence
+            || !crate::thread::ThreadCheckpoint::supports_schema(checkpoint.schema_version)
+            || !checkpoint.external_bodies.is_empty()
+        {
+            return Err(ResourceAdmissionError::InvalidIdentity(format!(
+                "Thread {thread_id} write {} has an inconsistent checkpoint",
+                effect.sequence
+            )));
+        }
+        let payload = effect.encode().map_err(|error| {
+            ResourceAdmissionError::InvalidIdentity(format!(
+                "Thread {thread_id} effect encoding failed: {error}"
+            ))
+        })?;
+        let envelope = serde_json::to_string(&checkpoint).map_err(|error| {
+            ResourceAdmissionError::InvalidIdentity(format!(
+                "Thread {thread_id} checkpoint encoding failed: {error}"
+            ))
+        })?;
+        let payload_hash = crate::context::content_hash(envelope.as_bytes());
+        let retained_checkpoint_bytes = envelope.len() as u64;
+        let record = Arc::new(sqlite::ThreadCheckpointRecord {
+            thread_id: thread_id.to_owned(),
+            schema_version: checkpoint.schema_version,
+            state_revision: checkpoint.state_revision,
+            history_fence: checkpoint.history_fence,
+            envelope,
+            payload_hash,
+        });
+        let type_id = payload.format().to_owned();
+        let schema_version = payload.version();
+        let content = payload.content().to_owned();
+        let now = crate::time::unix_seconds();
+        let mut state = self
+            .owner
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let resource_id = format!("pl.resource.thread-commit.{:020}", effect.sequence);
+        let key = (thread_id.to_owned(), resource_id.clone());
+        if let Some(previous) = state.resources.get(&key) {
+            // The effect identity is immutable, so an identical effect proves every field except the
+            // two clocks, which the pure replay `put` keeps from the first write. Its checkpoint was
+            // committed in that same transaction, so a repeated admission has nothing left to do.
+            if previous.type_id == type_id
+                && previous.schema_version == schema_version
+                && previous.payload == content
+            {
+                return Ok(());
+            }
+            return Err(ResourceAdmissionError::Conflict {
+                id: resource_id,
+                expected: None,
+                actual: Some(previous.revision),
+            });
+        }
+        if state.stopping || state.stopped {
+            return Err(ResourceAdmissionError::StoreClosed);
+        }
+        let resource_ordinal = state
+            .resources
+            .values()
+            .filter(|entry| entry.session_id == thread_id)
+            .map(|entry| entry.ordinal)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(ResourceAdmissionError::RevisionExhausted)?;
+        state.admitted = state
+            .admitted
+            .checked_add(1)
+            .ok_or(ResourceAdmissionError::RevisionExhausted)?;
+        let sequence = state.admitted;
+        let entry = SessionEntry {
+            session_id: thread_id.into(),
+            id: resource_id,
+            type_id,
+            schema_version,
+            ordinal: resource_ordinal,
+            revision: 1,
+            turn_id: None,
+            created_at: now,
+            updated_at: now,
+            payload: content,
+        };
+        let retained_bytes = (entry.payload.len() as u64).saturating_add(retained_checkpoint_bytes);
+        state.resource_admissions.insert(key.clone(), sequence);
+        state.resources.insert(key, entry.clone());
+        state.queue.push_back(Pending {
+            sequence,
+            accepted_at: Instant::now(),
+            retained_bytes,
+            operation: Arc::new(entry),
+            checkpoint: Some(record),
         });
         publish(&self.owner.shared, &state);
         drop(state);
@@ -602,7 +740,13 @@ async fn run(shared: &Shared) {
                             .queue
                             .iter()
                             .take(64)
-                            .map(|entry| (entry.sequence, entry.operation.clone()))
+                            .map(|entry| {
+                                (
+                                    entry.sequence,
+                                    entry.operation.clone(),
+                                    entry.checkpoint.clone(),
+                                )
+                            })
                             .collect::<Vec<_>>(),
                     )
                 } else {
@@ -630,7 +774,10 @@ async fn run(shared: &Shared) {
         };
         let commits = batch
             .iter()
-            .map(|(_, operation)| operation.clone())
+            .map(|(_, operation, checkpoint)| sqlite::Commit {
+                entry: operation.clone(),
+                checkpoint: checkpoint.clone(),
+            })
             .collect::<Vec<_>>();
         match sqlite::apply(&shared.db, &commits).await {
             Ok(()) => {
@@ -638,7 +785,7 @@ async fn run(shared: &Shared) {
                     .state
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                for (sequence, operation) in batch {
+                for (sequence, operation, _checkpoint) in batch {
                     state.queue.pop_front();
                     state.durable = sequence;
                     if let Some(sequence) = thread_commit_sequence(&operation.id) {

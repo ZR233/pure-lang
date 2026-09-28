@@ -4,12 +4,17 @@ mod history;
 pub mod migration;
 mod repository;
 mod sqlite;
+mod thread_checkpoint;
 mod thread_history;
 mod thread_journal;
 mod writer;
 
 /// Current SQLite cold-history format. Unsupported formats are never automatically reset.
-pub const SESSION_SCHEMA_VERSION: i64 = 7;
+///
+/// Schema 8 adds the per-Thread current-state checkpoint table, written in the same transaction as
+/// the effect it belongs to. Version 7 data is upgraded only through the explicit
+/// [`migration::migrate_v7`] step; opening a database never converts or discards it.
+pub const SESSION_SCHEMA_VERSION: i64 = 8;
 
 use std::sync::Arc;
 

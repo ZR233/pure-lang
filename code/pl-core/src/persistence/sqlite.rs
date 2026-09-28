@@ -158,7 +158,11 @@ async fn initialize(db: &DatabaseConnection) -> Result<(), SessionStoreError> {
             envelope TEXT NOT NULL, payload_hash TEXT NOT NULL,
             PRIMARY KEY(session_id,sequence));
          CREATE TABLE IF NOT EXISTS session_history_heads (
-            session_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, payload_hash TEXT NOT NULL);"
+            session_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, payload_hash TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS thread_checkpoints (
+            thread_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL,
+            state_revision INTEGER NOT NULL, history_fence INTEGER NOT NULL,
+            envelope TEXT NOT NULL CHECK(json_valid(envelope)), payload_hash TEXT NOT NULL);"
     ).await?;
     db.execute_unprepared(&format!(
         "PRAGMA user_version={}",
@@ -236,12 +240,89 @@ fn integer(value: u64) -> Result<i64, SessionStoreError> {
     i64::try_from(value).map_err(|_| SessionStoreError::Invalid("SQLite integer overflow".into()))
 }
 
+/// One Thread current-state checkpoint in its stored envelope form.
+///
+/// The checkpoint is the per-Thread latest-wins row the effect writer upserts inside the same
+/// transaction that appends the effect it was captured with, so a durable effect and the exact
+/// checkpoint that references it become visible together. The row is core-internal: a host reads it
+/// through [`crate::persistence::SqliteSessionStore::read_thread_checkpoint`] and never queries the
+/// table, its key, or the envelope itself.
+pub(super) struct ThreadCheckpointRecord {
+    pub(super) thread_id: String,
+    pub(super) schema_version: u32,
+    pub(super) state_revision: u64,
+    pub(super) history_fence: u64,
+    pub(super) envelope: String,
+    pub(super) payload_hash: String,
+}
+
+/// One unit of ordered writer work: a committed effect and the checkpoint it was paired with.
+///
+/// A generic immutable resource carries no checkpoint; a Thread write carries the pruned, inline
+/// checkpoint captured with its effect, so the two are committed by one transaction.
+pub(super) struct Commit {
+    pub(super) entry: std::sync::Arc<SessionEntry>,
+    pub(super) checkpoint: Option<std::sync::Arc<ThreadCheckpointRecord>>,
+}
+
+/// Upserts one Thread checkpoint row, refusing a stale or mutated revision.
+///
+/// The writer admits Thread writes in non-decreasing revision order, so a repeated revision must be
+/// byte-identical (idempotent replay) and a lower revision must never overwrite a newer one. Both a
+/// regression and a same-revision rewrite are rejected here, which rolls back the whole transaction
+/// — including the effect committed alongside it.
+async fn put_checkpoint(
+    db: &impl ConnectionTrait,
+    record: &ThreadCheckpointRecord,
+) -> Result<(), SessionStoreError> {
+    if let Some(row) = db
+        .query_one_raw(statement(
+            "SELECT state_revision,envelope FROM thread_checkpoints WHERE thread_id=?",
+            vec![record.thread_id.clone().into()],
+        ))
+        .await?
+    {
+        let revision: i64 = row.try_get("", "state_revision")?;
+        let revision = u64::try_from(revision)
+            .map_err(|_| SessionStoreError::Invalid("negative checkpoint revision".into()))?;
+        if record.state_revision < revision {
+            return Err(SessionStoreError::Invalid(
+                "Thread checkpoint revision regressed".into(),
+            ));
+        }
+        if record.state_revision == revision {
+            let envelope: String = row.try_get("", "envelope")?;
+            if envelope == record.envelope {
+                return Ok(());
+            }
+            return Err(SessionStoreError::Invalid(
+                "Thread checkpoint revision changed content".into(),
+            ));
+        }
+    }
+    db.execute_raw(statement(
+        "INSERT INTO thread_checkpoints(thread_id,schema_version,state_revision,history_fence,envelope,payload_hash) VALUES(?,?,?,?,?,?) \
+         ON CONFLICT(thread_id) DO UPDATE SET schema_version=excluded.schema_version,state_revision=excluded.state_revision,history_fence=excluded.history_fence,envelope=excluded.envelope,payload_hash=excluded.payload_hash",
+        vec![
+            record.thread_id.clone().into(),
+            i64::from(record.schema_version).into(),
+            integer(record.state_revision)?.into(),
+            integer(record.history_fence)?.into(),
+            record.envelope.clone().into(),
+            record.payload_hash.clone().into(),
+        ],
+    ))
+    .await?;
+    Ok(())
+}
+
 pub(super) async fn apply(
     db: &DatabaseConnection,
-    entries: &[std::sync::Arc<SessionEntry>],
+    commits: &[Commit],
 ) -> Result<(), SessionStoreError> {
     let tx = db.begin().await?;
-    for entry in entries {
+    for commit in commits {
+        let entry = &commit.entry;
         let previous = tx
             .query_one_raw(statement(
                 "SELECT * FROM session_entries WHERE session_id=? AND id=?",
@@ -263,6 +344,9 @@ pub(super) async fn apply(
                 vec![super::SessionEntryChange::Put { entry: saved }],
             )
             .await?;
+        }
+        if let Some(checkpoint) = &commit.checkpoint {
+            put_checkpoint(&tx, checkpoint).await?;
         }
     }
     tx.commit().await?;

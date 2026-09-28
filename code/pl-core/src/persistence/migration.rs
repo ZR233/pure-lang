@@ -86,6 +86,82 @@ pub async fn migrate_v6(
     }
 }
 
+/// Migrates version 7 to 8 in one transaction, preserving entries and all history.
+///
+/// Schema 8 adds the per-Thread current-state checkpoint table that the effect writer fills in the
+/// same transaction as the effect it belongs to (see `design/15` §15.5). The upgrade only creates
+/// that table and moves the version marker; it never rewrites, truncates or re-derives existing
+/// effect, entry or history rows, so an upgraded database keeps every fact it already held. Threads
+/// saved before the upgrade simply report no checkpoint until they next write one. The host must hold
+/// exclusive runtime/database ownership and make a consistent backup first.
+///
+/// # Errors
+/// Rejects unsupported versions, a database missing the version-7 tables, and storage failures.
+pub async fn migrate_v7(options: SqliteSessionOptions) -> Result<(), SessionStoreError> {
+    let mut url =
+        url::Url::parse("sqlite:///").map_err(|e| SessionStoreError::Invalid(e.to_string()))?;
+    url.set_path(
+        options
+            .path
+            .to_str()
+            .ok_or_else(|| SessionStoreError::Invalid("non-UTF8 database path".into()))?,
+    );
+    url.set_query(Some("mode=rw"));
+    let db = Database::connect(url.to_string()).await?;
+    let result = async {
+        let tx = db.begin().await?;
+        let version = tx
+            .query_one_raw(sqlite::statement("PRAGMA user_version", vec![]))
+            .await?
+            .ok_or_else(|| SessionStoreError::Invalid("missing version".into()))?
+            .try_get::<i64>("", "user_version")?;
+        if version == super::SESSION_SCHEMA_VERSION {
+            tx.commit().await?;
+            return Ok(());
+        }
+        if version != 7 {
+            return Err(SessionStoreError::UnsupportedSchema {
+                found: version,
+                supported: super::SESSION_SCHEMA_VERSION,
+            });
+        }
+        let base = tx
+            .query_one_raw(sqlite::statement(
+                "SELECT COUNT(*) AS present FROM sqlite_schema WHERE type='table' AND name IN ('session_entries','session_entry_history','session_history_heads')",
+                vec![],
+            ))
+            .await?
+            .ok_or_else(|| SessionStoreError::Invalid("missing schema probe".into()))?
+            .try_get::<i64>("", "present")?;
+        if base != 3 {
+            return Err(SessionStoreError::UnsupportedSchema {
+                found: version,
+                supported: super::SESSION_SCHEMA_VERSION,
+            });
+        }
+        tx.execute_unprepared(
+            "CREATE TABLE IF NOT EXISTS thread_checkpoints (
+                thread_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL,
+                state_revision INTEGER NOT NULL, history_fence INTEGER NOT NULL,
+                envelope TEXT NOT NULL CHECK(json_valid(envelope)), payload_hash TEXT NOT NULL);",
+        )
+        .await?;
+        tx.execute_unprepared("PRAGMA user_version=8").await?;
+        tx.commit().await?;
+        Ok(())
+    }
+    .await;
+    match (result, db.close().await) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(error)) => Err(error.into()),
+        (Err(initialization), Err(cleanup)) => Err(SessionStoreError::InitializationCleanup {
+            initialization: Box::new(initialization),
+            cleanup: Box::new(cleanup),
+        }),
+    }
+}
+
 fn convert(
     entry: &mut SessionEntry,
     transform: &impl Fn(&mut ThreadEffectBatch) -> Result<(), SessionStoreError>,

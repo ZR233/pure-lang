@@ -408,6 +408,19 @@ Turn、工具调用和审查记录，不读取 `session_entries` 表、不解码
 宿主提供的可见会话内容与长历史窗口经 `Session`/`ChatView` 读取；配置文件和业务状态仍由
 产品宿主管理。
 
+core 的 SQLite 后端把 effect 与它所属的当前状态 checkpoint 作为一次原子写入保存：一个
+`ThreadWrite` 经队列受理后，writer 在同一个事务里追加
+`pl.resource.thread-commit.<sequence>` effect，并 upsert 该 Thread 的最新 checkpoint 行
+（core 内部 `thread_checkpoints` 表），因此 durable receipt 只在二者同时落盘后才前进，绝不会
+出现引用了尚未保存 effect 的 checkpoint。checkpoint 以 pruned、全内联的重启 DTO 保存：core 没有
+会话 blob 根，所以超过阈值的正文仍内联在信封里，而不是被替换成它无法再次物化的引用；其序列化
+字节与 effect 一起计入 writer 压力预算。宿主通过 `read_thread_checkpoint(thread_id)` 读取，
+由 core 校验存储信封与内容 hash、Thread 身份、checkpoint schema 版本、`state_revision` 与
+`state.commit_sequence` 的一致性、`history_fence` 不超过状态 revision，以及 `history_fence`
+处确实存在已保存的 effect；宿主不查询 `thread_checkpoints` 表、键或信封本身。当前 core 会话
+schema 为 8，来自 schema 7 的数据库经显式 `migration::migrate_v7` 升级（只新增 checkpoint 表
+并移动版本标记，不重写、不裁剪任何已有 effect/entry/history），`open` 不会自动转换或重建。
+
 每个 Thread 使用独立 `history.sqlite`，面向稳定条目和 keyset 分页，不保存完整执行 journal。
 该文件位于应用 home 下的 `~/.anywork/v2/sessions/<storage-key>/history.sqlite`，`<storage-key>`
 是 Thread id 的 SHA-256 十六进制摘要（布局见 [17](./17-studio-storage.md) §17.1）。
@@ -619,3 +632,6 @@ admitted 水位，之后的新准入不会把屏障推远；它不启动新工�
 
 未知未来版本、损坏数据、缺失迁移路径和未知必需 producer 格式均失败并保留原始字节；未知但
 仅影响历史展示的载荷以 raw 历史条目保存。迁移不能用清空、默认状态或只有备份没有转换来替代。
+core 会话 schema 从 7 升到 8 时，唯一变化是新增 checkpoint 表并由 `migration::migrate_v7`
+在单个事务内完成；已有 effect、entry 与 history 行原样保留，尚未写过 checkpoint 的旧 Thread
+读取为空，等下一次写入时才落盘。
