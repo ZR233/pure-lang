@@ -13,6 +13,11 @@ schema、业务权限分类、JSON 解析、工作区约束和输出投影属于
 context；已观察到副作用的失败携带输出事实保存。Note、Todo 和 Skill 激活使用 Thread 扩展，
 工具不持有第二份会话状态。
 
+`CallContext.history_fence` 是工具开始执行时，Thread 已提交的 effect 序号；它至少覆盖
+该工具的运行中任务事实。会对外产生不可撤销副作用的产品工具，在执行副作用前应由宿主持有的
+ColdStore 对此固定序号完成持久化屏障。模型上下文的 revision 不是 effect 序号，不能代替
+这个屏障。工具只收到序号，不接触会话数据库或其存储键。
+
 工具不能由名字、MCP annotations 或输出正文取得控制权：结束 Turn、扩展 CAS、交互、发现、任务
 等待与取消均使用显式注册授权及类型化控制值。完整 payload 与实际 delivered context 分开保存；
 取消或失败保留观察结果，但不得提交迟到控制或扩展更新。Plan/workflow 工具与状态机属于

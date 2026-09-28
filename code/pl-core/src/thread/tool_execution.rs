@@ -104,6 +104,7 @@ impl Owner {
         let context = crate::tool::opaque::CallContext {
             grant: Default::default(),
             context: call.context.clone(),
+            history_fence: self.state.commit_sequence,
             model_projection: call.model_projection.clone(),
             tasks: Some(TaskAccess::new(self, &id, &call.executor)),
             thread_id: self.id.clone(),

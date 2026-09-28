@@ -12,6 +12,8 @@ pub struct CallContext {
     pub grant: super::execution_policy::ExecutionGrant,
     /// Immutable context actually admitted for the model request that produced this call.
     pub context: crate::context::ContextSnapshot,
+    /// 工具开始执行时已提交的 Thread effect 序号；外部副作用可对它建立持久化屏障。
+    pub history_fence: u64,
     /// Model-owned material frozen with the request that produced this call.
     pub model_projection: Option<OpaquePayload>,
     pub tasks: Option<crate::thread::TaskAccess>,

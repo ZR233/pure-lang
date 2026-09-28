@@ -10,9 +10,58 @@ use pl_core::thread::{
     ModelStepLimit, ThreadError, ThreadHandle, TurnOutcome, TurnState, inbox::ThreadMessage,
     input::InputDriverOptions,
 };
+use pl_core::tool::{
+    ToolOutput,
+    opaque::{CallContext, Registration, Tool, ToolError},
+};
 
 use support::{ScriptedModel, turn};
 use tool_support::tool;
+
+#[derive(Debug)]
+struct FenceTool(Arc<Mutex<Vec<u64>>>);
+
+impl Tool for FenceTool {
+    async fn execute(
+        &self,
+        input: OpaquePayload,
+        context: CallContext,
+    ) -> Result<ToolOutput, ToolError> {
+        self.0.lock().unwrap().push(context.history_fence);
+        Ok(ToolOutput::new(input, vec![]))
+    }
+}
+
+#[tokio::test]
+async fn tool_receives_the_committed_start_fact_as_its_history_fence() {
+    let (model, _) = ScriptedModel::new(&["fenced"]);
+    let thread = ThreadHandle::start("fence".into(), DynModelSession::new(model)).unwrap();
+    let fences = Arc::new(Mutex::new(Vec::new()));
+    thread
+        .register_tools(vec![
+            Registration::new(
+                "fenced".into(),
+                OpaquePayload::text("fenced tool"),
+                FenceTool(fences.clone()),
+            )
+            .unwrap()
+            .foreground_coexisting(),
+        ])
+        .await
+        .unwrap();
+    thread.run_turn(turn("fenced-turn")).await.unwrap();
+
+    let started = thread
+        .effects()
+        .await
+        .unwrap()
+        .into_iter()
+        .flat_map(|effect| effect.tasks.to_vec())
+        .find_map(|task| task.started_sequence)
+        .unwrap();
+    assert_eq!(*fences.lock().unwrap(), vec![started]);
+    thread.close().await.unwrap();
+}
 
 #[tokio::test]
 async fn a_turn_commits_user_model_and_tool_facts_in_call_order() {
