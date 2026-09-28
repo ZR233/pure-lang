@@ -188,6 +188,7 @@ class _TimelineViewState extends State<TimelineView> {
   bool _scrollingOlder = true;
   int _pendingNewEvents = 0;
   int _contentVersion = 0;
+  int _rowStructureVersion = 0;
   _TimelineRestore _pendingRestore = const _TimelineRestore.bottom();
 
   /// 待恢复的阅读意图（身份 + offset）是否还没被当前布局表达出来。
@@ -325,13 +326,22 @@ class _TimelineViewState extends State<TimelineView> {
     final anchor = restoreIntent ?? _captureAnchor(rows: oldWidget.rows);
     final hasNewEvent = _hasNewTimelineEvent(oldWidget, widget);
     _contentVersion = nextContentVersion;
-    if (_listController.isAttached) {
+    final structureChanged =
+        oldWidget.rows.length != widget.rows.length ||
+        oldWidget.rows.indexed.any(
+          (entry) => entry.$2.id != widget.rows[entry.$1].id,
+        );
+    if (structureChanged) {
+      // SuperSliverList stores heights by index. Dirtying an index does not
+      // replace its previous height, so a new window needs a fresh extent map.
+      // Stable row GlobalKeys retain mounted content; the existing identity
+      // anchor restores the reader after the new list has laid out.
+      _rowStructureVersion++;
+    } else if (_listController.isAttached) {
       for (var index = 0; index < oldWidget.rows.length; index++) {
         if (index >= _listController.numberOfItems) break;
-        if (index >= widget.rows.length ||
-            oldWidget.rows[index].id != widget.rows[index].id ||
-            oldWidget.rows[index].renderVersion !=
-                widget.rows[index].renderVersion) {
+        if (oldWidget.rows[index].renderVersion !=
+            widget.rows[index].renderVersion) {
           _listController.invalidateExtent(index);
         }
       }
@@ -350,7 +360,9 @@ class _TimelineViewState extends State<TimelineView> {
       if (hasNewEvent || widget.hasNewer) _pendingNewEvents += 1;
       if (anchor != null &&
           _anchorRowId(anchor.itemId) != null &&
-          (_restoreClamped || _needsAnchorRebase(anchor, oldWidget.rows))) {
+          (_restoreClamped ||
+              structureChanged ||
+              _needsAnchorRebase(anchor, oldWidget.rows))) {
         _prepareAnchorRestore(anchor);
       }
     }
@@ -372,7 +384,15 @@ class _TimelineViewState extends State<TimelineView> {
 
   @override
   Widget build(BuildContext context) {
-    _textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    if (textScale != _textScale) {
+      if (_detachedByUser && !_restoreClamped) {
+        final anchor = _captureAnchor();
+        if (anchor != null) _prepareAnchorRestore(anchor);
+      }
+      _textScale = textScale;
+      _rowStructureVersion++;
+    }
     _schedulePrefetch();
     final activeTurn = widget.turn?.state.isBusy == true ? widget.turn : null;
     if (widget.rows.isEmpty &&
@@ -529,7 +549,10 @@ class _TimelineViewState extends State<TimelineView> {
                           child: SliverPadding(
                             padding: const EdgeInsets.symmetric(horizontal: 24),
                             sliver: SuperSliverList(
-                              key: ValueKey(widget.threadId),
+                              key: ValueKey((
+                                widget.threadId,
+                                _rowStructureVersion,
+                              )),
                               listController: _listController,
                               extentEstimation: _estimateRowExtent,
                               delayPopulatingCacheArea: false,

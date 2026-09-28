@@ -2,13 +2,30 @@ part of 'timeline_view.dart';
 
 extension on _TimelineViewState {
   double _estimateRowExtent(int? index, double width) {
-    if (index == null || index >= widget.rows.length) return 80;
+    // A positive null-index result tells SuperSliverList that EVERY unmeasured
+    // row has that height, bypassing the per-row estimates below entirely.
+    if (index == null) return 0;
+    if (index >= widget.rows.length) {
+      return widget.planConfirmation == null ? 14 : 80;
+    }
     final row = widget.rows[index];
     final text = row.part?.text;
     if (text != null && text.isNotEmpty) {
       final scale = _textScale;
-      final columns = math.max(12, width / (8 * scale));
-      return 56 + (text.length / columns).ceil() * 22.0 * scale;
+      final prompt =
+          row.type == TimelineRowType.userMessage ||
+          row.type == TimelineRowType.parentAgentMessage;
+      final bodyWidth =
+          math.min(width, prompt ? 560.0 : 700.0) -
+          (row.type == TimelineRowType.userMessage ? 28 : 0);
+      final columns = math.max(1.0, bodyWidth / (8 * scale));
+      // Explicit line breaks matter even when each line is only a few letters.
+      // Do not construct off-screen Markdown merely to measure the scrollbar.
+      var lines = 0;
+      for (final line in LineSplitter.split(text)) {
+        lines += math.max(1, (line.length / columns).ceil());
+      }
+      return 56 + lines * 22.0 * scale;
     }
     return switch (row.type) {
       TimelineRowType.toolGroup => 110,
