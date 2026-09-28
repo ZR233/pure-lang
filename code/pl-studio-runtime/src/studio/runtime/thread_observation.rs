@@ -1403,7 +1403,7 @@ mod storage_fault_tests {
         let temp = tempfile::tempdir()?;
         let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
         let thread = pl_protocol::Thread::placeholder("recovered-hidden-input");
-        let sink = ThreadStorageSink::new(store.clone(), thread.clone()).await?;
+        let sink = ThreadStorageSink::new(store.clone(), thread.clone(), None).await?;
         let channel = store.thread_persistence().history_channel(&thread.id);
         let chat = store.chat_session(&thread.id).await?;
         let input_id = "interaction:approved:continuation";

@@ -380,6 +380,11 @@ history 事实，也不能成为 checkpoint fence。发布新 checkpoint 前必�
 
 因此磁盘上可见的 checkpoint 不会引用尚未保存的历史事实或 blob。owner 不持锁等待保存屏障。
 中间快照可合并；保存故障保留候选并暂停新模型/工具，不能把恢复所需状态视为可丢统计。
+冷恢复装配 Studio writer 时，从同一 Thread 的 `history.sqlite` 读取已提交 effect 水位，并要求它
+恰好等于已加载 checkpoint 的 `history_fence`（无 checkpoint 时为 0）；历史落后或领先都显式
+拒绝激活，不能将更旧的 Thread 状态接到更靠前的历史后跳过新的 effect。新 writer 分别从该水位
+和已加载的 checkpoint revision 初始化 durable 与 published 水位，使恢复后的 `flush` 无需等待
+本次进程不会再发布的旧 checkpoint。
 
 ### checkpoint schema 2：外置正文
 
@@ -417,8 +422,13 @@ core 的 SQLite 后端把 effect 与它所属的当前状态 checkpoint 作为�
 字节与 effect 一起计入 writer 压力预算。宿主通过 `read_thread_checkpoint(thread_id)` 读取，
 由 core 校验存储信封与内容 hash、Thread 身份、checkpoint schema 版本、`state_revision` 与
 `state.commit_sequence` 的一致性、`history_fence` 不超过状态 revision，并通过同一 typed effect
-读取入口校验 fence 处的完整事实及归属；宿主不查询 `thread_checkpoints` 表、键或信封本身。当前
-core 会话 schema 为 8。宿主在取得独占运行时所有权并完成一致备份后，使用
+读取入口校验 fence 处的完整事实及归属；宿主不查询 `thread_checkpoints` 表、键或信封本身。
+core writer 重开时从已校验的 Thread commit 资源恢复各 Thread 的 durable 水位；`Thread::resume`
+保留 checkpoint 的 `history_fence`，附加存储前要求该后端已确认至少同一水位，随后把它初始化为
+owner 的 admitted/durable 水位。不能把已恢复状态接到缺少其历史的存储，也不为已持久化的旧
+effect 再次等待写入。
+
+当前 core 会话 schema 为 8。宿主在取得独占运行时所有权并完成一致备份后，使用
 `migration::migrate_to_current` 持有数据库独占锁，按版本顺序完成 6→7→8 的显式升级；7→8
 只新增 checkpoint 表并移动版本标记，不重写、不裁剪任何已有 effect/entry/history。每步事务
 独立提交，若在两步之间中断，下次从已提交版本继续。`open` 不会自动转换或重建。
