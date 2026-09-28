@@ -42,14 +42,16 @@ class _Header extends StatelessWidget {
               ],
             ],
           );
-          final actions = Row(
-            mainAxisSize: MainAxisSize.min,
+          // Actions stay on one row when they fit and stack vertically when the
+          // window is too narrow, so the labeled open button never overflows.
+          final actions = OverflowBar(
+            spacing: 8,
+            overflowSpacing: 4,
+            overflowAlignment: OverflowBarAlignment.start,
             children: [
               _AgentSwitcher(state: state),
-              const SizedBox(width: 8),
               _SessionCostChip(cost: state.sessionCost),
-              const SizedBox(width: 8),
-              _SessionOverflowMenu(state: state),
+              _SessionOpenInVsCode(state: state),
             ],
           );
           if (constraints.maxWidth < 520) {
@@ -63,7 +65,17 @@ class _Header extends StatelessWidget {
               Expanded(child: title),
               if (state.workspaceThreads.isNotEmpty) ...[
                 const SizedBox(width: 16),
-                actions,
+                // Bound the actions: this non-flexible row child would
+                // otherwise receive unbounded width and let the overflow bar
+                // stay on one line past the header. The title keeps the rest,
+                // and the overflow bar stacks once actions exceed the cap.
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth:
+                        constraints.maxWidth * _headerActionsWidthFraction,
+                  ),
+                  child: actions,
+                ),
               ],
             ],
           );
@@ -105,13 +117,14 @@ String _purposeLabel(BuildContext context, String? purpose) =>
       String value => value,
     };
 
-/// 会话顶栏「...」更多菜单；当前唯一动作是「在 VS Code 中打开工作区」。
+/// 会话顶栏「在 VS Code 中打开工作区」直达入口。
 ///
-/// 未探测到 VS Code 安装或当前无所属项目时整个入口不渲染（菜单保持为空，
-/// 不显示空占位）。远端项目经 Remote-SSH 打开，连接参数由 `~/.ssh/config`
-/// 的 Host 别名解析。
-class _SessionOverflowMenu extends ConsumerWidget {
-  const _SessionOverflowMenu({required this.state});
+/// 仅在探测到 VS Code 安装且当前会话存在所属项目时渲染，否则不占位。优先显示
+/// 宿主系统为 `vscode` 协议默认处理应用解析的系统图标；取不到可解码图标时退回
+/// 带文字的按钮，不使用预置图片或「...」菜单。远端项目经 Remote-SSH 打开，
+/// 连接参数由 `~/.ssh/config` 的 Host 别名解析。
+class _SessionOpenInVsCode extends ConsumerWidget {
+  const _SessionOpenInVsCode({required this.state});
 
   final HeaderView state;
 
@@ -126,35 +139,35 @@ class _SessionOverflowMenu extends ConsumerWidget {
         availability.value != true) {
       return const SizedBox.shrink();
     }
-    final controller = MenuController();
-    return MenuAnchor(
-      controller: controller,
-      alignmentOffset: const Offset(0, 6),
-      menuChildren: [
-        MenuItemButton(
-          key: StudioDriverKeys.sessionOpenInVsCode,
-          leadingIcon: const Icon(Icons.code_outlined, size: 18),
-          onPressed: () {
-            controller.close();
-            _openInVsCode(context, ref, project, thread);
-          },
-          child: _SessionOpenTarget(
-            label: context.l10n.sessionOpenInVsCode,
-            target: thread.workspacePath,
-          ),
+    final label = context.l10n.sessionOpenInVsCode;
+    // 悬停与读屏都暴露完整打开目标路径；图标按钮无可见文字时尤为关键。
+    final tooltip = '$label\n${thread.workspacePath}';
+    Future<void> open() => _open(context, ref, project, thread);
+    final icon = ref.watch(vsCodeIconProvider).value;
+    if (icon != null) {
+      return IconButton(
+        key: StudioDriverKeys.sessionOpenInVsCode,
+        tooltip: tooltip,
+        onPressed: open,
+        icon: Image.memory(
+          icon,
+          width: 20,
+          height: 20,
+          filterQuality: FilterQuality.medium,
         ),
-      ],
-      builder: (context, controller, child) => IconButton(
-        key: StudioDriverKeys.sessionOverflow,
-        tooltip: context.l10n.sessionMoreActionsTooltip,
-        icon: const Icon(Icons.more_horiz, size: 20),
-        onPressed: () =>
-            controller.isOpen ? controller.close() : controller.open(),
+      );
+    }
+    return Tooltip(
+      message: tooltip,
+      child: TextButton(
+        key: StudioDriverKeys.sessionOpenInVsCode,
+        onPressed: open,
+        child: Text(label),
       ),
     );
   }
 
-  Future<void> _openInVsCode(
+  Future<void> _open(
     BuildContext context,
     WidgetRef ref,
     StudioProject project,
@@ -195,43 +208,6 @@ class _SessionOverflowMenu extends ConsumerWidget {
     if (failure != null && messenger != null) {
       messenger.showSnackBar(SnackBar(content: Text(failure)));
     }
-  }
-}
-
-/// 会话「在 VS Code 中打开工作区」菜单项：主标签下方以辅助行展示打开目标
-/// （会话工作区地址）。长路径截断为单行，完整内容可由悬停与读屏获取，辅助行
-/// 不改变打开目标语义。
-class _SessionOpenTarget extends StatelessWidget {
-  const _SessionOpenTarget({required this.label, required this.target});
-
-  final String label;
-  final String target;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: target,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 280),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(label),
-            const SizedBox(height: 2),
-            Text(
-              target,
-              key: StudioDriverKeys.sessionOpenTarget,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: context.text.bodySmall?.copyWith(
-                color: context.colors.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
@@ -406,6 +382,9 @@ const double _agentMenuMaxHeight = 320;
 
 /// 菜单行内状态标签最多占用的行宽比例，超出部分行内省略。
 const double _agentStatusWidthFraction = 0.45;
+
+/// 宽屏顶栏 actions 最多占用的横向比例，其余横向空间留给会话标题。
+const double _headerActionsWidthFraction = 0.7;
 
 /// 运行状态展示分组：执行中、失败、空闲、关闭中或已关闭。
 int _agentStatusPriority(ThreadStatusView status) => switch (status) {

@@ -28,6 +28,64 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
+// Resolves the icon of the default handler for the `vscode` URL protocol and
+// encodes it as PNG bytes. Returns a newly referenced FlValue (transfer full),
+// or nullptr when there is no reliable association or the theme cannot provide
+// the icon, so the UI never guesses an installation path or ships its own
+// artwork.
+static FlValue* vs_code_icon_value() {
+  g_autoptr(GAppInfo) app_info =
+      g_app_info_get_default_for_uri_scheme("vscode");
+  if (app_info == nullptr) {
+    return nullptr;
+  }
+  GIcon* icon = g_app_info_get_icon(app_info);
+  if (icon == nullptr) {
+    return nullptr;
+  }
+  g_autoptr(GtkIconInfo) icon_info = gtk_icon_theme_lookup_by_gicon(
+      gtk_icon_theme_get_default(), icon, 256, GTK_ICON_LOOKUP_FORCE_SIZE);
+  if (icon_info == nullptr) {
+    return nullptr;
+  }
+  g_autoptr(GError) error = nullptr;
+  g_autoptr(GdkPixbuf) pixbuf = gtk_icon_info_load_icon(icon_info, &error);
+  if (pixbuf == nullptr) {
+    return nullptr;
+  }
+  gchar* png_buffer = nullptr;
+  gsize png_size = 0;
+  if (!gdk_pixbuf_save_to_buffer(pixbuf, &png_buffer, &png_size, "png", &error,
+                                 nullptr)) {
+    return nullptr;
+  }
+  FlValue* value =
+      fl_value_new_uint8_list((const uint8_t*)png_buffer, png_size);
+  g_free(png_buffer);
+  return value;
+}
+
+// Hosts the application-icon method channel used by the Studio UI.
+static void application_icon_method_call_cb(FlMethodChannel* channel,
+                                            FlMethodCall* method_call,
+                                            gpointer user_data) {
+  const gchar* method = fl_method_call_get_name(method_call);
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (g_strcmp0(method, "vsCodeIcon") == 0) {
+    // vs_code_icon_value returns a new reference and
+    // fl_method_success_response_new takes its own reference, so release ours
+    // here; a null value is a valid "no icon" success result.
+    g_autoptr(FlValue) icon = vs_code_icon_value();
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(icon));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+  g_autoptr(GError) error = nullptr;
+  if (!fl_method_call_respond(method_call, response, &error)) {
+    g_warning("Failed to send application icon response: %s", error->message);
+  }
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
@@ -91,6 +149,17 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+
+  // fl_method_channel_new refs and registers the channel on the messenger, and
+  // the messenger keeps that reference alive for the lifetime of the engine, so
+  // releasing our local reference here is safe.
+  g_autoptr(FlStandardMethodCodec) icon_codec = fl_standard_method_codec_new();
+  g_autoptr(FlMethodChannel) icon_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "io.github.zr233.anywork/application_icon",
+      FL_METHOD_CODEC(icon_codec));
+  fl_method_channel_set_method_call_handler(
+      icon_channel, application_icon_method_call_cb, nullptr, nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
