@@ -8,11 +8,11 @@
 pl-studio-bridge / pl-studio-server → pl-studio-runtime
 pl-studio-runtime → pl-core / pl-model / pl-tool / pl-protocol / pl-trace
 pl-model → pl-core
-pl-tool → pl-core
+pl-tool → pl-core / pl-model
 pl-trace → pl-core
 ```
 
-model 与 tool 不相互依赖；core 不依赖 pl-protocol、pl-model、pl-tool、pl-trace、pl-output
+model 不依赖 tool；tool 消费 model 已解释的 provider 能力与路由。core 不依赖 pl-protocol、pl-model、pl-tool、pl-trace、pl-output
 或 Studio，包括测试依赖。新增概念先确认是否属于通用 Thread 编排；provider、工具和产品
 专属概念分别归对应适配层，不借 core 门面镜像。完整成员清单以根
 Cargo.toml 为准；Flutter 应用目录本身不是 workspace 成员，其 Rust 桥接 crate 单独纳入成员。
@@ -41,9 +41,9 @@ core 不提供默认工具安装、provider 配置、MCP 目录、产品 working
 ## 2.3 存储与投影
 
 Thread 内存是活动执行状态唯一事实源；core 默认纯内存，导出当前 checkpoint、不可变 effect，
-并负责有界聊天窗口对最近缓存、活动条目、待保存事实和历史查询的统一合并。core 不依赖产品协议
-或 SQLite；按身份与顺序键查询的存储能力由 core 定义，Studio 负责产品条目投影、SQLite 实现与
-TOML checkpoint 原子保存。历史分页由 ChatView 协调，Studio 不能另建 GUI 专用历史缓存或消息
+并负责有界聊天窗口对最近缓存、活动条目、待保存事实和历史查询的统一合并。core 不依赖产品协议；
+core 定义按身份与顺序查询的存储能力，并提供通用 SQLite session store 与 typed Thread checkpoint/effect 查询。
+Studio 负责产品条目投影、产品配置和自己的持久化状态。历史分页由 ChatView 协调，Studio 不能另建 GUI 专用历史缓存或消息
 交接链；冷历史浏览不激活模型、工具或执行 owner。可丢统计由全局 calls 库独立写入。Studio 使用
 通用扩展 CAS 保存业务状态并提交其模型上下文投影；GUI 只消费 canonical 产品 DTO。Provider 配置
 从 model、工具配置从 tool、业务协议从 protocol 导入，不借 core 镜像导出。

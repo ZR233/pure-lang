@@ -1,8 +1,32 @@
-//! Search plan projection into independent tool executors and model-owned capabilities.
-use super::*;
-use crate::thread_assembler::ThreadAssemblyError;
+//! Web Search 计划投影为独立的工具执行器与模型持有的 hosted 能力。
+//!
+//! 装配过程中只消费规划结果与共享配置快照；hosted 条目永不在本层获取 core 执行器。
+
 use pl_core::tool::opaque::Registration;
-use pl_model::runtime::HostedTool;
+use pl_model::provider::StandaloneWebSearchDialect;
+use pl_model::runtime::{HostedTool, thread_tool_declaration};
+use pl_protocol::HostedWebSearchDialect;
+use pl_protocol::search::WebSearchConfig;
+
+use super::client::{SearchEndpoint, WebSearchClient};
+use super::hosted_options;
+use super::plan::{ToolVisibilityConstraint, WebSearchPath, WebSearchPlans};
+use super::thread::{ThreadSearchOptions, ThreadWebSearchTool};
+
+/// 公共搜索装配错误；产品调用方负责映射到自身错误域。
+///
+/// 该类型刻意不引用任何 Studio 专属错误，以便 Studio 与 mai-team 等调用方共用。
+#[derive(Debug, thiserror::Error)]
+pub enum SearchBindingError {
+    #[error("standalone search is missing its resolved backend")]
+    MissingBackend,
+    #[error(transparent)]
+    Config(#[from] pl_protocol::PureError),
+    #[error("web search tool declaration failed")]
+    Declaration(#[from] pl_core::model::ModelError),
+    #[error("web search tool registration failed")]
+    Registry(#[from] pl_core::tool::opaque::RegistryError),
+}
 
 /// Frozen search assembly; hosted entries never acquire core executors.
 #[derive(Debug)]
@@ -14,7 +38,7 @@ pub struct ThreadSearchBinding {
 
 impl WebSearchPlans {
     /// Returns only provider-executed declarations without constructing local tool resources.
-    pub(crate) fn hosted_tools(&self, config: &WebSearchConfig) -> Result<Vec<HostedTool>> {
+    pub fn hosted_tools(&self, config: &WebSearchConfig) -> pl_protocol::Result<Vec<HostedTool>> {
         let Some(plan) = self.active() else {
             return Ok(Vec::new());
         };
@@ -26,8 +50,8 @@ impl WebSearchPlans {
                 pl_protocol::HostedWebSearchOptions::DeepSeek
             }
             Some(HostedWebSearchDialect::OpenAiResponses) | None => {
-                super::hosted_options::openai_options(config).ok_or_else(|| {
-                    PureError::ConfigError(
+                hosted_options::openai_options(config).ok_or_else(|| {
+                    pl_protocol::PureError::ConfigError(
                         "hosted search requires an enabled effective mode".into(),
                     )
                 })?
@@ -43,7 +67,7 @@ impl WebSearchPlans {
     pub fn build_thread(
         &self,
         config: &WebSearchConfig,
-    ) -> std::result::Result<ThreadSearchBinding, ThreadAssemblyError> {
+    ) -> std::result::Result<ThreadSearchBinding, SearchBindingError> {
         let mut binding = ThreadSearchBinding {
             tools: Vec::new(),
             hosted: self.hosted_tools(config)?,
@@ -54,29 +78,27 @@ impl WebSearchPlans {
         };
         match plan.resolution.path {
             Some(WebSearchPath::Standalone) => {
-                let backend = plan.backend.as_ref().ok_or_else(|| {
-                    PureError::ConfigError(
-                        "standalone search is missing its resolved backend".into(),
-                    )
-                })?;
+                let backend = plan
+                    .backend
+                    .as_ref()
+                    .ok_or(SearchBindingError::MissingBackend)?;
                 match backend.dialect {
                     StandaloneWebSearchDialect::OpenAiSearchApi => {
-                        let client = WebSearchClient::new(&pl_tool::search::SearchEndpoint {
+                        let client = WebSearchClient::new(&SearchEndpoint {
                             base_url: backend.endpoint.base_url.clone(),
                             bearer_token: backend.endpoint.bearer_token.clone(),
                             http_headers: backend.endpoint.http_headers.clone(),
                         })?;
-                        let tool = pl_tool::search::ThreadWebSearchTool::new(
+                        let tool = ThreadWebSearchTool::new(
                             client,
-                            pl_tool::search::ThreadSearchOptions {
+                            ThreadSearchOptions {
                                 model: backend.model.clone(),
                                 settings: pl_protocol::search::SearchSettings::from_config(config),
                                 max_output_tokens: backend.max_output_tokens,
                             },
                         );
-                        let declaration = pl_model::runtime::thread_tool_declaration(
-                            &pl_tool::search::ThreadWebSearchTool::declaration(),
-                        )?;
+                        let declaration =
+                            thread_tool_declaration(&ThreadWebSearchTool::declaration())?;
                         binding.tools.push(tool.registration(declaration)?);
                     }
                 }

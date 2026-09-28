@@ -170,7 +170,7 @@ effect window 批次被 durable 释放，重复 resolve 由 history 的持久回
 
 MCP 工具层只接收解析完毕的连接参数与凭据，不选择模型账号或内置服务；内置目录、启用
 状态持久化及 provider 凭据选择由 Studio 组合。搜索的公共请求格式由独立上层协议承载：
-独立搜索 HTTP 客户端与工具执行归 tool，Studio 根据模型能力选择并装配搜索后端；exclusive
+独立搜索 HTTP 客户端、能力规划与工具绑定归 tool；Studio 提供已解析的模型路由与产品配置。exclusive
 搜索装配只包含选中的搜索能力，不先创建被隐藏的 workspace 工具。宿主原生工具的启用
 条件由 Studio 按冻结模型绑定判断，作为同批工具目录变更发布；core 不按 provider
 capability 选择工具。执行环境（本地/SSH、OS、shell dialect 与可执行路径）由 tool 探测，

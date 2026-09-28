@@ -23,7 +23,7 @@ pub(super) struct ThreadToolAssembly<'a> {
 
 pub(super) struct PreparedThreadTools {
     pub catalog: Option<Arc<pl_tool::skill::FrozenSkillCatalog>>,
-    pub visibility: crate::search::ToolVisibilityConstraint,
+    pub visibility: pl_tool::search::ToolVisibilityConstraint,
     pub tools: StudioThreadTools,
     pub hosted: Vec<pl_model::runtime::HostedTool>,
     pub environment: pl_tool::environment::ExecutionEnvironment,
@@ -113,14 +113,15 @@ impl StudioThreadFactory {
             workspace,
             store,
         } = assembly;
-        let mut search = crate::search::plan_web_searches(
+        let mut search = pl_tool::search::plan_web_searches(
             &config.models,
             route,
             &config.web_search,
             config.deepseek_web_search.enabled,
         )?
-        .build_thread(&config.web_search)?;
-        if search.visibility != crate::search::ToolVisibilityConstraint::Exclusive {
+        .build_thread(&config.web_search)
+        .map_err(|error| resource_error("bind web search", error))?;
+        if search.visibility != pl_tool::search::ToolVisibilityConstraint::Exclusive {
             search
                 .hosted
                 .extend(crate::programmatic::hosted_tool(route));
@@ -146,7 +147,7 @@ impl StudioThreadFactory {
             .as_ref()
             .map(|host| host.execution_environment.clone())
             .unwrap_or_else(pl_tool::environment::ExecutionEnvironment::detect_local);
-        if search.visibility == crate::search::ToolVisibilityConstraint::Exclusive {
+        if search.visibility == pl_tool::search::ToolVisibilityConstraint::Exclusive {
             return Ok(PreparedThreadTools {
                 catalog: None,
                 visibility: search.visibility,

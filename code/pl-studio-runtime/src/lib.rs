@@ -98,8 +98,6 @@ pub use pl_protocol::{
     UserInputResolution,
 };
 
-pub mod search;
-
 mod programmatic;
 
 pub mod plan_tool;

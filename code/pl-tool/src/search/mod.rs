@@ -1,8 +1,17 @@
+mod binding;
 mod client;
+mod hosted_options;
+mod plan;
 mod thread;
-pub use thread::{ThreadSearchOptions, ThreadWebSearchTool};
 
-pub use self::client::{SearchEndpoint, WebSearchClient};
+pub use binding::{SearchBindingError, ThreadSearchBinding};
+pub use client::{SearchEndpoint, WebSearchClient};
+pub use plan::{
+    ToolVisibilityConstraint, WebSearchAvailability, WebSearchBackend, WebSearchBackendKind,
+    WebSearchPath, WebSearchPlan, WebSearchPlans, WebSearchResolution, plan_web_search,
+    plan_web_searches,
+};
+pub use thread::{ThreadSearchOptions, ThreadWebSearchTool};
 
 pub const TOOL_WEB_SEARCH: &str = "web_search";
 const ASSISTANT_CONTEXT_CHAR_LIMIT: usize = 4_000;

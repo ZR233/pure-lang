@@ -12,9 +12,9 @@ use pl_protocol::studio::{
     StudioSettingsSnapshot, StudioSkillsSettings, StudioWebSearchSettings,
 };
 
-use crate::search::{WebSearchAvailability, WebSearchBackendKind};
 use crate::{ConfigRuntimeSnapshot, StudioRole};
 use pl_model::config::{ProviderCapabilitySelection, ProviderModelCatalogConfig};
+use pl_tool::search::{WebSearchAvailability, WebSearchBackendKind};
 
 pub(crate) fn settings_snapshot(state: ConfigRuntimeSnapshot) -> Result<StudioSettingsSnapshot> {
     let settings = settings_view(&state.config, StudioRole::Executor)?;
@@ -240,7 +240,7 @@ fn search_settings(
     role: StudioRole,
 ) -> Result<(StudioWebSearchSettings, StudioDeepSeekWebSearchSettings)> {
     let route = config.resolve_role(role)?;
-    let plans = crate::search::plan_web_searches(
+    let plans = pl_tool::search::plan_web_searches(
         &config.models,
         &route,
         &config.web_search,

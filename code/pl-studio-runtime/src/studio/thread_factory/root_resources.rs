@@ -124,7 +124,7 @@ impl StudioThreadFactory {
                 store: store.clone(),
             })
             .await?;
-        if prepared.visibility != crate::search::ToolVisibilityConstraint::Exclusive {
+        if prepared.visibility != pl_tool::search::ToolVisibilityConstraint::Exclusive {
             prepared.tools = prepared
                 .tools
                 .with_tools(crate::workflow_tool::workflow_registrations(mode.clone())?);
@@ -152,7 +152,7 @@ impl StudioThreadFactory {
             initial_context = context;
             initial_extensions.insert("studio.instructions".into(), sources);
             if config.runtime.tool_capabilities.ask_user
-                && prepared.visibility != crate::search::ToolVisibilityConstraint::Exclusive
+                && prepared.visibility != pl_tool::search::ToolVisibilityConstraint::Exclusive
             {
                 initial_extensions.insert(
                     crate::plan_tool::PLAN_EXTENSION.into(),
@@ -230,7 +230,7 @@ impl StudioThreadFactory {
                 config.runtime.openai_compaction_mode,
             )?,
             agent_controls: if prepared.visibility
-                == crate::search::ToolVisibilityConstraint::Exclusive
+                == pl_tool::search::ToolVisibilityConstraint::Exclusive
             {
                 crate::thread_assembler::AgentControlExposure::Disabled
             } else {
