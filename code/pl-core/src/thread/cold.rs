@@ -253,6 +253,11 @@ pub struct DurableToolTask {
 
 /// Injected asynchronous sink. `admit` only queues immutable effect data and must not block.
 pub trait ColdStore: Send + Sync + fmt::Debug + 'static {
+    /// Folds a committed effect into the live cumulative usage before capturing its checkpoint.
+    ///
+    /// The plain SQLite store accounts for portable model usage here. Product stores that own
+    /// richer pricing and timing may leave this untouched and fold the same effect in their writer.
+    fn fold_usage(&self, _summary: &mut UsageSummary, _effect: &ThreadEffectBatch) {}
     /// Reserves an observed presentation identity synchronously, before a coalescing preview
     /// can discard it. Backends without ordered presentation storage need not reserve anything.
     fn reserve_observed_item(
@@ -340,6 +345,7 @@ pub trait ColdStore: Send + Sync + fmt::Debug + 'static {
     }
 }
 trait ErasedColdStore: Send + Sync + fmt::Debug {
+    fn fold_usage(&self, summary: &mut UsageSummary, effect: &ThreadEffectBatch);
     fn reserve_observed_item(&self, thread_id: &str, item_id: &str) -> Result<(), ColdStoreError>;
     fn reserve_operation_output(
         &self,
@@ -369,6 +375,9 @@ trait ErasedColdStore: Send + Sync + fmt::Debug {
     ) -> BoxFuture<'a, Result<Option<DurableToolTask>, ColdStoreError>>;
 }
 impl<T: ColdStore> ErasedColdStore for T {
+    fn fold_usage(&self, summary: &mut UsageSummary, effect: &ThreadEffectBatch) {
+        ColdStore::fold_usage(self, summary, effect);
+    }
     fn reserve_observed_item(&self, thread_id: &str, item_id: &str) -> Result<(), ColdStoreError> {
         ColdStore::reserve_observed_item(self, thread_id, item_id)
     }
@@ -423,6 +432,10 @@ impl ColdStoreHandle {
     /// Erases one backend; independent Threads may share its asynchronous writer.
     pub fn new(store: impl ColdStore) -> Self {
         Self(Arc::new(store))
+    }
+
+    pub(crate) fn fold_usage(&self, summary: &mut UsageSummary, effect: &ThreadEffectBatch) {
+        self.0.fold_usage(summary, effect);
     }
 
     pub(crate) fn reserve_observed_item(

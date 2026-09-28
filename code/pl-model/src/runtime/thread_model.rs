@@ -161,6 +161,10 @@ impl CoreModelSession for ThreadModelSession {
         let runtime = self.runtime.clone();
         let binding = receipt::ModelCallBinding::capture(&runtime, &self.purpose);
         let request_metadata = receipt::request_metadata(&binding, &encoded)?;
+        let usage_binding = pl_core::model::ModelUsageBinding {
+            model: binding.requested_model.clone(),
+            context_window: binding.context_window,
+        };
         let terminal_progress = request.progress.clone();
         let observed = self.observed.clone();
         let marker = OpaquePayload::new("pl.model.continuation", 1, request.attempt_id.clone())
@@ -203,7 +207,8 @@ impl CoreModelSession for ThreadModelSession {
         });
         let call = call
             .with_tool_projection(tool_projection)
-            .with_request_metadata(request_metadata);
+            .with_request_metadata(request_metadata)
+            .with_usage_binding(usage_binding);
         Ok(match estimate {
             Some(tokens) => call.with_input_estimate(pl_core::model::TokenEstimate {
                 tokens,

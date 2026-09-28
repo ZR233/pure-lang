@@ -377,6 +377,7 @@ impl Owner {
         }
         let input_estimate = prepared.input_estimate();
         let request_metadata = prepared.request_metadata().cloned();
+        let usage_binding = prepared.usage_binding().cloned();
         let tool_projection = prepared.tool_projection().cloned();
         // Capacity and storage admission happen before dispatch; they are waits on the host, not on
         // the model implementation.
@@ -389,6 +390,7 @@ impl Owner {
         let mut attempts = self.state.attempts.to_vec();
         attempts.push(RequestAttempt {
             request_metadata,
+            usage_binding,
             tool_projection: tool_projection.clone(),
             turn_id: input.turn_id.clone(),
             attempt_id: input.attempt_id.clone(),

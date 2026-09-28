@@ -547,6 +547,9 @@ impl Owner {
         };
         let effect = Arc::new(effect);
         self.state.commit_sequence = sequence;
+        if let Some(store) = &self.cold {
+            store.fold_usage(&mut self.state.usage_summary, &effect);
+        }
         // The effect above is the only copy of this commit's facts: the write below persists a
         // transfer state that still carries them so the writer projects the effect without reading
         // back a pruned checkpoint; the resident state drops the same facts right after.

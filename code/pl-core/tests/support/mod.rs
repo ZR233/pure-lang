@@ -2,7 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use pl_core::context::{ContextContent, ContextSnapshot, ContextSource, OpaquePayload};
 use pl_core::model::{
-    ModelError, ModelRequest, ModelSession, ModelStepOutput, ModelToolCall, PreparedModelCall,
+    ModelError, ModelRequest, ModelSession, ModelStepOutput, ModelToolCall, ModelUsage,
+    ModelUsageBinding, PreparedModelCall,
 };
 use pl_core::thread::{ModelStepLimit, TurnInput};
 use tokio_util::sync::CancellationToken;
@@ -41,6 +42,8 @@ pub fn response(request: &ModelRequest, tool_calls: Vec<ModelToolCall>) -> Model
 pub struct ScriptedModel {
     pub tool_ids: Vec<String>,
     pub requests: Arc<Mutex<Vec<ContextSnapshot>>>,
+    pub usage: ModelUsage,
+    pub usage_binding: Option<ModelUsageBinding>,
 }
 
 impl ScriptedModel {
@@ -50,6 +53,8 @@ impl ScriptedModel {
             Self {
                 tool_ids: tool_ids.iter().map(|id| (*id).into()).collect(),
                 requests: requests.clone(),
+                usage: ModelUsage::default(),
+                usage_binding: None,
             },
             requests,
         )
@@ -78,9 +83,16 @@ impl ModelSession for ScriptedModel {
                 })
                 .collect()
         };
-        Ok(PreparedModelCall::new(async move {
-            Ok(response(&request, calls))
-        }))
+        let usage = self.usage.clone();
+        let call = PreparedModelCall::new(async move {
+            let mut output = response(&request, calls);
+            output.usage = usage;
+            Ok(output)
+        });
+        Ok(match &self.usage_binding {
+            Some(binding) => call.with_usage_binding(binding.clone()),
+            None => call,
+        })
     }
 
     async fn close(&mut self) -> Result<(), ModelError> {

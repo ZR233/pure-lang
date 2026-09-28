@@ -1800,12 +1800,21 @@ impl SessionHealth {
     }
 }
 
+/// Provider-independent model facts frozen at request admission for cumulative usage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsageBinding {
+    pub model: String,
+    pub context_window: Option<u64>,
+}
+
 /// One-shot invocation bound to the implementation that prepared its request.
 ///
 /// Preparation cannot start unowned model work. Executing consumes this handle; a second
 /// dispatch requires a separately identified attempt. Dropping an unstarted call drops its future.
 pub struct PreparedModelCall {
     request_metadata: Option<OpaquePayload>,
+    usage_binding: Option<ModelUsageBinding>,
     tool_projection: Option<OpaquePayload>,
     session_health: Option<Arc<SessionHealth>>,
     input_estimate: Option<TokenEstimate>,
@@ -1819,6 +1828,7 @@ impl PreparedModelCall {
     ) -> Self {
         Self {
             future: Box::pin(future),
+            usage_binding: None,
             input_estimate: None,
             session_health: None,
             tool_projection: None,
@@ -1835,6 +1845,17 @@ impl PreparedModelCall {
     /// Returns the metadata of this exact prepared request.
     pub fn request_metadata(&self) -> Option<&OpaquePayload> {
         self.request_metadata.as_ref()
+    }
+
+    /// Freezes portable model identity and capacity for storage-independent usage accounting.
+    pub fn with_usage_binding(mut self, binding: ModelUsageBinding) -> Self {
+        self.usage_binding = Some(binding);
+        self
+    }
+
+    /// Returns the binding selected for this prepared invocation.
+    pub fn usage_binding(&self) -> Option<&ModelUsageBinding> {
+        self.usage_binding.as_ref()
     }
 
     /// Freezes model-owned materials for tools produced by this invocation. Core does not decode them.

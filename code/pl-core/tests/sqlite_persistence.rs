@@ -3,7 +3,7 @@ mod support;
 use std::sync::Arc;
 
 use pl_core::context::OpaquePayload;
-use pl_core::model::DynModelSession;
+use pl_core::model::{DynModelSession, ModelUsage, ModelUsageBinding};
 use pl_core::persistence::{
     ResourceAdmissionError, SessionStoreError, SqliteSessionOptions, SqliteSessionStore,
     ThreadEffectQuery, migration,
@@ -14,6 +14,68 @@ use pl_core::thread::{
 };
 
 use support::{ScriptedModel, turn};
+
+#[tokio::test]
+async fn sqlite_thread_usage_matches_hot_snapshot_and_restored_checkpoint() {
+    let directory = tempfile::tempdir().unwrap();
+    let options = SqliteSessionOptions {
+        path: directory.path().join("usage.sqlite"),
+    };
+    let store = SqliteSessionStore::open(options.clone()).await.unwrap();
+    let (mut model, _) = ScriptedModel::new(&[]);
+    model.usage = ModelUsage {
+        input_tokens: Some(120),
+        output_tokens: Some(30),
+        cache_read_tokens: Some(20),
+        cache_write_tokens: Some(0),
+        reasoning_tokens: Some(5),
+    };
+    model.usage_binding = Some(ModelUsageBinding {
+        model: "test-model".into(),
+        context_window: Some(1_000),
+    });
+    let thread = ThreadHandle::start("usage-thread".into(), DynModelSession::new(model)).unwrap();
+    thread
+        .attach_storage(ColdStoreHandle::new(store.clone()))
+        .await
+        .unwrap();
+    thread.run_turn(turn("first")).await.unwrap();
+    thread.run_turn(turn("second")).await.unwrap();
+    thread.flush().await.unwrap();
+    let hot = thread.snapshot().usage_summary;
+    assert_eq!(hot.model, "test-model");
+    assert_eq!(hot.context_window, Some(1_000));
+    assert_eq!(hot.inference_count, 2);
+    assert_eq!(hot.prompt_tokens, 240);
+    assert_eq!(hot.completion_tokens, 60);
+    assert_eq!(hot.total_tokens, 300);
+    assert_eq!(hot.latest_context_tokens, 150);
+    assert_eq!(hot.cache_input_tokens, 240);
+    assert_eq!(hot.cache_read_tokens, 40);
+    assert_eq!(hot.turn_completion_tokens, 30);
+    assert_eq!(hot.applied_sequence, thread.snapshot().commit_sequence);
+    let checkpoint = store
+        .read_thread_checkpoint("usage-thread")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkpoint.state.usage_summary, hot);
+
+    thread.close().await.unwrap();
+    store.shutdown().await.unwrap();
+    let reopened = SqliteSessionStore::open(options).await.unwrap();
+    let restored = reopened
+        .read_thread_checkpoint("usage-thread")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(restored.state.usage_summary.total_tokens, hot.total_tokens);
+    assert_eq!(
+        restored.state.usage_summary.context_window,
+        hot.context_window
+    );
+    reopened.shutdown().await.unwrap();
+}
 
 /// Opens the same SQLite file with a second connection so a test can tamper with one row directly.
 ///

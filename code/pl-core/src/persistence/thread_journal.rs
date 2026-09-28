@@ -28,6 +28,13 @@ fn storage_fault_kind(error: &super::SessionStoreError) -> crate::thread::cold::
 }
 
 impl ColdStore for SqliteSessionStore {
+    fn fold_usage(
+        &self,
+        summary: &mut crate::thread::UsageSummary,
+        effect: &crate::thread::ThreadEffectBatch,
+    ) {
+        crate::thread::usage::fold_effect(summary, effect);
+    }
     fn pressure(&self, thread_id: &str) -> crate::thread::cold::StoragePressure {
         let (thread_bytes, store_bytes) = self.pending_bytes(thread_id);
         crate::thread::cold::StoragePressure {
