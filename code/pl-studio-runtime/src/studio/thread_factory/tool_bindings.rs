@@ -289,28 +289,29 @@ impl StudioThreadFactory {
                 },
             )
             .await?;
-        let exposure =
-            if child || prepared.visibility == crate::search::ToolVisibilityConstraint::Exclusive {
-                crate::thread_assembler::AgentControlExposure::Disabled
-            } else {
-                let mode_id = crate::studio::thread_projection::saved_mode(snapshot)
-                    .map_err(|error| resource_error("read current mode for tool refresh", error))?
-                    .unwrap_or(thread.mode);
-                let mode = self
-                    .services
-                    .thread_modes
-                    .snapshot()
-                    .mode(&mode_id)
-                    .ok_or_else(|| {
-                        ThreadAssemblyError::Identity(
-                            "current Mode is unavailable; reactivate this Thread".into(),
-                        )
-                    })?;
-                prepared.tools = prepared
-                    .tools
-                    .with_tools(crate::workflow_tool::workflow_registrations(mode)?);
-                crate::thread_assembler::AgentControlExposure::Enabled
-            };
+        let exposure = if child
+            || prepared.visibility == pl_tool::search::ToolVisibilityConstraint::Exclusive
+        {
+            crate::thread_assembler::AgentControlExposure::Disabled
+        } else {
+            let mode_id = crate::studio::thread_projection::saved_mode(snapshot)
+                .map_err(|error| resource_error("read current mode for tool refresh", error))?
+                .unwrap_or(thread.mode);
+            let mode = self
+                .services
+                .thread_modes
+                .snapshot()
+                .mode(&mode_id)
+                .ok_or_else(|| {
+                    ThreadAssemblyError::Identity(
+                        "current Mode is unavailable; reactivate this Thread".into(),
+                    )
+                })?;
+            prepared.tools = prepared
+                .tools
+                .with_tools(crate::workflow_tool::workflow_registrations(mode)?);
+            crate::thread_assembler::AgentControlExposure::Enabled
+        };
         if cancellation.is_cancelled() {
             return Err(pl_core::thread::ThreadError::Cancelled.into());
         }

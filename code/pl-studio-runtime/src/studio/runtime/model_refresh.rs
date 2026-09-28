@@ -88,14 +88,14 @@ impl StudioRuntime {
         route: &ResolvedModelRoute,
         config: &crate::config::StudioConfig,
     ) -> Result<DeferredModelUpdate> {
-        let search = crate::search::plan_web_searches(
+        let search = pl_tool::search::plan_web_searches(
             &config.models,
             route,
             &config.web_search,
             config.deepseek_web_search.enabled,
         )?;
         let mut hosted = search.hosted_tools(&config.web_search)?;
-        if search.visibility() != crate::search::ToolVisibilityConstraint::Exclusive {
+        if search.visibility() != pl_tool::search::ToolVisibilityConstraint::Exclusive {
             hosted.extend(crate::programmatic::hosted_tool(route));
         }
         // Hash sorted structured inputs in memory. Credentials never enter logs, storage or model context.

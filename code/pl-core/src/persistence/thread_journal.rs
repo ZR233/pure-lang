@@ -22,7 +22,8 @@ fn storage_fault_kind(error: &super::SessionStoreError) -> crate::thread::cold::
         | SessionStoreError::Replay(_)
         | SessionStoreError::Invalid(_)
         | SessionStoreError::UnsupportedSchema { .. }
-        | SessionStoreError::InitializationCleanup { .. } => StorageFaultKind::WriteFailed,
+        | SessionStoreError::InitializationCleanup { .. }
+        | SessionStoreError::MaintenanceShutdown(_) => StorageFaultKind::WriteFailed,
     }
 }
 
@@ -55,18 +56,12 @@ impl ColdStore for SqliteSessionStore {
     }
 
     fn admit(&self, thread_id: &str, write: ThreadWrite) -> Result<(), ColdStoreError> {
-        let sequence = write.effect.sequence;
-        let payload = write.effect.encode().map_err(|source| ColdStoreError {
-            source: Box::new(source),
-        })?;
-        self.register_immutable_payload(
-            thread_id,
-            &format!("thread-commit.{sequence:020}"),
-            payload,
-        )
-        .map_err(|source| ColdStoreError {
-            source: Box::new(source),
-        })
+        // The effect and its checkpoint are committed together, so the writer's durable receipt only
+        // advances once both are on disk. Admission stays synchronous and never blocks the executor.
+        self.admit_thread_write(thread_id, write)
+            .map_err(|source| ColdStoreError {
+                source: Box::new(source),
+            })
     }
     async fn flush(&self, thread_id: &str, sequence: u64) -> Result<(), ColdStoreError> {
         if sequence == 0 {

@@ -380,6 +380,11 @@ history 事实，也不能成为 checkpoint fence。发布新 checkpoint 前必�
 
 因此磁盘上可见的 checkpoint 不会引用尚未保存的历史事实或 blob。owner 不持锁等待保存屏障。
 中间快照可合并；保存故障保留候选并暂停新模型/工具，不能把恢复所需状态视为可丢统计。
+冷恢复装配 Studio writer 时，从同一 Thread 的 `history.sqlite` 读取已提交 effect 水位，并要求它
+恰好等于已加载 checkpoint 的 `history_fence`（无 checkpoint 时为 0）；历史落后或领先都显式
+拒绝激活，不能将更旧的 Thread 状态接到更靠前的历史后跳过新的 effect。新 writer 分别从该水位
+和已加载的 checkpoint revision 初始化 durable 与 published 水位，使恢复后的 `flush` 无需等待
+本次进程不会再发布的旧 checkpoint。
 
 ### checkpoint schema 2：外置正文
 
@@ -398,6 +403,40 @@ delivery、扩展与运行事实、以及未结束 attempt 的诊断正文。
 可读；未知未来 schema 显式拒绝。checkpoint 恢复不依赖 `calls.sqlite`，且不重放旧 journal。
 
 ## 15.5 会话历史数据库
+
+`pl-core::persistence::SqliteSessionStore` 保存通用 Thread effect，与下文 Studio 的产品
+`history.sqlite` 是不同的存储适配器。使用前者的嵌入式宿主通过
+`read_thread_effect` / `query_thread_effects` 按 Thread 身份和 commit 序号读取已提交
+effect；core 校验存储信封完整性、Thread 归属和序号键。宿主只将这些通用事实投影为自己的
+Turn、工具调用和审查记录，不读取 `session_entries` 表、不解码
+`pl.resource.thread-commit.*` 存储键，也不从当前 checkpoint 重建已退出内存窗口的历史。
+宿主提供的可见会话内容与长历史窗口经 `Session`/`ChatView` 读取；配置文件和业务状态仍由
+产品宿主管理。
+
+core 的 SQLite 后端把 effect 与它所属的当前状态 checkpoint 作为一次原子写入保存：一个
+`ThreadWrite` 经队列受理后，writer 在同一个事务里追加
+`pl.resource.thread-commit.<sequence>` effect，并 upsert 该 Thread 的最新 checkpoint 行
+（core 内部 `thread_checkpoints` 表），因此 durable receipt 只在二者同时落盘后才前进，绝不会
+出现引用了尚未保存 effect 的 checkpoint。checkpoint 以 pruned、全内联的重启 DTO 保存：core 没有
+会话 blob 根，所以超过阈值的正文仍内联在信封里，而不是被替换成它无法再次物化的引用；其序列化
+字节与 effect 一起计入 writer 压力预算。宿主通过 `read_thread_checkpoint(thread_id)` 读取，
+由 core 校验存储信封与内容 hash、Thread 身份、checkpoint schema 版本、`state_revision` 与
+`state.commit_sequence` 的一致性、`history_fence` 不超过状态 revision，并通过同一 typed effect
+读取入口校验 fence 处的完整事实及归属；宿主不查询 `thread_checkpoints` 表、键或信封本身。
+core writer 重开时从已校验的 Thread commit 资源恢复各 Thread 的 durable 水位；`Thread::resume`
+保留 checkpoint 的 `history_fence`，附加存储前要求该后端已确认至少同一水位，随后把它初始化为
+owner 的 admitted/durable 水位。不能把已恢复状态接到缺少其历史的存储，也不为已持久化的旧
+effect 再次等待写入。
+
+当前 core 会话 schema 为 8。宿主在取得独占运行时所有权并完成一致备份后，使用
+`migration::migrate_to_current` 持有数据库独占锁，按版本顺序完成 6→7→8 的显式升级；7→8
+只新增 checkpoint 表并移动版本标记，不重写、不裁剪任何已有 effect/entry/history。每步事务
+独立提交，若在两步之间中断，下次从已提交版本继续。`open` 不会自动转换或重建。
+版本步骤只由这一统一入口调用，不向宿主开放绕过独占锁的单步迁移接口。
+
+通用 SQLite 后端删除已停止的会话时，通过 `delete_session` 在独占数据库锁下同事务删除该会话
+的 checkpoint、当前资源和历史记录；活跃 writer 拒绝删除，其他会话不受影响。产品目录、
+物理资源与用户文件不属于这项通用删除操作，由宿主按自己的可恢复流程协调。
 
 每个 Thread 使用独立 `history.sqlite`，面向稳定条目和 keyset 分页，不保存完整执行 journal。
 该文件位于应用 home 下的 `~/.anywork/v2/sessions/<storage-key>/history.sqlite`，`<storage-key>`
@@ -610,3 +649,5 @@ admitted 水位，之后的新准入不会把屏障推远；它不启动新工�
 
 未知未来版本、损坏数据、缺失迁移路径和未知必需 producer 格式均失败并保留原始字节；未知但
 仅影响历史展示的载荷以 raw 历史条目保存。迁移不能用清空、默认状态或只有备份没有转换来替代。
+core 会话 schema 从 7 升到 8 时，唯一变化是新增 checkpoint 表；已有 effect、entry 与
+history 行原样保留，尚未写过 checkpoint 的旧 Thread 读取为空，等下一次写入时才落盘。

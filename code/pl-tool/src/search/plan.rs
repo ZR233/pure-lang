@@ -1,17 +1,19 @@
-//! Provider capability 驱动的 Web Search 规划与安装。
+//! Provider/model capability 驱动的 Web Search 规划与工具可见性。
+//!
+//! 该模块只做确定性规划：根据 provider 服务能力、模型能力与当前 route 计算
+//! standalone 与 hosted 两条路径的可用性、选中 backend 以及搜索工具对本轮其他
+//! 工具的可见性约束。HTTP 客户端与工具执行见 [`super::client`] 与 [`super::thread`]，
+//! 装配见 [`super::binding`]。
 
 use std::collections::BTreeSet;
-
-use pl_protocol::{PureError, Result, WebSearchResolutionDescriptor};
 
 use pl_model::config::{AgentModelConfig, ProviderConfig, ProviderId, ResolvedModelRoute};
 use pl_model::provider::{ProviderEndpoint, ProviderWireProtocol, StandaloneWebSearchDialect};
 use pl_protocol::HostedWebSearchDialect;
 use pl_protocol::search::{WebSearchConfig, WebSearchMode};
-use pl_tool::search::{TOOL_WEB_SEARCH, WebSearchClient};
-mod hosted_options;
-mod thread;
-pub use thread::ThreadSearchBinding;
+use pl_protocol::{PureError, Result, WebSearchResolutionDescriptor};
+
+use super::TOOL_WEB_SEARCH;
 
 /// Web Search 工具对本轮其他工具的可见性约束。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,8 +87,8 @@ impl WebSearchResolution {
 pub struct WebSearchPlan {
     pub resolution: WebSearchResolution,
     pub visibility: ToolVisibilityConstraint,
-    backend: Option<WebSearchBackend>,
-    hosted_dialect: Option<HostedWebSearchDialect>,
+    pub(super) backend: Option<WebSearchBackend>,
+    pub(super) hosted_dialect: Option<HostedWebSearchDialect>,
 }
 
 impl WebSearchPlan {
@@ -115,7 +117,7 @@ impl WebSearchPlans {
         self.active().and_then(WebSearchPlan::exclusive_tool_name)
     }
 
-    fn active(&self) -> Option<&WebSearchPlan> {
+    pub(super) fn active(&self) -> Option<&WebSearchPlan> {
         match self.selected {
             Some(WebSearchBackendKind::OpenAi) => Some(&self.openai),
             Some(WebSearchBackendKind::DeepSeek) => Some(&self.deepseek),

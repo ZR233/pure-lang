@@ -1,4 +1,4 @@
-//! Deterministic product options for model-owned hosted search.
+//! 模型持有 hosted 搜索的确定性选项映射。
 use pl_protocol::search::{WebSearchConfig, WebSearchMode};
 use pl_protocol::{HostedWebSearchOptions, WebSearchFilters, WebSearchUserLocation};
 

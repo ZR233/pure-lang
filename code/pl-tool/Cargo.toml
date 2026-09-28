@@ -30,6 +30,7 @@ rmcp = { workspace = true, features = ["auth", "client", "transport-child-proces
 pl-protocol = { workspace = true }
 pl-output = { workspace = true }
 pl-patch = { workspace = true }
+pl-model = { workspace = true }
 serde_json = { workspace = true }
 base64 = { workspace = true }
 grep-regex = { workspace = true }

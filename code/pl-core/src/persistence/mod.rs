@@ -3,17 +3,25 @@
 mod history;
 pub mod migration;
 mod repository;
+mod session_delete;
 mod sqlite;
+mod thread_checkpoint;
+mod thread_history;
 mod thread_journal;
 mod writer;
 
 /// Current SQLite cold-history format. Unsupported formats are never automatically reset.
-pub const SESSION_SCHEMA_VERSION: i64 = 7;
+///
+/// Schema 8 adds the per-Thread current-state checkpoint table, written in the same transaction as
+/// the effect it belongs to. Older data is upgraded only through the explicit
+/// [`migration::migrate_to_current`] path; opening a database never converts or discards it.
+pub const SESSION_SCHEMA_VERSION: i64 = 8;
 
 use std::sync::Arc;
 
 use crate::storage::SessionEntryChange;
 pub use sqlite::{SessionStoreError, SqliteSessionOptions};
+pub use thread_history::{ThreadEffectPage, ThreadEffectQuery};
 pub use writer::SqliteSessionStore;
 
 /// Observable writer state. Errors retain their typed cause; pending facts remain owned in memory.

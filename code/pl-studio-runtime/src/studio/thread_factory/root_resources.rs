@@ -124,7 +124,7 @@ impl StudioThreadFactory {
                 store: store.clone(),
             })
             .await?;
-        if prepared.visibility != crate::search::ToolVisibilityConstraint::Exclusive {
+        if prepared.visibility != pl_tool::search::ToolVisibilityConstraint::Exclusive {
             prepared.tools = prepared
                 .tools
                 .with_tools(crate::workflow_tool::workflow_registrations(mode.clone())?);
@@ -152,7 +152,7 @@ impl StudioThreadFactory {
             initial_context = context;
             initial_extensions.insert("studio.instructions".into(), sources);
             if config.runtime.tool_capabilities.ask_user
-                && prepared.visibility != crate::search::ToolVisibilityConstraint::Exclusive
+                && prepared.visibility != pl_tool::search::ToolVisibilityConstraint::Exclusive
             {
                 initial_extensions.insert(
                     crate::plan_tool::PLAN_EXTENSION.into(),
@@ -221,16 +221,17 @@ impl StudioThreadFactory {
         let persistence = crate::studio::storage::thread_writer::ThreadStorageSink::new(
             self.services.store.clone(),
             protocol_thread,
+            checkpoint.as_ref(),
         )
         .await
-        .map_err(|error| resource_error("open Thread chat session", error))?;
+        .map_err(|error| resource_error("open Thread persistence", error))?;
         let spec = StudioThreadSpec {
             context_preparation: crate::compaction::preparer(
                 &route,
                 config.runtime.openai_compaction_mode,
             )?,
             agent_controls: if prepared.visibility
-                == crate::search::ToolVisibilityConstraint::Exclusive
+                == pl_tool::search::ToolVisibilityConstraint::Exclusive
             {
                 crate::thread_assembler::AgentControlExposure::Disabled
             } else {

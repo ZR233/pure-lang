@@ -17,8 +17,8 @@ HTTP → pl-studio-server ───┘                                  ↓
                                                pl-model 会话      pl-tool 实例
 ```
 
-上图最后两条表示装配后的调用关系；crate 依赖方向是 model/tool → core，见
-[02](./02-crates.md)。
+上图最后两条表示装配后的调用关系；完整 crate 依赖方向以
+[02](./02-crates.md) 为准。
 
 ## 1.3 核心概念与事实源
 

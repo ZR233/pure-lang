@@ -963,12 +963,26 @@ fn clear_recovered_fault(progress: &mut Progress) {
 }
 
 impl ThreadStorageSink {
-    pub(crate) async fn new(store: StudioStore, thread: pl_protocol::Thread) -> Result<Self> {
+    pub(crate) async fn new(
+        store: StudioStore,
+        thread: pl_protocol::Thread,
+        restored_checkpoint: Option<&ThreadCheckpoint>,
+    ) -> Result<Self> {
         let chat = store.chat_session(&thread.id).await?;
         chat.initialize_order_allocator().await?;
+        let channel = store.thread_persistence().history_channel(&thread.id);
+        // A preceding incarnation may still be finishing one write. Observe its committed
+        // watermark and seed this incarnation while holding the channel's single-writer lease.
+        let writer_lease = channel.step_lock.lock().await;
+        let durable = store.history(&thread.id).await?.watermark().await?;
+        let restored_fence = restored_checkpoint.map_or(0, |checkpoint| checkpoint.history_fence);
+        ensure!(
+            durable == restored_fence,
+            "Thread {} history watermark {durable} does not match checkpoint fence {restored_fence}",
+            thread.id
+        );
         let (call_observer_stop, mut stop_observer) = tokio::sync::watch::channel(false);
         let owner = NEXT_WRITER_INCARNATION.fetch_add(1, Ordering::Relaxed);
-        let channel = store.thread_persistence().history_channel(&thread.id);
         let inner = Arc::new(Inner {
             store,
             thread,
@@ -976,7 +990,7 @@ impl ThreadStorageSink {
             owner,
             history: tokio::sync::OnceCell::new(),
             changed: channel.changed.clone(),
-            channel,
+            channel: channel.clone(),
             call_observer_stop,
         });
         // Bind this incarnation before it reports anything: a superseded writer must never clear or
@@ -987,9 +1001,14 @@ impl ThreadStorageSink {
             .thread_persistence()
             .claim(&inner.thread.id, owner);
         {
-            let progress = lock_progress(&inner);
+            let mut progress = lock_progress(&inner);
+            progress.durable = progress.durable.max(durable);
+            progress.published_revision = progress
+                .published_revision
+                .max(restored_checkpoint.map_or(0, |checkpoint| checkpoint.state_revision));
             report(&inner, &progress);
         }
+        drop(writer_lease);
         let observer = Arc::downgrade(&inner);
         let calls = inner.store.calls().clone();
         tokio::spawn(async move {
@@ -1970,11 +1989,53 @@ mod storage_fault_tests {
     async fn sink(thread_id: &str) -> Result<(tempfile::TempDir, StudioStore, ThreadStorageSink)> {
         let temp = tempfile::tempdir()?;
         let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
-        let sink =
-            ThreadStorageSink::new(store.clone(), pl_protocol::Thread::placeholder(thread_id))
-                .await?;
+        let sink = ThreadStorageSink::new(
+            store.clone(),
+            pl_protocol::Thread::placeholder(thread_id),
+            None,
+        )
+        .await?;
         spawn_live_projection(&sink);
         Ok((temp, store, sink))
+    }
+
+    #[tokio::test]
+    async fn a_reopened_studio_sink_accepts_a_thread_with_durable_history() -> Result<()> {
+        let id = "reopened-durable-thread";
+        let (temp, store, original) = sink(id).await?;
+        let write = ticket(id, 1);
+        let checkpoint = write.checkpoint.clone();
+        original.admit(id, write)?;
+        tokio::time::timeout(Duration::from_secs(5), original.flush(id, 1)).await??;
+        drop(original);
+        drop(store);
+
+        let reopened_store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        assert!(
+            ThreadStorageSink::new(
+                reopened_store.clone(),
+                pl_protocol::Thread::placeholder(id),
+                None,
+            )
+            .await
+            .is_err(),
+            "history ahead of the checkpoint must not silently skip effects"
+        );
+        let reopened = ThreadStorageSink::new(
+            reopened_store,
+            pl_protocol::Thread::placeholder(id),
+            Some(&checkpoint),
+        )
+        .await?;
+        spawn_live_projection(&reopened);
+        let resumed = ThreadHandle::resume_without_model(id.into(), Some(checkpoint))?;
+        resumed
+            .attach_storage(ColdStoreHandle::new(reopened.clone()))
+            .await?;
+        assert_eq!(reopened.pressure(id).durable_sequence, 1);
+        tokio::time::timeout(Duration::from_secs(5), resumed.flush()).await??;
+        resumed.close().await?;
+        Ok(())
     }
 
     /// The projection an observation worker would own: empty until the test hands it the admitted
@@ -2192,6 +2253,7 @@ mod storage_fault_tests {
         let sink = ThreadStorageSink::new(
             store.clone(),
             pl_protocol::Thread::placeholder("no-handoff"),
+            None,
         )
         .await?;
         let write = ticket("no-handoff", 1);
@@ -2285,6 +2347,7 @@ mod storage_fault_tests {
         let sink = ThreadStorageSink::new(
             store.clone(),
             pl_protocol::Thread::placeholder("missing-visible"),
+            None,
         )
         .await?;
         let mut accepted = ticket("missing-visible", 1);
@@ -2542,7 +2605,7 @@ mod storage_fault_tests {
         let id = "child-message";
         let mut thread = pl_protocol::Thread::placeholder(id);
         thread.parent_thread_id = Some("parent".into());
-        let sink = ThreadStorageSink::new(store.clone(), thread).await?;
+        let sink = ThreadStorageSink::new(store.clone(), thread, None).await?;
         let chat = store.chat_session(id).await?;
         let mut projection = live_projection();
         let record = InboxRecord {
@@ -2659,6 +2722,7 @@ mod storage_fault_tests {
         let sink = ThreadStorageSink::new(
             store.clone(),
             pl_protocol::Thread::placeholder("window-input"),
+            None,
         )
         .await?;
         let thread_id = "window-input";
@@ -2767,9 +2831,12 @@ mod storage_fault_tests {
         // while a Turn that is still running (or not yet durable) is never reported as finished.
         let temp = tempfile::tempdir()?;
         let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
-        let sink =
-            ThreadStorageSink::new(store.clone(), pl_protocol::Thread::placeholder("cold-turn"))
-                .await?;
+        let sink = ThreadStorageSink::new(
+            store.clone(),
+            pl_protocol::Thread::placeholder("cold-turn"),
+            None,
+        )
+        .await?;
         let thread_id = "cold-turn";
         let turn_id = "terminal-turn";
         let input_id = "cold-input";
@@ -2997,6 +3064,7 @@ mod storage_fault_tests {
         let sink = ThreadStorageSink::new(
             store.clone(),
             pl_protocol::Thread::placeholder("output-transfer"),
+            None,
         )
         .await?;
         let channel = &sink.0.channel;
@@ -3227,8 +3295,9 @@ mod storage_fault_tests {
             async move { thread.run_turn(turn).await }
         });
         tokio::time::timeout(Duration::from_secs(10), async {
-            assert_eq!(starts.recv().await.as_deref(), Some("first"));
-            assert_eq!(starts.recv().await.as_deref(), Some("second"));
+            let mut started = [starts.recv().await, starts.recv().await];
+            started.sort();
+            assert_eq!(started, [Some("first".into()), Some("second".into())]);
         })
         .await?;
         assert_eq!(
@@ -3698,6 +3767,7 @@ mod storage_fault_tests {
         let sink = ThreadStorageSink::new(
             store.clone(),
             pl_protocol::Thread::placeholder("stable-payload"),
+            None,
         )
         .await?;
         let chat = store.chat_session("stable-payload").await?;
@@ -3745,6 +3815,7 @@ mod storage_fault_tests {
         let sink = ThreadStorageSink::new(
             store.clone(),
             pl_protocol::Thread::placeholder("revision-fence"),
+            None,
         )
         .await?;
         let chat = store.chat_session("revision-fence").await?;

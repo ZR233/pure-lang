@@ -2881,6 +2881,7 @@ dependencies = [
  "image",
  "pl-core",
  "pl-lsp",
+ "pl-model",
  "pl-output",
  "pl-patch",
  "pl-protocol",

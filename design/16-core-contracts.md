@@ -8,7 +8,8 @@ crate 依赖方向见 [02](./02-crates.md)；状态与历史存储见 [15](./15-
 
 pl-core 拥有 Thread、Turn、模型和工具调用契约、通用上下文、交互、任务、消息、当前状态
 checkpoint 与不可变 effect；
-model 和 tool 实现核心接口且不相互依赖；trace 只读消费核心观察接口。pl-studio-runtime 拥有
+model 和 tool 实现核心接口；搜索工具消费 model 已解析的能力，依赖方向以 [02](./02-crates.md)
+为准。trace 只读消费核心观察接口。pl-studio-runtime 拥有
 配置持久化、项目、Profile、Mode/workflow/Plan、子代理协调和唯一装配入口，root、child 和
 冷恢复使用同一装配路径。core 不提供默认工具、Git、Skill 或 Profile 自动安装入口：pl-tool
 的工具组只构造工具，Studio 显式注册并单独加入业务 plan/workflow 工具。文件、容器、Skill
@@ -170,7 +171,7 @@ effect window 批次被 durable 释放，重复 resolve 由 history 的持久回
 
 MCP 工具层只接收解析完毕的连接参数与凭据，不选择模型账号或内置服务；内置目录、启用
 状态持久化及 provider 凭据选择由 Studio 组合。搜索的公共请求格式由独立上层协议承载：
-独立搜索 HTTP 客户端与工具执行归 tool，Studio 根据模型能力选择并装配搜索后端；exclusive
+独立搜索 HTTP 客户端、能力规划与工具绑定归 tool；Studio 提供已解析的模型路由与产品配置。exclusive
 搜索装配只包含选中的搜索能力，不先创建被隐藏的 workspace 工具。宿主原生工具的启用
 条件由 Studio 按冻结模型绑定判断，作为同批工具目录变更发布；core 不按 provider
 capability 选择工具。执行环境（本地/SSH、OS、shell dialect 与可执行路径）由 tool 探测，

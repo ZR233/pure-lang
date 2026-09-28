@@ -12,6 +12,8 @@ pub struct CallContext {
     pub grant: super::execution_policy::ExecutionGrant,
     /// Immutable context actually admitted for the model request that produced this call.
     pub context: crate::context::ContextSnapshot,
+    /// 工具开始执行时已提交的 Thread effect 序号；附加存储时 core 在调用工具前等待它持久化。
+    pub history_fence: u64,
     /// Model-owned material frozen with the request that produced this call.
     pub model_projection: Option<OpaquePayload>,
     pub tasks: Option<crate::thread::TaskAccess>,
@@ -467,6 +469,8 @@ impl FrozenTool {
         &self,
         input: OpaquePayload,
         mut context: CallContext,
+        cold: Option<crate::thread::cold::ColdStoreHandle>,
+        cold_error: Option<Arc<crate::thread::cold::ColdStoreError>>,
     ) -> Result<ToolOutput, ToolError> {
         crate::error_record::catch_boundary("tool execution", async {
             if context.cancellation.is_cancelled() {
@@ -482,10 +486,51 @@ impl FrozenTool {
             if context.cancellation.is_cancelled() {
                 return Err(ToolError::new(crate::thread::ThreadError::Cancelled));
             }
+            // The task-start effect was admitted by the owner before this future was created.
+            // Every executor, including a dynamically registered one, crosses the same fixed
+            // durability fence before it can perform an external side effect.
+            if let Some(error) = cold_error {
+                return Err(fence_error(cold.as_ref(), &context.thread_id, error));
+            }
+            if let Some(store) = cold {
+                let result = tokio::select! {
+                    biased;
+                    _ = context.cancellation.cancelled() => {
+                        return Err(ToolError::new(crate::thread::ThreadError::Cancelled));
+                    }
+                    result = store.flush(&context.thread_id, context.history_fence) => result,
+                };
+                result.map_err(|error| {
+                    fence_error(Some(&store), &context.thread_id, Arc::new(error))
+                })?;
+            }
+            if context.cancellation.is_cancelled() {
+                return Err(ToolError::new(crate::thread::ThreadError::Cancelled));
+            }
             self.executor.execute(input, context).await
         })
         .await
         .map_err(ToolError::new)?
+    }
+}
+
+fn fence_error(
+    store: Option<&crate::thread::cold::ColdStoreHandle>,
+    thread_id: &str,
+    error: Arc<crate::thread::cold::ColdStoreError>,
+) -> ToolError {
+    use crate::thread::cold::{OutputStorageFault, StorageFaultKind};
+
+    let kind = store.and_then(|store| store.pressure(thread_id).fault);
+    if kind == Some(StorageFaultKind::QueueFull) {
+        // Queue pressure is transient and already tracked by the owner. Do not turn it into a
+        // local hard fault that demands an explicit resume after the queue drains.
+        ToolError::new(crate::thread::ThreadError::Storage(error))
+    } else {
+        ToolError::new(OutputStorageFault::new(
+            kind.unwrap_or(StorageFaultKind::WriteFailed),
+            error,
+        ))
     }
 }
 
