@@ -122,9 +122,13 @@ impl ThreadHandle {
             return Err(ThreadError::InvalidIdentity);
         }
         let resumed = checkpoint.is_some();
-        let (published, state) = match checkpoint {
-            Some(checkpoint) => checkpoint.into_states(&id)?,
-            None => (ThreadSnapshot::default(), ThreadSnapshot::default()),
+        let (published, state, restored_history_fence) = match checkpoint {
+            Some(checkpoint) => {
+                let history_fence = checkpoint.history_fence;
+                let (published, state) = checkpoint.into_states(&id)?;
+                (published, state, history_fence)
+            }
+            None => (ThreadSnapshot::default(), ThreadSnapshot::default(), 0),
         };
         let (commands, receiver) = mpsc::channel(64);
         let (mailbox, mailbox_receiver) = mpsc::channel(64);
@@ -167,6 +171,7 @@ impl ThreadHandle {
             capacity: Default::default(),
             pending_effects: Default::default(),
             cold: None,
+            restored_history_fence,
             cold_error: None,
             fault_fence: None,
             store_fault_generation: None,

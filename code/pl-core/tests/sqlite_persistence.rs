@@ -358,6 +358,33 @@ async fn thread_checkpoint_is_durable_with_its_effect_and_reopens() {
             .unwrap()
             .is_none()
     );
+    let (model, _) = ScriptedModel::new(&[]);
+    let resumed = ThreadHandle::resume(
+        "checkpoint-thread".into(),
+        DynModelSession::new(model),
+        Some(recovered.clone()),
+    )
+    .unwrap();
+    let empty_store = SqliteSessionStore::open_memory().await.unwrap();
+    assert!(matches!(
+        resumed
+            .attach_storage(ColdStoreHandle::new(empty_store.clone()))
+            .await,
+        Err(pl_core::thread::ThreadError::StorageRecoveryPending { durable: 0, required })
+            if required == recovered.history_fence
+    ));
+    empty_store.shutdown().await.unwrap();
+    resumed
+        .attach_storage(ColdStoreHandle::new(reopened.clone()))
+        .await
+        .unwrap();
+    assert!(resumed.snapshot().persistence.admitted_sequence >= recovered.history_fence);
+    assert!(resumed.snapshot().persistence.durable_sequence >= recovered.history_fence);
+    tokio::time::timeout(std::time::Duration::from_secs(3), resumed.flush())
+        .await
+        .expect("a restored Thread must not wait on already durable history")
+        .unwrap();
+    resumed.close().await.unwrap();
     reopened.shutdown().await.unwrap();
 }
 

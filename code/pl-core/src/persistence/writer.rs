@@ -169,6 +169,13 @@ impl SqliteSessionStore {
                 };
             }
         };
+        let mut thread_durable = BTreeMap::<String, u64>::new();
+        for (thread_id, resource_id) in resources.keys() {
+            if let Some(sequence) = thread_commit_sequence(resource_id) {
+                let durable = thread_durable.entry(thread_id.clone()).or_default();
+                *durable = (*durable).max(sequence);
+            }
+        }
         let (changed, _) = watch::channel(SessionPersistenceSnapshot {
             pending_commits: 0,
             admitted: 0,
@@ -184,7 +191,7 @@ impl SqliteSessionStore {
                 resources,
                 queue: VecDeque::new(),
                 resource_admissions: BTreeMap::new(),
-                thread_durable: BTreeMap::new(),
+                thread_durable,
                 admitted: 0,
                 durable: 0,
                 error: None,

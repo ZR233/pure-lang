@@ -50,6 +50,8 @@ pub(super) struct Owner {
     pub(super) effect_window: Arc<EffectWindow>,
     pub(super) pending_effects: std::collections::VecDeque<PendingEffect>,
     pub(super) cold: Option<cold::ColdStoreHandle>,
+    /// Durable history fence carried by the checkpoint until a store proves it owns the history.
+    pub(super) restored_history_fence: u64,
     pub(super) cold_error: Option<Arc<cold::ColdStoreError>>,
     /// `(fault_generation, durability fence)` a latched storage fault must be recovered to, fixed
     /// when that generation's fault is first observed. `None` means this owner owes no recovery.
@@ -299,15 +301,26 @@ impl Owner {
                     let _ = reply.send(result);
                 }
                 Command::AttachCold(store, reply) => {
-                    let result =
-                        if self.cold.is_some() || self.state.lifecycle != ThreadLifecycle::Open {
-                            Err(ThreadError::InvalidIdentity)
+                    let result = if self.cold.is_some()
+                        || self.state.lifecycle != ThreadLifecycle::Open
+                    {
+                        Err(ThreadError::InvalidIdentity)
+                    } else {
+                        let pressure = store.pressure(&self.id);
+                        if pressure.durable_sequence < self.restored_history_fence {
+                            Err(ThreadError::StorageRecoveryPending {
+                                durable: pressure.durable_sequence,
+                                required: self.restored_history_fence,
+                            })
                         } else {
+                            self.state.persistence.admitted_sequence = self.restored_history_fence;
+                            self.state.persistence.durable_sequence = self.restored_history_fence;
                             self.cold = Some(store);
                             self.admit_cold();
                             self.publish_snapshot();
                             Ok(())
-                        };
+                        }
+                    };
                     let _ = reply.send(result);
                 }
                 Command::QueuedTurn(request, reply) => {
