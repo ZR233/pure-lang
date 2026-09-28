@@ -2,8 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'studio_platform.dart';
-import 'vscode_detection.dart';
+import 'vscode_host.dart';
 
 typedef VsCodeLauncher = Future<void> Function(String url);
 
@@ -15,52 +14,36 @@ final vsCodeAvailabilityProvider = FutureProvider<bool>((ref) async {
   return probeVsCodeInstalled();
 });
 
-/// 打开 vscode 协议 URL 的注入点；生产实现复用外部 URL 启动器。
+/// 直接启动 VS Code；不经外部 URL 入口，不更改 VS Code 的安全设置。
 final vsCodeLauncherProvider = Provider<VsCodeLauncher>(
-  (ref) => openExternalUrl,
+  (ref) => (folderUri) async {
+    final uri = Uri.tryParse(folderUri);
+    if (utf8.encode(folderUri).length > _maxVsCodeUrlBytes ||
+        _urlControlCharacters.hasMatch(folderUri) ||
+        uri == null ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        !uri.path.startsWith('/') ||
+        !(uri.scheme == 'file' ||
+            (uri.scheme == 'vscode-remote' &&
+                uri.authority.startsWith('ssh-remote+') &&
+                uri.authority.length > 'ssh-remote+'.length))) {
+      throw ArgumentError.value(
+        folderUri,
+        'folderUri',
+        'Invalid VS Code folder',
+      );
+    }
+    await launchVsCodeFolder(folderUri);
+  },
 );
 
-/// 只放行两种 VS Code 打开形态，规则对齐 `safeExternalWebUrl` 的清洗边界。
-String? safeVsCodeUrl(String value) {
-  if (utf8.encode(value).length > _maxVsCodeUrlBytes) {
-    return null;
-  }
-  final sanitized = value.replaceAll(_urlControlCharacters, '');
-  final isLocal = sanitized.startsWith('vscode://file/');
-  final isRemote = sanitized.startsWith('vscode://vscode-remote/ssh-remote+');
-  if (!isLocal && !isRemote) {
-    return null;
-  }
-  return Uri.tryParse(sanitized) == null ? null : sanitized;
-}
-
-/// 本地文件夹 URI：`vscode://file/<绝对路径>/`，尾斜杠表示打开为工作区。
-///
-/// Windows 盘符路径形如 `C:\x\y` → `vscode://file/c:/x/y/`；POSIX 路径
-/// `/home/x/y` → `vscode://file/home/x/y/`。空格等字符按 URI 规则转义，
-/// 盘符冒号保留原样。
+/// CLI folder URI; Dart handles drive letters, UNC paths and percent encoding.
 String buildLocalVsCodeFolderUri(String absolutePath) {
-  var normalized = absolutePath.replaceAll('\\', '/');
-  if (normalized.startsWith('/')) {
-    normalized = normalized.substring(1);
-  } else if (normalized.length >= 2 && normalized[1] == ':') {
-    normalized =
-        normalized.substring(0, 1).toLowerCase() + normalized.substring(1);
-  }
-  if (normalized.endsWith('/')) {
-    normalized = normalized.substring(0, normalized.length - 1);
-  }
-  final segments = normalized.split('/');
-  final encodedPath = [
-    for (final (index, segment) in segments.indexed)
-      index == 0 && RegExp(r'^[a-zA-Z]:$').hasMatch(segment)
-          ? segment
-          : Uri.encodeComponent(segment),
-  ].join('/');
-  return 'vscode://file/$encodedPath/';
+  return Uri.directory(absolutePath).toString();
 }
 
-/// 远端文件夹 URI：`vscode://vscode-remote/ssh-remote+<别名>/<远端路径>`。
+/// 远端文件夹 URI：`vscode-remote://ssh-remote+<别名>/<远端路径>`。
 ///
 /// Remote-SSH 的 URI 不携带端口与密钥，连接参数由 `~/.ssh/config` 的别名解析。
 String buildRemoteVsCodeFolderUri({
@@ -73,5 +56,5 @@ String buildRemoteVsCodeFolderUri({
   }
   final encodedAlias = Uri.encodeComponent(alias);
   final encodedPath = normalized.split('/').map(Uri.encodeComponent).join('/');
-  return 'vscode://vscode-remote/ssh-remote+$encodedAlias/$encodedPath';
+  return 'vscode-remote://ssh-remote+$encodedAlias/$encodedPath';
 }

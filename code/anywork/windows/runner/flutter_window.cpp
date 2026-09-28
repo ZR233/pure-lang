@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "utils.h"
 
 namespace {
 
@@ -25,7 +26,7 @@ namespace {
 constexpr char kApplicationIconChannel[] =
     "io.github.zr233.anywork/application_icon";
 constexpr char kVsCodeIconMethod[] = "vsCodeIcon";
-constexpr char kVsCodeAvailableMethod[] = "vsCodeAvailable";
+constexpr char kVsCodeExecutableMethod[] = "vsCodeExecutable";
 
 // Looks up the executable Windows associates with the `vscode` URL protocol.
 // Returns false when there is no reliable association, so callers never guess
@@ -139,10 +140,13 @@ bool FlutterWindow::OnCreate() {
   application_icon_channel_->SetMethodCallHandler(
       [](const flutter::MethodCall<flutter::EncodableValue>& call,
          std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
-        if (call.method_name() == kVsCodeAvailableMethod) {
+        if (call.method_name() == kVsCodeExecutableMethod) {
           std::wstring executable;
-          result->Success(
-              flutter::EncodableValue(QueryVsCodeExecutable(&executable)));
+          if (QueryVsCodeExecutable(&executable)) {
+            result->Success(flutter::EncodableValue(Utf8FromUtf16(executable.c_str())));
+          } else {
+            result->Success();
+          }
           return;
         }
         if (call.method_name() != kVsCodeIconMethod) {

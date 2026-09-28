@@ -77,6 +77,16 @@ static void application_icon_method_call_cb(FlMethodChannel* channel,
     // here; a null value is a valid "no icon" success result.
     g_autoptr(FlValue) icon = vs_code_icon_value();
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(icon));
+  } else if (g_strcmp0(method, "vsCodeExecutable") == 0) {
+    g_autoptr(GAppInfo) app_info =
+        g_app_info_get_default_for_uri_scheme("vscode");
+    const gchar* executable =
+        app_info == nullptr ? "code" : g_app_info_get_executable(app_info);
+    g_autofree gchar* path =
+        executable == nullptr ? nullptr : g_find_program_in_path(executable);
+    g_autoptr(FlValue) value =
+        path == nullptr ? nullptr : fl_value_new_string(path);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(value));
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }

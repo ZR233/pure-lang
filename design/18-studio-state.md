@@ -346,12 +346,13 @@ Thread runtime 的缓存统计是独立的 typed 投影 `cache_usage`，包含�
 可用但系统图标无法获取或无法解码，显示带「在 VS Code 中打开」标签的直接按钮而不是空白、
 「...」菜单或预设图标。图标结果在进程内缓存，demo 与测试可覆写。
 
-打开通过系统 URL 协议完成，不派生 `code` CLI 子进程：本地使用
-`vscode://file/<绝对路径>/`（尾斜杠表示文件夹，Windows 盘符形如 `vscode://file/c:/x/y/`，
-路径按 URI 规则百分号编码），远端使用
-`vscode://vscode-remote/ssh-remote+<别名>/<远端路径>`；Remote-SSH 的 URI 不携带端口与
+打开直接启动宿主解析出的 VS Code 可执行文件，通过 `--folder-uri` 传递一个文件夹 URI，
+不经过 shell 或 `vscode://` 外部链接处理器，避免触发外部应用打开路径确认。本地使用
+`file:` URI，远端使用 `vscode-remote://ssh-remote+<别名>/<远端路径>`；路径按 URI 规则
+百分号编码。Remote-SSH 的 URI 不携带端口与
 密钥，连接参数由 `~/.ssh/config` 的 Host 别名解析（见 [22](./22-ssh-remote.md)）。URI
-构建与协议白名单校验是纯函数；实际打开复用外部 URL 启动器，仅放行上述两种 vscode URI
-形态，http/https 白名单不变。启动失败以界面提示回报，不自动重试。VS Code 探测在宿主
-平台层完成：Windows 查询 `vscode` 协议关联，Linux 检查 PATH 与
-`x-scheme-handler/vscode` 处理器；结果缓存于进程内 provider，demo 与测试可覆写。
+构建与协议白名单校验是纯函数；专用启动器仅接受上述两类文件夹 URI，作为独立参数传递，
+不接受任意命令。VS Code 自身的工作区信任、SSH 认证策略保持有效，不修改用户安全设置。
+启动失败以界面提示回报，不自动重试或回退外部链接。Windows 查询 `vscode` 协议关联，
+Linux 优先解析同一协议的 GIO 默认应用可执行文件，无关联时查找 PATH 中的 `code`；
+可用性与启动共用该解析入口。结果缓存于进程内 provider，demo 与测试可覆写。
