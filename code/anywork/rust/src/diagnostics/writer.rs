@@ -1,105 +1,48 @@
-use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use rolling_file::{BasicRollingFileAppender, RollingConditionBasic};
 use tracing_subscriber::fmt::MakeWriter;
 
-use super::{current_date, report_fallback};
+use super::report_fallback;
 
-pub(super) struct DailyFileWriter {
-    file: Option<RollingFileAppender>,
+const MAX_LOG_BYTES: u64 = 16 * 1024 * 1024;
+const ARCHIVED_LOG_FILES: usize = 7;
+
+/// Rotation and numbered-file cleanup are owned by the library, shared by both Rust log streams.
+pub(super) struct RollingLogWriter {
+    file: Option<BasicRollingFileAppender>,
 }
 
-impl DailyFileWriter {
+impl RollingLogWriter {
     pub(super) fn new(directory: PathBuf, prefix: &'static str) -> Self {
-        let file = RollingFileAppender::builder()
-            .rotation(Rotation::DAILY)
-            .filename_prefix(prefix)
-            .filename_suffix("log")
-            .build(&directory)
-            .map_err(|error| {
-                report_fallback(&format!(
-                    "cannot initialize rolling log in {}: {error}",
-                    directory.display()
-                ));
-                error
-            })
-            .ok();
+        let file = BasicRollingFileAppender::new(
+            directory.join(format!("{prefix}.log")),
+            RollingConditionBasic::new().daily().max_size(MAX_LOG_BYTES),
+            ARCHIVED_LOG_FILES,
+        )
+        .map_err(|error| {
+            report_fallback(&format!(
+                "cannot initialize rolling log in {}: {error}",
+                directory.display()
+            ));
+            error
+        })
+        .ok();
         Self { file }
     }
-
-    fn write_fallback(buffer: &[u8], error: &dyn std::fmt::Display) -> io::Result<usize> {
-        report_fallback(&format!("cannot append the daily log: {error}"));
-        std::io::stderr().write(buffer)
-    }
-
-    fn write_file(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        match self.file.as_mut() {
-            Some(file) => file
-                .write(buffer)
-                .or_else(|error| Self::write_fallback(buffer, &error)),
-            None => Self::write_fallback(buffer, &"rolling log is unavailable"),
-        }
-    }
 }
 
-impl Write for DailyFileWriter {
+impl Write for RollingLogWriter {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        self.write_file(buffer)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
         match self.file.as_mut() {
-            Some(file) => file.flush(),
-            None => Ok(()),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(super) struct SyncErrorMakeWriter {
-    directory: PathBuf,
-}
-
-impl SyncErrorMakeWriter {
-    pub(super) fn new(directory: PathBuf) -> Self {
-        Self { directory }
-    }
-}
-
-impl<'writer> MakeWriter<'writer> for SyncErrorMakeWriter {
-    type Writer = SyncErrorWriter;
-
-    fn make_writer(&'writer self) -> Self::Writer {
-        let path = self.directory.join(format!("error-{}.log", current_date()));
-        match OpenOptions::new().create(true).append(true).open(&path) {
-            Ok(file) => SyncErrorWriter { file: Some(file) },
-            Err(error) => {
-                report_fallback(&format!(
-                    "cannot open synchronous error log {}: {error}",
-                    path.display()
-                ));
-                SyncErrorWriter { file: None }
-            }
-        }
-    }
-}
-
-pub(super) struct SyncErrorWriter {
-    file: Option<File>,
-}
-
-impl Write for SyncErrorWriter {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        let result = match self.file.as_mut() {
-            Some(file) => file.write(buffer),
+            Some(file) => file.write(buffer).or_else(|error| {
+                report_fallback(&format!("cannot append rolling log: {error}"));
+                std::io::stderr().write(buffer)
+            }),
             None => std::io::stderr().write(buffer),
-        };
-        if let Some(file) = self.file.as_mut() {
-            file.flush()?;
         }
-        result
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -107,5 +50,42 @@ impl Write for SyncErrorWriter {
             Some(file) => file.flush(),
             None => std::io::stderr().flush(),
         }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct SyncErrorMakeWriter(Arc<Mutex<RollingLogWriter>>);
+
+impl SyncErrorMakeWriter {
+    pub(super) fn new(directory: PathBuf) -> Self {
+        Self(Arc::new(Mutex::new(RollingLogWriter::new(
+            directory, "error",
+        ))))
+    }
+}
+
+impl<'writer> MakeWriter<'writer> for SyncErrorMakeWriter {
+    type Writer = SyncErrorWriter<'writer>;
+
+    fn make_writer(&'writer self) -> Self::Writer {
+        SyncErrorWriter(
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+}
+
+pub(super) struct SyncErrorWriter<'a>(MutexGuard<'a, RollingLogWriter>);
+
+impl Write for SyncErrorWriter<'_> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let written = self.0.write(buffer)?;
+        self.0.flush()?;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
     }
 }

@@ -201,16 +201,21 @@ struct Progress {
     fault_target: u64,
     retry_requested: bool,
     last_progress_at: Option<Instant>,
-    /// Reliable output ceilings currently held by in-flight model/tool operations of this Thread.
-    ///
-    /// One entry per operation that reserved a live-output ceiling from the process budget. The
-    /// ceiling is charged to the budget the moment it is granted (a call only starts when its worst
-    /// case could be retained). The value is what is still *reserved* for output that has not become
-    /// a fact yet: admitting a fact transfers the bytes it covers out of these ceilings instead of
-    /// charging the same output a second time next to them, so the process total keeps exactly one
-    /// charge for it — as the in-flight ceiling before the fact exists, as the fact's own charge
-    /// afterwards. What is left when the call ends is given back in full.
-    operation_output: BTreeMap<String, u64>,
+    /// Actual accepted output, separate from each operation's upper bound.
+    operation_output: BTreeMap<String, OperationOutput>,
+}
+
+#[derive(Debug)]
+struct OperationOutput {
+    limit: u64,
+    accepted: u64,
+    transferred: u64,
+}
+
+impl OperationOutput {
+    fn retained(&self) -> u64 {
+        self.accepted - self.transferred
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -370,8 +375,8 @@ pub(crate) struct HistoryChannel {
     /// The process-wide reliable budget, shared by every Thread's channel.
     ///
     /// It charges exactly two things, each byte once: the effects the channels hold, each at the
-    /// encoded size it was admitted with, and the live-output ceilings still reserved by in-flight
-    /// model/tool operations. A fact whose operation holds a ceiling takes those bytes over at
+    /// encoded size it was admitted with, and the accepted output still retained by in-flight
+    /// model/tool operations. A fact produced by that operation takes those bytes over at
     /// admission instead of adding a second charge for the same output, and both charges are
     /// released when the fact becomes durable or the call ends without one.
     ///
@@ -409,95 +414,71 @@ impl HistoryChannel {
             .is_ok()
     }
 
-    /// Reserves up to `max_bytes` from the process budget, returning what was really granted.
-    ///
-    /// `None` means there is no headroom at all: the caller must wait for the budget to free up
-    /// instead of starting an operation whose output this process could not retain.
-    fn reserve_output_up_to(&self, max_bytes: u64) -> Option<u64> {
-        let mut granted = 0_u64;
-        let reserved = self
-            .process_bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                let headroom = MAX_HISTORY_PROCESS_BYTES.saturating_sub(current);
-                let take = headroom.min(max_bytes);
-                if take == 0 {
-                    return None;
-                }
-                granted = take;
-                Some(current.saturating_add(take))
-            })
-            .is_ok();
-        reserved.then_some(granted)
-    }
-
-    /// Reserves one operation's live-output ceiling from the process budget.
-    ///
-    /// The ceiling is charged to the budget as soon as it is granted, so a call only starts when its
-    /// worst case could be retained. The *whole* ceiling is given back at
-    /// [`release_operation_output`](Self::release_operation_output): this is a transient reservation
-    /// for output that is still in flight, not a second copy of the produced fact. Once the call
-    /// returns, the content it produced is charged once by the ordinary effect admission (`admit`
-    /// reserves the encoded batch and releases it when the batch becomes durable), so keeping the
-    /// accepted bytes charged here too would double-count them and leak the process budget a little
-    /// on every successful call. An already reserved operation keeps its original grant, so a
-    /// repeated reservation never charges twice.
+    /// Registers an output ceiling without charging bytes that do not exist yet.
+    /// The producer must charge each cumulative increment before retaining it.
     fn reserve_operation_output(&self, operation_id: &str, max_bytes: u64) -> Option<u64> {
         let mut progress = self
             .progress
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(granted) = progress.operation_output.get(operation_id) {
-            return Some(*granted);
+        if let Some(output) = progress.operation_output.get(operation_id) {
+            return Some(output.limit);
         }
-        let granted = self.reserve_output_up_to(max_bytes)?;
-        progress
-            .operation_output
-            .insert(operation_id.to_owned(), granted);
-        Some(granted)
+        if max_bytes == 0 || self.process_bytes.load(Ordering::Acquire) >= MAX_HISTORY_PROCESS_BYTES
+        {
+            return None;
+        }
+        progress.operation_output.insert(
+            operation_id.to_owned(),
+            OperationOutput {
+                limit: max_bytes,
+                accepted: 0,
+                transferred: 0,
+            },
+        );
+        Some(max_bytes)
     }
 
-    /// Checks that what the producer accepted still fits the ceiling it reserved.
-    ///
-    /// The ceiling is already charged to the budget, so there is nothing to add here — this only
-    /// guards the invariant that an operation can never accept more than the budget funded. The
-    /// compared value is the ceiling that is *still reserved* for this operation's not-yet-committed
-    /// output: facts the Thread admitted while the call was in flight already took over the bytes
-    /// they covered, and retaining more than what is left would exceed the process budget. A refusal
-    /// is typed and is what makes the producer truncate the call with the bytes it already had; the
-    /// remaining ceiling is released afterwards, so the refused operation leaves no residue.
+    /// Charges only newly accepted bytes. A transfer to an effect never resets the cumulative
+    /// producer counter, so later progress cannot charge the same output again.
     fn charge_operation_output(
         &self,
         operation_id: &str,
         accepted_bytes: u64,
     ) -> Result<(), ColdStoreError> {
-        let progress = self
+        let mut progress = self
             .progress
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match progress.operation_output.get(operation_id) {
-            Some(granted) if accepted_bytes > *granted => Err(cold_error(&format!(
-                "operation {operation_id} accepted {accepted_bytes} bytes over its {granted}-byte reservation"
-            ))),
-            _ => Ok(()),
+        let Some(output) = progress.operation_output.get_mut(operation_id) else {
+            return Err(cold_error("operation output quota is no longer registered"));
+        };
+        if accepted_bytes <= output.accepted {
+            return Ok(());
         }
+        let added = accepted_bytes - output.accepted;
+        if accepted_bytes > output.limit || !self.reserve(added) {
+            return Err(cold_error(&format!(
+                "operation {operation_id} cannot retain {added} additional output bytes"
+            )));
+        }
+        output.accepted = accepted_bytes;
+        Ok(())
     }
 
-    /// Gives back whatever ceiling the operation still holds.
-    ///
-    /// The reservation is transient: the bytes its produced facts already took over are charged to
-    /// those facts now, so only the remainder comes back here. Releasing the whole original ceiling
-    /// instead would drop the charge of the facts that consumed it, and releasing nothing would leak
-    /// the remainder of every call.
     fn release_operation_output(&self, operation_id: &str) {
-        let granted = {
+        let retained = {
             let mut progress = self
                 .progress
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            progress.operation_output.remove(operation_id).unwrap_or(0)
+            progress
+                .operation_output
+                .remove(operation_id)
+                .map_or(0, |output| output.retained())
         };
-        if granted > 0 {
-            self.process_bytes.fetch_sub(granted, Ordering::AcqRel);
+        if retained > 0 {
+            self.process_bytes.fetch_sub(retained, Ordering::AcqRel);
         }
     }
 
@@ -801,33 +782,17 @@ fn encoded_bytes(effect: &pl_core::thread::ThreadEffectBatch) -> u64 {
         .map_or(u64::MAX, |payload| payload.content().len() as u64)
 }
 
-/// Bytes of `bytes` that one operation's live-output ceiling can take over.
-fn output_ceiling_draw(progress: &Progress, operation: &str, want: u64) -> u64 {
+/// Accepted output bytes that can transfer to the operation's durable fact.
+fn retained_output_draw(progress: &Progress, operation: &str, want: u64) -> u64 {
     progress
         .operation_output
         .get(operation)
-        .map_or(0, |reserved| (*reserved).min(want))
+        .map_or(0, |output| output.retained().min(want))
 }
 
-/// Plans the transfer of the reserving operation's live-output ceiling onto the fact it funds.
-///
-/// An operation's ceiling is the reliable budget's hold on the output that operation will produce.
-/// When that output becomes an admitted fact, the hold becomes the fact's own charge instead of the
-/// fact being charged a second time next to it. Both are the same bytes, so the transfer needs no
-/// extra headroom at all: a Thread whose own reservations fill the process budget can still hand its
-/// facts over, which is what keeps a fully reserved process from stalling behind its own queue.
-///
-/// Only the operation the fact itself names may fund it: `ThreadWrite::output_claim` is the
-/// producing operation's own identity, so a fact takes over exactly the ceiling that was reserved
-/// for it. A fact that names no operation — an accepted input, a turn/lifecycle commit, any other
-/// commit that is not an operation's output — is never charged to somebody else's ceiling.
-/// Pooling every in-flight ceiling would let an unfunded fact spend headroom a *different*
-/// operation still needs, which is exactly the "unlimited, over-budget admission" this budget
-/// exists to prevent: such a fact has to fit the real headroom and is otherwise refused with typed
-/// backpressure.
-///
-/// Returns the `(operation, bytes)` pairs to debit and the total they cover, so the caller can take
-/// the decision — and the fail-typed backpressure path — before mutating anything.
+/// Transfers already charged output to its producing operation's fact without charging twice.
+/// Unrelated facts must fit the remaining budget; they cannot spend another operation's output.
+/// The plan is computed before admission mutates either counter.
 fn output_transfer_plan(
     progress: &Progress,
     funding: Option<&str>,
@@ -836,7 +801,7 @@ fn output_transfer_plan(
     let mut plan = Vec::new();
     let mut covered = 0_u64;
     if let Some(operation) = funding {
-        let take = output_ceiling_draw(progress, operation, bytes);
+        let take = retained_output_draw(progress, operation, bytes);
         if take > 0 {
             covered += take;
             plan.push((operation.to_owned(), take));
@@ -1543,13 +1508,15 @@ impl ColdStore for ThreadStorageSink {
         // once: the effects still queued, the prepared product batches the reliable handoff still
         // retains (the writer's queue length alone would under-report a Thread whose projection is
         // already done but whose save is not), the bodies its live projection and report accumulator
-        // keep after their batch became durable, and the ceilings still reserved for in-flight
-        // model/tool output. The in-flight ceilings are what a Thread about to publish its result
+        // keep after their batch became durable, and the accepted bytes retained by in-flight
+        // model/tool output. Those accepted bytes are what a Thread about to publish its result
         // holds; leaving them out would report a Thread as idle while a call is buffering its answer.
         let reserved = progress
             .operation_output
             .values()
-            .fold(0_u64, |total, reserved| total.saturating_add(*reserved));
+            .fold(0_u64, |total, output| {
+                total.saturating_add(output.retained())
+            });
         let mut bytes = progress
             .effects
             .iter()
@@ -1623,7 +1590,7 @@ impl ColdStore for ThreadStorageSink {
                 .iter()
                 .fold(0_u64, |total, queued| total.saturating_add(queued.bytes));
             // The fact takes over the bytes of its own operation's reservation instead of being
-            // charged next to them; only what that one ceiling does not cover needs new headroom.
+            // charged next to them; only bytes not already charged need new headroom.
             let (transfer, covered) =
                 output_transfer_plan(&progress, write.output_claim.as_deref(), bytes);
             let added = bytes.saturating_sub(covered);
@@ -1647,15 +1614,8 @@ impl ColdStore for ThreadStorageSink {
                 return Err(cold_error(&message));
             }
             for (operation, taken) in transfer {
-                let emptied = match progress.operation_output.get_mut(&operation) {
-                    Some(reserved) => {
-                        *reserved = reserved.saturating_sub(taken);
-                        *reserved == 0
-                    }
-                    None => false,
-                };
-                if emptied {
-                    progress.operation_output.remove(&operation);
+                if let Some(output) = progress.operation_output.get_mut(&operation) {
+                    output.transferred += taken;
                 }
             }
             progress.effects.push_back(QueuedEffect {
@@ -3012,15 +2972,21 @@ mod storage_fault_tests {
 
     #[tokio::test]
     async fn operation_output_reservation_returns_to_baseline_across_rounds() -> Result<()> {
-        // A model/tool call reserves its live-output ceiling from the same process budget the
-        // reliable save path uses and gives the *whole* ceiling back when it ends. Returning
-        // `granted - accepted` would leave the accepted bytes charged forever while the batch that
-        // carries the same fact charges them again, so the Thread's water level would creep up on
-        // every successful call. This drives the reservation directly and asserts the gauge is back
-        // at its baseline after each round, which a leak of any size would break.
+        // Idle operations must not spend their hypothetical maximum output. More than sixteen
+        // parallel tools with tiny output must run without exhausting the 256 MiB process budget.
         let (_temp, _store, sink) = sink("operation-budget").await?;
         let channel = &sink.0.channel;
         let baseline = channel.process_bytes.load(Ordering::Acquire);
+        for index in 0..32 {
+            assert_eq!(
+                channel.reserve_operation_output(&format!("idle-{index}"), 16 * 1024 * 1024),
+                Some(16 * 1024 * 1024)
+            );
+        }
+        assert_eq!(channel.process_bytes.load(Ordering::Acquire), baseline);
+        for index in 0..32 {
+            channel.release_operation_output(&format!("idle-{index}"));
+        }
         for round in 0..4_u64 {
             let operation = format!("task:call-{round}");
             let granted = channel
@@ -3029,15 +2995,22 @@ mod storage_fault_tests {
             assert_eq!(granted, 4096);
             assert_eq!(
                 channel.process_bytes.load(Ordering::Acquire),
-                baseline + 4096,
-                "the whole ceiling is charged while the call is in flight"
+                baseline,
+                "a ceiling without produced bytes consumes no resident budget"
             );
             channel.charge_operation_output(&operation, 1024)?;
+            channel.charge_operation_output(&operation, 1024)?;
+            assert!(channel.charge_operation_output(&operation, 4097).is_err());
+            assert_eq!(
+                channel.process_bytes.load(Ordering::Acquire),
+                baseline + 1024
+            );
+            channel.release_operation_output(&operation);
             channel.release_operation_output(&operation);
             assert_eq!(
                 channel.process_bytes.load(Ordering::Acquire),
                 baseline,
-                "a finished call returns its whole ceiling instead of leaking the accepted bytes"
+                "a finished call releases all accepted bytes"
             );
         }
         Ok(())
@@ -3079,7 +3052,7 @@ mod storage_fault_tests {
                 .reserve_operation_output(operation, reservation)
                 .expect("the empty budget funds a quarter of itself");
             assert_eq!(granted, reservation);
-            channel.charge_operation_output(operation, 512)?;
+            channel.charge_operation_output(operation, reservation)?;
         }
         assert_eq!(
             channel.process_bytes.load(Ordering::Acquire),

@@ -122,10 +122,13 @@ last-known state，不自动检查。FRB 只公开 typed DTO 和事件（上述�
 
 ## 23.5 生产诊断与后台进程
 
-Studio 在用户数据目录的 `anywork/logs` 写入按日滚动 Rust 与 Dart error 日志，panic
+Studio 在用户数据目录的 `anywork/logs` 写入滚动 Rust 与 Dart error 日志，panic
 marker 和 native dump 写入 `anywork/crashes`。默认 Rust filter 为 `warn`，CLI
 `--log-level` 优先于 `RUST_LOG`；启动、每小时与正常关闭清理最后修改时间超过 48 小时的
-自有日志和 crash 文件。完整 prompt、context 和工具结果不进入 tracing；日志只记录
+自有日志和 crash 文件。Rust 主日志与同步 error 日志使用 `rolling-file` 按日或达到 16 MiB
+轮转，每类保留当前文件和最多 7 个归档，写入队列继续复用 `tracing-appender`。旧日期格式
+及 Dart 兜底日志除时间清理外，总量超过 64 MiB 时从最旧文件开始清理；清理不跟随符号链接，
+不删除当前打开的编号轮转主文件。完整 prompt、context 和工具结果不进入 tracing；日志只记录
 root/agent/session 身份、cursor、运行阶段、条目规模、耗时和 outcome（完整合同见
 [17](./17-studio-storage.md)）。panic 与 error 使用同步兜底持久化，正常关闭显式 flush。
 Windows 构建为当前 exe 配置 WER LocalDumps，并保留 in-process unhandled exception

@@ -1425,10 +1425,9 @@ impl OutputRefusalNotice {
 impl OutputBudget {
     /// Reserves one operation's live-output quota from the backend's reliable budget.
     ///
-    /// The ceiling is the smaller of the request and what the backend can really fund; nothing is
-    /// charged until the producer reports accepted bytes, and the granted ceiling is charged at the
-    /// first report. A backend without a reliable budget grants the request unchanged, and the
-    /// ceiling itself still bounds the operation.
+    /// The granted ceiling bounds cumulative output. Each accepted increment is charged before
+    /// retention; an unused ceiling consumes no resident bytes. A backend without a reliable
+    /// budget grants the request unchanged, while core still enforces the operation limit.
     pub(crate) fn reserve(
         store: Option<crate::thread::cold::ColdStoreHandle>,
         thread_id: &str,

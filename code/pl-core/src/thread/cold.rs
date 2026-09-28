@@ -264,19 +264,15 @@ pub trait ColdStore: Send + Sync + fmt::Debug + 'static {
     }
     /// Reserves a bounded reliable quota for one in-flight operation's live output.
     ///
-    /// The quota comes from the same budget the reliable save path uses, so a model/tool step is
-    /// only admitted when its streamed result could really be retained: `admit` may then reserve the
-    /// fact it produces without discovering a shortfall after the bytes are already resident —
-    /// a batch offered with its operation named in [`ThreadWrite::output_claim`] takes the reserved
-    /// bytes over instead of being charged next to them. The returned value is the *granted* ceiling,
-    /// never more than `max_bytes`; the producer charges what it accepted against it.
-    ///
-    /// A backend without a reliable budget grants the request unchanged, and core still bounds the
-    /// operation itself, so the refusal path stays reachable for every backend.
+    /// The returned ceiling never exceeds `max_bytes` and bounds cumulative output. The producer
+    /// charges each accepted increment before retaining it. Registering an unused ceiling need not
+    /// consume resident budget. A batch naming its operation in [`ThreadWrite::output_claim`]
+    /// transfers already charged bytes instead of charging the same output twice.
+    /// A backend without a reliable budget grants the request unchanged.
     ///
     /// # Errors
-    /// Refuses (typed) when the reliable budget cannot hold the quota at all. The operation must not
-    /// start unfunded; nothing was lost yet, so this is backpressure rather than a hard fault.
+    /// Refuses with typed backpressure when the backend cannot admit an operation. A granted
+    /// ceiling does not guarantee future headroom; each charge must still succeed before retention.
     fn reserve_operation_output(
         &self,
         _thread_id: &str,
@@ -290,8 +286,8 @@ pub trait ColdStore: Send + Sync + fmt::Debug + 'static {
     /// Repeated charges are monotonic in `accepted_bytes` and idempotent. A charge the quota cannot
     /// hold is refused (typed) and is what makes the producer cancel the operation with the bytes it
     /// already accepted instead of buffering more; the backend reports the matching typed fault. The
-    /// ceiling a charge is compared against is what is still reserved, so output that already became
-    /// a fact leaves less room for the rest of the call.
+    /// cumulative count includes output already transferred to a fact, without charging those bytes
+    /// twice. Transfers do not reset the operation limit.
     ///
     /// # Errors
     /// Refuses (typed) a body beyond the reserved quota.

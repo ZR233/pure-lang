@@ -25,14 +25,17 @@ use pl_core::thread::{AttemptOutcome, ThreadEffectBatch};
 use pl_protocol::{InferenceBillingRecord, RuntimeCostAmount};
 use sea_orm::sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};
 use sea_orm::{
-    ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, QueryResult,
-    Statement, TransactionTrait, Value,
+    ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection,
+    DatabaseTransaction, QueryResult, Statement, TransactionTrait, Value,
 };
 use tokio::sync::{Notify, watch};
 
 use crate::hash::merge_costs;
 
-pub(crate) const CALLS_SCHEMA_VERSION: i64 = 3;
+mod performance;
+pub(crate) use performance::PERFORMANCE_SAMPLE_LIMIT;
+
+pub(crate) const CALLS_SCHEMA_VERSION: i64 = 4;
 
 /// calls 正文的内容寻址文件根目录名（`calls/blobs`）。
 const CALLS_BLOBS_DIR_NAME: &str = "blobs";
@@ -591,8 +594,9 @@ impl CallsStore {
                         reported_model, reasoning_effort, output_tokens,
                         ttft_millis, decode_millis, response_millis
                  FROM model_calls
-                 WHERE terminal=1 AND status='committed'
-                 ORDER BY finished_at DESC, started_at DESC, call_id DESC
+                 WHERE (thread_id,call_id) IN (SELECT thread_id,call_id FROM performance_samples)
+                   AND terminal=1 AND status='committed'
+                 ORDER BY COALESCE(finished_at,started_at) DESC,thread_id DESC,call_id DESC
                  LIMIT ?",
                 vec![i64::from(limit).into()],
             ))
@@ -607,7 +611,7 @@ impl CallsStore {
             .db
             .query_all_raw(statement(
                 "SELECT provider_instance_id,
-                        MAX(provider_display_name) AS provider_display_name,
+                        COALESCE(MAX(provider_display_name), '') AS provider_display_name,
                         sent_model,
                         reasoning_effort,
                         COUNT(*) AS sample_count,
@@ -616,7 +620,8 @@ impl CallsStore {
                         COALESCE(SUM(decode_millis), 0) AS total_decode_millis,
                         COALESCE(SUM(response_millis), 0) AS total_response_millis
                  FROM model_calls
-                 WHERE terminal=1 AND status='committed' AND provider_instance_id IS NOT NULL
+                 WHERE (thread_id,call_id) IN (SELECT thread_id,call_id FROM performance_samples)
+                   AND terminal=1 AND status='committed' AND provider_instance_id IS NOT NULL
                    AND sent_model IS NOT NULL AND decode_millis > 0
                    AND output_tokens IS NOT NULL
                  GROUP BY provider_instance_id, sent_model, reasoning_effort
@@ -710,7 +715,16 @@ async fn ensure_calls_schema(db: &DatabaseConnection, blobs_dir: &Path) -> Resul
         CREATE INDEX IF NOT EXISTS model_calls_by_root
             ON model_calls(root_thread_id, finished_at);
         CREATE INDEX IF NOT EXISTS tool_calls_by_thread
-            ON tool_calls(thread_id, started_at);",
+            ON tool_calls(thread_id, started_at);
+        CREATE TABLE IF NOT EXISTS performance_samples (
+            thread_id TEXT NOT NULL,
+            call_id TEXT NOT NULL,
+            completed_at INTEGER NOT NULL,
+            PRIMARY KEY(thread_id,call_id),
+            FOREIGN KEY(thread_id,call_id) REFERENCES model_calls(thread_id,call_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS performance_samples_by_completion
+            ON performance_samples(completed_at DESC,thread_id DESC,call_id DESC);",
     )
     .await?;
     // 工具调用任务来源状态列：当前 schema 版本的旧库也必须原地补齐，因此放在无条件执行的
@@ -770,6 +784,9 @@ async fn ensure_calls_schema(db: &DatabaseConnection, blobs_dir: &Path) -> Resul
     }
     if version == CALLS_SCHEMA_VERSION {
         return Ok(());
+    }
+    if version == 3 {
+        return performance::migrate(db).await;
     }
     tracing::warn!(
         from = version,
@@ -879,11 +896,7 @@ async fn migrate_calls_schema(
         )
         .await?;
     }
-    db.execute_raw(statement(
-        "UPDATE calls_meta SET schema_version=? WHERE id=1",
-        vec![CALLS_SCHEMA_VERSION.into()],
-    ))
-    .await?;
+    performance::migrate(db).await?;
     tracing::info!(
         from = from_version,
         to = CALLS_SCHEMA_VERSION,
@@ -1069,43 +1082,35 @@ async fn run_writer(shared: Arc<CallsWriter>) {
             total.saturating_add(entry.bytes as u64)
         });
         shared.in_flight_bytes.store(batch_bytes, Ordering::Release);
-        let mut deferred: Option<(QueuedCallMutation, BatchFailure)> = None;
-        while let Some(entry) = pending.pop_front() {
-            #[cfg(test)]
-            if shared.panic_next_mutation.swap(false, Ordering::AcqRel) {
-                panic!("injected call statistics consumer exit");
-            }
-            let ticket = entry.ticket;
-            match apply_mutation(&shared, &entry.mutation).await {
-                Ok(()) => {
+        let deferred = match apply_batch(&shared, &pending).await {
+            Ok((completed, failures, deferred)) => {
+                if completed > 0 {
                     retries = 0;
-                    advance_durable(&shared, ticket);
                     clear_last_error(&shared);
-                }
-                Err(failure) if failure.retryable && shared.stopping.load(Ordering::Acquire) => {
-                    // 停机不再退避：未写入事实显式交回等待方，由调用方保留并重试。
-                    fail_mutation(
-                        &shared,
-                        &format!("call writer stopped before writing: {}", failure.message),
-                    );
+                    for failure in failures {
+                        fail_mutation(&shared, &failure);
+                    }
+                    let ticket = pending[completed - 1].ticket;
+                    pending.drain(..completed);
+                    // No receipt may outrun the commit of the outer transaction.
                     advance_durable(&shared, ticket);
                 }
-                Err(failure) if failure.retryable => {
-                    deferred = Some((entry, failure));
-                    break;
-                }
-                Err(failure) => {
-                    fail_mutation(&shared, &failure.message);
-                    advance_durable(&shared, ticket);
-                }
+                deferred
             }
-        }
+            Err(error) => Some(classify_failure(error)),
+        };
         // 本批已处理完（含退回队首的 deferred 条目），不再有 in-flight 字节。
         shared.in_flight_bytes.store(0, Ordering::Release);
-        let Some((entry, failure)) = deferred else {
+        let Some(failure) = deferred else {
             continue;
         };
-        pending.push_front(entry);
+        if !failure.retryable || shared.stopping.load(Ordering::Acquire) {
+            fail_mutation(&shared, &failure.message);
+            if let Some(last) = pending.back() {
+                advance_durable(&shared, last.ticket);
+            }
+            continue;
+        }
         requeue(&shared, pending);
         retries = retries.saturating_add(1);
         if shared.stopping.load(Ordering::Acquire) {
@@ -1127,6 +1132,36 @@ async fn run_writer(shared: Arc<CallsWriter>) {
         );
         wait_for_retry(&shared, backoff).await;
     }
+}
+
+/// One disk commit per bounded batch. Each mutation uses a savepoint, so a bad statistics fact
+/// cannot poison the remaining valid facts; a transient failure leaves that suffix queued.
+async fn apply_batch(
+    shared: &CallsWriter,
+    pending: &VecDeque<QueuedCallMutation>,
+) -> Result<(usize, Vec<String>, Option<BatchFailure>)> {
+    let tx = shared.db.begin().await?;
+    let mut completed = 0;
+    let mut failures = Vec::new();
+    let mut deferred = None;
+    for entry in pending {
+        #[cfg(test)]
+        if shared.panic_next_mutation.swap(false, Ordering::AcqRel) {
+            panic!("injected call statistics consumer exit");
+        }
+        match apply_mutation(shared, &tx, &entry.mutation).await {
+            Ok(()) => {}
+            Err(failure) if failure.retryable => {
+                deferred = Some(failure);
+                break;
+            }
+            Err(failure) => failures.push(failure.message),
+        }
+        completed += 1;
+    }
+    performance::trim(&tx).await?;
+    tx.commit().await?;
+    Ok((completed, failures, deferred))
 }
 
 async fn wait_for_retry(shared: &CallsWriter, backoff: Duration) {
@@ -1226,29 +1261,39 @@ fn queue_pressure(shared: &CallsWriter) -> QueuePressure {
     pressure
 }
 
-async fn apply_mutation(shared: &CallsWriter, mutation: &CallMutation) -> Result<(), BatchFailure> {
+async fn apply_mutation(
+    shared: &CallsWriter,
+    db: &DatabaseTransaction,
+    mutation: &CallMutation,
+) -> Result<(), BatchFailure> {
     let result = match mutation {
-        CallMutation::Effect(effect) => apply_effect(shared, effect).await,
+        CallMutation::Effect(effect) => apply_effect(shared, db, effect).await,
         CallMutation::Billing {
             root_thread_id,
             thread_id,
             retention,
             billing,
-        } => apply_billing(shared, root_thread_id, thread_id, billing, *retention).await,
+        } => apply_billing(shared, db, root_thread_id, thread_id, billing, *retention).await,
     };
-    result.map_err(|error| {
-        let message = error.to_string();
-        BatchFailure {
-            retryable: is_retryable_write(&message),
-            message,
-        }
-    })
+    result.map_err(classify_failure)
+}
+
+fn classify_failure(error: anyhow::Error) -> BatchFailure {
+    let message = error.to_string();
+    BatchFailure {
+        retryable: is_retryable_write(&message),
+        message,
+    }
 }
 
 /// 把一次 effect 的调用事实写入调用库；调用开始与终态更新共享同一调用身份。
-async fn apply_effect(shared: &CallsWriter, effect: &ThreadEffectBatch) -> Result<()> {
+async fn apply_effect(
+    shared: &CallsWriter,
+    db: &DatabaseTransaction,
+    effect: &ThreadEffectBatch,
+) -> Result<()> {
     let sequence = integer(effect.sequence)?;
-    let tx = shared.db.begin().await?;
+    let tx = db.begin().await?;
     let current = tx
         .query_one_raw(statement(
             "SELECT durable_write_seq FROM call_watermarks WHERE thread_id=?",
@@ -1264,6 +1309,7 @@ async fn apply_effect(shared: &CallsWriter, effect: &ThreadEffectBatch) -> Resul
     }
     if let Some(attempt) = &effect.attempt {
         upsert_attempt(shared, &tx, effect, attempt, sequence).await?;
+        performance::record(&tx, &effect.thread_id, &attempt.attempt_id).await?;
     }
     tx.execute_raw(statement(
         "INSERT INTO call_watermarks(thread_id,admitted_write_seq,durable_write_seq)
@@ -1285,6 +1331,7 @@ async fn apply_effect(shared: &CallsWriter, effect: &ThreadEffectBatch) -> Resul
 /// 幂等写入一次计费/性能事实；同一身份不同正文明确失败。
 async fn apply_billing(
     shared: &CallsWriter,
+    db: &DatabaseTransaction,
     root_thread_id: &str,
     thread_id: &str,
     billing: &InferenceBillingRecord,
@@ -1292,7 +1339,7 @@ async fn apply_billing(
 ) -> Result<()> {
     let body = serde_json::to_string(billing)?;
     let body_ref = body_ref(&body);
-    let tx = shared.db.begin().await?;
+    let tx = db.begin().await?;
     let existing = tx
         .query_one_raw(statement(
             "SELECT billing_ref FROM model_calls WHERE thread_id=? AND call_id=?",
@@ -1417,6 +1464,7 @@ async fn apply_billing(
         ],
     ))
     .await?;
+    performance::record(&tx, thread_id, &billing.inference_id).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -1682,4 +1730,77 @@ fn is_retryable_write(message: &str) -> bool {
         || message.contains("sqlite_busy")
         || message.contains("sqlite_locked")
         || message.contains("sqlite_ioerr")
+}
+
+#[cfg(test)]
+mod storage_fault_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn batch_savepoint_failure_preserves_other_calls_and_commits_before_receipts()
+    -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = CallsStore::open(&temp.path().join("calls.sqlite")).await?;
+        store
+            .writer
+            .db
+            .execute_unprepared(
+                "CREATE TABLE failure_probe(thread_id TEXT NOT NULL);
+                 CREATE TRIGGER reject_one BEFORE INSERT ON call_watermarks
+                 WHEN NEW.thread_id='rejected' BEGIN
+                   INSERT INTO failure_probe VALUES(NEW.thread_id);
+                   SELECT RAISE(FAIL,'injected invalid call');
+                 END;",
+            )
+            .await?;
+        let pending = ["first", "rejected", "last"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, thread)| {
+                let mutation = CallMutation::Effect(Box::new(ThreadEffectBatch {
+                    thread_id: thread.to_owned(),
+                    sequence: 1,
+                    committed_at: 1,
+                    ..Default::default()
+                }));
+                QueuedCallMutation {
+                    ticket: index as u64 + 1,
+                    accepted_at: tokio::time::Instant::now(),
+                    bytes: mutation.estimated_bytes(),
+                    mutation,
+                }
+            })
+            .collect();
+        let (completed, failures, deferred) = apply_batch(&store.writer, &pending).await?;
+        assert_eq!(completed, 3);
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].contains("injected invalid call"));
+        assert!(deferred.is_none());
+        // An independent connection observes both committed facts before a receipt is advanced.
+        let reopened = CallsStore::open(&temp.path().join("calls.sqlite")).await?;
+        let rows = reopened
+            .writer
+            .db
+            .query_all_raw(statement(
+                "SELECT thread_id FROM call_watermarks ORDER BY thread_id",
+                vec![],
+            ))
+            .await?;
+        let ids = rows
+            .iter()
+            .map(|row| row.try_get::<String>("", "thread_id"))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        assert_eq!(ids, ["first", "last"]);
+        // RAISE(FAIL) preserves earlier trigger writes unless the mutation's savepoint rolls back.
+        let failed_writes = reopened
+            .writer
+            .db
+            .query_all_raw(statement("SELECT thread_id FROM failure_probe", vec![]))
+            .await?;
+        assert!(failed_writes.is_empty());
+        assert_eq!(*store.writer.durable_ticket.borrow(), 0);
+        store.stop_best_effort();
+        reopened.stop_best_effort();
+        Ok(())
+    }
 }

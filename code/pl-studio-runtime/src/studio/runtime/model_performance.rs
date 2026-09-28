@@ -31,7 +31,7 @@ pub(in crate::studio) const MODEL_PERFORMANCE_OWNER_ID: &str = "global";
 const CACHE_VERSION: u32 = 4;
 const LEGACY_CACHE_VERSION: u32 = 2;
 /// 产品快照返回的性能历史窗口上限；历史事实源是调用库。
-const HISTORY_LIMIT: usize = 1_000;
+const HISTORY_LIMIT: usize = crate::studio::storage::calls::PERFORMANCE_SAMPLE_LIMIT;
 /// 内存中保留的最近 inference 身份窗口上限。
 ///
 /// 持久 idempotency 已由 `calls.sqlite` 的调用身份唯一约束承担；这里只用于抑制同一

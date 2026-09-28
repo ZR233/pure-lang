@@ -9,13 +9,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, Once, OnceLock};
 
-use time::{Date, OffsetDateTime};
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
 use self::retention::RetentionGuard;
-use self::writer::{DailyFileWriter, SyncErrorMakeWriter};
+use self::writer::{RollingLogWriter, SyncErrorMakeWriter};
 
 const CLI_LOG_LEVEL_ENV: &str = "ANYWORK_LOG_LEVEL";
 const DEFAULT_LOG_FILTER: &str = "warn";
@@ -76,7 +75,7 @@ fn initialize_once() {
 
     retention::clean_expired_logs(&log_dir, &crash_dir, std::time::SystemTime::now());
 
-    let main_writer = DailyFileWriter::new(log_dir.clone(), "studio");
+    let main_writer = RollingLogWriter::new(log_dir.clone(), "studio");
     let (main_writer, log_guard) = tracing_appender::non_blocking(main_writer);
     let error_writer = SyncErrorMakeWriter::new(log_dir.clone());
     let filter = configured_filter();
@@ -204,12 +203,6 @@ fn diagnostics_root() -> PathBuf {
                 .map(|path| path.join(".anywork").join("studio"))
         })
         .unwrap_or_else(|| PathBuf::from(".").join("anywork-diagnostics"))
-}
-
-fn current_date() -> Date {
-    OffsetDateTime::now_local()
-        .unwrap_or_else(|_| OffsetDateTime::now_utc())
-        .date()
 }
 
 fn unix_seconds() -> u64 {
