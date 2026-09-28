@@ -1,7 +1,7 @@
 use pl_core::{
     context::{ContextContent, ContextSource},
     model::ModelFactory,
-    thread::{ModelStepLimit, ThreadHandle, TurnInput, TurnOutcome, TurnState},
+    thread::{AttemptOutcome, ModelStepLimit, ThreadHandle, TurnInput, TurnOutcome, TurnState},
 };
 use pl_model::{
     completion::{
@@ -132,15 +132,13 @@ fn tiny_png() -> Vec<u8> {
 
 #[tokio::test]
 async fn core_thread_runs_provider_backed_turn_and_commits_effects() {
+    let mut events = responses_text("cross-crate answer", "thread-response", "core-fixture");
+    events.last_mut().unwrap()["response"]["usage"]["total_tokens"] = json!(16);
     let fixture = FixtureServer::start(vec![Step::prompt(
         Protocol::ResponsesHttp,
         "cross-crate request",
         0,
-        Reply::Sse(responses_text(
-            "cross-crate answer",
-            "thread-response",
-            "core-fixture",
-        )),
+        Reply::Sse(events),
     )])
     .await
     .unwrap();
@@ -179,6 +177,12 @@ async fn core_thread_runs_provider_backed_turn_and_commits_effects() {
         effect.turn.as_ref().is_some_and(|turn| {
             turn.turn_id == "wire-turn" && turn.state == TurnState::Finished(TurnOutcome::Completed)
         })
+    }));
+    assert!(effects.iter().any(|effect| {
+        matches!(
+            effect.attempt.as_ref().map(|attempt| &attempt.outcome),
+            Some(AttemptOutcome::Committed(output)) if output.usage.total_tokens == Some(16)
+        )
     }));
     thread.close().await.unwrap();
     let records = fixture.finish().await.unwrap();

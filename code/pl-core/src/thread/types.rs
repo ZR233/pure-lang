@@ -371,10 +371,10 @@ pub struct ThreadSnapshot {
     /// Constant-size cumulative model accounting for this Thread.
     ///
     /// Current execution only keeps unfinished attempts, so the totals cannot be re-aggregated from
-    /// resident attempts. This summary is the single cumulative fact: the durable writer folds each
-    /// committed effect into it exactly once and stores the absolute result here (and therefore in
-    /// the checkpoint), so a live subscription, a reconnect after window eviction and a cold
-    /// restore all read one value instead of a value that depends on what is still resident.
+    /// resident attempts. This summary is the single cumulative fact: the configured cold store
+    /// folds each committed effect exactly once, either synchronously before the checkpoint is
+    /// captured or in its durable writer. A live subscription, a reconnect after window eviction
+    /// and a cold restore then read one value instead of whatever attempts remain resident.
     #[serde(default)]
     pub usage_summary: UsageSummary,
 }
@@ -733,6 +733,8 @@ pub enum ThreadLifecycle {
 pub struct RequestAttempt {
     #[serde(default)]
     pub request_metadata: Option<OpaquePayload>,
+    #[serde(default)]
+    pub usage_binding: Option<crate::model::ModelUsageBinding>,
     #[serde(default)]
     pub tool_projection: Option<OpaquePayload>,
     pub turn_id: String,

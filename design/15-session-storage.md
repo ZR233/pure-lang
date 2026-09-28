@@ -18,6 +18,15 @@
 | 已提交 Turn、Item、任务身份与完整工具交付 | history writer | `history.sqlite` | core ChatView 合并历史存储适配、内存尾部和未保存事实；任务按身份读取 |
 | 模型/工具调用统计、用量、耗时和诊断 | 可丢观察投影 | 全局 `calls.sqlite` | CallReader 独立分页与统计；缺失不代表零 |
 
+Thread 的 `usage_summary` 是当前状态的一份绝对累计摘要，随 checkpoint 保存；它不替代
+可丢的逐调用诊断库。通用 SQLite `ColdStore` 在提交 effect 后、捕获 checkpoint 前折叠
+core 已知的模型用量；Studio 的可靠 writer 继续按已保存回执补充价格、耗时和辅助调用。
+折叠以 effect 序号幂等推进；部分缺失或溢出的 token 不伪造完整总量，也不覆盖最近一次
+已知的上下文用量，并显式标记统计不完整。
+通用 SQLite schema 9 的显式升级会在独占数据库租约下按序重读 schema 8 已保存的 effect，
+把缺失的用量累计补入每条 Thread 的 checkpoint，并与版本标记在同一事务提交。旧 effect
+没有模型绑定时保留未知模型和容量；迁移遇到序号缺口或损坏的 effect 须失败并保留原库。
+
 Thread owner 不保存已持久化历史，也不执行分页。Session 的 TimelineState 由 core 管理，和
 Thread owner 共享的是稳定条目身份及变更通知，不共享执行队列；ChatView 通过按需的存储能力
 直接读历史，查询不能排队等待正在调用模型的 owner。GUI snapshot 不包含完整 Timeline；

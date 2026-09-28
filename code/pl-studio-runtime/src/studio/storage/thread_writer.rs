@@ -2510,6 +2510,7 @@ mod storage_fault_tests {
             Arc::from(Vec::<pl_core::model::ModelToolDeclaration>::new());
         let attempt = pl_core::thread::RequestAttempt {
             request_metadata: None,
+            usage_binding: None,
             tool_projection: None,
             turn_id: turn_id.to_owned(),
             attempt_id: attempt_id.to_owned(),
@@ -2521,6 +2522,7 @@ mod storage_fault_tests {
         };
         let update = pl_core::thread::journal::AttemptUpdate {
             request_metadata: None,
+            usage_binding: None,
             tool_projection: None,
             turn_id: turn_id.to_owned(),
             attempt_id: attempt_id.to_owned(),

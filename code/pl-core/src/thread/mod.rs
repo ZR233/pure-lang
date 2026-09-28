@@ -22,6 +22,8 @@ pub mod task;
 mod task_access;
 pub use task_access::{TaskAccess, TaskWaitSnapshot};
 mod turn;
+#[cfg(feature = "sqlite")]
+pub(crate) mod usage;
 pub use checkpoint::{
     CHECKPOINT_BODY_THRESHOLD_BYTES, CheckpointBodyError, CheckpointBodyKind,
     CheckpointBodyReference, CheckpointBodySlot, CheckpointExternalBody, ExtractedCheckpointBody,

@@ -110,10 +110,12 @@ fn unknown_accounting(usage: &pl_core::model::ModelUsage) -> InferenceAccounting
             cache_read_tokens: usage.cache_read_tokens,
             cache_write_tokens: usage.cache_write_tokens,
             reasoning_tokens: usage.reasoning_tokens,
-            total_tokens: usage
-                .input_tokens
-                .zip(usage.output_tokens)
-                .and_then(|(a, b)| a.checked_add(b)),
+            total_tokens: usage.total_tokens.or_else(|| {
+                usage
+                    .input_tokens
+                    .zip(usage.output_tokens)
+                    .and_then(|(a, b)| a.checked_add(b))
+            }),
         },
         ..Default::default()
     }

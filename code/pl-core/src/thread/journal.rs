@@ -23,6 +23,8 @@ pub struct AttemptUpdate {
     #[serde(default)]
     pub request_metadata: Option<OpaquePayload>,
     #[serde(default)]
+    pub usage_binding: Option<crate::model::ModelUsageBinding>,
+    #[serde(default)]
     pub tool_projection: Option<OpaquePayload>,
     pub turn_id: String,
     pub attempt_id: String,
@@ -157,6 +159,7 @@ impl ThreadEffectBatch {
         } else {
             current.attempts.last().map(|attempt| AttemptUpdate {
                 request_metadata: attempt.request_metadata.clone(),
+                usage_binding: attempt.usage_binding.clone(),
                 tool_projection: attempt.tool_projection.clone(),
                 turn_id: attempt.turn_id.clone(),
                 attempt_id: attempt.attempt_id.clone(),
@@ -391,6 +394,7 @@ pub(crate) fn replay_legacy(
             }
             let attempt = RequestAttempt {
                 request_metadata: update.request_metadata.clone(),
+                usage_binding: update.usage_binding.clone(),
                 tool_projection: update.tool_projection.clone(),
                 turn_id: update.turn_id.clone(),
                 attempt_id: update.attempt_id.clone(),
@@ -413,6 +417,7 @@ pub(crate) fn replay_legacy(
                     || previous.tools != attempt.tools
                     || previous.tool_projection != attempt.tool_projection
                     || previous.request_metadata != attempt.request_metadata
+                    || previous.usage_binding != attempt.usage_binding
                     || previous.input_estimate != attempt.input_estimate
                 {
                     return Err(ThreadError::InvalidOutput);
