@@ -219,6 +219,7 @@ abstract final class StudioDriverState {
         'windowItemCount': _timelineWorkspace?.items.length ?? 0,
         'hasOlder': _history.hasOlder,
         'hasNewer': _history.hasNewer,
+        'canExtendLatest': _history.canExtendLatest,
         'loading': _history.isLoading,
         'direction': _history.direction.name,
         'epoch': _history.epoch,

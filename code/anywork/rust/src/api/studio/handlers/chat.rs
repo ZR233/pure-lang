@@ -124,6 +124,21 @@ impl BridgeChatView {
         }
     }
 
+    /// Fill a short latest viewport without detaching from live content. Closing cancels the read.
+    pub async fn extend_latest(&self) -> Result<BridgeChatSnapshot, BridgeError> {
+        if self.cancel.is_cancelled() {
+            return Err(view_closed());
+        }
+        let mut window = self.window.lock().await;
+        tokio::select! {
+            biased;
+            () = self.cancel.cancelled() => Err(view_closed()),
+            result = window.extend_latest() => {
+                Ok(chat_window::snapshot(result?)?)
+            }
+        }
+    }
+
     pub async fn focus(&self, focus: BridgeChatFocus) -> Result<BridgeChatSnapshot, BridgeError> {
         if self.cancel.is_cancelled() {
             return Err(view_closed());

@@ -1681,6 +1681,77 @@ async fn coalesced_window_versions_arrive_as_one_patch() {
 }
 
 #[tokio::test]
+async fn extending_latest_fills_capacity_without_losing_the_live_tail_or_reading_intent() {
+    let session = Session::new(Stored {
+        items: (1..=100)
+            .map(|order| (order, item(order, 1, "stored", true)))
+            .collect(),
+    });
+    let view = session.open_chat(ChatFocus::Latest).await.unwrap();
+    let (initial, mut updates) = view.subscribe();
+    let mut client = Client::new(&initial);
+    assert!(initial.can_extend_latest);
+
+    for expected in [64, 96] {
+        let snapshot = view.extend_latest().await.unwrap();
+        assert_eq!(snapshot.focus, ChatFocus::Latest);
+        assert_eq!(snapshot.items.len(), expected);
+        assert_eq!(snapshot.items.last().unwrap().order, 100);
+        assert!(!snapshot.has_newer);
+        let update = apply_next(&mut client, &mut updates, &view).await;
+        if expected == 96 {
+            assert!(matches!(update, ChatUpdate::Reset(snapshot) if !snapshot.can_extend_latest));
+        }
+    }
+    let full = view.snapshot();
+    assert!(!full.can_extend_latest);
+    assert!(full.has_older);
+    assert_eq!(view.extend_latest().await.unwrap(), full);
+    assert!(
+        updates.take().is_none(),
+        "capacity must not create a reload loop"
+    );
+
+    session.publish(item(101, 1, "still live", false)).unwrap();
+    apply_next(&mut client, &mut updates, &view).await;
+    let live = view.snapshot();
+    assert_eq!(live.focus, ChatFocus::Latest);
+    assert_eq!(live.items.len(), 96);
+    assert_eq!(live.items.first().unwrap().order, 6);
+    assert_eq!(live.items.last().unwrap().order, 101);
+
+    let history = view.load(Direction::Older).await.unwrap();
+    assert!(matches!(history.focus, ChatFocus::Around(_)));
+    assert!(!history.can_extend_latest);
+    assert_eq!(view.extend_latest().await.unwrap(), history);
+    session
+        .publish(item(102, 1, "outside reading window", false))
+        .unwrap();
+    assert_eq!(view.snapshot().items, history.items);
+    assert!(view.snapshot().has_newer);
+
+    view.focus(ChatFocus::Latest).await.unwrap();
+    assert!(view.snapshot().can_extend_latest);
+    assert_eq!(view.snapshot().items.last().unwrap().order, 102);
+
+    // Exhausting real history before capacity is equally terminal, including an empty session.
+    for count in [0, 40] {
+        let short = Session::new(Stored {
+            items: (1..=count)
+                .map(|order| (order, item(order, 1, "short", true)))
+                .collect(),
+        });
+        let view = short.open_chat(ChatFocus::Latest).await.unwrap();
+        let filled = view.extend_latest().await.unwrap();
+        assert_eq!(filled.focus, ChatFocus::Latest);
+        assert_eq!(filled.items.len(), count as usize);
+        assert!(!filled.can_extend_latest);
+        assert!(!filled.has_older);
+        assert_eq!(view.extend_latest().await.unwrap(), filled);
+    }
+}
+
+#[tokio::test]
 async fn newer_revision_keeps_save_responsibility_and_emits_typed_append() {
     let session = Session::new(Stored::default());
     let first = item(1, 10, "hello", false);

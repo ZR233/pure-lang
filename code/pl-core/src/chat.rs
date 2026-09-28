@@ -1240,6 +1240,12 @@ fn remember_terminal(state: &mut TimelineState, item_id: &str, order: u64, revis
     }
 }
 
+#[derive(Clone, Copy)]
+enum PageLoad {
+    Browse(Direction),
+    ExtendLatest,
+}
+
 struct Window {
     focus: ChatFocus,
     items: Vec<ChatItem>,
@@ -1257,6 +1263,12 @@ struct Window {
     has_older: bool,
     has_newer: bool,
     generation: u64,
+}
+
+impl Window {
+    fn can_extend_latest(&self) -> bool {
+        self.focus == ChatFocus::Latest && self.has_older && self.items.len() < WINDOW_ITEMS
+    }
 }
 
 #[derive(Clone)]
@@ -1282,6 +1294,8 @@ pub struct ChatSnapshot {
     pub items: Vec<ChatItem>,
     pub has_older: bool,
     pub has_newer: bool,
+    /// Whether another older page can be added without leaving Latest or evicting its tail.
+    pub can_extend_latest: bool,
 }
 
 /// Typed change for one content field, derived from the shared block lineage.
@@ -1577,6 +1591,7 @@ impl ChatUpdates {
         let next = self.view.snapshot();
         if next.focus != self.baseline.focus
             || next.has_older != self.baseline.has_older
+            || next.can_extend_latest != self.baseline.can_extend_latest
             || next.version < self.baseline.version
         {
             let update = ChatUpdate::Reset(next.clone());
@@ -1690,6 +1705,7 @@ impl ChatView {
             items: window.items.clone(),
             has_older: window.has_older,
             has_newer: window.has_newer,
+            can_extend_latest: window.can_extend_latest(),
         }
     }
 
@@ -1793,11 +1809,30 @@ impl ChatView {
     }
 
     pub async fn load(&self, direction: Direction) -> Result<ChatSnapshot, ChatError> {
+        self.load_page(PageLoad::Browse(direction)).await
+    }
+
+    /// Adds one older page to a latest window without changing its reading intent.
+    /// Stops at the bounded capacity instead of evicting the live tail. A concurrent focus or
+    /// boundary change discards the read; cancellation before publication leaves the window intact.
+    pub async fn extend_latest(&self) -> Result<ChatSnapshot, ChatError> {
+        self.load_page(PageLoad::ExtendLatest).await
+    }
+
+    async fn load_page(&self, intent: PageLoad) -> Result<ChatSnapshot, ChatError> {
+        let direction = match intent {
+            PageLoad::Browse(direction) => direction,
+            PageLoad::ExtendLatest => Direction::Older,
+        };
         let (anchor, focus, generation) = {
             let window = self
                 .window
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
+            if matches!(intent, PageLoad::ExtendLatest) && !window.can_extend_latest() {
+                drop(window);
+                return Ok(self.snapshot());
+            }
             let anchor = match direction {
                 Direction::Older => window.items.first().map(|item| item.order),
                 Direction::Newer => window.items.last().map(|item| item.order),
@@ -1837,6 +1872,7 @@ impl ChatView {
         let had_newer = window.has_newer;
         let had_older = window.has_older;
         if direction == Direction::Older
+            && matches!(intent, PageLoad::Browse(_))
             && focus == ChatFocus::Latest
             && !addition.is_empty()
             && let Some(last) = window.items.last()
@@ -1847,15 +1883,15 @@ impl ChatView {
         let mut older_removed = false;
         let mut newer_removed = false;
         if window.items.len() > WINDOW_ITEMS {
-            match direction {
-                Direction::Older => {
-                    window.items.truncate(WINDOW_ITEMS);
-                    newer_removed = true;
-                }
-                Direction::Newer => {
+            match intent {
+                PageLoad::ExtendLatest | PageLoad::Browse(Direction::Newer) => {
                     let excess = window.items.len() - WINDOW_ITEMS;
                     window.items.drain(..excess);
                     older_removed = true;
+                }
+                PageLoad::Browse(Direction::Older) => {
+                    window.items.truncate(WINDOW_ITEMS);
+                    newer_removed = true;
                 }
             }
         }

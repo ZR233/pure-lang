@@ -46,6 +46,7 @@ class TimelineView extends StatefulWidget {
     this.planExpanded = false,
     this.onPlanToggle,
     this.onLoadOlder,
+    this.onExtendLatest,
     this.isLoadingOlder = false,
     this.isLoadingNewer = false,
     this.onLoadNewer,
@@ -75,6 +76,9 @@ class TimelineView extends StatefulWidget {
   final bool planExpanded;
   final VoidCallback? onPlanToggle;
   final VoidCallback? onLoadOlder;
+
+  /// Canonical capacity to fill a short latest viewport without browsing away from the tail.
+  final VoidCallback? onExtendLatest;
   final bool isLoadingOlder;
   final bool isLoadingNewer;
   final VoidCallback? onLoadNewer;
@@ -818,7 +822,7 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _jumpToLatest() {
-    // 显式跳最新后不立即向旧自动补页；下一次上翻手势再恢复向旧阅读。
+    // 阅读方向与最新窗口填充互不影响；扩充由布局与 canonical 容量决定。
     _scrollingOlder = false;
     _followLatestBottom();
     widget.onJumpToLatest?.call();

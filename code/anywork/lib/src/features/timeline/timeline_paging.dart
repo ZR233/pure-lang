@@ -262,12 +262,25 @@ extension on _TimelineViewState {
         return;
       }
       final position = _controller.hasClients ? _controller.position : null;
-      // 隐藏条目或折叠分组可能让一整页不足一屏，甚至没有可布局的行。
-      // 此时无法先滚动脱离底部，仍须沿阅读方向补页；到端后不反向加载，
-      // 否则有界窗口会在旧页和新页之间反复淘汰、重载。
+      // Use actual layout: raw item counts do not predict the height after grouping.
       final underfull = position == null
           ? widget.rows.isEmpty
           : position.maxScrollExtent - position.minScrollExtent < 1;
+      if (_followingBottom && !_detachedByUser) {
+        // Filling a latest viewport must not change focus or evict the live tail.
+        // The backend owns capacity; a full bounded window never falls through to browsing.
+        if (underfull &&
+            !widget.hasNewer &&
+            widget.onExtendLatest != null &&
+            widget.olderError == null &&
+            !_olderLoadRequested) {
+          _olderLoadRequested = true;
+          widget.onExtendLatest!();
+        }
+        return;
+      }
+      // History reading advances only in its chosen direction, even when underfull.
+      // Reversing automatically at an edge would oscillate a bounded window.
       final threshold = 1.5 * (position?.viewportDimension ?? 0);
       if (_scrollingOlder &&
           (_detachedByUser || underfull) &&
@@ -324,7 +337,11 @@ extension on _TimelineViewState {
                   key: ValueKey(
                     older ? 'timeline-history-retry' : 'timeline-newer-retry',
                   ),
-                  onPressed: older ? widget.onLoadOlder : widget.onLoadNewer,
+                  onPressed: older
+                      ? (_followingBottom && !_detachedByUser
+                            ? widget.onExtendLatest
+                            : widget.onLoadOlder)
+                      : widget.onLoadNewer,
                   icon: const Icon(Icons.refresh),
                   label: Text(context.l10n.timelineImageRetry),
                 ),

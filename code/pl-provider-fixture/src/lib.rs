@@ -137,6 +137,50 @@ pub fn gui_tool_scroll_script() -> Vec<Step> {
         });
         script.optional_title(&title);
     }
+    // More than a first page of raw tools collapses to one visible row. Returning to Latest
+    // must fill the remaining viewport from the preceding long reply without user scrolling.
+    let identities: Vec<_> = (0..40)
+        .map(|index| {
+            (
+                format!("compact-item-{index}"),
+                format!("compact-call-{index}"),
+            )
+        })
+        .collect();
+    let calls: Vec<_> = identities
+        .iter()
+        .map(|(item_id, call_id)| RealtimeToolCall {
+            item_id,
+            call_id,
+            name: "list_files",
+            arguments: json!({"path":"scroll-fixture", "limit":1}).to_string(),
+        })
+        .collect();
+    script.add(|step| {
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            "Tool scroll compact",
+            step,
+            Reply::Sse(responses_tool_calls(
+                "compact-tools",
+                "fixture-model",
+                &calls,
+            )),
+        )
+    });
+    script.add(|step| {
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            "Tool scroll compact",
+            step,
+            Reply::Sse(responses_text(
+                "compact tail complete",
+                "compact-tail",
+                "fixture-model",
+            )),
+        )
+    });
+    script.optional_title(&title);
     script.finish()
 }
 
@@ -1702,10 +1746,10 @@ const TOOL_EXEC_NAME: &str = "exec";
 const TOOL_WAIT_NAME: &str = "wait";
 
 /// One assistant tool call used by [`responses_tool_calls`].
-pub struct RealtimeToolCall {
-    pub item_id: &'static str,
-    pub call_id: &'static str,
-    pub name: &'static str,
+pub struct RealtimeToolCall<'a> {
+    pub item_id: &'a str,
+    pub call_id: &'a str,
+    pub name: &'a str,
     pub arguments: String,
 }
 
@@ -1932,7 +1976,7 @@ pub fn responses_reasoning_tool_calls(
     reasoning_lines: &[&str],
     id: &str,
     model: &str,
-    calls: &[RealtimeToolCall],
+    calls: &[RealtimeToolCall<'_>],
 ) -> Vec<Value> {
     let summary = reasoning_lines.join("\n");
     let mut events = vec![
@@ -1960,7 +2004,7 @@ pub fn responses_reasoning_tool_calls(
 }
 
 /// Responses SSE events for one assistant turn that issues the given tool calls.
-pub fn responses_tool_calls(id: &str, model: &str, calls: &[RealtimeToolCall]) -> Vec<Value> {
+pub fn responses_tool_calls(id: &str, model: &str, calls: &[RealtimeToolCall<'_>]) -> Vec<Value> {
     let mut events = vec![json!({"type":"response.created","response":{"id":id,"model":model}})];
     for (index, call) in calls.iter().enumerate() {
         events.push(json!({"type":"response.output_item.added","output_index":index,"item":{"id":call.item_id,"type":"function_call","name":call.name,"call_id":call.call_id}}));

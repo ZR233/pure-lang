@@ -5,6 +5,7 @@ import 'package:flutter_driver/flutter_driver.dart';
 
 import 'raw_tap.dart';
 import 'tool_probe.dart';
+import 'timeline_fill_journey.dart';
 import 'stress_start.dart' as start;
 
 Future<void> main(List<String> args) async {
@@ -497,6 +498,10 @@ Future<void> main(List<String> args) async {
     }
     evidence['checks'] = checks;
     evidence['checksPassed'] = checks.every((v) => v);
+    evidence['latestViewportFill'] = await observeLatestViewportFill(
+      driver,
+      output,
+    );
     if (evidence['checksPassed'] != true) exitCode = 1;
   } finally {
     await File('${output.path}/tool-scroll.json')

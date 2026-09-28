@@ -581,7 +581,7 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         println!("Native GUI is ready. Evidence: {}", output.display());
         if options.scenario == "tool-scroll" {
             let log = File::create(output.join("tool-scroll-driver.log"))?;
-            let mut command = Command::new("dart");
+            let mut command = process::path_command("dart", &[]);
             command
                 .current_dir(&app_dir)
                 .args(["run", "test_driver/tool_scroll_journey.dart", &vm_url])

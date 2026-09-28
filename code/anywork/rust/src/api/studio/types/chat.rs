@@ -42,6 +42,7 @@ pub struct BridgeChatSnapshot {
     pub items: Vec<BridgeChatItem>,
     pub has_older: bool,
     pub has_newer: bool,
+    pub can_extend_latest: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

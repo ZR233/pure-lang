@@ -243,11 +243,14 @@ ThreadWorkspace? applyThreadStorage(
 
 /// ChatView owns the complete bounded reading window. The execution stream may
 /// advance its own revision, but cannot add a second copy of these items.
+enum ChatHistoryCompletion { focus, older, newer }
+
 StudioState applyChatWindowSnapshot(
   StudioState current,
   String threadId,
-  StudioChatSnapshot snapshot,
-) {
+  StudioChatSnapshot snapshot, {
+  ChatHistoryCompletion? historyCompletion,
+}) {
   final workspace = current.workspacesByThread[threadId];
   if (workspace == null) return current;
   // 窗口是唯一正文 owner：条目直接来自权威窗口，不再叠加任何本地补齐副本或第二份事实。
@@ -257,11 +260,19 @@ StudioState applyChatWindowSnapshot(
   final history = ui.history.copyWith(
     hasOlder: snapshot.hasOlder,
     hasNewer: snapshot.hasNewer,
+    canExtendLatest: snapshot.canExtendLatest,
     olderCursor: items.firstOrNull?.id,
     newerCursor: items.lastOrNull?.id,
-    isLoading: false,
-    errorMessage: null,
-    newerError: null,
+    // Content delivery does not finish an in-flight history command or dismiss its failure.
+    isLoading: historyCompletion == null ? ui.history.isLoading : false,
+    errorMessage: switch (historyCompletion) {
+      ChatHistoryCompletion.focus || ChatHistoryCompletion.older => null,
+      ChatHistoryCompletion.newer || null => ui.history.errorMessage,
+    },
+    newerError: switch (historyCompletion) {
+      ChatHistoryCompletion.focus || ChatHistoryCompletion.newer => null,
+      ChatHistoryCompletion.older || null => ui.history.newerError,
+    },
     detached: snapshot.focusedItemId != null,
     anchor: snapshot.focusedItemId == null
         ? null

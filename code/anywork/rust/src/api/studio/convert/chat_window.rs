@@ -29,6 +29,7 @@ pub(crate) fn snapshot(value: ChatWindowSnapshot) -> Result<BridgeChatSnapshot, 
             .collect::<Result<_, _>>()?,
         has_older: value.has_older,
         has_newer: value.has_newer,
+        can_extend_latest: value.can_extend_latest,
     })
 }
 

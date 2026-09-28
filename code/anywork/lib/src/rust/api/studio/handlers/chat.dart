@@ -36,6 +36,9 @@ abstract class BridgeChatView implements RustOpaqueInterface {
   /// 覆一份 item 或维持另一份 baseline（据此删除 `_completedBodies` 覆盖层）。
   Future<BridgeChatSnapshot> expand({required String itemId});
 
+  /// Fill a short latest viewport without detaching from live content. Closing cancels the read.
+  Future<BridgeChatSnapshot> extendLatest();
+
   Future<BridgeChatSnapshot> focus({required BridgeChatFocus focus});
 
   /// The subscription baseline is captured before returning the handle.

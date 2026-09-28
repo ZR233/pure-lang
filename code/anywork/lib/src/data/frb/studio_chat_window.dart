@@ -25,6 +25,7 @@ class StudioChatSnapshot {
     required this.items,
     required this.hasOlder,
     required this.hasNewer,
+    required this.canExtendLatest,
   });
 
   final String? focusedItemId;
@@ -32,12 +33,14 @@ class StudioChatSnapshot {
   final List<StudioChatItem> items;
   final bool hasOlder;
   final bool hasNewer;
+  final bool canExtendLatest;
 }
 
 abstract interface class StudioChatWindow {
   Future<StudioChatSnapshot> initial();
   Future<StudioChatSnapshot?> next();
   Future<StudioChatSnapshot> load(TimelineDirection direction);
+  Future<StudioChatSnapshot> extendLatest();
   Future<StudioChatSnapshot> focus(String? itemId);
 
   /// 按 identity 请求一条窗口条目的完整正文，并交回**同一权威窗口**的新快照。
@@ -84,6 +87,7 @@ class FrbChatWindow implements StudioChatWindow {
       items: List.unmodifiable(snapshot.items.map(_item)),
       hasOlder: snapshot.hasOlder,
       hasNewer: snapshot.hasNewer,
+      canExtendLatest: snapshot.canExtendLatest,
     );
     _baseline = next;
     // 只读内容交付计数（仅 Driver 启用时统计；不是 FRB 物理 wire 字节）。
@@ -202,6 +206,7 @@ class FrbChatWindow implements StudioChatWindow {
       items: List.unmodifiable(visible),
       hasOlder: baseline.hasOlder,
       hasNewer: hasNewer,
+      canExtendLatest: baseline.canExtendLatest,
     );
     _baseline = next;
     StudioDriverState.recordChatWindowPatch(next.items.length);
@@ -260,6 +265,12 @@ class FrbChatWindow implements StudioChatWindow {
         },
       ),
     );
+  }
+
+  @override
+  Future<StudioChatSnapshot> extendLatest() async {
+    if (_closed) throw StateError('Chat window is closed');
+    return _adopt(await _view.extendLatest());
   }
 
   @override

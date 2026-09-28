@@ -16,6 +16,8 @@ part 'studio_controller.g.dart';
 
 Duration? _disableStudioRetry(int retryCount, Object error) => null;
 
+enum _ChatWindowLoad { older, newer, extendLatest }
+
 @Riverpod(keepAlive: true, retry: _disableStudioRetry)
 class StudioController extends _$StudioController {
   static bool _startupProjectActivated = false;
@@ -611,7 +613,11 @@ class StudioController extends _$StudioController {
       }
       if (!_acceptChatWindow(threadId, operation)) return;
       _chatWindow = window;
-      _adoptChatWindow(threadId, initial);
+      _adoptChatWindow(
+        threadId,
+        initial,
+        historyCompletion: ChatHistoryCompletion.focus,
+      );
       unawaited(_pullChatWindow(threadId, window));
       window = null;
     } catch (error) {
@@ -641,11 +647,22 @@ class StudioController extends _$StudioController {
       _chatWindowOperation == operation &&
       state.value?.selectedThreadId == threadId;
 
-  void _adoptChatWindow(String threadId, StudioChatSnapshot snapshot) {
+  void _adoptChatWindow(
+    String threadId,
+    StudioChatSnapshot snapshot, {
+    ChatHistoryCompletion? historyCompletion,
+  }) {
     final current = state.value;
     if (current == null || current.selectedThreadId != threadId) return;
     _chatFocusedItemId = snapshot.focusedItemId;
-    state = AsyncData(applyChatWindowSnapshot(current, threadId, snapshot));
+    state = AsyncData(
+      applyChatWindowSnapshot(
+        current,
+        threadId,
+        snapshot,
+        historyCompletion: historyCompletion,
+      ),
+    );
   }
 
   Future<void> _pullChatWindow(String threadId, StudioChatWindow window) async {
@@ -725,6 +742,11 @@ class StudioController extends _$StudioController {
   Future<void> loadNewerHistory(String threadId) async {
     await _ensureThreadOpen(threadId);
     await _loadTimelinePage(threadId, TimelineDirection.newer);
+  }
+
+  Future<void> extendLatestHistory(String threadId) async {
+    await _ensureThreadOpen(threadId);
+    await _loadChatWindow(threadId, _ChatWindowLoad.extendLatest);
   }
 
   /// 可见条目正文补齐：对窗口内仍是预览的可见身份按 identity 向同一 ChatView 请求展开。
@@ -900,7 +922,10 @@ class StudioController extends _$StudioController {
       } else if (resetWindow) {
         await _focusChatWindow(threadId, null);
       } else {
-        await _loadChatWindow(threadId, direction);
+        await _loadChatWindow(threadId, switch (direction) {
+          TimelineDirection.older => _ChatWindowLoad.older,
+          TimelineDirection.newer => _ChatWindowLoad.newer,
+        });
       }
       return true;
     }
@@ -1054,7 +1079,11 @@ class StudioController extends _$StudioController {
     try {
       final snapshot = await window.focus(itemId);
       if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {
-        _adoptChatWindow(threadId, snapshot);
+        _adoptChatWindow(
+          threadId,
+          snapshot,
+          historyCompletion: ChatHistoryCompletion.focus,
+        );
       }
     } catch (error) {
       if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {
@@ -1074,12 +1103,12 @@ class StudioController extends _$StudioController {
     }
   }
 
-  Future<void> _loadChatWindow(
-    String threadId,
-    TimelineDirection direction,
-  ) async {
+  Future<void> _loadChatWindow(String threadId, _ChatWindowLoad request) async {
     final window = _chatWindow;
     if (window == null || _chatWindowThreadId != threadId) return;
+    final direction = request == _ChatWindowLoad.newer
+        ? TimelineDirection.newer
+        : TimelineDirection.older;
     if (!_historyRequests.add(threadId)) return;
     final operation = ++_chatWindowOperation;
     final current = state.value;
@@ -1095,9 +1124,20 @@ class StudioController extends _$StudioController {
       );
     }
     try {
-      final snapshot = await window.load(direction);
+      final snapshot = await switch (request) {
+        _ChatWindowLoad.extendLatest => window.extendLatest(),
+        _ChatWindowLoad.older ||
+        _ChatWindowLoad.newer => window.load(direction),
+      };
       if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {
-        _adoptChatWindow(threadId, snapshot);
+        _adoptChatWindow(
+          threadId,
+          snapshot,
+          historyCompletion: switch (direction) {
+            TimelineDirection.older => ChatHistoryCompletion.older,
+            TimelineDirection.newer => ChatHistoryCompletion.newer,
+          },
+        );
       }
     } catch (error) {
       if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {

@@ -99,6 +99,8 @@ pub struct ChatWindowSnapshot {
     pub items: Vec<ChatWindowItem>,
     pub has_older: bool,
     pub has_newer: bool,
+    /// 是否可向旧扩充 Latest 窗口而不淘汰最新端；容量由 core 决定。
+    pub can_extend_latest: bool,
 }
 
 /// 一帧是否需要立即交付，还是普通文本可以合帧。

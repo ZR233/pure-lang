@@ -689,6 +689,13 @@ class _AgentTimelineHost extends ConsumerWidget {
                       .loadNewerHistory(threadId),
                 )
               : null,
+          onExtendLatest: timeline.history.canExtendLatest
+              ? () => unawaited(
+                  ref
+                      .read(studioControllerProvider.notifier)
+                      .extendLatestHistory(threadId),
+                )
+              : null,
           onLoadOlder: timeline.hasOlderHistory
               ? () => unawaited(
                   ref

@@ -185,6 +185,13 @@ impl ChatWindowStream {
         self.initial()
     }
 
+    /// 按页扩充 Latest，保持最新端；历史阅读或容量已满时不改变窗口。
+    pub async fn extend_latest(&mut self) -> Result<ChatWindowSnapshot> {
+        self.view.extend_latest().await?;
+        self.resubscribe();
+        self.initial()
+    }
+
     /// 读取当前窗口，并把它变成新的订阅基线。
     pub async fn snapshot(&mut self) -> Result<ChatWindowSnapshot> {
         self.resubscribe();
@@ -390,6 +397,7 @@ fn window_snapshot(thread_id: &str, window: ChatSnapshot) -> Result<ChatWindowSn
             .collect::<Result<_>>()?,
         has_older: window.has_older,
         has_newer: window.has_newer,
+        can_extend_latest: window.can_extend_latest,
     })
 }
 

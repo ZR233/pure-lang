@@ -2616,6 +2616,7 @@ class _DemoChatWindow implements StudioChatWindow {
       ]),
       hasOlder: false,
       hasNewer: false,
+      canExtendLatest: false,
     );
   }
 
@@ -2633,6 +2634,9 @@ class _DemoChatWindow implements StudioChatWindow {
   @override
   Future<StudioChatSnapshot> load(TimelineDirection direction) async =>
       _snapshot();
+
+  @override
+  Future<StudioChatSnapshot> extendLatest() async => _snapshot();
 
   @override
   Future<StudioChatSnapshot> focus(String? itemId) async {

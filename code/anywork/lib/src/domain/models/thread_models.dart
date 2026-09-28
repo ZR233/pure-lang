@@ -1207,6 +1207,7 @@ class ThreadHistoryWindow {
   const ThreadHistoryWindow({
     this.hasOlder = false,
     this.hasNewer = false,
+    this.canExtendLatest = false,
     this.olderCursor,
     this.newerCursor,
     this.isLoading = false,
@@ -1226,6 +1227,7 @@ class ThreadHistoryWindow {
   });
   final bool hasOlder;
   final bool hasNewer;
+  final bool canExtendLatest;
   final String? olderCursor;
   final String? newerCursor;
   final bool isLoading;
@@ -1262,6 +1264,7 @@ class ThreadHistoryWindow {
   ThreadHistoryWindow copyWith({
     bool? hasOlder,
     bool? hasNewer,
+    bool? canExtendLatest,
     Object? olderCursor = _workspaceUnset,
     Object? newerCursor = _workspaceUnset,
     bool? isLoading,
@@ -1281,6 +1284,7 @@ class ThreadHistoryWindow {
   }) => ThreadHistoryWindow(
     hasOlder: hasOlder ?? this.hasOlder,
     hasNewer: hasNewer ?? this.hasNewer,
+    canExtendLatest: canExtendLatest ?? this.canExtendLatest,
     olderCursor: identical(olderCursor, _workspaceUnset)
         ? this.olderCursor
         : olderCursor as String?,

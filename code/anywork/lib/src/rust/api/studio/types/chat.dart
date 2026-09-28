@@ -68,6 +68,7 @@ class BridgeChatSnapshot {
   final List<BridgeChatItem> items;
   final bool hasOlder;
   final bool hasNewer;
+  final bool canExtendLatest;
 
   const BridgeChatSnapshot({
     required this.focus,
@@ -75,6 +76,7 @@ class BridgeChatSnapshot {
     required this.items,
     required this.hasOlder,
     required this.hasNewer,
+    required this.canExtendLatest,
   });
 
   @override
@@ -83,7 +85,8 @@ class BridgeChatSnapshot {
       version.hashCode ^
       items.hashCode ^
       hasOlder.hashCode ^
-      hasNewer.hashCode;
+      hasNewer.hashCode ^
+      canExtendLatest.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -94,7 +97,8 @@ class BridgeChatSnapshot {
           version == other.version &&
           items == other.items &&
           hasOlder == other.hasOlder &&
-          hasNewer == other.hasNewer;
+          hasNewer == other.hasNewer &&
+          canExtendLatest == other.canExtendLatest;
 }
 
 @freezed
