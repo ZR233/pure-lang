@@ -1,6 +1,6 @@
 ---
 name: flutter-studio-build
-description: Use when building anywork on Windows or Linux, debugging release builds, or troubleshooting flutter_rust_bridge generated bindings.
+description: Use when building anywork on Windows or Linux, manually validating the native GUI with Flutter Driver (including headless SSH/Xvfb), debugging release builds, or troubleshooting flutter_rust_bridge generated bindings.
 category: guides
 platforms: [windows, linux]
 ---
@@ -74,9 +74,15 @@ Windows 发布目录通常包含 `anywork.exe`、`flutter_windows.dll`、
 - 只要求构建或运行时，完成对应 xtask 命令并核实产物或启动结果；不自动扩展为完整验收。
 - 生成输入变更时先执行 `cargo xtask generate-gui`，再执行 `cargo xtask check-gui-generated`。
 - GUI 或桥接修改执行 `cargo xtask verify-gui`；GUI 行为变更按根 `AGENTS.md` 执行
-  `cargo xtask verify-gui --integration` 与相应 Driver/harness 验收。
+  `cargo xtask manual-gui` 与相应 Flutter Driver 验收。`verify-gui` 不接受 `--integration`。
 - 授权、提交前门禁与完成条件以根 `AGENTS.md` 为准；适用检查通过后直接交付，只有新修改、
   失败或具体未决风险才重跑。已通过的生成检查不另行重复，门禁命令内部自带的检查正常保留。
 
 Linux 缺少编译器、CMake、Ninja、pkg-config 或 GTK 3 开发文件时，保留 xtask 返回的真实预检命令
 和原始错误，不注入机器专用 include/library 路径。
+
+## 原生 GUI 人工验收
+
+执行前读取 [人工验收操作指南](references/manual-gui.md)：包含隔离 harness、Linux SSH 下的
+伪终端与 Xvfb、Flutter Driver 定向操作、截图/快照核对及进程回收。不要将无交互终端直接
+等同于无法验收，也不要把 demo、静态分析或成功启动等同于完整业务验收。
