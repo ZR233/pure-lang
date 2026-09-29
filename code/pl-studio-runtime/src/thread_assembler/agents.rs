@@ -206,17 +206,7 @@ impl AgentControlHost for AgentHost {
         }
         let id = spec.id.clone();
         let options = spec.execution;
-        let history = request.fork_turns.inheritance();
-        let child = owner
-            .assemble_child(
-                spec,
-                &context,
-                pl_core::context::ContextInheritance {
-                    history,
-                    instructions: pl_core::context::InstructionInheritance::Exclude,
-                },
-            )
-            .await;
+        let child = owner.assemble_child(spec, &context).await;
         let child = match child {
             Ok(child) => child,
             Err(error) => {

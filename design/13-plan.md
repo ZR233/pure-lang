@@ -43,7 +43,7 @@ operation receipts。缺失 Plan 字段等价于 revision 0 的 `drafting`，查
 
 工具读取当前调用的不透明扩展快照，解码为产品 Plan 状态后由同一纯状态机计算候选，返回
 扩展 CAS；core 与工具完整结果及实际上下文一次提交。工具不持有可写状态机或第二份会话
-working set，提交失败不会留下私有状态更新。child Agent 的 session 由消息 fork 策略创建，
+working set，提交失败不会留下私有状态更新。child Agent 使用独立 session 与独立上下文，
 不继承 parent 的 Plan 内核、Plan working state、revision 或工具句柄；child 若需要执行父
 计划，父 Agent 必须把相关已批准基线明确写进 `spawn_agent.message`，不得通过跨 session
 查询、共享句柄、root registry 或 SQLite 旁路读取。

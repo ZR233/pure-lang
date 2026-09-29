@@ -25,9 +25,6 @@ pub struct AgentSpawn {
     pub task_summary: AgentTaskSummary,
     /// Full self-contained task: goals, approved contract, facts, interfaces, steps, ownership and verification. No application length limit; include pseudocode when useful.
     pub message: String,
-    /// Inherits conversation records only; the child receives its own Profile instructions.
-    #[serde(default)]
-    pub fork_turns: AgentHistory,
     /// Optional project-relative write directories, accepted only by directory Profiles.
     pub writable_paths: Option<Vec<String>>,
     /// Product-owned creation metadata; never interpreted as framework permissions.
@@ -67,27 +64,6 @@ impl TryFrom<String> for AgentTaskSummary {
 impl AgentTaskSummary {
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-/// Product tool syntax for selecting a core conversation window.
-#[derive(Debug, Clone, Copy, Default, serde::Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum AgentHistory {
-    #[default]
-    None,
-    All,
-    Last(std::num::NonZeroUsize),
-}
-
-impl AgentHistory {
-    /// Converts the explicit selection without copying a model session or tool state.
-    pub fn inheritance(self) -> pl_core::context::HistoryInheritance {
-        match self {
-            Self::None => pl_core::context::HistoryInheritance::Empty,
-            Self::All => pl_core::context::HistoryInheritance::All,
-            Self::Last(count) => pl_core::context::HistoryInheritance::LastUserTurns(count),
-        }
     }
 }
 
@@ -183,7 +159,7 @@ impl AgentControlKind {
         match self {
             Self::Spawn => pl_protocol::ToolSpec::function(
                 "spawn_agent",
-                "Create a child using an authorized profile and optional recent conversation history. Provide taskSummary: a brief task description (1–80 Unicode characters) shown in the child list, and message: the complete instructions. The host validates permissions and limits.",
+                "Create a child with an independent context using an authorized profile. Provide taskSummary: a brief task description (1–80 Unicode characters) shown in the child list, and message: the complete self-contained instructions. The host validates permissions and limits.",
                 schemars::schema_for!(AgentSpawn).to_value(),
             ),
             Self::Send => pl_protocol::ToolSpec::function(

@@ -16,16 +16,17 @@ Profile 修改只影响未来创建的子代理。禁用或不可用的 Profile 
 
 首次调用就使用工具 schema 的 camelCase 字段。标准形状如下：
 
-- 无目录限制的探索者或审查者：`{"profileId":"explorer","forkTurns":"none","taskSummary":"检查指定组件","message":"..."}`，按角色替换 `profileId`。
-- 本地目录执行者：`{"profileId":"executor","forkTurns":"none","writablePaths":["src/module"],"taskSummary":"实现指定模块","message":"..."}`。
-- 工作树执行者：`{"profileId":"worktree_executor","forkTurns":"none","taskSummary":"在独立工作树实现指定模块","message":"..."}`。
+- 无目录限制的探索者或审查者：`{"profileId":"explorer","taskSummary":"检查指定组件","message":"..."}`，按角色替换 `profileId`。
+- 本地目录执行者：`{"profileId":"executor","writablePaths":["src/module"],"taskSummary":"实现指定模块","message":"..."}`。
+- 工作树执行者：`{"profileId":"worktree_executor","taskSummary":"在独立工作树实现指定模块","message":"..."}`。
 
 每次派发必须提供简洁的 `taskSummary`，空白归一化后为 1–80 个 Unicode 字符，用作 GUI
 子代理列表标题；`message` 包含完整任务。主代理和子代理在首次工具调用前、重要发现、阶段
 切换、等待及阻塞等有意义的节点，用 1–3 句 commentary 汇报。
 
-不得发送 `profile_id`、`fork_turns` 或 `writable_paths`。只有 directory Profile 接受
-`writablePaths`，unrestricted 和 worktree Profile 不接受。首次调用前确认 Profile、模式及
+只发送 schema 声明的字段，不得改用 `profile_id` 或 `writable_paths`。只有 directory
+Profile 接受 `writablePaths`，unrestricted 和 worktree Profile 不接受。子代理始终使用独立
+上下文，`message` 必须自包含，不能依赖父会话历史。首次调用前确认 Profile、模式及
 最窄目录范围。遇到类型化参数错误时修正 schema 用法，不重复原参数。刻意触发的目录边界
 拒绝记为 `expected_rejection`，不得重试或通过 shell、Git、MCP 绕过。
 
@@ -39,7 +40,7 @@ Profile 修改只影响未来创建的子代理。禁用或不可用的 Profile 
 
 ## 派发时机与工作区
 
-`spawn_agent` 用于边界明确的异步任务。独立探索使用 `forkTurns:none` 并行派发，由主代理
+`spawn_agent` 用于边界明确的异步任务。子代理始终使用独立上下文；独立探索可并行派发，由主代理
 综合证据；需要检查实例时使用 `list_agents`，没有独立工作时使用 `wait`。真实依赖保持顺序，
 所有权重叠的修改不并行。Task 的 `editing_documents` 阶段仅由主代理写入 `design/**`。
 

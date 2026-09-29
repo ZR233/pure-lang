@@ -373,36 +373,20 @@ impl StudioThreadAssembler {
         Ok(thread)
     }
 
-    /// Creates a child with selected context from its originating, immutable model request.
+    /// Creates a child with an independent context from its frozen Profile and initial facts.
     /// Model sessions, task state, mutable extensions and executors are created independently.
     ///
     /// # Errors
-    /// Rejects mismatched parent identities, recovery history or malformed inherited context.
+    /// Rejects mismatched parent identities or recovery history.
     pub async fn assemble_child(
         &self,
-        mut spec: StudioThreadSpec,
+        spec: StudioThreadSpec,
         caller: &pl_core::tool::opaque::CallContext,
-        inheritance: pl_core::context::ContextInheritance,
     ) -> Result<ThreadHandle, ThreadAssemblyError> {
         if spec.parent_id.as_deref() != Some(caller.thread_id.as_str()) || spec.checkpoint.is_some()
         {
             return Err(ThreadAssemblyError::Identity(spec.id));
         }
-        let inherited = caller
-            .context
-            .inherit(inheritance)
-            .map_err(ThreadError::from)?;
-        let (mut instructions, mut history): (Vec<_>, Vec<_>) = inherited
-            .into_iter()
-            .partition(|record| record.source == pl_core::context::ContextSource::Instruction);
-        let (new_instructions, current_facts): (Vec<_>, Vec<_>) = spec
-            .initial_context
-            .into_iter()
-            .partition(|record| record.source == pl_core::context::ContextSource::Instruction);
-        instructions.extend(new_instructions);
-        history.extend(current_facts);
-        instructions.extend(history);
-        spec.initial_context = instructions;
         self.assemble(spec).await
     }
 

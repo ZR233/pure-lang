@@ -84,18 +84,21 @@ model、effort、system instructions 和 workspace mode 创建容器、远端会
 可以重命名请求类型或拆分生命周期阶段，但不得删除这项能力，也不得把重新解析 Profile 的
 责任推回产品层。
 
-Plan 属于各自的 Thread，不随 Profile、消息 fork 或 workspace assignment 复制到 child，也不
-存在 lineage 共享句柄。root 必须把 child 所需的已批准基线写入 `spawn_agent.message`；
+Plan 属于各自的 Thread，不随 Profile 或 workspace assignment 复制到 child，也不
+存在 lineage 共享句柄。child 始终使用独立上下文，不继承父 Thread 的对话记录、附件、资源引用或
+provider 私有历史；`spawn_agent` 不接受历史继承选项。root 必须把 child 所需的已批准基线写入
+`spawn_agent.message`；
 child 不装配 `plan_*` 工具；方案与问题通过 Turn 报告交给 root。配置冻结与 Plan session
 隔离是两条独立边界。`spawn_agent.message` 和 root 后续通过 `send_message` 发送的补充输入
 都在 child Timeline 中显示为 `parentAgent` 文本消息，并由 Studio 标记为"主智能体 / Main
 agent"；`send_message` 对运行中 child 请求打断并在清理后携带新内容自动继续，对空闲 child 启动执行。
-它复用用户 prompt 的 owner 控制入口，`interrupt_agent` 则仅停止，不自动续跑。消息收据只表示受理。它们对 provider 仍是普通 user role，不得改变 fork、Plan 隔离、预算刷新或
+它复用用户 prompt 的 owner 控制入口，`interrupt_agent` 则仅停止，不自动续跑。消息收据只表示受理。它们对 provider 仍是普通 user role，不得改变上下文隔离、Plan 隔离、预算刷新或
 parent→direct-child 授权语义。
 
 ## 12.3 spawn 与目录写策略
 
-`spawn_agent` 必须提供 `taskSummary` 与完整 `message`。概要由调用者用简短语句描述本次
+`spawn_agent` 必须提供 `taskSummary` 与完整、自包含的 `message`。child 的初始上下文只由冻结
+Profile 的系统指令、产品初始事实和该消息构成，不读取父模型请求历史。概要由调用者用简短语句描述本次
 任务，折叠空白后必须非空且不超过 80 个 Unicode 字符；缺失或非法概要在分配资源前拒绝，
 不截断。Studio 通过类型化创建请求接收概要，作为 child 的初始 canonical Thread title
 保存和发布。后续消息、进度与完成汇报不覆盖该标题；显式重命名沿用 Thread title 合同。
