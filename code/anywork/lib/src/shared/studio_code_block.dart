@@ -13,6 +13,7 @@ class StudioCodeBlock extends StatelessWidget {
     this.backgroundColor,
     this.headerBackgroundColor,
     this.borderColor,
+    this.borderRadius,
     this.textStyle,
     this.languageTextStyle,
     super.key,
@@ -27,6 +28,7 @@ class StudioCodeBlock extends StatelessWidget {
   final Color? backgroundColor;
   final Color? headerBackgroundColor;
   final Color? borderColor;
+  final Radius? borderRadius;
   final TextStyle? textStyle;
   final TextStyle? languageTextStyle;
 
@@ -67,7 +69,9 @@ class StudioCodeBlock extends StatelessWidget {
       margin: margin,
       decoration: BoxDecoration(
         color: backgroundColor ?? colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(StudioRadii.sm),
+        borderRadius: BorderRadius.all(
+          borderRadius ?? Radius.circular(StudioRadii.sm),
+        ),
         border: Border.all(color: borderColor ?? colors.outlineVariant),
       ),
       clipBehavior: Clip.antiAlias,

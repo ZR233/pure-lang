@@ -43,39 +43,16 @@ class _AgentMarkdown extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final onUserSurface = surface == _MarkdownSurface.user;
     return GptMarkdownTheme(
-      // 标题按级别递进字级字重，只能在 GptMarkdownThemeData 上按级提供；
-      // 用局部 InheritedWidget 覆盖，不改动全局主题或其他潜在调用方。
+      // VS Code 预览的标题阶梯：全部 w600、line-height 1.25，字级按正文字号
+      // 相对递进（2/1.5/1.25/1/0.875/0.85em）。只能在 GptMarkdownThemeData
+      // 上按级提供；用局部 InheritedWidget 覆盖，不改动全局主题。
       gptThemeData: GptMarkdownTheme.of(context).copyWith(
-        h1: _timelineHeadingStyle(
-          context,
-          fontSize: 20,
-          weight: FontWeight.w600,
-        ),
-        h2: _timelineHeadingStyle(
-          context,
-          fontSize: 18,
-          weight: FontWeight.w600,
-        ),
-        h3: _timelineHeadingStyle(
-          context,
-          fontSize: 16,
-          weight: FontWeight.w600,
-        ),
-        h4: _timelineHeadingStyle(
-          context,
-          fontSize: 15,
-          weight: FontWeight.w600,
-        ),
-        h5: _timelineHeadingStyle(
-          context,
-          fontSize: 14,
-          weight: FontWeight.w600,
-        ),
-        h6: _timelineHeadingStyle(
-          context,
-          fontSize: 13,
-          weight: FontWeight.w500,
-        ),
+        h1: _timelineHeadingStyle(context, surface, 2.0),
+        h2: _timelineHeadingStyle(context, surface, 1.5),
+        h3: _timelineHeadingStyle(context, surface, 1.25),
+        h4: _timelineHeadingStyle(context, surface, 1.0),
+        h5: _timelineHeadingStyle(context, surface, 0.875),
+        h6: _timelineHeadingStyle(context, surface, 0.85),
       ),
       child: GptMarkdown(
         repaired,
@@ -85,13 +62,11 @@ class _AgentMarkdown extends ConsumerWidget {
           blockQuote: BlockQuoteStyle(
             textStyle: TextStyle(
               color: context.colors.onSurfaceVariant,
-              height: 1.52,
+              height: 1.57,
             ),
           ),
           heading: HeadingStyle(
-            // 聊天正文里标题靠字级字重分层：前留白大于后留白，不再画 h1 分隔线。
-            padding: const EdgeInsetsDirectional.fromSTEB(0, 12, 0, 4),
-            showDivider: false,
+            // 仅做随表面的语义色覆盖；节奏与 H1/H2 分隔线由 headingBuilder 提供。
             textStyle: switch (surface) {
               _MarkdownSurface.reasoning => TextStyle(
                 color: context.colors.onSurfaceVariant,
@@ -111,16 +86,69 @@ class _AgentMarkdown extends ConsumerWidget {
             ),
           ),
           table: TableStyle(
-            // 表格网格与分隔线同一低对比色，避免默认 onSurface 重网格。
+            // VS Code 表格：无表头背景、无外圆角，浅色细网格做清楚分隔。
             borderColor: scheme.outlineVariant,
-            borderRadius: Radius.circular(StudioRadii.sm),
-            headerBackground: scheme.surfaceContainerLow,
+            headerBackground: Colors.transparent,
+            headerTextStyle: const TextStyle(fontWeight: FontWeight.w600),
             cellPadding: const EdgeInsets.symmetric(
               horizontal: 10,
               vertical: 5,
             ),
           ),
         ),
+        headingBuilder: (context, level, content, style) {
+          final bodySize = _markdownBodyStyle(context, surface)?.fontSize ?? 14;
+          // VS Code 预览节奏：块间空行承担约一段距（≈1.15em），标题只补
+          // margin-top 24px（相对正文 ≈1.7em）；H3-H6 底距交还空行节奏。
+          // H1/H2 自带 0.3em 底距与 1px 轻分隔线（padding 在线之上）。
+          // 选择顺序：标题整树包 _HeadingSelectionUnit 作为块级选择单元，
+          // 外层选择区域见块级边界而非窄标题文本盒，几何排序不再因文本
+          // 盒 top 偏移把标题排到后续正文之后（复制错序）。
+          final topPadding = bodySize * 24 / 14;
+          final Widget heading;
+          if (level > 2) {
+            heading = LayoutBuilder(
+              builder: (context, constraints) {
+                // 有界阅读列内标题占满列宽，块级选择边界覆盖整行；
+                // 无界约束保持内容宽度，避免 infinity 布局错误。
+                return constraints.hasBoundedWidth
+                    ? SizedBox(width: double.infinity, child: content)
+                    : content;
+              },
+            );
+          } else {
+            final headingSize = bodySize * (level == 1 ? 2.0 : 1.5);
+            heading = LayoutBuilder(
+              builder: (context, constraints) {
+                final rule = DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: headingSize * 0.3),
+                    child: content,
+                  ),
+                );
+                // 有界阅读列内底线占满列宽、内容保持起始对齐；
+                // 无界约束保持内容宽度，避免 infinity 布局错误。
+                return constraints.hasBoundedWidth
+                    ? SizedBox(width: double.infinity, child: rule)
+                    : rule;
+              },
+            );
+          }
+          return _HeadingSelectionUnit(
+            child: Padding(
+              padding: EdgeInsets.only(top: topPadding),
+              child: heading,
+            ),
+          );
+        },
         onLinkTap: (url, _) {
           unawaited(_openTimelineWebLink(context, ref, url));
         },
@@ -133,71 +161,61 @@ class _AgentMarkdown extends ConsumerWidget {
           // app 正文字体链，中文代码字形回落 Noto Sans SC 而非衬线。
           fontFamily: kGptMarkdownMonoFontFamily,
           fontFamilyPackage: kGptMarkdownFontPackage,
-          fontSizeFactor: 0.9,
+          fontSizeFactor: 1.0,
           color: scheme.onSurface,
           backgroundColor: onUserSurface
               ? scheme.surfaceContainerLowest
               : scheme.surfaceContainerLow,
           // 只用轻底色区分，去掉描边和加粗，避免打断中文阅读基线。
           borderWidth: 0,
-          borderRadius: Radius.circular(StudioRadii.xs),
+          borderRadius: Radius.circular(3),
           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
         ),
-        blockQuoteBuilder: (context, content, style) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final card = DecoratedBox(
-                key: const ValueKey('studio-markdown-quote'),
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainerLow,
-                  border: BorderDirectional(
-                    start: BorderSide(
-                      color: context.colors.primary,
-                      width: 2.5,
-                    ),
-                  ),
-                  borderRadius: BorderRadius.circular(StudioRadii.sm),
+        // VS Code 预览引用：常规左侧线 + 低对比背景，无垂直外边距
+        // （块间空行已承担节奏），内边距 0 16 0 10、小圆角。
+        blockQuoteBuilder: (context, content, style) => LayoutBuilder(
+          builder: (context, constraints) {
+            final card = DecoratedBox(
+              key: const ValueKey('studio-markdown-quote'),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerLowest,
+                border: BorderDirectional(
+                  start: BorderSide(color: scheme.outlineVariant, width: 5),
                 ),
-                child: Padding(
-                  padding: const EdgeInsetsDirectional.fromSTEB(12, 8, 12, 8),
-                  child: content,
-                ),
-              );
-              // 宽度有界时占满可用宽度，与其他块级内容右边缘对齐；
-              // 无界约束（如横向滚动内）保持内容宽度，避免 infinity 布局错误。
-              return constraints.hasBoundedWidth
-                  ? SizedBox(width: double.infinity, child: card)
-                  : card;
-            },
-          ),
+                borderRadius: BorderRadius.circular(2),
+              ),
+              child: Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(10, 0, 16, 0),
+                child: content,
+              ),
+            );
+            // 宽度有界时占满可用宽度，与其他块级内容右边缘对齐；
+            // 无界约束（如横向滚动内）保持内容宽度，避免 infinity 布局错误。
+            return constraints.hasBoundedWidth
+                ? SizedBox(width: double.infinity, child: card)
+                : card;
+          },
         ),
         imageBuilder: (context, url, _, _) =>
             _studioMarkdownImage(context, url, imageAlts[url] ?? '', surface),
         codeBuilder: (context, name, code, closed) {
           final scheme = Theme.of(context).colorScheme;
           final textTheme = Theme.of(context).textTheme;
+          // VS Code 预览代码区：低对比背景 + 1px 边框，不显示语言栏；
+          // 垂直节奏交还块间空行。
           final codeBackground = onUserSurface
               ? scheme.surfaceContainerHigh
               : scheme.surfaceContainerLow;
-          // 语言栏始终比代码底色深一档，保证各 surface 层次一致。
-          final headerBackground = onUserSurface
-              ? scheme.surfaceContainerHighest
-              : scheme.surfaceContainerHigh;
           final bodyStyle = surface == _MarkdownSurface.reasoning
               ? textTheme.bodySmall
               : textTheme.bodyMedium;
           return StudioCodeBlock(
             text: code,
-            language: name,
-            margin: const EdgeInsets.symmetric(vertical: 6),
+            margin: EdgeInsets.zero,
+            padding: const EdgeInsets.all(16),
             backgroundColor: codeBackground,
-            headerBackgroundColor: headerBackground,
             borderColor: scheme.outlineVariant,
-            languageTextStyle: textTheme.labelSmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-              fontFamily: _monoFontFamily,
-            ),
+            borderRadius: const Radius.circular(3),
             textStyle: bodyStyle?.copyWith(
               color: surface == _MarkdownSurface.reasoning
                   ? context.colors.onSurfaceVariant
@@ -206,8 +224,8 @@ class _AgentMarkdown extends ConsumerWidget {
                   : scheme.onSurface,
               // 包注册字体；不传 fallback，中文继承 app 正文字体链。
               fontFamily: _monoFontFamily,
-              fontSize: (bodyStyle.fontSize ?? 14) * 0.92,
-              height: 1.45,
+              fontSize: bodyStyle.fontSize ?? 14,
+              height: 1.36,
             ),
           );
         },
@@ -215,14 +233,19 @@ class _AgentMarkdown extends ConsumerWidget {
     );
   }
 
-  /// 聊天阅读用的标题字级：从全局正文字体派生，保持家族与颜色继承。
+  /// VS Code 预览标题：相对所在 surface 正文字号的递进字级（em），
+  /// 全部 w600、line-height 1.25；从全局正文字体派生保持家族继承。
   TextStyle? _timelineHeadingStyle(
-    BuildContext context, {
-    required double fontSize,
-    required FontWeight weight,
-  }) {
-    return Theme.of(context).textTheme.bodyMedium
-        ?.copyWith(fontSize: fontSize, fontWeight: weight, height: 1.4);
+    BuildContext context,
+    _MarkdownSurface surface,
+    double em,
+  ) {
+    final bodySize = _markdownBodyStyle(context, surface)?.fontSize ?? 14;
+    return Theme.of(context).textTheme.bodyMedium?.copyWith(
+      fontSize: bodySize * em,
+      fontWeight: FontWeight.w600,
+      height: 1.25,
+    );
   }
 }
 
@@ -230,6 +253,42 @@ class _AgentMarkdown extends ConsumerWidget {
 /// （见 InlineCodeStyle.applyTo 的 `packages/<package>/<family>` 拼法）。
 const String _monoFontFamily =
     'packages/$kGptMarkdownFontPackage/$kGptMarkdownMonoFontFamily';
+
+/// 标题的块级选择单元：内层标题文本注册到局部
+/// [StaticSelectionContainerDelegate]，外层选择区域只见 [SelectionContainer]
+/// 的 RenderBox 边界（paintBounds，覆盖标题完整 padding 与底线），而不是
+/// 窄标题文本盒——几何选择排序因此把标题当作与后续正文平级的块单元，
+/// 不会因文本盒 top 偏移把标题排到正文之后（复制错序）。标题仍参与外层
+/// 连续选择：委托嵌套是 SDK 官方用法（SelectableRegion 自身即用
+/// SelectionContainer 嵌套委托），不通过独立文本编辑控件隔离标题，也不
+/// 改变全局选择排序。
+class _HeadingSelectionUnit extends StatefulWidget {
+  const _HeadingSelectionUnit({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_HeadingSelectionUnit> createState() => _HeadingSelectionUnitState();
+}
+
+class _HeadingSelectionUnitState extends State<_HeadingSelectionUnit> {
+  // State 拥有 delegate 生命周期（create once / dispose），与 SDK
+  // SelectionListenerContainer 同构：SelectionContainer 自身 dispose 时
+  // 只清理引用，不负责销毁 delegate。
+  final StaticSelectionContainerDelegate _delegate =
+      StaticSelectionContainerDelegate();
+
+  @override
+  void dispose() {
+    _delegate.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SelectionContainer(delegate: _delegate, child: widget.child);
+  }
+}
 
 /// 纯文本正文的**分块**渲染（只对超长、纯 LTR 的普通正文生效）。
 ///
@@ -612,20 +671,21 @@ Future<void> _openTimelineWebLink(
 
 TextStyle? _markdownBodyStyle(BuildContext context, _MarkdownSurface surface) {
   final theme = Theme.of(context);
+  // VS Code 预览正文行高 22px/14px ≈ 1.57，各阅读表面保持一致节奏。
   if (surface == _MarkdownSurface.reasoning) {
     return theme.textTheme.bodySmall?.copyWith(
       color: context.colors.onSurfaceVariant,
-      height: 1.48,
+      height: 1.57,
     );
   }
   if (surface == _MarkdownSurface.error) {
     return theme.textTheme.bodyMedium?.copyWith(
       color: theme.colorScheme.error,
-      height: 1.52,
+      height: 1.57,
     );
   }
   return theme.textTheme.bodyMedium?.copyWith(
     color: theme.colorScheme.onSurface,
-    height: 1.52,
+    height: 1.57,
   );
 }
