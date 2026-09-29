@@ -29,7 +29,8 @@ class _Header extends StatelessWidget {
               if (projectLabel.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Tooltip(
-                  message: project?.path ?? projectLabel,
+                  message:
+                      thread?.workspacePath ?? project?.path ?? projectLabel,
                   child: Text(
                     projectLabel,
                     maxLines: 1,
