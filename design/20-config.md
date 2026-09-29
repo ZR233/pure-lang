@@ -345,12 +345,11 @@ Studio 保留两段互不混用的顶层配置。`[web_search]` 只配置 OpenAI
 近似位置均可省略。`[deepseek_web_search]` 只包含 `enabled`，默认 `true`；缺失整段时同样
 按启用处理。DeepSeek 不接受 cached/indexed、域名、位置或 context size 等 OpenAI 专属字段。
 
-规划先独立解析两边状态，再统一仲裁：当前 route 的 provider 有凭据、使用 Responses
-transport、模型支持 web search、endpoint 声明 DeepSeek hosted dialect，且 DeepSeek 开关
-启用时，选择 DeepSeek 原生搜索并保持其他普通工具可见；否则沿用 OpenAI
-standalone/hosted 规划。DeepSeek 不跨 provider 借用，跨 provider 回退只由 OpenAI 搜索
-承担。两边均不可用时分别保留 `disabled`、`missingCredential`、`providerUnsupported` 或
-`modelUnsupported`，不能合并为模糊状态。
+规划先独立解析两边状态，再统一仲裁：只有当前 route 的 endpoint 与模型显式声明 DeepSeek
+hosted dialect，且开关启用时，才选择该 hosted 搜索并保持其他普通工具可见。官方 DeepSeek
+Responses endpoint 不声明该能力，因为该 API 会忽略 `web_search` builtin；内置 DeepSeek 模型
+沿用 OpenAI standalone/hosted 规划，以 function tool 执行搜索。两边均不可用时分别保留
+`disabled`、`missingCredential`、`providerUnsupported` 或 `modelUnsupported`，不能合并为模糊状态。
 
 配置值与生效值必须分离：没有有凭据的 OpenAI preset 时保留 configured mode，但 effective
 mode 为 `disabled`——此状态下工具规划不得注册独立搜索或 hosted 搜索，运行时不得创建

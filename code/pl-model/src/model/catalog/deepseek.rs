@@ -108,7 +108,7 @@ fn deepseek_capabilities() -> ModelCapabilities {
         streaming: true,
         temperature: false,
         reasoning: true,
-        web_search: true,
+        web_search: false,
         input: vec![ModelInputCapability::text()],
         output: vec![ModelModality::Text],
         tools: ToolCapabilities {

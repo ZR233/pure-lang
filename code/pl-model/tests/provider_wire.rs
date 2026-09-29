@@ -67,6 +67,16 @@ fn bundled(slug: &str) -> ModelInfo {
         .unwrap()
 }
 
+#[test]
+fn deepseek_catalog_does_not_advertise_ignored_responses_web_search() {
+    let endpoint = ProviderEndpoint::deepseek(None);
+    assert!(!endpoint.service_capabilities.web_search.hosted_responses);
+
+    for slug in ["deepseek-flash", "deepseek-v4-pro"] {
+        assert!(!bundled(slug).capabilities.web_search, "{slug}");
+    }
+}
+
 async fn complete(
     fixture: &FixtureServer,
     model: ModelInfo,
@@ -1080,7 +1090,7 @@ async fn openai_hosted_search_and_native_custom_programmatic_tools_use_responses
 }
 
 #[tokio::test]
-async fn deepseek_hosted_search_has_its_own_minimal_wire_dialect() {
+async fn explicitly_enabled_deepseek_hosted_search_has_its_own_minimal_wire_dialect() {
     let fixture = FixtureServer::start(vec![Step::prompt(
         Protocol::ResponsesHttp,
         "native search",
@@ -1094,7 +1104,9 @@ async fn deepseek_hosted_search_has_its_own_minimal_wire_dialect() {
     .await
     .unwrap();
     let endpoint = ProviderEndpoint::deepseek(Some(fixture.base_url()));
-    let runtime = ModelRuntime::new(endpoint, bundled("deepseek-v4-pro")).unwrap();
+    let mut model = bundled("deepseek-v4-pro");
+    model.capabilities.web_search = true;
+    let runtime = ModelRuntime::new(endpoint, model).unwrap();
     let result = runtime
         .complete(
             CompletionRequest::builder()

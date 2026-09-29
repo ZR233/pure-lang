@@ -336,11 +336,6 @@ impl ProviderEndpoint {
             apply_patch_tool_type: None,
             service_capabilities: ProviderServiceCapabilities {
                 files,
-                web_search: WebSearchProviderCapabilities {
-                    hosted_responses: true,
-                    hosted_dialect: HostedWebSearchDialect::DeepSeekResponses,
-                    standalone: None,
-                },
                 prompt_cache: PromptCacheProviderCapabilities {
                     dialect: PromptCacheDialect::ImplicitPrefix,
                 },

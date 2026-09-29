@@ -407,10 +407,10 @@ transport 记录 continuation attempted/used/invalid、full replay retry 和 HTT
 ## 6.11 Web 搜索 Provider 边界
 
 Web 搜索同时维护 OpenAI 与 DeepSeek 两份独立 resolution，再按当前 route 仲裁。OpenAI 路径保留
-standalone `/alpha/search` 与 Responses hosted search；DeepSeek 原生搜索只允许当前 route 自身
-满足：endpoint 有凭据、模型使用 Responses transport、模型声明 web_search 能力，且 provider
-服务能力声明 DeepSeek Responses 方言。DeepSeek 不跨 provider 借用；不满足或配置关闭时才允许
-现有 OpenAI resolution 成为回退。
+standalone `/alpha/search` 与 Responses hosted search。DeepSeek 官方 Responses API 会忽略
+`web_search` builtin，因此内置 DeepSeek endpoint 和模型不得声明原生搜索能力；DeepSeek 模型通过
+function calling 使用已解析的 standalone 搜索。只有明确实现该 wire 方言的其他 endpoint 与模型
+同时显式声明能力时，DeepSeek hosted resolution 才可用。
 
 Responses 原生搜索统一通过携带 hosted dialect 的 WebSearch 工具规格表达。OpenAI dialect 可
 发送 external/indexed access、context size、允许域名与近似位置；DeepSeek dialect 严格只序列化
@@ -420,11 +420,10 @@ tool choice 保持 `auto`。DeepSeek hosted search 是 additive 工具，必须�
 使用封闭变体：DeepSeek 无附加参数，OpenAI 拥有其实际支持的访问模式、过滤、位置与上下文设置；
 构造 DeepSeek 搜索不需要填写 OpenAI 空字段，adapter 也不通过逐字段丢弃这些设置来模拟协议兼容。
 
-Provider 服务能力同时包含 hosted_responses 与 hosted_dialect。内置 DeepSeek preset 使用
-DeepSeekResponses 方言，OpenAI preset 与旧显式配置默认使用 OpenAiResponses 方言。preset 实例
-覆盖非 canonical base_url 时不得继承 hosted search 或其他 Responses hosted 能力；显式
-capability 仍可由用户重新声明。provider catalog schema 暴露 dialect，产品层不得从 provider id
-或 URL 猜测。
+Provider 服务能力同时包含 hosted_responses 与 hosted_dialect。内置 DeepSeek preset 不声明
+hosted search；OpenAI preset 使用 OpenAiResponses 方言。preset 实例覆盖非 canonical base_url
+时不得继承 hosted search 或其他 Responses hosted 能力；显式 capability 仍可由用户重新声明。
+provider catalog schema 暴露 dialect，产品层不得从 provider id 或 URL 猜测。
 
 DeepSeek `/responses` 返回的 `web_search_call` 与 OpenAI Responses 共用 canonical SSE
 decoder、timeline 和历史回放：searching/completed 生命周期、search/open/find action 都投影为

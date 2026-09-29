@@ -44,12 +44,12 @@ Product metadata lives in `<home>/studio/studio.sqlite`, and model/tool call rec
 - `[lsp.servers.<id>]` — command-based LSP servers outside the bundled catalog.
 - `[ui]` — `follow_active_turn`, `compact_timeline`. Studio always uses its fixed light theme. The obsolete `follow_system_theme` key is ignored when reading current-schema files and omitted on the next normal save; no configuration reset is needed.
 - `[web_search]` — search mode, context size, allowed domains, location.
-- `[deepseek_web_search]` — DeepSeek native hosted search toggle. The section and `enabled` field both default to `true`; it deliberately has no OpenAI-specific mode, domain, location, or context options.
+- `[deepseek_web_search]` — Optional DeepSeek hosted search toggle for endpoints that explicitly declare that dialect. The official DeepSeek Responses endpoint does not; it uses function-backed standalone search instead. The section and `enabled` field both default to `true` and have no OpenAI-specific mode, domain, location, or context options.
 - `[instructions]` — base override, developer/user instructions, project doc limits.
 
 A few sections are omitted when left at defaults (`runtime`, `instructions`, `lsp`, `ui`); a default Studio save still writes `[skills]` with `project_dir = ".agents/skills"` and `user_dir = "~/.anywork/skills"`, `[web_search]` with `mode = "cached"`, and `[deepseek_web_search]` with `enabled = true`, so do not delete them assuming they are unused.
 
-When the current route is an eligible credentialed DeepSeek Responses model, DeepSeek native search takes priority. Disabling it falls back to the separately configured OpenAI search when available. Provider instances that override a preset's canonical base URL do not inherit hosted search capability unless they explicitly declare the matching hosted dialect.
+When the current route explicitly declares the DeepSeek hosted dialect, that search takes priority. The official DeepSeek Responses route falls back to the separately configured OpenAI search because its API ignores built-in `web_search`. Provider instances that override a preset's canonical base URL do not inherit hosted search capability unless they explicitly declare the matching hosted dialect.
 
 ## Credentials
 
