@@ -3423,6 +3423,8 @@ dependencies = [
 [[package]]
 name = "rust-embed"
 version = "8.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9e7760e252aaba7b09f4be00e36476cf585bdb68a53552ac954cdf504ab4bc9"
 dependencies = [
  "include-flate",
  "rust-embed-impl",
@@ -3433,6 +3435,8 @@ dependencies = [
 [[package]]
 name = "rust-embed-impl"
 version = "8.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bcfc4d6f53af43755f7a723e4b6b8794fcce052a178dd8c6c1dadc5f5343097"
 dependencies = [
  "mime_guess",
  "proc-macro2",
