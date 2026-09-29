@@ -41,87 +41,195 @@ class _AgentMarkdown extends ConsumerWidget {
         ? _markdownImageAlts(repaired)
         : const <String, String>{};
     final scheme = Theme.of(context).colorScheme;
-    return GptMarkdown(
-      repaired,
-      key: ValueKey('gpt-markdown-$id-$status'),
-      style: _markdownBodyStyle(context, surface),
-      styleSheet: GptMarkdownStyleSheet(
-        blockQuote: BlockQuoteStyle(
-          textStyle: TextStyle(
-            color: context.colors.onSurfaceVariant,
-            height: 1.5,
-          ),
+    final onUserSurface = surface == _MarkdownSurface.user;
+    return GptMarkdownTheme(
+      // 标题按级别递进字级字重，只能在 GptMarkdownThemeData 上按级提供；
+      // 用局部 InheritedWidget 覆盖，不改动全局主题或其他潜在调用方。
+      gptThemeData: GptMarkdownTheme.of(context).copyWith(
+        h1: _timelineHeadingStyle(
+          context,
+          fontSize: 20,
+          weight: FontWeight.w600,
+        ),
+        h2: _timelineHeadingStyle(
+          context,
+          fontSize: 18,
+          weight: FontWeight.w600,
+        ),
+        h3: _timelineHeadingStyle(
+          context,
+          fontSize: 16,
+          weight: FontWeight.w600,
+        ),
+        h4: _timelineHeadingStyle(
+          context,
+          fontSize: 15,
+          weight: FontWeight.w600,
+        ),
+        h5: _timelineHeadingStyle(
+          context,
+          fontSize: 14,
+          weight: FontWeight.w600,
+        ),
+        h6: _timelineHeadingStyle(
+          context,
+          fontSize: 13,
+          weight: FontWeight.w500,
         ),
       ),
-      onLinkTap: (url, _) {
-        unawaited(_openTimelineWebLink(context, ref, url));
-      },
-      inlineLinkBuilder: (link) => safeExternalWebUrl(link.url) == null
-          ? TextSpan(children: link.labelSpans, style: link.style)
-          : link.defaultSpan(),
-      inlineCodeStyle: InlineCodeStyle(
-        fontFamily: 'JetBrains Mono',
-        fontFamilyFallback: const ['Consolas', 'monospace'],
-        fontSizeFactor: 0.9,
-        fontWeight: FontWeight.w600,
-        color: scheme.onSurface,
-        backgroundColor: surface == _MarkdownSurface.user
-            ? scheme.surfaceContainerLowest
-            : scheme.surfaceContainerLow,
-        borderColor: scheme.outlineVariant,
-        borderRadius: Radius.circular(StudioRadii.xs),
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
-      ),
-      blockQuoteBuilder: (context, content, style) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: DecoratedBox(
-          key: const ValueKey('studio-markdown-quote'),
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerLow,
-            border: BorderDirectional(
-              start: BorderSide(color: context.colors.primary, width: 3),
+      child: GptMarkdown(
+        repaired,
+        key: ValueKey('gpt-markdown-$id-$status'),
+        style: _markdownBodyStyle(context, surface),
+        styleSheet: GptMarkdownStyleSheet(
+          blockQuote: BlockQuoteStyle(
+            textStyle: TextStyle(
+              color: context.colors.onSurfaceVariant,
+              height: 1.52,
             ),
-            borderRadius: BorderRadius.circular(StudioRadii.sm),
           ),
-          child: Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(10, 7, 10, 7),
-            child: content,
+          heading: HeadingStyle(
+            // 聊天正文里标题靠字级字重分层：前留白大于后留白，不再画 h1 分隔线。
+            padding: const EdgeInsetsDirectional.fromSTEB(0, 12, 0, 4),
+            showDivider: false,
+            textStyle: switch (surface) {
+              _MarkdownSurface.reasoning => TextStyle(
+                color: context.colors.onSurfaceVariant,
+              ),
+              _MarkdownSurface.error => TextStyle(color: scheme.error),
+              _ => null,
+            },
+          ),
+          list: ListStyle(
+            // 有序/无序列表统一标记距离；标记色弱化，正文保持主导。
+            indent: 8,
+            gapAfterMarker: 8,
+            bulletColor: scheme.onSurfaceVariant,
+            markerTextStyle: TextStyle(
+              fontWeight: FontWeight.w500,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          table: TableStyle(
+            // 表格网格与分隔线同一低对比色，避免默认 onSurface 重网格。
+            borderColor: scheme.outlineVariant,
+            borderRadius: Radius.circular(StudioRadii.sm),
+            headerBackground: scheme.surfaceContainerLow,
+            cellPadding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 5,
+            ),
           ),
         ),
-      ),
-      imageBuilder: (context, url, _, _) =>
-          _studioMarkdownImage(context, url, imageAlts[url] ?? '', surface),
-      codeBuilder: (context, name, code, closed) {
-        final scheme = Theme.of(context).colorScheme;
-        final textTheme = Theme.of(context).textTheme;
-        final codeBackground = surface == _MarkdownSurface.user
-            ? scheme.surfaceContainerHigh
-            : scheme.surfaceContainerLow;
-        final bodyStyle = surface == _MarkdownSurface.reasoning
-            ? textTheme.bodySmall
-            : textTheme.bodyMedium;
-        return StudioCodeBlock(
-          text: code,
-          language: name,
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          backgroundColor: codeBackground,
-          borderColor: scheme.outlineVariant,
-          textStyle: bodyStyle?.copyWith(
-            color: surface == _MarkdownSurface.reasoning
-                ? context.colors.onSurfaceVariant
-                : surface == _MarkdownSurface.error
-                ? scheme.error
-                : scheme.onSurface,
-            fontFamily: 'JetBrains Mono',
-            fontFamilyFallback: const ['Consolas', 'monospace'],
-            fontSize: (bodyStyle.fontSize ?? 14) * 0.92,
-            height: 1.35,
+        onLinkTap: (url, _) {
+          unawaited(_openTimelineWebLink(context, ref, url));
+        },
+        inlineLinkBuilder: (link) => safeExternalWebUrl(link.url) == null
+            ? TextSpan(children: link.labelSpans, style: link.style)
+            : link.defaultSpan(),
+        inlineCodeStyle: InlineCodeStyle(
+          // 包注册字体（family+package 由 InlineCodeStyle.applyTo 拼成
+          // packages/gpt_markdown/JetBrainsMono）；不传 fallback 以继承
+          // app 正文字体链，中文代码字形回落 Noto Sans SC 而非衬线。
+          fontFamily: kGptMarkdownMonoFontFamily,
+          fontFamilyPackage: kGptMarkdownFontPackage,
+          fontSizeFactor: 0.9,
+          color: scheme.onSurface,
+          backgroundColor: onUserSurface
+              ? scheme.surfaceContainerLowest
+              : scheme.surfaceContainerLow,
+          // 只用轻底色区分，去掉描边和加粗，避免打断中文阅读基线。
+          borderWidth: 0,
+          borderRadius: Radius.circular(StudioRadii.xs),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+        ),
+        blockQuoteBuilder: (context, content, style) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final card = DecoratedBox(
+                key: const ValueKey('studio-markdown-quote'),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerLow,
+                  border: BorderDirectional(
+                    start: BorderSide(
+                      color: context.colors.primary,
+                      width: 2.5,
+                    ),
+                  ),
+                  borderRadius: BorderRadius.circular(StudioRadii.sm),
+                ),
+                child: Padding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(12, 8, 12, 8),
+                  child: content,
+                ),
+              );
+              // 宽度有界时占满可用宽度，与其他块级内容右边缘对齐；
+              // 无界约束（如横向滚动内）保持内容宽度，避免 infinity 布局错误。
+              return constraints.hasBoundedWidth
+                  ? SizedBox(width: double.infinity, child: card)
+                  : card;
+            },
           ),
-        );
-      },
+        ),
+        imageBuilder: (context, url, _, _) =>
+            _studioMarkdownImage(context, url, imageAlts[url] ?? '', surface),
+        codeBuilder: (context, name, code, closed) {
+          final scheme = Theme.of(context).colorScheme;
+          final textTheme = Theme.of(context).textTheme;
+          final codeBackground = onUserSurface
+              ? scheme.surfaceContainerHigh
+              : scheme.surfaceContainerLow;
+          // 语言栏始终比代码底色深一档，保证各 surface 层次一致。
+          final headerBackground = onUserSurface
+              ? scheme.surfaceContainerHighest
+              : scheme.surfaceContainerHigh;
+          final bodyStyle = surface == _MarkdownSurface.reasoning
+              ? textTheme.bodySmall
+              : textTheme.bodyMedium;
+          return StudioCodeBlock(
+            text: code,
+            language: name,
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            backgroundColor: codeBackground,
+            headerBackgroundColor: headerBackground,
+            borderColor: scheme.outlineVariant,
+            languageTextStyle: textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+              fontFamily: _monoFontFamily,
+            ),
+            textStyle: bodyStyle?.copyWith(
+              color: surface == _MarkdownSurface.reasoning
+                  ? context.colors.onSurfaceVariant
+                  : surface == _MarkdownSurface.error
+                  ? scheme.error
+                  : scheme.onSurface,
+              // 包注册字体；不传 fallback，中文继承 app 正文字体链。
+              fontFamily: _monoFontFamily,
+              fontSize: (bodyStyle.fontSize ?? 14) * 0.92,
+              height: 1.45,
+            ),
+          );
+        },
+      ),
     );
   }
+
+  /// 聊天阅读用的标题字级：从全局正文字体派生，保持家族与颜色继承。
+  TextStyle? _timelineHeadingStyle(
+    BuildContext context, {
+    required double fontSize,
+    required FontWeight weight,
+  }) {
+    return Theme.of(context).textTheme.bodyMedium
+        ?.copyWith(fontSize: fontSize, fontWeight: weight, height: 1.4);
+  }
 }
+
+/// gpt_markdown 包注册的等宽字体在宿主中的完整 family 名
+/// （见 InlineCodeStyle.applyTo 的 `packages/<package>/<family>` 拼法）。
+const String _monoFontFamily =
+    'packages/$kGptMarkdownFontPackage/$kGptMarkdownMonoFontFamily';
 
 /// 纯文本正文的**分块**渲染（只对超长、纯 LTR 的普通正文生效）。
 ///
