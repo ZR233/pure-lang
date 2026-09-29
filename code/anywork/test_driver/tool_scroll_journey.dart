@@ -5,6 +5,7 @@ import 'package:flutter_driver/flutter_driver.dart';
 
 import 'raw_tap.dart';
 import 'tool_probe.dart';
+import 'scrolling_journey.dart';
 import 'timeline_fill_journey.dart';
 import 'stress_start.dart' as start;
 
@@ -199,6 +200,13 @@ Future<void> main(List<String> args) async {
       await driver.enterText('Tool scroll $kind');
       await driver.sendCommand(RawTap(find.byValueKey('composer-submit')));
       await waitAnswer('Tool scroll $kind');
+    }
+    evidence['wheelNavigation'] = await observeTimelineScrolling(
+      args[0],
+      output,
+    );
+    if ((evidence['wheelNavigation'] as Map)['pass'] != true) {
+      throw StateError('Wheel/scrollbar navigation failed');
     }
     var s = await snapshot();
     final lazy = s['timelineScroll'] as Map;

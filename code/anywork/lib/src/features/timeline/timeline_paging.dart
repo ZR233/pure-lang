@@ -48,12 +48,18 @@ extension on _TimelineViewState {
         cached != null &&
         row.part != null &&
         !isTerminalTimelineStatus(row.part!.status);
-    if (!defer &&
-        (cached == null ||
-            cached.version != version ||
-            cached.expanded != reasoningExpanded ||
-            cached.toolExpanded != toolExpanded ||
-            cached.body != bodyState)) {
+    final needsUpdate =
+        cached == null ||
+        cached.version != version ||
+        cached.expanded != reasoningExpanded ||
+        cached.toolExpanded != toolExpanded ||
+        cached.body != bodyState;
+    if (defer && needsUpdate) {
+      _deferredRowIds.add(row.id);
+    } else {
+      _deferredRowIds.remove(row.id);
+    }
+    if (!defer && needsUpdate) {
       _rowWidgets[row.id] = (
         version: version,
         expanded: reasoningExpanded,

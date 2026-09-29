@@ -6,6 +6,7 @@ import 'package:flutter_driver/flutter_driver.dart';
 import 'pointer_scroll.dart';
 import 'raw_tap.dart';
 import 'scrollbar_drag.dart';
+import 'tool_probe.dart';
 
 /// Opt-in native observation, shared by the long-body manual journey.
 Future<Map<String, Object?>> observeTimelineScrolling(
@@ -44,6 +45,40 @@ Future<Map<String, Object?>> observeTimelineScrolling(
     }).every((moved) => moved);
     await File('${output.path}/scroll-wheel.png')
         .writeAsBytes(await driver.screenshot());
+    final returning = <Map<String, dynamic>>[];
+    for (var step = 0; step < 12; step++) {
+      await driver.sendCommand(PointerScroll(timeline, 60));
+      final state = await scroll();
+      returning.add(state);
+      if (state['followingBottom'] == true &&
+          (state['extentAfter'] as num).abs() < 0.5) {
+        break;
+      }
+    }
+    observations['wheelReturning'] = returning;
+    final returned = returning.last;
+    observations['wheelReachedLatest'] =
+        returned['followingBottom'] == true &&
+        returned['hasNewer'] == false &&
+        (returned['extentAfter'] as num).abs() < 0.5;
+    final state = jsonDecode(await driver.requestData('snapshot')) as Map;
+    final rows = (state['workspace'] as Map)['timeline'] as List;
+    final view = await driver.sendCommand(ToolProbe(timeline, 'observe'));
+    final last = await driver.sendCommand(
+      ToolProbe(
+        find.byValueKey('timeline-block-${rows.last['id']}'),
+        'observe',
+      ),
+    );
+    final viewport = (view['samples'] as List).last as Map;
+    final tail = (last['samples'] as List).last as Map;
+    observations['latestRowGeometry'] = tail;
+    observations['wheelLastLineVisible'] =
+        tail['mounted'] != false &&
+        (tail['top'] as num) + (tail['height'] as num) <=
+            (viewport['top'] as num) + (viewport['height'] as num) + 0.5;
+    await File('${output.path}/scroll-wheel-latest.png')
+        .writeAsBytes(await driver.screenshot());
     final up = await driver.sendCommand(ScrollbarDrag(timeline, -140));
     observations['thumbUp'] = up;
     await File('${output.path}/scroll-thumb-up.png')
@@ -70,6 +105,8 @@ Future<Map<String, Object?>> observeTimelineScrolling(
       'forwardCoordinates',
       'wheelDetached',
       'wheelContinuous',
+      'wheelReachedLatest',
+      'wheelLastLineVisible',
       'thumbUpContinuous',
       'thumbDownContinuous',
     ].every((key) => observations[key] == true);

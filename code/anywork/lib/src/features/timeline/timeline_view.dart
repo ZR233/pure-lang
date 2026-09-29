@@ -131,6 +131,7 @@ class _TimelineViewState extends State<TimelineView> {
   final ListController _listController = ListController();
   Timer? _streamingIdleTimer;
   bool _deferStreamingUpdates = false;
+  final Set<String> _deferredRowIds = {};
   int _restoreAttempts = 0;
   final Map<String, _TimelineScrollSnapshot> _threadScroll = {};
   final Set<String> _expandedReasoningGroups = {};
@@ -274,12 +275,14 @@ class _TimelineViewState extends State<TimelineView> {
       _expandedReasoningGroups.clear();
       _expandedToolGroups.clear();
       _rowWidgets.clear();
+      _deferredRowIds.clear();
       _rowKeys.clear();
       _visibleItemBodySignature = null;
       _lastSelectedText = null;
       _imageLoader.clear();
       _bottomSlack = 0;
       _streamingIdleTimer?.cancel();
+      _streamingIdleTimer = null;
       _deferStreamingUpdates = false;
       _restoreThreadState();
       _contentVersion = _timelineContentVersion(
@@ -421,6 +424,7 @@ class _TimelineViewState extends State<TimelineView> {
     final activeIds = rows.map((row) => row.id).toSet();
     _rowKeys.removeWhere((id, _) => !activeIds.contains(id));
     _rowWidgets.removeWhere((id, _) => !activeIds.contains(id));
+    _deferredRowIds.retainAll(activeIds);
     _imageLoader.retainWindow(widget.threadId, rows);
     // 展开态按稳定分组身份保存，但只保留仍在窗口内的身份：历史分页淘汰/切回
     // 不留下再也用不到的 id，避免集合无界增长。
@@ -627,21 +631,31 @@ class _TimelineViewState extends State<TimelineView> {
         !_controller.hasClients) {
       return;
     }
-    final position = _controller.position;
-    if (position.maxScrollExtent - position.minScrollExtent >= 1) return;
+    // Match Scrollable's axis modifiers: Shift+wheel may belong to a horizontal
+    // code/tool scroller and must not change the timeline's reading intent.
+    if (event.kind == PointerDeviceKind.mouse &&
+        ScrollConfiguration.of(context).pointerAxisModifiers
+            .any(HardwareKeyboard.instance.logicalKeysPressed.contains)) {
+      return;
+    }
     final older = event.scrollDelta.dy < 0;
-    if ((older ? widget.onLoadOlder : widget.onLoadNewer) == null) return;
-    // 内层工具输出若已处理滚轮，外层不再抢走同一事件。
+    final canPage = (older ? widget.onLoadOlder : widget.onLoadNewer) != null;
+    final canResumeLatest =
+        !older &&
+        !widget.hasNewer &&
+        (!_followingBottom || _detachedByUser || _restoreClamped);
+    if (!canPage && !canResumeLatest) return;
+    // Scrollable only claims wheel events that move pixels. At a window edge
+    // (including an underfull list), the unclaimed direction still means page
+    // onward or resume Latest. Inner scrollers and normal timeline movement
+    // register first, so they retain ownership of any event they can consume.
     GestureBinding.instance.pointerSignalResolver.register(event, (_) {
       if (!mounted) return;
-      setState(() {
-        _scrollingOlder = older;
-        if (older) _resumeAfterNewerPage = false;
-        _followingBottom = false;
-        _detachedByUser = true;
-        _restoreClamped = false;
-      });
-      _schedulePrefetch();
+      _restoreClamped = false;
+      _handleScrollPositionChanged(
+        direction: older ? ScrollDirection.forward : ScrollDirection.reverse,
+      );
+      event.respond(allowPlatformDefault: false);
     });
   }
 
@@ -844,19 +858,40 @@ class _TimelineViewState extends State<TimelineView> {
 
   void _deferStreamingDuringScroll() {
     _streamingIdleTimer?.cancel();
+    _streamingIdleTimer = null;
     if (_detachedByUser || !_isNearBottom()) _deferStreamingUpdates = true;
   }
 
   void _resumeStreamingAfterIdle() {
     _streamingIdleTimer?.cancel();
-    _streamingIdleTimer = Timer(const Duration(milliseconds: 160), () {
+    late final Timer timer;
+    timer = Timer(const Duration(milliseconds: 160), () {
       if (!mounted || !_deferStreamingUpdates || _pointerHeld) return;
-      final anchor = _captureAnchor();
-      setState(() {
+      // Static history has nothing to flush. Creating a restore intent here
+      // would compete with the wheel's position even though no body changed.
+      if (_deferredRowIds.isEmpty) {
         _deferStreamingUpdates = false;
-        if (_detachedByUser && anchor != null) _prepareAnchorRestore(anchor);
+        return;
+      }
+      // A timer can fire between pointerScroll and the next layout. Capture the
+      // painted anchor only after that layout, otherwise it describes the old
+      // viewport and restores the very position the user just scrolled away from.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            !identical(_streamingIdleTimer, timer) ||
+            !_deferStreamingUpdates ||
+            _pointerHeld) {
+          return;
+        }
+        final anchor = _captureAnchor();
+        setState(() {
+          _deferStreamingUpdates = false;
+          if (_detachedByUser && anchor != null) _prepareAnchorRestore(anchor);
+        });
       });
+      WidgetsBinding.instance.ensureVisualUpdate();
     });
+    _streamingIdleTimer = timer;
   }
 
   void _toggleReasoning(String groupId) {
