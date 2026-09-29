@@ -37,6 +37,7 @@ impl StudioRuntime {
         let _timing = crate::startup_timing::Stage::new("construct_runtime");
         observer(crate::StudioStartupStage::OpeningStorage);
         let resolved = options.resolve()?;
+        let helper_source = resolved.helper_source;
         let lock_path = resolved.paths.runtime_lock();
         let system_skills_dir = resolved.paths.system_skills_dir();
         let host = resolved.host;
@@ -71,6 +72,7 @@ impl StudioRuntime {
             StudioRuntimeState::new(),
             Some(instance_lock),
             Some(system_skills_dir),
+            helper_source,
             observer,
         )
         .map_err(|error| {
@@ -90,6 +92,7 @@ impl StudioRuntime {
         runtime_state: StudioRuntimeState,
         instance_lock: Option<RuntimeLock>,
         system_skills_dir: Option<std::path::PathBuf>,
+        helper_source: crate::worker_assets::RemoteHelperSource,
         startup_observer: std::sync::Arc<dyn Fn(crate::StudioStartupStage) + Send + Sync>,
     ) -> Result<Self> {
         let config_timing = crate::startup_timing::Stage::new("load_configuration");
@@ -101,7 +104,7 @@ impl StudioRuntime {
         let writer = ThreadWriteBehindWriter::new(store.clone());
         let product_events = ProductEventBus::new(store.clone(), writer.clone());
         let model_performance = ModelPerformanceOwner::new(store.clone(), product_events.clone());
-        let ssh_manager = std::sync::Arc::new(crate::worker_assets::ssh_manager());
+        let ssh_manager = std::sync::Arc::new(crate::worker_assets::ssh_manager(&helper_source));
         let worktrees =
             crate::studio::agent_host::worktree_lease::WorktreeLeaseOwner::new(writer.clone());
         let persistence = writer;
@@ -133,6 +136,7 @@ impl StudioRuntime {
                 skills: skills.clone(),
                 thread_modes: thread_modes.clone(),
                 ssh_manager: ssh_manager.clone(),
+                helper_source,
             },
         );
         let threads = crate::thread_assembler::StudioThreadAssembler::default();

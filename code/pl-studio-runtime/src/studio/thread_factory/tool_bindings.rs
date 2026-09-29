@@ -278,6 +278,7 @@ impl StudioThreadFactory {
                     root_thread_id: &thread.root_thread_id,
                     workspace: binding.workspace.clone(),
                     store: resources,
+                    helper_source: self.services.helper_source.clone(),
                 },
                 CatalogPreparation::Refresh {
                     policy_key: binding.policy_key.clone(),

@@ -88,6 +88,7 @@ pub use updater::{
     StudioUpdate, StudioUpdateAsset, StudioUpdateCancellation, StudioUpdateCheck,
     StudioUpdateError, StudioUpdateErrorCode, StudioUpdateEvent, StudioUpdater,
 };
+pub use worker_assets::RemoteHelperSource;
 
 // 公共签名（bridge DTO 字段、runtime API 返回值）使用的 pl-protocol 类型在此
 // 精确重导出，消费方只依赖 pl-studio-runtime 即可命名完整签名。

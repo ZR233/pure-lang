@@ -112,7 +112,7 @@ impl SshManager {
     /// 使用可选的开发 helper 资产创建 manager。
     ///
     /// 每个资产仍必须带有相邻的 `.sha256` 文件；生产环境应使用
-    /// [`Self::with_helper_assets`] 提供随应用嵌入的压缩资产。
+    /// [`Self::with_helper_assets`] 提供随应用分发的按需解压资产。
     pub fn new(aarch64_helper: Option<PathBuf>, x86_64_helper: Option<PathBuf>) -> Self {
         Self::with_optional_helper_assets(file_helper_assets(aarch64_helper, x86_64_helper))
     }

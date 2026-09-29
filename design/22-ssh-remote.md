@@ -5,7 +5,7 @@
 Pure 的 SSH 远程开发是本地 runtime 的宿主能力，不是第二套远端 runtime。Flutter 只调用
 typed Studio 功能并展示 canonical snapshot；SSH 服务器管理、连接状态机、helper 安装、
 协议、重连和远端工具 backend 位于 pl-tool；pl-studio-runtime 只实现 SQLite、可选系统
-凭据库与 helper 嵌入资产 adapter。SSH 服务器配置不是产品数据，唯一事实源是用户
+凭据库与 helper 随包资产 adapter。SSH 服务器配置不是产品数据，唯一事实源是用户
 `~/.ssh/config`（Windows 为 `%USERPROFILE%\.ssh\config`）。
 
 远端 helper 是随 SSH stdio channel 生存的能力代理，只维护 workspace handle 与进程 handle。
@@ -56,7 +56,7 @@ record、Timeline、artifact 与最终 JSON。不提供 PTY、终端面板、端
 
 ## 22.3 本地工具与 SSH 管理
 
-pl-tool 的 SSH 管理器负责服务器校验、系统 OpenSSH、架构探测、内嵌 helper
+pl-tool 的 SSH 管理器负责服务器校验、系统 OpenSSH、架构探测、随包 helper
 bootstrap、握手 shell descriptor、连接状态与自动重连，并返回带执行环境的远端 workspace
 host；host 实现或组合现有文件、命令、Git、worktree、Skill 与 LSP backend，再经统一安装
 入口注册现有工具。模型不得看到 `remote_read`、`remote_exec` 等环境专用名字。
@@ -182,11 +182,24 @@ Studio schema 不保存 SSH 服务器表；远端项目以可空 `projects.ssh_a
 重试。Session、Turn、Item、Interaction、working state 与 tool record 的 wire 语义不因
 远程 host 改变。远端项目启动时不做本地 canonicalize，服务器离线是连接状态，不是项目损坏。
 
-## 22.5 helper 资产与嵌入
+## 22.5 helper 资产与随包分发
 
-helper 构建为 stripped 静态 musl 资产（aarch64 与 x86_64 两种 Linux 架构），在 GUI 构建
-Rust bridge 时以 zstd 压缩资产嵌入同一个应用二进制，不作为独立安装文件或网络资产；
-原生 GUI 预备并验证两种 helper 资产，纯 Dart demo 不加载 bridge，也不需要 helper 资产。
+helper 构建为 stripped 静态 musl 资产（aarch64 与 x86_64 两种 Linux 架构），由 xtask
+独立准备并以 zstd 压缩资源随 Flutter 桌面 bundle 分发，不嵌入 Rust bridge。Windows/Linux
+CMake 将资源安装到应用可执行文件旁的 `data/remote-helper/<target>/`，每个目标包含
+`pl-remote-helper.zst` 与 `pl-remote-helper.metadata.json`；元数据使用 camelCase，记录
+`target`、`workerProtocolVersion` 与原始可执行文件的 `sha256`。资源不经过 Dart rootBundle
+或 FRB 字节传输。原生 GUI 预备并验证两种资产，纯 Dart demo 不加载 bridge，也不需要资产。
+
+桌面 bridge 根据应用可执行文件位置解析资源根，通过明确的运行时启动选项提供随包 helper
+来源；runtime 为 SSH 与 Linux 本地 worker 统一持有该来源，不能使用进程全局可变配置。
+非打包 Server、开发与观察入口显式使用外部 helper 模式，Linux 本地 worker 从 PATH 查找；
+随包模式下缺失、解压失败、目标或协议不匹配、内容摘要不符必须报告资源路径和失败原因，
+不得回退到 PATH、开发目录或网络下载。普通运行不依赖 xtask 的构建环境变量。
+
+helper 资源与 bridge 是独立构建产物，在 Flutter 打包阶段汇合；资源路径与内容不作为 Rust
+编译输入，内容未变的 staging 不改写文件。仅 helper 资源更新不应重编译 runtime 或重链接
+bridge；共享 Rust 源码、依赖与协议变化仍正常触发 Cargo 重建。
 helper target 由 `uname -s/-m` 穷尽映射，未知平台明确失败。core 先探测架构，再请求宿主
 adapter 解压唯一匹配的 helper bytes，并按内容摘要上传到版本化远端目录；同一摘要已有
 可执行文件时直接复用，不重复传输；未匹配架构保持压缩状态，也不产生本地解压文件；远端
@@ -194,7 +207,12 @@ adapter 解压唯一匹配的 helper bytes，并按内容摘要上传到版本�
 平台的 C 依赖，Rust 最终链接使用当前工具链随附的 `rust-lld`，不覆盖用户显式指定的
 目标链接器，也不调整 Rust 编译优化等级。正式发布流程可在 Linux 侧构建同一提交的
 两种 helper 并作为 CI 内部产物
-交给 Windows GUI job 嵌入，不得进入正式 Release 文件集。
+交给 Windows GUI job 打包。两种资源必须包含在最终应用安装包与 dist 中，但不作为独立
+Release 下载项发布。
+
+Linux 本地 worker 使用同一资产来源，保留匿名不可变可执行镜像和文件句柄 lease；旧会话
+持有的镜像不随资源替换而变化，不直接执行可能被覆盖的随包文件。此分发变化不改变进程
+监督、取消、Ready 准入、失败保持不可用及退出回收契约，不迁移或删除用户数据。
 
 预编译 helper 除 SHA-256 外必须携带目标架构与 worker 协议版本元数据，缺失或不匹配时
 拒绝并提示重建。宿主架构复用 worker Ready 协议做实际握手，其他架构仅校验静态元数据；

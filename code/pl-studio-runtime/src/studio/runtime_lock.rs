@@ -7,6 +7,8 @@ use fs4::{FileExt, TryLockError};
 use pl_protocol::studio::{StudioError, StudioResult};
 use serde::Serialize;
 
+use crate::worker_assets::RemoteHelperSource;
+
 use super::paths::StudioPaths;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +32,7 @@ impl StudioHostKind {
 pub struct StudioRuntimeOptions {
     pub studio_home: Option<PathBuf>,
     pub host: StudioHostKind,
+    pub helper_source: RemoteHelperSource,
 }
 
 impl StudioRuntimeOptions {
@@ -37,6 +40,7 @@ impl StudioRuntimeOptions {
         Self {
             studio_home: None,
             host: StudioHostKind::Desktop,
+            helper_source: RemoteHelperSource::External,
         }
     }
 
@@ -44,7 +48,17 @@ impl StudioRuntimeOptions {
         Self {
             studio_home,
             host: StudioHostKind::HttpServer,
+            helper_source: RemoteHelperSource::External,
         }
+    }
+
+    /// Sets the explicit origin of `pl-remote-helper` bytes.
+    ///
+    /// Packaged desktop bridges pass the bundled resource root; every other host
+    /// keeps the external installation mode of the constructors above.
+    pub fn with_remote_helper_source(mut self, source: RemoteHelperSource) -> Self {
+        self.helper_source = source;
+        self
     }
 }
 
@@ -145,6 +159,7 @@ impl Drop for RuntimeLock {
 pub(super) struct ResolvedRuntimeOptions {
     pub paths: StudioPaths,
     pub host: StudioHostKind,
+    pub helper_source: RemoteHelperSource,
 }
 
 impl StudioRuntimeOptions {
@@ -154,6 +169,7 @@ impl StudioRuntimeOptions {
         Ok(ResolvedRuntimeOptions {
             paths,
             host: self.host,
+            helper_source: self.helper_source,
         })
     }
 }

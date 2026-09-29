@@ -77,6 +77,7 @@ pub struct StudioGitBinding<B, P> {
 pub struct StudioWorkspaceTools {
     pub binding: StudioCommandBinding,
     pub store: FileResourceStore,
+    pub helper_source: crate::worker_assets::RemoteHelperSource,
     pub capabilities: pl_tool::workspace::ToolCapabilityConfig,
 }
 
@@ -124,10 +125,15 @@ impl StudioThreadTools {
         options: StudioWorkspaceTools,
         mut commands: Option<StudioCommandProcesses>,
     ) -> Result<Self, ThreadAssemblyError> {
+        // The local worker exists only on Linux; other platforms drop the field
+        // via `..` so it never becomes an unused binding.
+        #[cfg(target_os = "linux")]
+        let helper_source = options.helper_source.clone();
         let StudioWorkspaceTools {
             binding,
             store,
             capabilities,
+            ..
         } = options;
         let mut registrations = Vec::new();
         match binding {
@@ -151,7 +157,7 @@ impl StudioThreadTools {
                             .with_execution_environment(environment);
                             #[cfg(target_os = "linux")]
                             let backend = backend.with_worker_executable(
-                                crate::worker_assets::local_worker().await?,
+                                crate::worker_assets::local_worker(helper_source).await?,
                             );
                             Arc::new(pl_tool::command::CommandProcessManager::new(Arc::new(
                                 backend,

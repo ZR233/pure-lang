@@ -75,7 +75,7 @@ core 默认纯内存，SQLite 通过 `sqlite` feature 显式启用。独立用�
 
 #### 所有桌面系统都需要的 Rust 目标
 
-普通的桌面构建会同时嵌入两个 Linux SSH 远程助手，因此首次准备时安装这两个 Rust 目标：
+普通的桌面构建会同时打包两个 Linux SSH 远程助手资源，因此首次准备时安装这两个 Rust 目标：
 
 ```powershell
 rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl
@@ -192,13 +192,16 @@ cargo flutter doctor -v
 xtask 会在构建前使用 PATH 中发现的真实工具链编译并链接最小 GTK/C++ 探针；不会写死编译器版本、
 系统库路径，也不会注入 `LIBRARY_PATH` 或 `CPLUS_INCLUDE_PATH`。
 
-未构建桌面内嵌资源、单独运行 Studio server 时，Linux 仍需要安装同一生产 worker：
+使用外部 helper 模式、单独运行 Studio server 时，Linux 仍需要安装同一生产 worker：
 
 ```bash
 cargo install --path code/pl-remote-helper --locked
 ```
 
-确保安装目录位于 PATH。`exec` 不使用裸 shell 后备路径；桌面 xtask 构建会嵌入并保留 worker 可执行资源。
+确保安装目录位于 PATH。`exec` 不使用裸 shell 后备路径；桌面 xtask 构建将压缩 worker 与元数据
+打包到可执行文件旁的 `data/remote-helper/`，不再嵌入 Rust bridge。运行桌面应用时必须保留完整
+bundle；helper 资源缺失或损坏会明确报错，不会改用 PATH 中的程序。仅 helper 资源变化不再
+触发 bridge 重编译；共享 Rust 源码、依赖或协议变化仍会正常重建。
 
 #### macOS
 

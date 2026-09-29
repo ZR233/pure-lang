@@ -90,6 +90,7 @@ impl StudioChildResources for StudioThreadFactory {
                 root_thread_id: &parent.root_thread_id,
                 workspace,
                 store: store.clone(),
+                helper_source: self.services.helper_source.clone(),
             })
             .await?;
         check_cancelled(request)?;

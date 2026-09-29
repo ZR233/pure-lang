@@ -2,7 +2,7 @@ use crate::cli::{BuildGuiOptions, LogLevel, RunGuiOptions};
 use crate::paths;
 use crate::process;
 use crate::pubspec_lock::{self, LockfileChange};
-use crate::remote_helper;
+use crate::remote_helper::{self, BUNDLE_DIR_ENV};
 use crate::rust_bridge::{
     self, BRIDGE_DEBUG_SYMBOLS_ENV, BRIDGE_LIBRARY_ENV, BridgeConfiguration, RustBridgeArtifacts,
 };
@@ -44,6 +44,7 @@ struct FlutterInvocation<'a> {
     demo_mode: DemoMode,
     process_mode: FlutterProcessMode,
     bridge_artifacts: Option<&'a RustBridgeArtifacts>,
+    remote_helper_bundle_dir: Option<&'a Path>,
     log_level: Option<LogLevel>,
 }
 
@@ -179,7 +180,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     } else {
         DemoMode::Native
     };
-    prepare_remote_helpers(&workspace_root, demo_mode)?;
+    let remote_helper_bundle_dir = prepare_remote_helpers(&workspace_root, demo_mode)?;
     let driver_attachment_define = options
         .driver_attachment
         .as_ref()
@@ -227,6 +228,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
             demo_mode,
             process_mode,
             bridge_artifacts: bridge_artifacts.as_ref(),
+            remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
             log_level: options.log_level,
         },
     )
@@ -296,7 +298,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     } else {
         DemoMode::Native
     };
-    prepare_remote_helpers(&workspace_root, demo_mode)?;
+    let remote_helper_bundle_dir = prepare_remote_helpers(&workspace_root, demo_mode)?;
     let args = build_gui_args(target, &version_define);
     let bridge_artifacts =
         prepare_bridge_artifacts(&workspace_root, demo_mode, BridgeConfiguration::Release)?;
@@ -308,6 +310,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
             demo_mode,
             process_mode: FlutterProcessMode::Batch,
             bridge_artifacts: bridge_artifacts.as_ref(),
+            remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
             log_level: None,
         },
     )?;
@@ -428,16 +431,17 @@ fn print_context(workspace_root: &Path, app_dir: &Path) {
     println!("Studio app dir: {}", app_dir.display());
 }
 
-fn prepare_remote_helpers(workspace_root: &Path, demo_mode: DemoMode) -> Result<()> {
+fn prepare_remote_helpers(workspace_root: &Path, demo_mode: DemoMode) -> Result<Option<PathBuf>> {
     if matches!(demo_mode, DemoMode::Native) {
         let started = std::time::Instant::now();
-        remote_helper::prepare_for_embedding(workspace_root)?;
+        let bundle_dir = remote_helper::prepare_bundle_resources(workspace_root)?;
         println!(
             "startup_stage=build_remote_helpers elapsed_ms={}",
             started.elapsed().as_millis()
         );
+        return Ok(Some(bundle_dir));
     }
-    Ok(())
+    Ok(None)
 }
 
 fn prepare_bridge_artifacts(
@@ -472,6 +476,7 @@ fn run_flutter(
             demo_mode,
             process_mode: FlutterProcessMode::Batch,
             bridge_artifacts: None,
+            remote_helper_bundle_dir: None,
             log_level: None,
         },
     )
@@ -504,6 +509,7 @@ fn run_flutter_with_process_mode(
 fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvocation<'_>) {
     command.env_remove(BRIDGE_LIBRARY_ENV);
     command.env_remove(BRIDGE_DEBUG_SYMBOLS_ENV);
+    command.env_remove(BUNDLE_DIR_ENV);
     match invocation.demo_mode {
         DemoMode::Native => {
             command.env_remove("ANYWORK_DEMO");
@@ -525,6 +531,9 @@ fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvoc
         if let Some(debug_symbols) = artifacts.debug_symbols() {
             command.env(BRIDGE_DEBUG_SYMBOLS_ENV, debug_symbols);
         }
+    }
+    if let Some(bundle_dir) = invocation.remote_helper_bundle_dir {
+        command.env(BUNDLE_DIR_ENV, bundle_dir);
     }
 }
 

@@ -122,6 +122,7 @@ impl StudioThreadFactory {
                 root_thread_id: &thread.root_thread_id,
                 workspace,
                 store: store.clone(),
+                helper_source: self.services.helper_source.clone(),
             })
             .await?;
         if prepared.visibility != pl_tool::search::ToolVisibilityConstraint::Exclusive {

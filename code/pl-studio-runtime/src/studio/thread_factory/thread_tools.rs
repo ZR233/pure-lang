@@ -19,6 +19,7 @@ pub(super) struct ThreadToolAssembly<'a> {
     pub root_thread_id: &'a str,
     pub workspace: ToolWorkspace,
     pub store: FileResourceStore,
+    pub helper_source: crate::worker_assets::RemoteHelperSource,
 }
 
 pub(super) struct PreparedThreadTools {
@@ -112,6 +113,7 @@ impl StudioThreadFactory {
             root_thread_id,
             workspace,
             store,
+            helper_source,
         } = assembly;
         let mut search = pl_tool::search::plan_web_searches(
             &config.models,
@@ -193,6 +195,7 @@ impl StudioThreadFactory {
             StudioWorkspaceTools {
                 binding,
                 store,
+                helper_source,
                 capabilities: {
                     let mut capabilities = config.runtime.tool_capabilities.clone();
                     capabilities.ask_user &= thread_id == root_thread_id;

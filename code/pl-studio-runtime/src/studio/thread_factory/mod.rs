@@ -26,6 +26,7 @@ pub(in crate::studio) struct StudioThreadServices {
     pub skills: crate::studio::runtime::SkillCatalogRuntime,
     pub thread_modes: crate::mode::ThreadModeManager,
     pub ssh_manager: Arc<pl_tool::remote::SshManager>,
+    pub helper_source: crate::worker_assets::RemoteHelperSource,
 }
 
 /// Assembles fresh model and tool instances from product inputs, without the old Turn engine.

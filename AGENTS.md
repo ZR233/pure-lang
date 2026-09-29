@@ -150,9 +150,9 @@ crate 职责、依赖方向与禁止依赖的唯一权威源是 [Crate 边界](d
   cargo xtask verify-gui
   ```
 
-- Linux 上运行未启用 `embedded-remote-helpers` 的 Studio/Server 人工验收前，先执行
+- Linux 上运行使用外部 helper 模式的 Studio/Server 人工验收前，先执行
   `cargo install --path code/pl-remote-helper --locked`，确保同一生产进程 worker 位于 PATH。
-  桌面 xtask 构建会嵌入 worker；两种宿主均不使用裸 shell 后备路径。
+  桌面 xtask 构建将 worker 作为 Flutter bundle 资源分发，不嵌入 bridge；两种宿主均不使用裸 shell 后备路径。
 
 - 不默认启用 `--all-features`：`live-tests` 等 feature 依赖外部服务与有效
   API key，需要时以 `cargo run -p pl-studio-runtime --features live-tests --example model_observe -- <provider> <model> <task-file> <artifact-dir>` 等显式

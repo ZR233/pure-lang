@@ -8,7 +8,8 @@
   `xtask/src/manual_gui.rs` 核实当前场景参数，不为绕过终端检查选择无关场景。
 - `cargo xtask verify-gui` 负责生成一致性、格式及静态分析，不包含 GUI 人工结论。
 - 真实供应商验收使用 `cargo xtask run-gui --driver`，不把模拟通过外推为真实模型兼容。
-  非嵌入 worker 的 Linux Studio/Server 入口按根 `AGENTS.md` 预先安装 remote helper。
+  使用外部 helper 模式的 Linux Studio/Server 入口按根 `AGENTS.md` 预先安装 remote helper；
+  桌面 xtask 入口使用 bundle 内的 `data/remote-helper/`，不能以 PATH 中的程序代替资源校验。
 
 ## Linux SSH：补齐终端和显示环境
 

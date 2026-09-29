@@ -8,7 +8,7 @@ on:
 
 jobs:
   helper:
-    name: Build embedded Linux remote helpers
+    name: Build Linux remote helpers
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,7 +37,7 @@ jobs:
         run: cargo xtask build-remote-helper --all-targets
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rc-embedded-helper-${{ github.sha }}
+          name: rc-bundled-helper-${{ github.sha }}
           path: dist/remote-helper/**
           if-no-files-found: error
           compression-level: 0
@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: rc-embedded-helper-${{ github.sha }}
+          name: rc-bundled-helper-${{ github.sha }}
           path: dist/remote-helper
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:

@@ -92,6 +92,7 @@ async fn main() -> Result<()> {
     let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
         studio_home: Some(home),
         host: StudioHostKind::Desktop,
+        ..StudioRuntimeOptions::desktop()
     })
     .await?;
     runtime.start_runtime().await?;

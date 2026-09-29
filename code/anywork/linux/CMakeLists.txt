@@ -130,6 +130,63 @@ install(CODE "
     endif()
   " COMPONENT Runtime)
 
+# Stage the prebuilt remote helper bundle resources (prepared by xtask).
+# The runtime resolves them next to the executable through
+# data/remote-helper/<target>/; no build environment is needed at run time.
+if("$ENV{ANYWORK_DEMO}" STREQUAL "true")
+  message(STATUS "ANYWORK_DEMO=true; skipping remote helper resource staging.")
+else()
+  set(ANYWORK_REMOTE_HELPER_DIR "$ENV{ANYWORK_REMOTE_HELPER_DIR}")
+  if(ANYWORK_REMOTE_HELPER_DIR STREQUAL "")
+    message(FATAL_ERROR
+      "ANYWORK_REMOTE_HELPER_DIR is required. Build or run the Linux GUI "
+      "through 'cargo xtask build-gui' or 'cargo xtask run-gui'.")
+  endif()
+  if(NOT IS_ABSOLUTE "${ANYWORK_REMOTE_HELPER_DIR}")
+    message(FATAL_ERROR
+      "ANYWORK_REMOTE_HELPER_DIR must be an absolute path: "
+      "${ANYWORK_REMOTE_HELPER_DIR}")
+  endif()
+  if(NOT EXISTS "${ANYWORK_REMOTE_HELPER_DIR}"
+      OR NOT IS_DIRECTORY "${ANYWORK_REMOTE_HELPER_DIR}")
+    message(FATAL_ERROR
+      "ANYWORK_REMOTE_HELPER_DIR is not a directory: "
+      "${ANYWORK_REMOTE_HELPER_DIR}")
+  endif()
+  foreach(_anywork_helper_target aarch64-unknown-linux-musl x86_64-unknown-linux-musl)
+    if(NOT EXISTS
+        "${ANYWORK_REMOTE_HELPER_DIR}/${_anywork_helper_target}/pl-remote-helper.zst"
+        OR NOT EXISTS
+        "${ANYWORK_REMOTE_HELPER_DIR}/${_anywork_helper_target}/pl-remote-helper.metadata.json")
+      message(FATAL_ERROR
+        "Remote helper resources for ${_anywork_helper_target} are missing under "
+        "${ANYWORK_REMOTE_HELPER_DIR}; rebuild with "
+        "'cargo xtask build-remote-helper --all-targets'.")
+    endif()
+  endforeach()
+endif()
+
+install(CODE "
+    if(NOT \"\$ENV{ANYWORK_DEMO}\" STREQUAL \"true\")
+      set(_anywork_helpers \"\$ENV{ANYWORK_REMOTE_HELPER_DIR}\")
+      if(_anywork_helpers STREQUAL \"\" OR NOT EXISTS \"\${_anywork_helpers}\")
+        message(FATAL_ERROR
+          \"ANYWORK_REMOTE_HELPER_DIR is missing at install time: \
+           build through 'cargo xtask build-gui' or 'cargo xtask run-gui'.\")
+      endif()
+      file(MAKE_DIRECTORY \"${INSTALL_BUNDLE_DATA_DIR}/remote-helper\")
+      foreach(_anywork_helper_target aarch64-unknown-linux-musl x86_64-unknown-linux-musl)
+        file(MAKE_DIRECTORY
+          \"${INSTALL_BUNDLE_DATA_DIR}/remote-helper/\${_anywork_helper_target}\")
+        foreach(_anywork_helper_file pl-remote-helper.zst pl-remote-helper.metadata.json)
+          execute_process(COMMAND \"${CMAKE_COMMAND}\" -E copy_if_different
+            \"\${_anywork_helpers}/\${_anywork_helper_target}/\${_anywork_helper_file}\"
+            \"${INSTALL_BUNDLE_DATA_DIR}/remote-helper/\${_anywork_helper_target}/\${_anywork_helper_file}\")
+        endforeach()
+      endforeach()
+    endif()
+  " COMPONENT Runtime)
+
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 

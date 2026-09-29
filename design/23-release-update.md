@@ -2,8 +2,8 @@
 
 本文定义 anywork 稳定版的唯一发布渠道、Windows 打包格式和应用内更新信任边界。首版只
 支持 Windows x64；RC 构建只作为 CI artifact，不进入稳定更新源。SSH remote helper 不建立
-独立发布合同：helper 以压缩资产嵌入 Rust bridge（见 [22](./22-ssh-remote.md)），GitHub
-Release、安装目录与本地数据目录均不出现独立 helper 文件。
+独立发布合同：helper 以压缩资源随应用 bundle 分发（见 [22](./22-ssh-remote.md)），安装
+目录包含随包资源，但 GitHub Release 不提供单独 helper 下载项，也不在用户数据目录安装副本。
 
 ## 23.1 版本与发布流
 
@@ -28,8 +28,8 @@ tag 独立解析仓库、稳定 SemVer、提交 SHA 与三个版本文件，拒�
 
 publisher 分为 helper、GUI 构建与发布三阶段。Linux helper job 从 tag 的精确提交交叉编译
 两种 musl 架构并生成 SHA-256，只作为同一 workflow run 的内部 artifact；Windows job 消费
-这组 helper 并压缩嵌入 Rust bridge，再执行 Rust/Flutter 检查、GUI 构建、签名、安装烟测、
-独立 verify 和 provenance；helper 本身不进入正式 Release 文件集。publish job 下载最终
+这组 helper 并作为压缩资源打入应用 bundle，再执行 Rust/Flutter 检查、GUI 构建、签名、安装烟测、
+独立 verify 和 provenance；helper 不作为独立正式 Release 资产发布。publish job 下载最终
 artifact 并按 Release ID 对账：draft 可为空或只含部分资产，但任何已有资产的名称、长度
 与 SHA-256 digest 必须和本地文件完全一致；只允许补传缺失资产，不得覆盖不同字节。全部
 资产一致后才能取消 draft 并标记 latest。failed job 重跑复用原 artifact 继续补传；完整

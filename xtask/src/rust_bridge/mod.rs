@@ -74,8 +74,6 @@ fn cargo_build_args(configuration: BridgeConfiguration) -> Vec<OsString> {
         OsString::from("build"),
         OsString::from("-p"),
         OsString::from(BRIDGE_PACKAGE_NAME),
-        OsString::from("--features"),
-        OsString::from("pl-studio-runtime/embedded-remote-helpers"),
     ];
     if configuration.uses_release_profile() {
         args.push(OsString::from("--release"));

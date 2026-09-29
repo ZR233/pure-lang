@@ -34,7 +34,7 @@
 | 19 | [anywork UI](./19-studio-ui.md) | UI 边界、模式与状态、主题、设置页组织、Timeline、历史阅读 |
 | 20 | [Studio 持久化配置](./20-config.md) | 配置 schema、provider/model、提示词、MCP/Skills/LSP、凭据 |
 | 21 | [LSP Runtime](./21-lsp.md) | catalog 与 driver、registry CQS、状态模型、工具能力 |
-| 22 | [SSH 远程开发](./22-ssh-remote.md) | helper 能力代理、最小协议、连接管理、凭据与路径、helper 嵌入 |
+| 22 | [SSH 远程开发](./22-ssh-remote.md) | helper 能力代理、最小协议、连接管理、凭据与路径、helper 随包资源 |
 | 23 | [发布与更新](./23-release-update.md) | 发布渠道与信任根、Windows 包边界、更新清单与状态机、诊断 |
 | 24 | [测试与人工验收](./24-testing.md) | 两库公开 API 测试、本地模拟供应商、GUI 人工证据 |
 

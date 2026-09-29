@@ -13,7 +13,7 @@ use crate::remote::RemoteClientError;
 
 const HELPER_NAME: &str = "pl-remote-helper";
 
-/// 可嵌入 anywork 的远端 helper 目标平台。
+/// 宿主可提供资产的远端 helper 目标平台。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RemoteHelperTarget {
     Aarch64Musl,

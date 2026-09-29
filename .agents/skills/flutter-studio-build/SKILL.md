@@ -47,6 +47,12 @@ cargo xtask check-gui-generated
 DLL 或共享库。xtask 从 Cargo profile 目录定位 Windows DLL/PDB 或 Linux `.so`，通过
 `ANYWORK_BRIDGE_LIBRARY` 等环境变量交给 CMake staging。CMake 不再启动 Cargo。
 
+Linux remote helper 不嵌入 bridge：xtask 独立构建、校验并准备两种架构的压缩资源，CMake
+随 Flutter bundle 安装到可执行文件旁的 `data/remote-helper/<target>/`。运行时从该目录
+按架构加载资源并校验元数据与摘要，不依赖构建环境变量，不回退到 PATH 或源码目录。
+排查缺资源时检查完整 bundle，而不是仅复制 bridge 动态库。仅 helper 资源变化不应导致
+runtime 重编译或 bridge 重链接；用 Cargo Fresh 状态与 bridge 摘要验证，不单靠构建耗时。
+
 绑定不同步常表现为 Dart 方法缺失、联合类型匹配不完整或 Rust/Dart 类型字段不一致。先同步生成
 文件，再分别核验：
 
@@ -67,7 +73,8 @@ Flutter 原始输出与 xtask 最终收集目录。
 
 Windows 发布目录通常包含 `anywork.exe`、`flutter_windows.dll`、
 `pl_studio_bridge.dll`、可选 PDB 以及 `data/`。Linux 发布目录包含对应可执行文件、Flutter 库、
-`libpl_studio_bridge.so` 与数据目录。
+`libpl_studio_bridge.so` 与数据目录。两平台 `data/remote-helper/` 均包含两个架构的
+`pl-remote-helper.zst` 和 `pl-remote-helper.metadata.json`，应随安装包一并交付。
 
 ## 按任务选择验证
 

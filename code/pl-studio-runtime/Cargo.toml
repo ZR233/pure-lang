@@ -6,7 +6,6 @@ license.workspace = true
 
 [features]
 default = []
-embedded-remote-helpers = []
 live-tests = []
 
 [dependencies]
@@ -41,6 +40,7 @@ minisign-verify = { workspace = true }
 fs4 = { workspace = true }
 rust-embed = { workspace = true }
 dunce = { workspace = true }
+zstd = { workspace = true }
 
 [[example]]
 name = "collaboration_observe"

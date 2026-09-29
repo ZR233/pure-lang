@@ -189,6 +189,7 @@ impl StudioThreadFactory {
                 workspace: ToolWorkspace::new(workspace)
                     .with_lsp_runtime(Some(self.services.lsp_runtime.clone())),
                 store: resources.clone(),
+                helper_source: self.services.helper_source.clone(),
             })
             .await?;
         if request.cancellation.is_cancelled() {

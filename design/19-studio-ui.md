@@ -8,6 +8,9 @@
 
 ## 19.1 边界
 
+桌面 bundle 同时携带预构建 Rust bridge 与独立 helper 资源；资源定位和消费属于 Rust
+宿主边界，不由 Dart 加载后传输。分发、校验与 worker 生命周期遵循 [22](./22-ssh-remote.md)。
+
 anywork 是 Flutter 桌面应用，使用 Material 3、Riverpod、go_router 与 typed FRB。UI 只能通过
 bridge 访问 Studio 运行时，不读取 SQLite、Agent TOML 或 Skill 文件。Flutter Web 只用于 demo
 integration 验收，不能伪造原生 provider、文件系统或进程能力。
