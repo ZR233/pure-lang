@@ -23,25 +23,49 @@
 
 namespace {
 
-// Shared with host_app_icons.dart and the VS Code launcher.
+// Shared with host_app_icons.dart and the desktop application launchers.
 constexpr char kHostAppsChannel[] = "io.github.zr233.anywork/host_apps";
 constexpr char kVsCodeExecutableMethod[] = "vsCodeExecutable";
+constexpr char kZedExecutableMethod[] = "zedExecutable";
 
-// Looks up the executable Windows associates with the `vscode` URL protocol.
-// Returns false when there is no reliable association, so callers never guess
-// an installation path. Availability probes and launches share this entry.
-bool QueryVsCodeExecutable(std::wstring* executable) {
+// Looks up the executable Windows associates with a URL protocol.
+bool QueryProtocolExecutable(const wchar_t* protocol,
+                             std::wstring* executable) {
   DWORD length = 0;
   HRESULT result =
-      AssocQueryStringW(ASSOCF_IS_PROTOCOL, ASSOCSTR_EXECUTABLE, L"vscode",
+      AssocQueryStringW(ASSOCF_IS_PROTOCOL, ASSOCSTR_EXECUTABLE, protocol,
                         nullptr, nullptr, &length);
   if (result != S_FALSE || length == 0) {
     return false;
   }
   std::wstring buffer(length, L'\0');
-  result = AssocQueryStringW(ASSOCF_IS_PROTOCOL, ASSOCSTR_EXECUTABLE, L"vscode",
+  result = AssocQueryStringW(ASSOCF_IS_PROTOCOL, ASSOCSTR_EXECUTABLE, protocol,
                              nullptr, buffer.data(), &length);
   if (FAILED(result)) {
+    return false;
+  }
+  *executable = std::wstring(buffer.c_str());
+  return !executable->empty();
+}
+
+// Availability probes and launches share the registered VS Code executable.
+bool QueryVsCodeExecutable(std::wstring* executable) {
+  return QueryProtocolExecutable(L"vscode", executable);
+}
+
+// Zed's URL protocol points at the graphical application, while its official
+// command-line program is installed separately on PATH. Never substitute the
+// protocol executable because it does not implement the same argv contract.
+bool QueryZedExecutable(std::wstring* executable) {
+  const DWORD length =
+      SearchPathW(nullptr, L"zed.exe", nullptr, 0, nullptr, nullptr);
+  if (length == 0) {
+    return false;
+  }
+  std::wstring buffer(length, L'\0');
+  const DWORD copied = SearchPathW(nullptr, L"zed.exe", nullptr, length,
+                                   buffer.data(), nullptr);
+  if (copied == 0 || copied >= length) {
     return false;
   }
   *executable = std::wstring(buffer.c_str());
@@ -95,6 +119,24 @@ std::vector<uint8_t> EncodeIconAsPng(HICON icon) {
 std::vector<uint8_t> LoadVsCodeIconPng() {
   std::wstring executable;
   if (!QueryVsCodeExecutable(&executable)) {
+    return {};
+  }
+  SHFILEINFOW file_info = {};
+  if (SHGetFileInfoW(executable.c_str(), 0, &file_info, sizeof(file_info),
+                     SHGFI_ICON | SHGFI_LARGEICON) == 0 ||
+      file_info.hIcon == nullptr) {
+    return {};
+  }
+  auto png = EncodeIconAsPng(file_info.hIcon);
+  DestroyIcon(file_info.hIcon);
+  return png;
+}
+
+// The protocol association is only an application identity used for artwork;
+// Zed launches continue to use the independent command-line executable.
+std::vector<uint8_t> LoadZedIconPng() {
+  std::wstring executable;
+  if (!QueryProtocolExecutable(L"zed", &executable)) {
     return {};
   }
   SHFILEINFOW file_info = {};
@@ -170,11 +212,24 @@ bool FlutterWindow::OnCreate() {
           }
           return;
         }
+        if (call.method_name() == kZedExecutableMethod) {
+          std::wstring executable;
+          if (QueryZedExecutable(&executable)) {
+            result->Success(
+                flutter::EncodableValue(Utf8FromUtf16(executable.c_str())));
+          } else {
+            result->Success();
+          }
+          return;
+        }
         if (call.method_name() == "vsCodeIcon" ||
+            call.method_name() == "zedIcon" ||
             call.method_name() == "terminalIcon") {
           const auto png = call.method_name() == "vsCodeIcon"
                                ? LoadVsCodeIconPng()
-                               : LoadTerminalIconPng();
+                               : call.method_name() == "zedIcon"
+                                     ? LoadZedIconPng()
+                                     : LoadTerminalIconPng();
           if (png.empty()) {
             result->Success();
           } else {

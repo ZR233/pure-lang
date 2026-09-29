@@ -118,10 +118,10 @@ String _purposeLabel(BuildContext context, String? purpose) =>
       String value => value,
     };
 
-/// 会话顶栏「打开工作区」菜单：并列 VS Code 与终端两个外部入口。
+/// 会话顶栏「打开工作区」菜单：并列 VS Code、Zed 与终端三个外部入口。
 ///
-/// 有当前会话及所属项目即显示入口，不以 VS Code 安装情况控制整个入口；
-/// 两项各自探测可用性，不可用时禁用并说明原因。两个入口的目标都由会话
+/// 有当前会话及所属项目即显示入口，不以编辑器安装情况控制整个入口；
+/// 三项各自探测可用性，不可用时禁用并说明原因。三个入口的目标都由会话
 /// canonical `workspacePath` 决定，GUI 不推导工作树布局；菜单图标读取
 /// 宿主应用图标。远端项目复用 `~/.ssh/config` 的 Host 别名。
 class _SessionOpenWorkspaceMenu extends ConsumerStatefulWidget {
@@ -149,6 +149,7 @@ class _SessionOpenWorkspaceMenuState
     }
     final vsCodeAvailable =
         ref.watch(vsCodeAvailabilityProvider).value ?? false;
+    final zedAvailable = ref.watch(zedAvailabilityProvider).value ?? false;
     final terminalAvailable =
         ref.watch(terminalAvailabilityProvider).value ?? false;
     final label = context.l10n.sessionOpenWorkspace;
@@ -171,6 +172,15 @@ class _SessionOpenWorkspaceMenuState
           onPressed: () => _openVsCode(project, thread),
         ),
         _menuItem(
+          key: StudioDriverKeys.sessionOpenWorkspaceZed,
+          icon: _appIcon(HostAppIcon.zed, Icons.code),
+          label: context.l10n.sessionOpenInZed,
+          targetDescription: targetDescription,
+          available: zedAvailable,
+          unavailableReason: context.l10n.sessionZedUnavailable,
+          onPressed: () => _openZed(project, thread),
+        ),
+        _menuItem(
           key: StudioDriverKeys.sessionOpenWorkspaceTerminal,
           icon: _appIcon(HostAppIcon.terminal, Icons.terminal),
           label: context.l10n.sessionOpenInTerminal,
@@ -183,13 +193,29 @@ class _SessionOpenWorkspaceMenuState
       builder: (context, controller, child) {
         return Tooltip(
           message: '$label\n$targetDescription',
-          child: TextButton.icon(
+          child: TextButton(
             key: StudioDriverKeys.sessionOpenWorkspaceMenu,
             onPressed: () => _menuController.isOpen
                 ? _menuController.close()
                 : _menuController.open(),
-            icon: const Icon(Icons.open_in_new, size: 18),
-            label: Text(label),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.folder_open_outlined,
+                  size: 18,
+                  color: context.colors.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Text(label),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 16,
+                  color: context.colors.onSurfaceVariant,
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -300,6 +326,47 @@ class _SessionOpenWorkspaceMenuState
         await launcher(uri);
       } on Object {
         failure = l10n.sessionVsCodeOpenFailed;
+      }
+    }
+    if (failure != null && mounted && messenger != null && messenger.mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(failure)));
+    }
+  }
+
+  Future<void> _openZed(StudioProject project, StudioThread thread) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final l10n = context.l10n;
+    // launcher 必须在首个 await 前读取；widget 卸载后再访问 ref 会抛错。
+    final launcher = ref.read(zedLauncherProvider);
+    ZedWorkspaceTarget? target;
+    String? failure;
+    if (project.sshAlias case final alias?) {
+      try {
+        final servers = await ref.read(studioApiProvider).listSshServers();
+        // await 恢复后先确认 widget 仍在，再继续启动或反馈 UI。
+        if (!mounted) return;
+        final server = servers
+            .where((server) => server.alias == alias)
+            .firstOrNull;
+        if (server == null) {
+          failure = l10n.sessionOpenServerMissing;
+        } else {
+          target = RemoteSshZedWorkspaceTarget(
+            alias: server.alias,
+            remotePath: thread.workspacePath,
+          );
+        }
+      } on Object {
+        failure = l10n.sessionZedOpenFailed;
+      }
+    } else {
+      target = LocalZedWorkspaceTarget(directory: thread.workspacePath);
+    }
+    if (target != null) {
+      try {
+        await launcher(target);
+      } on Object {
+        failure = l10n.sessionZedOpenFailed;
       }
     }
     if (failure != null && mounted && messenger != null && messenger.mounted) {

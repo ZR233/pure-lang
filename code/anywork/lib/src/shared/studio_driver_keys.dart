@@ -94,6 +94,9 @@ abstract final class StudioDriverKeys {
   static const sessionOpenWorkspaceVsCode = ValueKey<String>(
     'session-open-workspace-vscode',
   );
+  static const sessionOpenWorkspaceZed = ValueKey<String>(
+    'session-open-workspace-zed',
+  );
   static const sessionOpenWorkspaceTerminal = ValueKey<String>(
     'session-open-workspace-terminal',
   );

@@ -601,10 +601,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sessionOpenInVsCode => '在 VS Code 中打开';
 
   @override
+  String get sessionOpenInZed => '在 Zed 中打开';
+
+  @override
   String get sessionOpenInTerminal => '在终端中打开';
 
   @override
   String get sessionVsCodeUnavailable => '未在这台机器上找到 VS Code';
+
+  @override
+  String get sessionZedUnavailable => '未在这台机器上找到 Zed';
 
   @override
   String get sessionTerminalUnavailableWindows =>
@@ -619,6 +625,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get sessionVsCodeOpenFailed => '打开 VS Code 失败';
+
+  @override
+  String get sessionZedOpenFailed => '打开 Zed 失败';
 
   @override
   String get sessionTerminalOpenFailed => '打开终端失败';

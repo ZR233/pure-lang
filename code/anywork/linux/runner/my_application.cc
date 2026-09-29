@@ -28,11 +28,12 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
-// Uses the registered VS Code application or the desktop's terminal artwork.
+// Uses a registered URL application or the desktop's terminal artwork.
 // Returns a new reference, or nullptr if the desktop cannot provide an icon.
-static FlValue* application_icon_value(bool terminal) {
+static FlValue* application_icon_value(const gchar* scheme,
+                                       bool terminal) {
   g_autoptr(GAppInfo) app_info = terminal
-      ? nullptr : g_app_info_get_default_for_uri_scheme("vscode");
+      ? nullptr : g_app_info_get_default_for_uri_scheme(scheme);
   g_autoptr(GIcon) terminal_icon = terminal
       ? g_themed_icon_new("utilities-terminal") : nullptr;
   GIcon* icon = terminal ? terminal_icon
@@ -62,19 +63,27 @@ static FlValue* application_icon_value(bool terminal) {
   return value;
 }
 
+// Zed publishes `zed` on most Linux installs and `zeditor` on distributions
+// where the short command name is already occupied.
+static gchar* find_zed_executable() {
+  gchar* path = g_find_program_in_path("zed");
+  return path == nullptr ? g_find_program_in_path("zeditor") : path;
+}
+
 // Hosts the host-apps method channel used by the Studio UI. Resolves application
-// icons and the executable GIO associates with the
-// `vscode` URL protocol, falling back to `code` on PATH; a null value means
-// "not found", not an error.
+// icons and the executables used by VS Code and Zed; a null value means "not
+// found", not an error.
 static void host_apps_method_call_cb(FlMethodChannel* channel,
                                      FlMethodCall* method_call,
                                      gpointer user_data) {
   const gchar* method = fl_method_call_get_name(method_call);
   g_autoptr(FlMethodResponse) response = nullptr;
   if (g_strcmp0(method, "vsCodeIcon") == 0 ||
+      g_strcmp0(method, "zedIcon") == 0 ||
       g_strcmp0(method, "terminalIcon") == 0) {
-    g_autoptr(FlValue) icon =
-        application_icon_value(g_strcmp0(method, "terminalIcon") == 0);
+    const gboolean terminal = g_strcmp0(method, "terminalIcon") == 0;
+    const gchar* scheme = g_strcmp0(method, "zedIcon") == 0 ? "zed" : "vscode";
+    g_autoptr(FlValue) icon = application_icon_value(scheme, terminal);
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(icon));
   } else if (g_strcmp0(method, "vsCodeExecutable") == 0) {
     g_autoptr(GAppInfo) app_info =
@@ -83,6 +92,11 @@ static void host_apps_method_call_cb(FlMethodChannel* channel,
         app_info == nullptr ? "code" : g_app_info_get_executable(app_info);
     g_autofree gchar* path =
         executable == nullptr ? nullptr : g_find_program_in_path(executable);
+    g_autoptr(FlValue) value =
+        path == nullptr ? nullptr : fl_value_new_string(path);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(value));
+  } else if (g_strcmp0(method, "zedExecutable") == 0) {
+    g_autofree gchar* path = find_zed_executable();
     g_autoptr(FlValue) value =
         path == nullptr ? nullptr : fl_value_new_string(path);
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(value));

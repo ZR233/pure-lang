@@ -1196,6 +1196,12 @@ abstract class AppLocalizations {
   /// **'Open in VS Code'**
   String get sessionOpenInVsCode;
 
+  /// No description provided for @sessionOpenInZed.
+  ///
+  /// In en, this message translates to:
+  /// **'Open in Zed'**
+  String get sessionOpenInZed;
+
   /// No description provided for @sessionOpenInTerminal.
   ///
   /// In en, this message translates to:
@@ -1207,6 +1213,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'VS Code was not found on this machine'**
   String get sessionVsCodeUnavailable;
+
+  /// No description provided for @sessionZedUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Zed was not found on this machine'**
+  String get sessionZedUnavailable;
 
   /// No description provided for @sessionTerminalUnavailableWindows.
   ///
@@ -1231,6 +1243,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Failed to open VS Code'**
   String get sessionVsCodeOpenFailed;
+
+  /// No description provided for @sessionZedOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to open Zed'**
+  String get sessionZedOpenFailed;
 
   /// No description provided for @sessionTerminalOpenFailed.
   ///

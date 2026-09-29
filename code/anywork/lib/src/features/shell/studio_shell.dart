@@ -20,6 +20,7 @@ import '../../platform/studio_platform.dart';
 import '../../platform/host_app_icons.dart';
 import '../../platform/terminal_launcher.dart';
 import '../../platform/vscode_launcher.dart';
+import '../../platform/zed_launcher.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
 import '../../shared/studio_driver_state.dart';

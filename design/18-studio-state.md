@@ -331,7 +331,7 @@ Thread runtime 的缓存统计是独立的 typed 投影 `cache_usage`，包含�
 ## 18.9 顶栏工作区打开菜单
 
 会话顶栏 actions 区（与智能体切换器、费用 chip 同级）提供带图标与文字的「打开工作区」按钮，点击展开
-下拉菜单，并列提供「VS Code」与「终端」。有当前会话及所属项目时显示入口，不以 VS Code
+下拉菜单，并列提供「VS Code」「Zed」与「终端」。有当前会话及所属项目时显示入口，不以任一编辑器
 安装情况控制整个入口；各项独立探测可用性，不可用项禁用并说明原因。入口与菜单项提供
 可本地化 tooltip、读屏名称和打开目标路径说明。
 
@@ -340,8 +340,8 @@ Thread runtime 的缓存统计是独立的 typed 投影 `cache_usage`，包含�
 改用子代理路径，也不由 GUI 推导工作树布局。未选择会话时回退到所属项目路径；侧栏的
 项目路径仍表示项目根目录。
 
-两个入口的目标均由会话 canonical `workspacePath` 决定，不按 `workspace_mode` 分别取
-Project 路径或工作树路径，GUI 不推导工作树布局。菜单读取宿主的 VS Code 与终端应用图标，
+三个入口的目标均由会话 canonical `workspacePath` 决定，不按 `workspace_mode` 分别取
+Project 路径或工作树路径，GUI 不推导工作树布局。菜单读取宿主的 VS Code、Zed 与终端应用图标，
 保留应用原色；Windows Terminal 使用注册的打包应用图标，不能使用执行别名的通用文件图标。
 图标缺失或解码失败时仍显示明确的文字和通用入口图标，不影响启动。GUI 负责目标选择与反馈，
 平台启动器负责可用性与启动。
@@ -356,6 +356,13 @@ Project 路径或工作树路径，GUI 不推导工作树布局。菜单读取�
 启动失败以界面提示回报，不自动重试或回退外部链接。Windows 查询 `vscode` 协议关联，
 Linux 优先解析同一协议的 GIO 默认应用可执行文件，无关联时查找 PATH 中的 `code`；
 可用性与启动共用该解析入口。结果缓存于进程内 provider，demo 与测试可覆写。
+
+Zed 通过官方命令行程序直接打开目标，不经过 shell 或 `zed://` 外部链接处理器。本地目标以
+单个 canonical 目录参数传递；远端目标使用 `ssh://<Host 别名>/<远端路径>`，路径按 URI 规则
+百分号编码，连接参数继续由 `~/.ssh/config` 解析。Windows 从 PATH 解析 Zed 的独立命令行程序，
+不能把 `zed` 协议关联的图形主程序误作命令行程序；协议关联只用于读取品牌图标。Linux 依次
+查找 PATH 中的 `zed`、`zeditor`，品牌图标取自 `zed` 协议的 GIO 默认应用。探测与启动共用
+同一解析入口，参数按 argv 原样传递，失败明确反馈且不自动重试或切换目标。
 
 Windows 终端使用 Windows Terminal（`wt.exe`），本地工作目录为会话工作区，不回退成独立
 cmd 或 PowerShell 窗口。Windows 入口探测接受 WindowsApps 执行别名，不要求将该别名

@@ -627,11 +627,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sessionOpenInVsCode => 'Open in VS Code';
 
   @override
+  String get sessionOpenInZed => 'Open in Zed';
+
+  @override
   String get sessionOpenInTerminal => 'Open in terminal';
 
   @override
   String get sessionVsCodeUnavailable =>
       'VS Code was not found on this machine';
+
+  @override
+  String get sessionZedUnavailable => 'Zed was not found on this machine';
 
   @override
   String get sessionTerminalUnavailableWindows =>
@@ -647,6 +653,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get sessionVsCodeOpenFailed => 'Failed to open VS Code';
+
+  @override
+  String get sessionZedOpenFailed => 'Failed to open Zed';
 
   @override
   String get sessionTerminalOpenFailed => 'Failed to open terminal';
