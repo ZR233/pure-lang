@@ -110,6 +110,17 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
       ...defaultModels,
       ...customModels.map(withCurrentConnection),
     ];
+    final autoCompactOverrides = {
+      for (final limit in provider.modelAutoCompactLimits)
+        limit.slug: limit.limit,
+    };
+    final autoCompactLimits = {
+      for (final model in models)
+        model.slug: _demoAutoCompactLimit(
+          model,
+          override: autoCompactOverrides[model.slug],
+        ),
+    };
     final previousProvider = previous
         .where((item) => item.id == (provider.originalId ?? provider.id))
         .firstOrNull;
@@ -134,6 +145,7 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
       models: models,
       defaultModels: defaultModels,
       customModels: customModels.map(withCurrentConnection).toList(),
+      autoCompactLimits: autoCompactLimits,
       status: hasToken || template.credentialEnv.isEmpty
           ? 'ready'
           : 'missingCredential',
@@ -160,6 +172,18 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
       iconKey: template.iconKey,
     );
   }).toList();
+}
+
+/// 预览态的压缩阈值三层视图：默认 258k，上下文 90% 为安全上限，覆盖等于默认时归一化。
+ProviderModelAutoCompactView _demoAutoCompactLimit(
+  ProviderModelView model, {
+  int? override,
+}) {
+  final base = ProviderModelAutoCompactView.forModel(model);
+  if (override == null || override <= 0 || override == base.defaultLimit) {
+    return base;
+  }
+  return base.withOverride(override);
 }
 
 List<RoleSettingsView> _rolesFromSettingsCommand(

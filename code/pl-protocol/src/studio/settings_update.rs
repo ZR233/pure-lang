@@ -146,6 +146,7 @@ pub struct ProviderSettingsUpdate {
     pub default_model: String,
     pub custom_models: Vec<ProviderModelUpdate>,
     pub model_connection_modes: Vec<ProviderModelConnectionUpdate>,
+    pub model_auto_compact_limits: Vec<ProviderModelAutoCompactUpdate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -163,6 +164,16 @@ pub struct ProviderModelUpdate {
 pub struct ProviderModelConnectionUpdate {
     pub slug: String,
     pub connection_mode: String,
+}
+
+/// 某模型上下文压缩阈值用户覆盖的完整集合项；`limit` 必须为正整数 tokens。
+///
+/// 该列表是该 provider 实例的完整覆盖集合；未列出的模型使用模型默认值。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderModelAutoCompactUpdate {
+    pub slug: String,
+    pub limit: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]

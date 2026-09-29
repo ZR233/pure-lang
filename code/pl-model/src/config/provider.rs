@@ -21,12 +21,18 @@ pub enum ProviderModelCatalogConfig {
         additional_models: Vec<ModelInfo>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         connection_overrides: BTreeMap<String, ProviderConnectionMode>,
+        /// 按模型 slug 索引的上下文压缩阈值用户覆盖；缺省表示使用模型默认值。
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        auto_compact_overrides: BTreeMap<String, u64>,
     },
     /// 完全由产品配置提供的模型目录。
     Explicit {
         models: Vec<ModelInfo>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         connection_overrides: BTreeMap<String, ProviderConnectionMode>,
+        /// 按模型 slug 索引的上下文压缩阈值用户覆盖；缺省表示使用模型默认值。
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        auto_compact_overrides: BTreeMap<String, u64>,
     },
 }
 
@@ -93,6 +99,7 @@ impl ProviderConfig {
                 catalog,
                 additional_models,
                 connection_overrides: BTreeMap::new(),
+                auto_compact_overrides: BTreeMap::new(),
             },
         )
     }
@@ -104,6 +111,7 @@ impl ProviderConfig {
             ProviderModelCatalogConfig::Explicit {
                 models,
                 connection_overrides: BTreeMap::new(),
+                auto_compact_overrides: BTreeMap::new(),
             },
         )
     }
@@ -221,6 +229,30 @@ impl ProviderConfig {
         }
     }
 
+    /// 返回按模型 slug 保存的上下文压缩阈值用户覆盖。
+    ///
+    /// 覆盖值独立于 [`ModelInfo::auto_compact_token_limit`] 默认元信息，缺省表示使用模型默认值。
+    pub fn auto_compact_overrides(&self) -> &BTreeMap<String, u64> {
+        match &self.catalog {
+            ProviderModelCatalogConfig::Bundled {
+                auto_compact_overrides,
+                ..
+            }
+            | ProviderModelCatalogConfig::Explicit {
+                auto_compact_overrides,
+                ..
+            } => auto_compact_overrides,
+        }
+    }
+
+    /// 解析某模型（含 provider 实例覆盖）的实际生效压缩阈值。
+    ///
+    /// 生效值取「用户覆盖或模型默认」与上下文 90% 安全上限的较小值；上下文未知返回 `None`。
+    pub fn resolved_auto_compact_limit(&self, model: &ModelInfo) -> Option<u64> {
+        let override_limit = self.auto_compact_overrides().get(&model.slug).copied();
+        model.resolved_auto_compact_limit_with(override_limit)
+    }
+
     /// 返回可由产品编辑的模型列表，不包含 PL 内置只读模型。
     pub fn editable_models(&self) -> &[ModelInfo] {
         match &self.catalog {
@@ -271,6 +303,53 @@ impl ProviderConfig {
                 connection_overrides,
                 ..
             } => connection_overrides,
+        }
+    }
+
+    /// 保存或清除某模型的上下文压缩阈值用户覆盖。
+    ///
+    /// `limit` 为 `None` 或等于该模型默认阈值时删除覆盖项（恢复默认）；覆盖值必须为正整数，
+    /// 模型必须存在于当前声明目录中。
+    pub fn set_model_auto_compact_override(
+        &mut self,
+        model: &str,
+        limit: Option<u64>,
+    ) -> Result<()> {
+        let models = self.declared_models()?;
+        let selected = models
+            .iter()
+            .find(|candidate| candidate.slug == model)
+            .ok_or_else(|| PureError::ConfigError(format!("unknown model: {model}")))?;
+        let restore_default = match limit {
+            None => true,
+            Some(0) => {
+                return Err(PureError::ConfigError(format!(
+                    "model {model} auto compact limit must be a positive integer"
+                )));
+            }
+            Some(limit) => limit == selected.default_auto_compact_token_limit(),
+        };
+        if restore_default {
+            self.auto_compact_overrides_mut().remove(model);
+        } else {
+            self.auto_compact_overrides_mut().insert(
+                model.to_string(),
+                limit.expect("positive override is present"),
+            );
+        }
+        Ok(())
+    }
+
+    fn auto_compact_overrides_mut(&mut self) -> &mut BTreeMap<String, u64> {
+        match &mut self.catalog {
+            ProviderModelCatalogConfig::Bundled {
+                auto_compact_overrides,
+                ..
+            }
+            | ProviderModelCatalogConfig::Explicit {
+                auto_compact_overrides,
+                ..
+            } => auto_compact_overrides,
         }
     }
 
@@ -347,6 +426,18 @@ impl ProviderConfig {
                 return Err(PureError::ConfigError(format!(
                     "provider {provider_id} contains duplicate model: {}",
                     model.slug
+                )));
+            }
+        }
+        for (slug, limit) in self.auto_compact_overrides() {
+            if *limit == 0 {
+                return Err(PureError::ConfigError(format!(
+                    "provider {provider_id} model {slug} auto compact limit must be a positive integer"
+                )));
+            }
+            if !slugs.contains(slug.as_str()) {
+                return Err(PureError::ConfigError(format!(
+                    "provider {provider_id} auto compact override references unknown model: {slug}"
                 )));
             }
         }

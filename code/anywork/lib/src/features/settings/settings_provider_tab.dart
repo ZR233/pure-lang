@@ -34,6 +34,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
   String _query = '';
   String? _selectedProviderId;
   ProviderDraft? _draft;
+  final GlobalKey<FormState> _draftFormKey = GlobalKey<FormState>();
   bool _showDetails = false;
   bool _saving = false;
   String? _draftError;
@@ -83,6 +84,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
                 _draft!.originalId,
                 _draft!.provider.templateKind,
               )),
+              formKey: _draftFormKey,
               draft: _draft!,
               presets: catalog.presets,
               saving: _saving,
@@ -286,8 +288,29 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       final custom = [...provider.customModels];
       final previousSlug = custom[index].slug;
       custom[index] = model;
+      // 保留既有用户覆盖：同名编辑不得丢覆盖，仅更名时迁移；上下文窗口变化时按新容量
+      // 重算安全上限与生效值，模型默认与用户覆盖保持不变。
+      final limits = {...provider.autoCompactLimits};
+      final previousLimit =
+          limits[previousSlug] ?? ProviderModelAutoCompactView.forModel(model);
+      final recalculated = previousLimit.withSafeLimit(
+        ProviderModelAutoCompactView.safeLimitForContext(model.contextWindow),
+      );
+      if (previousSlug != model.slug) {
+        limits.remove(previousSlug);
+      }
+      limits[model.slug] = previousSlug == model.slug
+          ? recalculated
+          : ProviderModelAutoCompactView(
+              slug: model.slug,
+              defaultLimit: recalculated.defaultLimit,
+              overrideLimit: recalculated.overrideLimit,
+              effectiveLimit: recalculated.effectiveLimit,
+              safeLimit: recalculated.safeLimit,
+            );
       return provider.copyWith(
         customModels: custom,
+        autoCompactLimits: limits,
         defaultModel: provider.defaultModel == previousSlug
             ? model.slug
             : provider.defaultModel,
@@ -302,6 +325,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       final removedSlug = custom[index].slug;
       custom.removeAt(index);
       final models = [...provider.defaultModels, ...custom];
+      final limits = {...provider.autoCompactLimits}..remove(removedSlug);
       // 仅当被移除的模型正是当前默认模型时才改写，避免覆盖无法解析的
       // canonical defaultModel。
       final defaultModel = provider.defaultModel == removedSlug
@@ -309,6 +333,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
           : provider.defaultModel;
       return provider.copyWith(
         customModels: custom,
+        autoCompactLimits: limits,
         models: models,
         defaultModel: defaultModel,
       );
@@ -318,6 +343,10 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
   Future<void> _saveDraft() async {
     final current = _draft;
     if (current == null || _saving) {
+      return;
+    }
+    // 无效阈值输入必须阻止保存并保留草稿，不得静默用旧值保存成功。
+    if (_draftFormKey.currentState?.validate() == false) {
       return;
     }
     setState(() {

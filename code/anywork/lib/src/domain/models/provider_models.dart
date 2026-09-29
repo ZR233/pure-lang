@@ -132,6 +132,90 @@ class ProviderModelView {
   }
 }
 
+/// 模型未显式声明默认压缩阈值时使用的十进制 token 数（258k）。
+///
+/// 与 pl-model 的 `DEFAULT_AUTO_COMPACT_TOKEN_LIMIT` 保持一致；草稿中尚未由服务端解析的
+/// 模型（新建 provider 或新增自定义模型）用它作为默认阈值展示，不写入保存请求。
+const int kDefaultAutoCompactTokens = 258000;
+
+/// provider 实例中某模型上下文压缩阈值的三层视图。
+///
+/// `defaultLimit` 为模型默认元信息；`overrideLimit` 为用户覆盖（`null` 表示使用默认）；
+/// `effectiveLimit` 为实际生效值 `min(覆盖或默认, 上下文 90%)`，上下文未知时为 `null`；
+/// `safeLimit` 为上下文 90% 安全上限，上下文未知时为 `null`。
+class ProviderModelAutoCompactView {
+  const ProviderModelAutoCompactView({
+    required this.slug,
+    required this.defaultLimit,
+    this.overrideLimit,
+    this.effectiveLimit,
+    this.safeLimit,
+  });
+
+  /// 由模型草稿推导的默认视图：默认阈值 258k，上下文 90% 为安全上限。
+  factory ProviderModelAutoCompactView.forModel(ProviderModelView model) {
+    final safeLimit = safeLimitForContext(model.contextWindow);
+    return ProviderModelAutoCompactView(
+      slug: model.slug,
+      defaultLimit: kDefaultAutoCompactTokens,
+      overrideLimit: null,
+      effectiveLimit: _effective(kDefaultAutoCompactTokens, safeLimit),
+      safeLimit: safeLimit,
+    );
+  }
+
+  /// 上下文容量 90% 的安全上限；容量未知或非正时返回 `null`（保持不自动压缩）。
+  ///
+  /// 用商余数计算，避免 `contextWindow * 90` 在大容量下的整数溢出。
+  static int? safeLimitForContext(int? contextWindow) {
+    if (contextWindow == null || contextWindow <= 0) {
+      return null;
+    }
+    final quotient = contextWindow ~/ 100;
+    final remainder = contextWindow % 100;
+    return quotient * 90 + (remainder * 90) ~/ 100;
+  }
+
+  static int? _effective(int selected, int? safeLimit) {
+    if (safeLimit == null) {
+      return null;
+    }
+    return selected < safeLimit ? selected : safeLimit;
+  }
+
+  final String slug;
+  final int defaultLimit;
+  final int? overrideLimit;
+  final int? effectiveLimit;
+  final int? safeLimit;
+
+  bool get hasOverride => overrideLimit != null;
+
+  /// 返回覆盖变更后的副本；覆盖为 `null` 表示恢复默认。
+  ///
+  /// 实际生效值按 `min(覆盖或默认, 安全上限)` 重新推导，上下文未知时保持 `null`。
+  ProviderModelAutoCompactView withOverride(int? overrideLimit) {
+    return ProviderModelAutoCompactView(
+      slug: slug,
+      defaultLimit: defaultLimit,
+      overrideLimit: overrideLimit,
+      effectiveLimit: _effective(overrideLimit ?? defaultLimit, safeLimit),
+      safeLimit: safeLimit,
+    );
+  }
+
+  /// 以新的上下文安全上限重算生效值，保留模型默认与用户覆盖。
+  ProviderModelAutoCompactView withSafeLimit(int? safeLimit) {
+    return ProviderModelAutoCompactView(
+      slug: slug,
+      defaultLimit: defaultLimit,
+      overrideLimit: overrideLimit,
+      effectiveLimit: _effective(overrideLimit ?? defaultLimit, safeLimit),
+      safeLimit: safeLimit,
+    );
+  }
+}
+
 class ProviderSettingsView {
   const ProviderSettingsView({
     this.pricingEnabled = false,
@@ -148,6 +232,7 @@ class ProviderSettingsView {
     this.defaultModels = const [],
     this.customModels = const [],
     this.modelConnectionModes = const {},
+    this.autoCompactLimits = const {},
     required this.status,
     required this.usageLabel,
     this.modelCount = '',
@@ -178,6 +263,7 @@ class ProviderSettingsView {
   final List<ProviderModelView> defaultModels;
   final List<ProviderModelView> customModels;
   final Map<String, String> modelConnectionModes;
+  final Map<String, ProviderModelAutoCompactView> autoCompactLimits;
   final String status;
   final String usageLabel;
   final String modelCount;
@@ -211,6 +297,24 @@ class ProviderSettingsView {
     );
   }
 
+  /// 返回某模型的三层压缩阈值视图。
+  ///
+  /// 优先使用 canonical snapshot 的解析结果；草稿中尚未持久化的模型（新建 provider 或
+  /// 新增自定义模型）按模型默认 258,000 与上下文 90% 安全上限推导。
+  ProviderModelAutoCompactView autoCompactLimitFor(ProviderModelView model) {
+    return autoCompactLimits[model.slug] ??
+        ProviderModelAutoCompactView.forModel(model);
+  }
+
+  /// 写入或更新某模型的三层压缩阈值视图。
+  ProviderSettingsView withAutoCompactLimit(
+    ProviderModelAutoCompactView limit,
+  ) {
+    return copyWith(
+      autoCompactLimits: {...autoCompactLimits, limit.slug: limit},
+    );
+  }
+
   ProviderSettingsView copyWith({
     bool? pricingEnabled,
     String? id,
@@ -226,6 +330,7 @@ class ProviderSettingsView {
     List<ProviderModelView>? defaultModels,
     List<ProviderModelView>? customModels,
     Map<String, String>? modelConnectionModes,
+    Map<String, ProviderModelAutoCompactView>? autoCompactLimits,
     String? status,
     String? usageLabel,
     String? modelCount,
@@ -256,6 +361,7 @@ class ProviderSettingsView {
       defaultModels: defaultModels ?? this.defaultModels,
       customModels: customModels ?? this.customModels,
       modelConnectionModes: modelConnectionModes ?? this.modelConnectionModes,
+      autoCompactLimits: autoCompactLimits ?? this.autoCompactLimits,
       status: status ?? this.status,
       usageLabel: usageLabel ?? this.usageLabel,
       modelCount: modelCount ?? this.modelCount,

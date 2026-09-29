@@ -127,6 +127,10 @@ abstract final class StudioDriverKeys {
   static const providerModelAdd = ValueKey<String>('provider-model-add');
   static ValueKey<String> customModelId(int index) =>
       ValueKey<String>('provider-model-$index-id');
+  static ValueKey<String> customModelAdvanced(int index) =>
+      ValueKey<String>('provider-model-$index-advanced');
+  static ValueKey<String> customModelDisplayName(int index) =>
+      ValueKey<String>('provider-model-$index-display-name');
   static const providerCancel = ValueKey<String>('provider-cancel');
   static const toolApprove = ValueKey<String>('tool-approve');
   static const toolDeny = ValueKey<String>('tool-deny');
@@ -398,4 +402,20 @@ abstract final class StudioDriverKeys {
   ) => ValueKey<String>(
     'provider-$providerId-model-$model-connection-mode-$mode',
   );
+
+  static ValueKey<String> providerModelAutoCompactInput(
+    String providerId,
+    String model,
+  ) => ValueKey<String>('provider-$providerId-model-$model-auto-compact-input');
+
+  static ValueKey<String> providerModelAutoCompactSlider(
+    String providerId,
+    String model,
+  ) =>
+      ValueKey<String>('provider-$providerId-model-$model-auto-compact-slider');
+
+  static ValueKey<String> providerModelAutoCompactReset(
+    String providerId,
+    String model,
+  ) => ValueKey<String>('provider-$providerId-model-$model-auto-compact-reset');
 }

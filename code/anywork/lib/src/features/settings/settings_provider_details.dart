@@ -134,6 +134,7 @@ class ProviderDetails extends StatelessWidget {
                 model: model,
                 providerId: provider.id,
                 framed: true,
+                autoCompact: provider.autoCompactLimitFor(model),
               ),
           ],
         ),

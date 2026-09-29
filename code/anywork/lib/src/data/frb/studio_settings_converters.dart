@@ -10,6 +10,16 @@ ProviderSettingsView _providerSettingsFromFrb(
     for (final mode in value.modelConnectionModes)
       mode.slug: mode.connectionMode,
   };
+  final autoCompactLimits = {
+    for (final limit in value.modelAutoCompactLimits)
+      limit.slug: ProviderModelAutoCompactView(
+        slug: limit.slug,
+        defaultLimit: limit.defaultLimit.toInt(),
+        overrideLimit: limit.overrideLimit?.toInt(),
+        effectiveLimit: limit.effectiveLimit?.toInt(),
+        safeLimit: limit.safeLimit?.toInt(),
+      ),
+  };
 
   return ProviderSettingsView(
     pricingEnabled: value.pricingEnabled,
@@ -25,6 +35,7 @@ ProviderSettingsView _providerSettingsFromFrb(
     models: const [],
     customModels: customModels,
     modelConnectionModes: connectionModes,
+    autoCompactLimits: autoCompactLimits,
     status: value.hasBearerToken || !value.credentialRequired
         ? 'ready'
         : 'missingCredential',

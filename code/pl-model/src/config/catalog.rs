@@ -141,6 +141,7 @@ impl ProviderCatalogRegistry {
         compatible.provider.catalog = super::ProviderModelCatalogConfig::Explicit {
             models: Vec::new(),
             connection_overrides: BTreeMap::new(),
+            auto_compact_overrides: BTreeMap::new(),
         };
         presets.push(compatible);
 

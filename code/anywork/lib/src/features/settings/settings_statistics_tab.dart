@@ -220,7 +220,9 @@ class _SummarySection extends StatelessWidget {
                         ),
                       ),
                       DataCell(Text('${summary.sampleCount}')),
-                      DataCell(Text('${summary.completionTokens}')),
+                      DataCell(
+                        Text(formatTokenCount(summary.completionTokens)),
+                      ),
                       DataCell(Text(_formatMillis(summary.averageTtftMillis))),
                       DataCell(
                         Text(_formatMillis(summary.averageResponseMillis)),
@@ -269,7 +271,7 @@ class _CompactSummaryCard extends StatelessWidget {
           ),
           SettingsMetric(
             context.l10n.statisticsOutputTokens,
-            '${summary.completionTokens}',
+            formatTokenCount(summary.completionTokens),
           ),
           SettingsMetric(
             context.l10n.statisticsAverageTtft,
@@ -469,7 +471,7 @@ class _WideHistoryRow extends StatelessWidget {
         Text(_formatCompletedAt(context, sample.completedAt)),
         _ModelIdentity(sample: sample),
         Text(_formatReasoningEffort(context, sample.reasoningEffort)),
-        Text('${sample.completionTokens}'),
+        Text(formatTokenCount(sample.completionTokens)),
         Text(_formatSampleMillis(context, sample.ttftMillis)),
         Text(_formatSampleMillis(context, sample.decodeMillis)),
         Text(_formatSampleMillis(context, sample.totalResponseMillis)),
@@ -567,7 +569,7 @@ class _CompactHistoryCard extends StatelessWidget {
                 ),
                 SettingsMetric(
                   context.l10n.statisticsOutputTokens,
-                  '${sample.completionTokens}',
+                  formatTokenCount(sample.completionTokens),
                 ),
                 SettingsMetric(
                   'TTFT',

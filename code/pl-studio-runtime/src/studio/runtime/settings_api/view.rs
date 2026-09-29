@@ -8,8 +8,9 @@ use pl_protocol::search::WebSearchMode;
 use pl_protocol::studio::{
     StudioCustomModelSettings, StudioDeepSeekWebSearchSettings, StudioGeneralSettings,
     StudioInstructionsSettings, StudioMcpServerSettings, StudioModeModelSettings,
-    StudioModelConnectionSettings, StudioProviderSettings, StudioRoleSettings, StudioSettings,
-    StudioSettingsSnapshot, StudioSkillsSettings, StudioWebSearchSettings,
+    StudioModelAutoCompactSettings, StudioModelConnectionSettings, StudioProviderSettings,
+    StudioRoleSettings, StudioSettings, StudioSettingsSnapshot, StudioSkillsSettings,
+    StudioWebSearchSettings,
 };
 
 use crate::{ConfigRuntimeSnapshot, StudioRole};
@@ -97,6 +98,23 @@ fn settings_view(
                         connection_mode: connection_mode_label(*mode).to_string(),
                     })
                     .collect(),
+                model_auto_compact_limits: {
+                    let overrides = provider.auto_compact_overrides();
+                    models
+                        .iter()
+                        .map(|model| {
+                            let override_limit = overrides.get(&model.slug).copied();
+                            StudioModelAutoCompactSettings {
+                                slug: model.slug.clone(),
+                                default_limit: model.default_auto_compact_token_limit(),
+                                override_limit,
+                                effective_limit: model
+                                    .resolved_auto_compact_limit_with(override_limit),
+                                safe_limit: model.safe_auto_compact_token_limit(),
+                            }
+                        })
+                        .collect()
+                },
                 catalog_id,
             })
         })

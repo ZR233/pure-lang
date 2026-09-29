@@ -10,7 +10,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'settings.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `bridge_input_source`, `bridge_modality`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`
 
 /// Provider 配置中由用户定义的模型，不复制内置 catalog 元数据。
 class BridgeCustomModelSettingsDto {
@@ -252,6 +252,42 @@ class BridgeModeModelSettingsDto {
           providerId == other.providerId &&
           model == other.model &&
           effort == other.effort;
+}
+
+/// provider 实例中某模型上下文压缩阈值的三层 canonical 视图。
+class BridgeModelAutoCompactSettingsDto {
+  final String slug;
+  final BigInt defaultLimit;
+  final BigInt? overrideLimit;
+  final BigInt? effectiveLimit;
+  final BigInt? safeLimit;
+
+  const BridgeModelAutoCompactSettingsDto({
+    required this.slug,
+    required this.defaultLimit,
+    this.overrideLimit,
+    this.effectiveLimit,
+    this.safeLimit,
+  });
+
+  @override
+  int get hashCode =>
+      slug.hashCode ^
+      defaultLimit.hashCode ^
+      overrideLimit.hashCode ^
+      effectiveLimit.hashCode ^
+      safeLimit.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelAutoCompactSettingsDto &&
+          runtimeType == other.runtimeType &&
+          slug == other.slug &&
+          defaultLimit == other.defaultLimit &&
+          overrideLimit == other.overrideLimit &&
+          effectiveLimit == other.effectiveLimit &&
+          safeLimit == other.safeLimit;
 }
 
 class BridgeModelCapabilities {
@@ -736,6 +772,7 @@ class BridgeProviderSettingsDto {
   final String defaultModel;
   final List<BridgeCustomModelSettingsDto> customModels;
   final List<BridgeModelConnectionSettingsDto> modelConnectionModes;
+  final List<BridgeModelAutoCompactSettingsDto> modelAutoCompactLimits;
   final String? catalogId;
 
   const BridgeProviderSettingsDto({
@@ -755,6 +792,7 @@ class BridgeProviderSettingsDto {
     required this.defaultModel,
     required this.customModels,
     required this.modelConnectionModes,
+    required this.modelAutoCompactLimits,
     this.catalogId,
   });
 
@@ -776,6 +814,7 @@ class BridgeProviderSettingsDto {
       defaultModel.hashCode ^
       customModels.hashCode ^
       modelConnectionModes.hashCode ^
+      modelAutoCompactLimits.hashCode ^
       catalogId.hashCode;
 
   @override
@@ -800,6 +839,7 @@ class BridgeProviderSettingsDto {
           defaultModel == other.defaultModel &&
           customModels == other.customModels &&
           modelConnectionModes == other.modelConnectionModes &&
+          modelAutoCompactLimits == other.modelAutoCompactLimits &&
           catalogId == other.catalogId;
 }
 
@@ -1221,6 +1261,7 @@ class ProviderInput {
   final String defaultModel;
   final List<ProviderModelInput> customModels;
   final List<ProviderModelConnectionInput> modelConnectionModes;
+  final List<ProviderModelAutoCompactInput> modelAutoCompactLimits;
 
   const ProviderInput({
     required this.id,
@@ -1233,6 +1274,7 @@ class ProviderInput {
     required this.defaultModel,
     required this.customModels,
     required this.modelConnectionModes,
+    required this.modelAutoCompactLimits,
   });
 
   @override
@@ -1246,7 +1288,8 @@ class ProviderInput {
       pricingEnabled.hashCode ^
       defaultModel.hashCode ^
       customModels.hashCode ^
-      modelConnectionModes.hashCode;
+      modelConnectionModes.hashCode ^
+      modelAutoCompactLimits.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1262,7 +1305,30 @@ class ProviderInput {
           pricingEnabled == other.pricingEnabled &&
           defaultModel == other.defaultModel &&
           customModels == other.customModels &&
-          modelConnectionModes == other.modelConnectionModes;
+          modelConnectionModes == other.modelConnectionModes &&
+          modelAutoCompactLimits == other.modelAutoCompactLimits;
+}
+
+/// 某模型上下文压缩阈值用户覆盖的输入项；`limit` 必须为正整数 tokens。
+class ProviderModelAutoCompactInput {
+  final String slug;
+  final BigInt limit;
+
+  const ProviderModelAutoCompactInput({
+    required this.slug,
+    required this.limit,
+  });
+
+  @override
+  int get hashCode => slug.hashCode ^ limit.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProviderModelAutoCompactInput &&
+          runtimeType == other.runtimeType &&
+          slug == other.slug &&
+          limit == other.limit;
 }
 
 class ProviderModelConnectionInput {

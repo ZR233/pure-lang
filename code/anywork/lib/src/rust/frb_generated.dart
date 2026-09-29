@@ -6354,6 +6354,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeModelAutoCompactSettingsDto
+  dco_decode_bridge_model_auto_compact_settings_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return BridgeModelAutoCompactSettingsDto(
+      slug: dco_decode_String(arr[0]),
+      defaultLimit: dco_decode_u_64(arr[1]),
+      overrideLimit: dco_decode_opt_box_autoadd_u_64(arr[2]),
+      effectiveLimit: dco_decode_opt_box_autoadd_u_64(arr[3]),
+      safeLimit: dco_decode_opt_box_autoadd_u_64(arr[4]),
+    );
+  }
+
+  @protected
   BridgeModelCapabilities dco_decode_bridge_model_capabilities(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -6909,8 +6925,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 17)
-      throw Exception('unexpected arr length: expect 17 but see ${arr.length}');
+    if (arr.length != 18)
+      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
     return BridgeProviderSettingsDto(
       pricingEnabled: dco_decode_bool(arr[0]),
       id: dco_decode_String(arr[1]),
@@ -6929,7 +6945,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       customModels: dco_decode_list_bridge_custom_model_settings_dto(arr[14]),
       modelConnectionModes:
           dco_decode_list_bridge_model_connection_settings_dto(arr[15]),
-      catalogId: dco_decode_opt_String(arr[16]),
+      modelAutoCompactLimits:
+          dco_decode_list_bridge_model_auto_compact_settings_dto(arr[16]),
+      catalogId: dco_decode_opt_String(arr[17]),
     );
   }
 
@@ -9511,6 +9529,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeModelAutoCompactSettingsDto>
+  dco_decode_list_bridge_model_auto_compact_settings_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_bridge_model_auto_compact_settings_dto)
+        .toList();
+  }
+
+  @protected
   List<BridgeModelCatalogDescriptor>
   dco_decode_list_bridge_model_catalog_descriptor(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -9874,6 +9901,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<ProviderInput> dco_decode_list_provider_input(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_provider_input).toList();
+  }
+
+  @protected
+  List<ProviderModelAutoCompactInput>
+  dco_decode_list_provider_model_auto_compact_input(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_provider_model_auto_compact_input)
+        .toList();
   }
 
   @protected
@@ -10296,8 +10332,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ProviderInput dco_decode_provider_input(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return ProviderInput(
       id: dco_decode_String(arr[0]),
       originalId: dco_decode_opt_String(arr[1]),
@@ -10311,6 +10347,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       modelConnectionModes: dco_decode_list_provider_model_connection_input(
         arr[9],
       ),
+      modelAutoCompactLimits: dco_decode_list_provider_model_auto_compact_input(
+        arr[10],
+      ),
+    );
+  }
+
+  @protected
+  ProviderModelAutoCompactInput dco_decode_provider_model_auto_compact_input(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return ProviderModelAutoCompactInput(
+      slug: dco_decode_String(arr[0]),
+      limit: dco_decode_u_64(arr[1]),
     );
   }
 
@@ -13285,6 +13338,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeModelAutoCompactSettingsDto
+  sse_decode_bridge_model_auto_compact_settings_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_slug = sse_decode_String(deserializer);
+    var var_defaultLimit = sse_decode_u_64(deserializer);
+    var var_overrideLimit = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_effectiveLimit = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_safeLimit = sse_decode_opt_box_autoadd_u_64(deserializer);
+    return BridgeModelAutoCompactSettingsDto(
+      slug: var_slug,
+      defaultLimit: var_defaultLimit,
+      overrideLimit: var_overrideLimit,
+      effectiveLimit: var_effectiveLimit,
+      safeLimit: var_safeLimit,
+    );
+  }
+
+  @protected
   BridgeModelCapabilities sse_decode_bridge_model_capabilities(
     SseDeserializer deserializer,
   ) {
@@ -14034,6 +14107,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     );
     var var_modelConnectionModes =
         sse_decode_list_bridge_model_connection_settings_dto(deserializer);
+    var var_modelAutoCompactLimits =
+        sse_decode_list_bridge_model_auto_compact_settings_dto(deserializer);
     var var_catalogId = sse_decode_opt_String(deserializer);
     return BridgeProviderSettingsDto(
       pricingEnabled: var_pricingEnabled,
@@ -14052,6 +14127,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       defaultModel: var_defaultModel,
       customModels: var_customModels,
       modelConnectionModes: var_modelConnectionModes,
+      modelAutoCompactLimits: var_modelAutoCompactLimits,
       catalogId: var_catalogId,
     );
   }
@@ -17467,6 +17543,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeModelAutoCompactSettingsDto>
+  sse_decode_list_bridge_model_auto_compact_settings_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeModelAutoCompactSettingsDto>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_model_auto_compact_settings_dto(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<BridgeModelCatalogDescriptor>
   sse_decode_list_bridge_model_catalog_descriptor(
     SseDeserializer deserializer,
@@ -18069,6 +18160,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <ProviderInput>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_provider_input(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<ProviderModelAutoCompactInput>
+  sse_decode_list_provider_model_auto_compact_input(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <ProviderModelAutoCompactInput>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_provider_model_auto_compact_input(deserializer));
     }
     return ans_;
   }
@@ -18750,6 +18856,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_customModels = sse_decode_list_provider_model_input(deserializer);
     var var_modelConnectionModes =
         sse_decode_list_provider_model_connection_input(deserializer);
+    var var_modelAutoCompactLimits =
+        sse_decode_list_provider_model_auto_compact_input(deserializer);
     return ProviderInput(
       id: var_id,
       originalId: var_originalId,
@@ -18761,7 +18869,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       defaultModel: var_defaultModel,
       customModels: var_customModels,
       modelConnectionModes: var_modelConnectionModes,
+      modelAutoCompactLimits: var_modelAutoCompactLimits,
     );
+  }
+
+  @protected
+  ProviderModelAutoCompactInput sse_decode_provider_model_auto_compact_input(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_slug = sse_decode_String(deserializer);
+    var var_limit = sse_decode_u_64(deserializer);
+    return ProviderModelAutoCompactInput(slug: var_slug, limit: var_limit);
   }
 
   @protected
@@ -21609,6 +21728,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_model_auto_compact_settings_dto(
+    BridgeModelAutoCompactSettingsDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.slug, serializer);
+    sse_encode_u_64(self.defaultLimit, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.overrideLimit, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.effectiveLimit, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.safeLimit, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_model_capabilities(
     BridgeModelCapabilities self,
     SseSerializer serializer,
@@ -22180,6 +22312,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     );
     sse_encode_list_bridge_model_connection_settings_dto(
       self.modelConnectionModes,
+      serializer,
+    );
+    sse_encode_list_bridge_model_auto_compact_settings_dto(
+      self.modelAutoCompactLimits,
       serializer,
     );
     sse_encode_opt_String(self.catalogId, serializer);
@@ -24853,6 +24989,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_bridge_model_auto_compact_settings_dto(
+    List<BridgeModelAutoCompactSettingsDto> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_model_auto_compact_settings_dto(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_bridge_model_catalog_descriptor(
     List<BridgeModelCatalogDescriptor> self,
     SseSerializer serializer,
@@ -25363,6 +25511,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_provider_input(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_provider_model_auto_compact_input(
+    List<ProviderModelAutoCompactInput> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_provider_model_auto_compact_input(item, serializer);
     }
   }
 
@@ -25995,6 +26155,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       self.modelConnectionModes,
       serializer,
     );
+    sse_encode_list_provider_model_auto_compact_input(
+      self.modelAutoCompactLimits,
+      serializer,
+    );
+  }
+
+  @protected
+  void sse_encode_provider_model_auto_compact_input(
+    ProviderModelAutoCompactInput self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.slug, serializer);
+    sse_encode_u_64(self.limit, serializer);
   }
 
   @protected

@@ -3773,6 +3773,78 @@ abstract class AppLocalizations {
   /// **'Maximum output (tokens)'**
   String get settingsOutputBudget;
 
+  /// No description provided for @settingsModelAutoCompactTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Context compaction threshold'**
+  String get settingsModelAutoCompactTitle;
+
+  /// No description provided for @settingsModelAutoCompactRestore.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore default'**
+  String get settingsModelAutoCompactRestore;
+
+  /// No description provided for @settingsModelAutoCompactDefaultLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Default'**
+  String get settingsModelAutoCompactDefaultLabel;
+
+  /// No description provided for @settingsModelAutoCompactOverrideLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'User'**
+  String get settingsModelAutoCompactOverrideLabel;
+
+  /// No description provided for @settingsModelAutoCompactEffectiveLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Effective'**
+  String get settingsModelAutoCompactEffectiveLabel;
+
+  /// No description provided for @settingsModelAutoCompactSafeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Safe limit'**
+  String get settingsModelAutoCompactSafeLabel;
+
+  /// No description provided for @settingsModelAutoCompactUsingDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Using default'**
+  String get settingsModelAutoCompactUsingDefault;
+
+  /// No description provided for @settingsModelAutoCompactInputLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Threshold (tokens)'**
+  String get settingsModelAutoCompactInputLabel;
+
+  /// No description provided for @settingsModelAutoCompactInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a positive integer token count.'**
+  String get settingsModelAutoCompactInvalid;
+
+  /// No description provided for @settingsModelAutoCompactHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Effective value is the smaller of the selected threshold and 90% of the context window.'**
+  String get settingsModelAutoCompactHelp;
+
+  /// No description provided for @settingsModelAutoCompactUnknownCapacity.
+  ///
+  /// In en, this message translates to:
+  /// **'Context capacity is unknown, so compaction stays off.'**
+  String get settingsModelAutoCompactUnknownCapacity;
+
+  /// No description provided for @settingsModelAutoCompactAboveSafe.
+  ///
+  /// In en, this message translates to:
+  /// **'Above the safe limit; {value} takes effect.'**
+  String settingsModelAutoCompactAboveSafe(String value);
+
   /// No description provided for @settingsPriceInput.
   ///
   /// In en, this message translates to:

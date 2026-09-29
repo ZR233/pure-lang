@@ -37,6 +37,8 @@ pub struct ProviderEdit {
     pub default_model: String,
     pub custom_models: Vec<ProviderModelEdit>,
     pub model_connection_modes: BTreeMap<String, ProviderConnectionMode>,
+    /// 该 provider 实例完整的上下文压缩阈值用户覆盖集合；未列出模型使用默认值。
+    pub model_auto_compact_limits: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,6 +198,9 @@ impl ProviderEdit {
         };
         for (model, mode) in &self.model_connection_modes {
             config.set_model_connection_mode(model, *mode)?;
+        }
+        for (model, limit) in &self.model_auto_compact_limits {
+            config.set_model_auto_compact_override(model, Some(*limit))?;
         }
         config.pricing_mode = self.pricing_mode;
         config.name = name;

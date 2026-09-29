@@ -1,12 +1,12 @@
 use crate::api::studio::types::{
     BridgeCustomModelSettingsDto, BridgeDeepSeekWebSearchSettingsDto, BridgeGeneralSettingsDto,
     BridgeInstructionsSettingsDto, BridgeMcpServerConfiguration, BridgeMcpServerSettingsDto,
-    BridgeModeModelSettingsDto, BridgeModelConnectionSettingsDto, BridgeProviderSettingsDto,
-    BridgeProviderUsageData, BridgeProviderUsageState, BridgeRoleSettingsDto,
-    BridgeSettingsStateSnapshot, BridgeSkillsSettingsDto, BridgeStudioSettingsDto,
-    BridgeWebSearchSettingsDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto, ProviderSecretInput,
-    ProviderSettingsInput, ProviderUsageDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
-    ZhipuToolUsageDetailDto,
+    BridgeModeModelSettingsDto, BridgeModelAutoCompactSettingsDto,
+    BridgeModelConnectionSettingsDto, BridgeProviderSettingsDto, BridgeProviderUsageData,
+    BridgeProviderUsageState, BridgeRoleSettingsDto, BridgeSettingsStateSnapshot,
+    BridgeSkillsSettingsDto, BridgeStudioSettingsDto, BridgeWebSearchSettingsDto,
+    DeepSeekBalanceDto, DeepSeekBalanceInfoDto, ProviderSecretInput, ProviderSettingsInput,
+    ProviderUsageDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 use pl_studio_runtime::{ProviderUsageData, ProviderUsageState, ZhipuQuotaWindow};
 
@@ -54,6 +54,17 @@ pub(crate) fn bridge_settings(
                     .map(|mode| BridgeModelConnectionSettingsDto {
                         slug: mode.slug,
                         connection_mode: mode.connection_mode,
+                    })
+                    .collect(),
+                model_auto_compact_limits: provider
+                    .model_auto_compact_limits
+                    .into_iter()
+                    .map(|limit| BridgeModelAutoCompactSettingsDto {
+                        slug: limit.slug,
+                        default_limit: limit.default_limit,
+                        override_limit: limit.override_limit,
+                        effective_limit: limit.effective_limit,
+                        safe_limit: limit.safe_limit,
                     })
                     .collect(),
                 catalog_id: provider.catalog_id,
@@ -229,6 +240,16 @@ pub(crate) fn provider_settings_request(
                         slug: mode.slug,
                         connection_mode: mode.connection_mode,
                     })
+                    .collect(),
+                model_auto_compact_limits: provider
+                    .model_auto_compact_limits
+                    .into_iter()
+                    .map(
+                        |limit| pl_protocol::studio::ProviderModelAutoCompactUpdate {
+                            slug: limit.slug,
+                            limit: limit.limit,
+                        },
+                    )
                     .collect(),
             })
             .collect(),

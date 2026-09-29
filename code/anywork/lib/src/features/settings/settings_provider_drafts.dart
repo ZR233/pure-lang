@@ -244,21 +244,34 @@ String quotaDetail(BuildContext context, ZhipuQuotaLimitView limit) {
   final remaining = limit.remaining;
   final currentValue = limit.currentValue;
   final total = limit.total;
+  final format = _quotaValueFormatter(limit);
   if (remaining != null && total != null) {
     return context.l10n.settingsUsageQuotaRemaining(
-      _formatCompactNumber(remaining),
-      _formatCompactNumber(total),
+      format(remaining),
+      format(total),
     );
   }
   if (currentValue != null && total != null) {
     return context.l10n.settingsUsageQuotaUsed(
-      _formatCompactNumber(currentValue),
-      _formatCompactNumber(total),
+      format(currentValue),
+      format(total),
     );
   }
   return context.l10n.settingsUsagePercentRemaining(
     formatPercent(quotaRemainingPercent(limit)),
   );
+}
+
+/// 额度数值按后端 limit 类型选择展示格式。
+///
+/// 5 小时与每周额度由后端分类为 `TOKENS_LIMIT`，是词元用量，统一走共享词元 formatter；
+/// MCP 月度由 `TIME_LIMIT` 分类、其余为未知窗口，不是词元，沿用计数紧凑格式，避免把
+/// 时间/次数伪装成词元。
+String Function(num value) _quotaValueFormatter(ZhipuQuotaLimitView limit) {
+  if (limit.window == 'fiveHour' || limit.window == 'weekly') {
+    return (value) => formatTokenCount(value.round());
+  }
+  return _formatCompactNumber;
 }
 
 String quotaResetLabel(BuildContext context, int? seconds) {

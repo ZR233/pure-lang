@@ -20,10 +20,10 @@ pub use catalog::{
 };
 pub use family::ModelFamily;
 pub use info::{
-    ChatRequestOptions, MaxTokensField, MediaMixPolicy, MediaRepresentation, MediaWireFormat,
-    ModelBinding, ModelInfo, ModelMediaInputProfile, ModelProtocolOptions, ModelRequestProfile,
-    ModelTransportProfile, ResponsesMaxTokensField, ResponsesRequestOptions, TruncationMode,
-    TruncationPolicy,
+    ChatRequestOptions, DEFAULT_AUTO_COMPACT_TOKEN_LIMIT, MaxTokensField, MediaMixPolicy,
+    MediaRepresentation, MediaWireFormat, ModelBinding, ModelInfo, ModelMediaInputProfile,
+    ModelProtocolOptions, ModelRequestProfile, ModelTransportProfile, ResponsesMaxTokensField,
+    ResponsesRequestOptions, TruncationMode, TruncationPolicy,
 };
 pub use parameter::{
     MissingCandidatePolicy, ModelParameter, ModelParameterCandidateError,

@@ -57,6 +57,14 @@ anywork 使用独立产品身份，默认仅访问 `~/.anywork`，凭据服务�
 
 ## 20.2 配置职责
 
+每个 provider 的模型目录独立保存按模型 slug 索引的压缩阈值覆盖值，bundled、附加与 explicit
+模型使用同一解析规则。覆盖值为正整数 tokens，缺省表示使用模型默认值；恢复默认仅删除对应
+模型覆盖项。默认值与安全上限由 [06](./06-model.md) 定义，不复制进用户配置作为第二事实源。
+无效值和不存在的模型引用在发布配置前拒绝，失败不改变 canonical snapshot。新增可选覆盖
+集合缺省为空，已有配置和凭据保持原样；既有模型默认阈值字段继续保持默认元信息语义。
+Settings 命令携带 revision 并返回完整 canonical snapshot，保留未修改的模型和 provider 数据。
+模型刷新将覆盖值纳入冻结配置身份，新建、恢复和后续安全刷新使用最新解析值，不改写已发请求。
+
 pl-model 拥有产品无关的模型配置值对象：角色路由配置（provider/model/effort 校验与解析）、
 provider 配置与模型路由配置，负责把路由解析为运行时 endpoint 和唯一选中的不可变模型信息。
 pl-studio-runtime 拥有：Studio 配置 schema 与启动期版本迁移、配置文件路径、

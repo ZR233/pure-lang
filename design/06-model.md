@@ -275,6 +275,11 @@ Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 
 模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 Studio 的 instruction
 assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的
 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值；
+默认压缩阈值未显式声明时为 258,000 tokens（十进制 258k）。用户覆盖值独立于模型默认
+元信息，以 provider 实例与模型 slug 为身份，优先于默认值；实际生效值取所选阈值与上下文
+容量 90% 的较小值。默认值和覆盖值必须为正整数，安全上限不能通过覆盖绕过；未知上下文
+容量仍保持不自动压缩的既有行为。目录和设置投影区分模型默认值、用户覆盖值及生效值，
+不把用户选择反写为模型能力。配置保存契约见 [20](./20-config.md)。
 压缩政策与摘要要求由 Studio 选择，model 执行辅助调用，core 校验并原子提交上下文替换与持久化，
 pl-model 不维护压缩状态。
 
@@ -368,7 +373,7 @@ Workspace/项目文档。每轮 Skill 调用与推荐写入该轮 canonical tran
 更新 context hash，不因追加记录提升固定前缀 generation；provider、model、固定指令或工具
 schema 的变化仍单独记录（完整依赖倒置与 prepared-call 契约见 [16](./16-core-contracts.md)）。
 
-上下文压缩采用 Codex 风格的版本化 replacement：采样前估算完整物化请求，达到 90% 自动阈值时
+上下文压缩采用 Codex 风格的版本化 replacement：采样前估算完整物化请求，达到上述实际生效阈值时
 replace transcript，再把当前 working context 注入新窗口一次；provider 报告 token 达到阈值时，
 下一次采样前执行同样 replacement。压缩不得丢失 tool call/output 配对或当前用户任务。估算与
 请求准备共享同一协议入口校验：历史含原生 Responses 物料（如加密 checkpoint）而当前模型使用

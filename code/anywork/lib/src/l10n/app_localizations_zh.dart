@@ -2013,6 +2013,44 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsOutputBudget => '最大输出（词元）';
 
   @override
+  String get settingsModelAutoCompactTitle => '上下文压缩阈值';
+
+  @override
+  String get settingsModelAutoCompactRestore => '恢复默认';
+
+  @override
+  String get settingsModelAutoCompactDefaultLabel => '默认';
+
+  @override
+  String get settingsModelAutoCompactOverrideLabel => '用户';
+
+  @override
+  String get settingsModelAutoCompactEffectiveLabel => '生效';
+
+  @override
+  String get settingsModelAutoCompactSafeLabel => '安全上限';
+
+  @override
+  String get settingsModelAutoCompactUsingDefault => '使用默认';
+
+  @override
+  String get settingsModelAutoCompactInputLabel => '阈值（词元）';
+
+  @override
+  String get settingsModelAutoCompactInvalid => '请输入正整数词元数。';
+
+  @override
+  String get settingsModelAutoCompactHelp => '实际生效取所选阈值与上下文容量 90% 中较小者。';
+
+  @override
+  String get settingsModelAutoCompactUnknownCapacity => '上下文容量未知，暂不自动压缩。';
+
+  @override
+  String settingsModelAutoCompactAboveSafe(String value) {
+    return '超过安全上限，实际按 $value 生效。';
+  }
+
+  @override
   String get settingsPriceInput => '输入';
 
   @override

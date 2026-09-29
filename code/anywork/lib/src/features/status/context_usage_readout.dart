@@ -110,7 +110,7 @@ class _ContextDetail extends StatelessWidget {
       hasKnownCapacity: hasKnownCapacity,
     );
     final capacityLabel = hasKnownCapacity
-        ? _formatCount(runtime.contextWindow)
+        ? formatTokenCount(runtime.contextWindow)
         : _unknownCapacityPlaceholder;
     final cache = runtime.cacheUsage;
     final cacheRateLabel = cache.hitRate == null
@@ -164,13 +164,13 @@ class _ContextDetail extends StatelessWidget {
               StatusDetailRow(
                 label: context.l10n.statusContextLabel,
                 value:
-                    '${_formatCount(runtime.contextTokens)} / $capacityLabel',
+                    '${formatTokenCount(runtime.contextTokens)} / $capacityLabel',
               ),
               StatusDetailRow(
                 label: context.l10n.statusTotalTokensLabel,
                 value: runtime.hasIncompleteUsage
-                    ? '${_formatCount(runtime.totalTokens)} · ${context.l10n.statusReportedUsageOnly}'
-                    : _formatCount(runtime.totalTokens),
+                    ? '${formatTokenCount(runtime.totalTokens)} · ${context.l10n.statusReportedUsageOnly}'
+                    : formatTokenCount(runtime.totalTokens),
               ),
               StatusDetailRow(
                 label: context.l10n.statusCacheLabel,
@@ -179,22 +179,22 @@ class _ContextDetail extends StatelessWidget {
               if (cache.hasPositiveDenominator)
                 StatusDetailRow(
                   label: context.l10n.statusCacheHitTokensLabel,
-                  value: _formatCount(cache.cacheReadTokens),
+                  value: formatTokenCount(cache.cacheReadTokens),
                 ),
               if (cache.hasPositiveDenominator)
                 StatusDetailRow(
                   label: context.l10n.statusCacheMissTokensLabel,
-                  value: _formatCount(cache.missTokens),
+                  value: formatTokenCount(cache.missTokens),
                 ),
               if (runtime.cacheWriteTokens > 0)
                 StatusDetailRow(
                   label: context.l10n.statusCacheWriteTokensLabel,
-                  value: _formatCount(runtime.cacheWriteTokens),
+                  value: formatTokenCount(runtime.cacheWriteTokens),
                 ),
               if (runtime.reasoningTokens > 0)
                 StatusDetailRow(
                   label: context.l10n.statusReasoningTokensLabel,
-                  value: _formatCount(runtime.reasoningTokens),
+                  value: formatTokenCount(runtime.reasoningTokens),
                 ),
               if (runtime.hasUsage)
                 StatusDetailRow(

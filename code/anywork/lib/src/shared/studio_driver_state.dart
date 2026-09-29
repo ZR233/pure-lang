@@ -297,6 +297,22 @@ abstract final class StudioDriverState {
               'hasBearerToken': provider.hasBearerToken,
               'status': provider.status,
               'models': [for (final model in provider.allModels) model.slug],
+              // 压缩阈值三层视图：slug → {default, override, effective, safe}。
+              // 缺失值保持 null，便于 Driver 断言未知容量与覆盖归一化。
+              'autoCompactLimits': [
+                for (final model in provider.allModels)
+                  {
+                    'slug': model.slug,
+                    'default': provider.autoCompactLimitFor(model).defaultLimit,
+                    'override': provider
+                        .autoCompactLimitFor(model)
+                        .overrideLimit,
+                    'effective': provider
+                        .autoCompactLimitFor(model)
+                        .effectiveLimit,
+                    'safe': provider.autoCompactLimitFor(model).safeLimit,
+                  },
+              ],
             },
         ],
         'roles': [

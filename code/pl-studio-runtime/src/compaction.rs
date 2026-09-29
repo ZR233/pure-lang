@@ -34,7 +34,7 @@ pub(crate) fn preparer(
     route: &ResolvedModelRoute,
     mode: OpenAiCompactionMode,
 ) -> Result<Option<ContextPreparer>, pl_model::PureError> {
-    let Some(limit) = route.model.resolved_auto_compact_limit() else {
+    let Some(limit) = route.auto_compact_limit else {
         return Ok(None);
     };
     Ok(Some(ContextPreparer::new(StudioCompaction {

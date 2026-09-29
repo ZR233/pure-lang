@@ -5,6 +5,7 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
+import 'settings_provider_auto_compact.dart';
 import 'settings_provider_drafts.dart';
 
 class ProviderModelReadout extends StatelessWidget {
@@ -14,12 +15,24 @@ class ProviderModelReadout extends StatelessWidget {
     this.providerId = '',
     this.framed = false,
     this.onConnectionModeChanged,
+    this.autoCompact,
+    this.autoCompactEnabled = true,
+    this.onAutoCompactChanged,
   });
 
   final ProviderModelView model;
   final String providerId;
   final bool framed;
   final ValueChanged<String>? onConnectionModeChanged;
+
+  /// 该模型的三层压缩阈值视图；为 `null` 时不展示阈值区块。
+  final ProviderModelAutoCompactView? autoCompact;
+
+  /// 非空时提供压缩阈值编辑；`null` 表示只读展示。
+  final ValueChanged<int?>? onAutoCompactChanged;
+
+  /// 压缩阈值输入与滑块是否可用（保存中禁用）。
+  final bool autoCompactEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -154,6 +167,19 @@ class ProviderModelReadout extends StatelessWidget {
                     ? null
                     : (selection) => onConnectionModeChanged!(selection.single),
               ),
+            ),
+          ),
+        ],
+        if (autoCompact != null) ...[
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: ProviderModelAutoCompactControl(
+              limit: autoCompact!,
+              providerId: providerId,
+              modelSlug: model.slug,
+              enabled: autoCompactEnabled,
+              onOverrideChanged: onAutoCompactChanged,
             ),
           ),
         ],

@@ -2098,6 +2098,47 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsOutputBudget => 'Maximum output (tokens)';
 
   @override
+  String get settingsModelAutoCompactTitle => 'Context compaction threshold';
+
+  @override
+  String get settingsModelAutoCompactRestore => 'Restore default';
+
+  @override
+  String get settingsModelAutoCompactDefaultLabel => 'Default';
+
+  @override
+  String get settingsModelAutoCompactOverrideLabel => 'User';
+
+  @override
+  String get settingsModelAutoCompactEffectiveLabel => 'Effective';
+
+  @override
+  String get settingsModelAutoCompactSafeLabel => 'Safe limit';
+
+  @override
+  String get settingsModelAutoCompactUsingDefault => 'Using default';
+
+  @override
+  String get settingsModelAutoCompactInputLabel => 'Threshold (tokens)';
+
+  @override
+  String get settingsModelAutoCompactInvalid =>
+      'Enter a positive integer token count.';
+
+  @override
+  String get settingsModelAutoCompactHelp =>
+      'Effective value is the smaller of the selected threshold and 90% of the context window.';
+
+  @override
+  String get settingsModelAutoCompactUnknownCapacity =>
+      'Context capacity is unknown, so compaction stays off.';
+
+  @override
+  String settingsModelAutoCompactAboveSafe(String value) {
+    return 'Above the safe limit; $value takes effect.';
+  }
+
+  @override
   String get settingsPriceInput => 'Input';
 
   @override

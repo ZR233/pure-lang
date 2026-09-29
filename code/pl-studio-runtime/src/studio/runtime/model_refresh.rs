@@ -102,6 +102,7 @@ impl StudioRuntime {
         let key = crate::hash::canonical_json_hash(&serde_json::json!({
             "provider": route.provider_id, "endpoint": route.endpoint, "model": route.model,
             "effort": route.effort, "pricing": route.pricing_mode,
+            "autoCompactLimit": route.auto_compact_limit,
             "compaction": config.runtime.openai_compaction_mode,
             "hosted": hosted.iter().map(|tool| match tool {
                 pl_model::runtime::HostedTool::WebSearch(options) => pl_protocol::ToolSpec::WebSearch { options: options.clone() },

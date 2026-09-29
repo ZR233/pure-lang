@@ -24,6 +24,11 @@ pub enum ModelProfileError {
         model: String,
         protocol: ProviderWireProtocol,
     },
+
+    /// 默认上下文压缩阈值必须为正整数。
+    #[error("model {model} auto compact token limit must be a positive integer")]
+    InvalidAutoCompactTokenLimit { model: String },
+
     /// `supported_connection_modes` 为空。
     #[error("model {model} has no supported connection modes")]
     NoSupportedConnectionModes { model: String },

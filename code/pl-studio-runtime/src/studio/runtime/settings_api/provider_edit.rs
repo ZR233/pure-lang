@@ -5,9 +5,9 @@ use pl_model::provider::{ProviderConnectionMode, ProviderWireProtocol};
 use pl_protocol::WebSearchContextSize;
 use pl_protocol::search::WebSearchMode;
 use pl_protocol::studio::{
-    ModeRouteSettingsUpdate, ProviderModelConnectionUpdate, ProviderModelUpdate,
-    ProviderSecretUpdate, ProviderSettingsUpdate, RoleSettingsUpdate, StudioError,
-    UpdateWebSearchSettingsRequest,
+    ModeRouteSettingsUpdate, ProviderModelAutoCompactUpdate, ProviderModelConnectionUpdate,
+    ProviderModelUpdate, ProviderSecretUpdate, ProviderSettingsUpdate, RoleSettingsUpdate,
+    StudioError, UpdateWebSearchSettingsRequest,
 };
 
 use crate::{ModeRouteEdit, ProviderEdit, ProviderModelEdit, RoleEdit};
@@ -61,6 +61,7 @@ pub(super) fn provider_edit(
             .map(provider_model_edit)
             .collect::<Result<Vec<_>>>()?,
         model_connection_modes: model_connection_modes(input.model_connection_modes)?,
+        model_auto_compact_limits: model_auto_compact_limits(input.model_auto_compact_limits)?,
     })
 }
 
@@ -96,6 +97,31 @@ fn model_connection_modes(
         }
     }
     Ok(modes)
+}
+
+fn model_auto_compact_limits(
+    inputs: Vec<ProviderModelAutoCompactUpdate>,
+) -> Result<std::collections::BTreeMap<String, u64>> {
+    let mut limits = std::collections::BTreeMap::new();
+    for input in inputs {
+        let slug = input.slug.trim();
+        if slug.is_empty() {
+            return Err(invalid_settings_argument(
+                "Model auto compact slug must not be empty",
+            ));
+        }
+        if input.limit == 0 {
+            return Err(invalid_settings_argument(
+                "Model auto compact limit must be a positive integer",
+            ));
+        }
+        if limits.insert(slug.to_string(), input.limit).is_some() {
+            return Err(invalid_settings_argument(
+                "Duplicate model auto compact limit",
+            ));
+        }
+    }
+    Ok(limits)
 }
 
 fn parse_provider_protocol(value: &str) -> Result<ProviderWireProtocol> {

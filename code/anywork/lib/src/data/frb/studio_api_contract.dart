@@ -1298,6 +1298,13 @@ class FrbStudioApi
                         connectionMode: model.connectionMode,
                       ),
                   ],
+                  modelAutoCompactLimits: [
+                    for (final limit in provider.modelAutoCompactLimits)
+                      frb.ProviderModelAutoCompactInput(
+                        slug: limit.slug,
+                        limit: BigInt.from(limit.limit),
+                      ),
+                  ],
                 ),
             ],
             modeRoutes: [

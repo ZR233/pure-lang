@@ -5930,6 +5930,24 @@ impl SseDecode for crate::api::studio::types::settings::BridgeModeModelSettingsD
     }
 }
 
+impl SseDecode for crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_slug = <String>::sse_decode(deserializer);
+        let mut var_defaultLimit = <u64>::sse_decode(deserializer);
+        let mut var_overrideLimit = <Option<u64>>::sse_decode(deserializer);
+        let mut var_effectiveLimit = <Option<u64>>::sse_decode(deserializer);
+        let mut var_safeLimit = <Option<u64>>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto {
+            slug: var_slug,
+            default_limit: var_defaultLimit,
+            override_limit: var_overrideLimit,
+            effective_limit: var_effectiveLimit,
+            safe_limit: var_safeLimit,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::settings::BridgeModelCapabilities {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -6748,6 +6766,9 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
         let mut var_modelConnectionModes = <Vec<
             crate::api::studio::types::settings::BridgeModelConnectionSettingsDto,
         >>::sse_decode(deserializer);
+        let mut var_modelAutoCompactLimits = <Vec<
+            crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto,
+        >>::sse_decode(deserializer);
         let mut var_catalogId = <Option<String>>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeProviderSettingsDto {
             pricing_enabled: var_pricingEnabled,
@@ -6766,6 +6787,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
             default_model: var_defaultModel,
             custom_models: var_customModels,
             model_connection_modes: var_modelConnectionModes,
+            model_auto_compact_limits: var_modelAutoCompactLimits,
             catalog_id: var_catalogId,
         };
     }
@@ -10494,6 +10516,18 @@ impl SseDecode for Vec<crate::api::studio::types::settings::BridgeModeModelSetti
     }
 }
 
+impl SseDecode for Vec<crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::studio::types::settings::BridgeModelCatalogDescriptor> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -11138,6 +11172,22 @@ impl SseDecode for Vec<crate::api::studio::types::settings::ProviderInput> {
         for idx_ in 0..len_ {
             ans_.push(
                 <crate::api::studio::types::settings::ProviderInput>::sse_decode(deserializer),
+            );
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::studio::types::settings::ProviderModelAutoCompactInput> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::settings::ProviderModelAutoCompactInput>::sse_decode(
+                    deserializer,
+                ),
             );
         }
         return ans_;
@@ -11832,6 +11882,9 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
         let mut var_modelConnectionModes = <Vec<
             crate::api::studio::types::settings::ProviderModelConnectionInput,
         >>::sse_decode(deserializer);
+        let mut var_modelAutoCompactLimits = <Vec<
+            crate::api::studio::types::settings::ProviderModelAutoCompactInput,
+        >>::sse_decode(deserializer);
         return crate::api::studio::types::settings::ProviderInput {
             id: var_id,
             original_id: var_originalId,
@@ -11843,6 +11896,19 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
             default_model: var_defaultModel,
             custom_models: var_customModels,
             model_connection_modes: var_modelConnectionModes,
+            model_auto_compact_limits: var_modelAutoCompactLimits,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::settings::ProviderModelAutoCompactInput {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_slug = <String>::sse_decode(deserializer);
+        let mut var_limit = <u64>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::ProviderModelAutoCompactInput {
+            slug: var_slug,
+            limit: var_limit,
         };
     }
 }
@@ -14464,6 +14530,36 @@ impl
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.slug.into_into_dart().into_dart(),
+            self.default_limit.into_into_dart().into_dart(),
+            self.override_limit.into_into_dart().into_dart(),
+            self.effective_limit.into_into_dart().into_dart(),
+            self.safe_limit.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto,
+    > for crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::settings::BridgeModelCapabilities
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -15381,6 +15477,7 @@ impl flutter_rust_bridge::IntoDart
             self.default_model.into_into_dart().into_dart(),
             self.custom_models.into_into_dart().into_dart(),
             self.model_connection_modes.into_into_dart().into_dart(),
+            self.model_auto_compact_limits.into_into_dart().into_dart(),
             self.catalog_id.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -19712,6 +19809,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::Prov
             self.default_model.into_into_dart().into_dart(),
             self.custom_models.into_into_dart().into_dart(),
             self.model_connection_modes.into_into_dart().into_dart(),
+            self.model_auto_compact_limits.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -19724,6 +19822,31 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::settings::Prov
     for crate::api::studio::types::settings::ProviderInput
 {
     fn into_into_dart(self) -> crate::api::studio::types::settings::ProviderInput {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::settings::ProviderModelAutoCompactInput
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.slug.into_into_dart().into_dart(),
+            self.limit.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::ProviderModelAutoCompactInput
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::settings::ProviderModelAutoCompactInput,
+    > for crate::api::studio::types::settings::ProviderModelAutoCompactInput
+{
+    fn into_into_dart(self) -> crate::api::studio::types::settings::ProviderModelAutoCompactInput {
         self
     }
 }
@@ -21762,6 +21885,17 @@ impl SseEncode for crate::api::studio::types::settings::BridgeModeModelSettingsD
     }
 }
 
+impl SseEncode for crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.slug, serializer);
+        <u64>::sse_encode(self.default_limit, serializer);
+        <Option<u64>>::sse_encode(self.override_limit, serializer);
+        <Option<u64>>::sse_encode(self.effective_limit, serializer);
+        <Option<u64>>::sse_encode(self.safe_limit, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::settings::BridgeModelCapabilities {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -22363,6 +22497,10 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderSettingsDt
         );
         <Vec<crate::api::studio::types::settings::BridgeModelConnectionSettingsDto>>::sse_encode(
             self.model_connection_modes,
+            serializer,
+        );
+        <Vec<crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto>>::sse_encode(
+            self.model_auto_compact_limits,
             serializer,
         );
         <Option<String>>::sse_encode(self.catalog_id, serializer);
@@ -25086,6 +25224,18 @@ impl SseEncode for Vec<crate::api::studio::types::settings::BridgeModeModelSetti
     }
 }
 
+impl SseEncode for Vec<crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::settings::BridgeModelAutoCompactSettingsDto>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::studio::types::settings::BridgeModelCatalogDescriptor> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -25580,6 +25730,18 @@ impl SseEncode for Vec<crate::api::studio::types::settings::ProviderInput> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::studio::types::settings::ProviderInput>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::studio::types::settings::ProviderModelAutoCompactInput> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::settings::ProviderModelAutoCompactInput>::sse_encode(
+                item, serializer,
+            );
         }
     }
 }
@@ -26159,6 +26321,18 @@ impl SseEncode for crate::api::studio::types::settings::ProviderInput {
             self.model_connection_modes,
             serializer,
         );
+        <Vec<crate::api::studio::types::settings::ProviderModelAutoCompactInput>>::sse_encode(
+            self.model_auto_compact_limits,
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::studio::types::settings::ProviderModelAutoCompactInput {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.slug, serializer);
+        <u64>::sse_encode(self.limit, serializer);
     }
 }
 

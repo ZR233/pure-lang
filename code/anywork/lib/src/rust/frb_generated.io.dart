@@ -897,6 +897,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelAutoCompactSettingsDto
+  dco_decode_bridge_model_auto_compact_settings_dto(dynamic raw);
+
+  @protected
   BridgeModelCapabilities dco_decode_bridge_model_capabilities(dynamic raw);
 
   @protected
@@ -1596,6 +1600,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_list_bridge_mode_model_settings_dto(dynamic raw);
 
   @protected
+  List<BridgeModelAutoCompactSettingsDto>
+  dco_decode_list_bridge_model_auto_compact_settings_dto(dynamic raw);
+
+  @protected
   List<BridgeModelCatalogDescriptor>
   dco_decode_list_bridge_model_catalog_descriptor(dynamic raw);
 
@@ -1769,6 +1777,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ProviderInput> dco_decode_list_provider_input(dynamic raw);
+
+  @protected
+  List<ProviderModelAutoCompactInput>
+  dco_decode_list_provider_model_auto_compact_input(dynamic raw);
 
   @protected
   List<ProviderModelConnectionInput>
@@ -1945,6 +1957,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProviderInput dco_decode_provider_input(dynamic raw);
+
+  @protected
+  ProviderModelAutoCompactInput dco_decode_provider_model_auto_compact_input(
+    dynamic raw,
+  );
 
   @protected
   ProviderModelConnectionInput dco_decode_provider_model_connection_input(
@@ -3104,6 +3121,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelAutoCompactSettingsDto
+  sse_decode_bridge_model_auto_compact_settings_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeModelCapabilities sse_decode_bridge_model_capabilities(
     SseDeserializer deserializer,
   );
@@ -3967,6 +3990,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   sse_decode_list_bridge_mode_model_settings_dto(SseDeserializer deserializer);
 
   @protected
+  List<BridgeModelAutoCompactSettingsDto>
+  sse_decode_list_bridge_model_auto_compact_settings_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeModelCatalogDescriptor>
   sse_decode_list_bridge_model_catalog_descriptor(SseDeserializer deserializer);
 
@@ -4180,6 +4209,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ProviderInput> sse_decode_list_provider_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<ProviderModelAutoCompactInput>
+  sse_decode_list_provider_model_auto_compact_input(
     SseDeserializer deserializer,
   );
 
@@ -4404,6 +4439,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProviderInput sse_decode_provider_input(SseDeserializer deserializer);
+
+  @protected
+  ProviderModelAutoCompactInput sse_decode_provider_model_auto_compact_input(
+    SseDeserializer deserializer,
+  );
 
   @protected
   ProviderModelConnectionInput sse_decode_provider_model_connection_input(
@@ -5772,6 +5812,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_model_auto_compact_settings_dto(
+    BridgeModelAutoCompactSettingsDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_model_capabilities(
     BridgeModelCapabilities self,
     SseSerializer serializer,
@@ -6828,6 +6874,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_model_auto_compact_settings_dto(
+    List<BridgeModelAutoCompactSettingsDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_model_catalog_descriptor(
     List<BridgeModelCatalogDescriptor> self,
     SseSerializer serializer,
@@ -7082,6 +7134,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_provider_input(
     List<ProviderInput> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_provider_model_auto_compact_input(
+    List<ProviderModelAutoCompactInput> self,
     SseSerializer serializer,
   );
 
@@ -7348,6 +7406,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_provider_input(ProviderInput self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_provider_model_auto_compact_input(
+    ProviderModelAutoCompactInput self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_provider_model_connection_input(

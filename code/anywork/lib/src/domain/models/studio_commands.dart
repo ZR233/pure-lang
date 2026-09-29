@@ -45,6 +45,17 @@ class ProviderModelConnectionCommand {
   final String connectionMode;
 }
 
+/// 某模型上下文压缩阈值用户覆盖的命令项；`limit` 为正整数 tokens。
+class ProviderModelAutoCompactCommand {
+  const ProviderModelAutoCompactCommand({
+    required this.slug,
+    required this.limit,
+  });
+
+  final String slug;
+  final int limit;
+}
+
 class ProviderCommand {
   const ProviderCommand({
     required this.id,
@@ -57,6 +68,7 @@ class ProviderCommand {
     required this.defaultModel,
     required this.customModels,
     required this.modelConnectionModes,
+    required this.modelAutoCompactLimits,
   });
 
   final String id;
@@ -69,6 +81,7 @@ class ProviderCommand {
   final String defaultModel;
   final List<ProviderModelCommand> customModels;
   final List<ProviderModelConnectionCommand> modelConnectionModes;
+  final List<ProviderModelAutoCompactCommand> modelAutoCompactLimits;
 }
 
 class RoleSettingsCommand {
@@ -251,11 +264,36 @@ abstract final class ProviderSettingsCommandBuilder {
                   connectionMode: model.connectionMode,
                 ),
             ],
+            modelAutoCompactLimits: _autoCompactCommands(provider),
           ),
       ],
       modeRoutes: modeCommands,
       roles: commands,
     );
+  }
+
+  /// 该 provider 实例完整的压缩阈值覆盖集合；未列出模型恢复默认，未修改模型保留覆盖。
+  ///
+  /// 覆盖值与模型默认相同或为空时不下发，交由服务端按默认解析；只保留正整数值。
+  static List<ProviderModelAutoCompactCommand> _autoCompactCommands(
+    ProviderSettingsView provider,
+  ) {
+    final commands = <ProviderModelAutoCompactCommand>[];
+    for (final model in provider.allModels) {
+      final limit = provider.autoCompactLimits[model.slug];
+      final override = limit?.overrideLimit;
+      final slug = model.slug.trim();
+      if (override == null || override <= 0 || slug.isEmpty) {
+        continue;
+      }
+      if (override == limit!.defaultLimit) {
+        continue;
+      }
+      commands.add(
+        ProviderModelAutoCompactCommand(slug: slug, limit: override),
+      );
+    }
+    return commands;
   }
 
   static ProviderSettingsView normalizeProvider(ProviderSettingsView provider) {

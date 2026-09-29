@@ -47,6 +47,7 @@ pub struct StudioProviderSettings {
     pub default_model: String,
     pub custom_models: Vec<StudioCustomModelSettings>,
     pub model_connection_modes: Vec<StudioModelConnectionSettings>,
+    pub model_auto_compact_limits: Vec<StudioModelAutoCompactSettings>,
     pub catalog_id: Option<String>,
 }
 
@@ -70,6 +71,21 @@ pub struct StudioCustomModelSettings {
 pub struct StudioModelConnectionSettings {
     pub slug: String,
     pub connection_mode: String,
+}
+
+/// provider 实例中某模型的上下文压缩阈值三层视图。
+///
+/// `default_limit` 为模型默认元信息；`override_limit` 为用户覆盖（`None` 表示使用默认）；
+/// `effective_limit` 为实际生效值 `min(覆盖或默认, 上下文 90%)`，上下文未知时为 `None`；
+/// `safe_limit` 为上下文 90% 安全上限，上下文未知时为 `None`。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudioModelAutoCompactSettings {
+    pub slug: String,
+    pub default_limit: u64,
+    pub override_limit: Option<u64>,
+    pub effective_limit: Option<u64>,
+    pub safe_limit: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]

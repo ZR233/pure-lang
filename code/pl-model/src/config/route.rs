@@ -53,6 +53,8 @@ pub struct ResolvedModelRoute {
     pub provider_id: ProviderId,
     pub endpoint: ProviderEndpoint,
     pub model: ModelInfo,
+    /// 该 provider 实例与模型下实际生效的上下文压缩阈值；`None` 表示不自动压缩。
+    pub auto_compact_limit: Option<u64>,
     pub effort: Option<ReasoningEffort>,
 }
 
@@ -158,6 +160,7 @@ impl AgentModelConfig {
             role,
             provider_id: route.provider.clone(),
             endpoint: provider.to_endpoint()?,
+            auto_compact_limit: provider.resolved_auto_compact_limit(&model),
             model,
             effort: route.effort.clone(),
         })

@@ -1158,6 +1158,25 @@
   "settingsModelAdvanced": "Optional model settings",
   "settingsContextBudget": "Context budget (tokens)",
   "settingsOutputBudget": "Maximum output (tokens)",
+  "settingsModelAutoCompactTitle": "Context compaction threshold",
+  "settingsModelAutoCompactRestore": "Restore default",
+  "settingsModelAutoCompactDefaultLabel": "Default",
+  "settingsModelAutoCompactOverrideLabel": "User",
+  "settingsModelAutoCompactEffectiveLabel": "Effective",
+  "settingsModelAutoCompactSafeLabel": "Safe limit",
+  "settingsModelAutoCompactUsingDefault": "Using default",
+  "settingsModelAutoCompactInputLabel": "Threshold (tokens)",
+  "settingsModelAutoCompactInvalid": "Enter a positive integer token count.",
+  "settingsModelAutoCompactHelp": "Effective value is the smaller of the selected threshold and 90% of the context window.",
+  "settingsModelAutoCompactUnknownCapacity": "Context capacity is unknown, so compaction stays off.",
+  "settingsModelAutoCompactAboveSafe": "Above the safe limit; {value} takes effect.",
+  "@settingsModelAutoCompactAboveSafe": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
   "settingsPriceInput": "Input",
   "settingsPriceOutput": "Output",
   "settingsPriceCacheRead": "Cache read",

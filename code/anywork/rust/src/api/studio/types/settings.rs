@@ -33,6 +33,7 @@ pub struct ProviderInput {
     pub default_model: String,
     pub custom_models: Vec<ProviderModelInput>,
     pub model_connection_modes: Vec<ProviderModelConnectionInput>,
+    pub model_auto_compact_limits: Vec<ProviderModelAutoCompactInput>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -50,6 +51,14 @@ pub struct ProviderModelInput {
 pub struct ProviderModelConnectionInput {
     pub slug: String,
     pub connection_mode: String,
+}
+
+/// 某模型上下文压缩阈值用户覆盖的输入项；`limit` 必须为正整数 tokens。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderModelAutoCompactInput {
+    pub slug: String,
+    pub limit: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -238,6 +247,7 @@ pub struct BridgeProviderSettingsDto {
     pub default_model: String,
     pub custom_models: Vec<BridgeCustomModelSettingsDto>,
     pub model_connection_modes: Vec<BridgeModelConnectionSettingsDto>,
+    pub model_auto_compact_limits: Vec<BridgeModelAutoCompactSettingsDto>,
     pub catalog_id: Option<String>,
 }
 
@@ -263,6 +273,17 @@ pub struct BridgeCustomModelSettingsDto {
 pub struct BridgeModelConnectionSettingsDto {
     pub slug: String,
     pub connection_mode: String,
+}
+
+/// provider 实例中某模型上下文压缩阈值的三层 canonical 视图。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeModelAutoCompactSettingsDto {
+    pub slug: String,
+    pub default_limit: u64,
+    pub override_limit: Option<u64>,
+    pub effective_limit: Option<u64>,
+    pub safe_limit: Option<u64>,
 }
 
 /// 角色到 provider/model/effort 的 canonical 路由。
