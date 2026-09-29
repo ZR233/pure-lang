@@ -1,7 +1,7 @@
 use super::asset_name;
-use crate::process;
 use anyhow::{Context, Result, anyhow, bail};
 use minisign_verify::{PublicKey, Signature};
+use pl_dev_support::process;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

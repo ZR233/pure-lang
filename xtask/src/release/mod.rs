@@ -4,9 +4,9 @@ mod manifest;
 mod package;
 
 use crate::cli::ReleaseGuiOptions;
-use crate::paths;
 use crate::studio_version;
 use anyhow::{Context, Result, bail};
+use pl_dev_support::paths;
 use semver::Version;
 use std::path::{Path, PathBuf};
 

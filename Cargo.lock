@@ -2666,6 +2666,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pl-dev-support"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "pl-lsp"
 version = "0.1.0"
 dependencies = [
@@ -2773,6 +2781,25 @@ dependencies = [
  "gray_matter",
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "pl-studio-acceptance"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "pl-dev-support",
+ "pl-model",
+ "pl-provider-fixture",
+ "pl-studio-runtime",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2913,13 +2940,10 @@ dependencies = [
  "clap",
  "hex",
  "minisign-verify",
- "pl-model",
+ "pl-dev-support",
  "pl-protocol",
- "pl-provider-fixture",
  "pl-remote-helper",
  "pl-skill-core",
- "pl-studio-runtime",
- "sea-orm",
  "semver",
  "serde",
  "serde_json",
@@ -2927,9 +2951,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "tokio",
- "toml",
  "which",
- "windows-sys 0.61.2",
  "zstd",
 ]
 

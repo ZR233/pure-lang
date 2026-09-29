@@ -1,7 +1,6 @@
-use crate::cli::ManualGuiOptions;
-use crate::paths;
-use crate::process;
 use anyhow::{Context, Result, bail, ensure};
+use clap::Parser;
+use pl_dev_support::{paths, process};
 use pl_model::config::{ProviderConfig, ProviderId};
 use pl_model::model::{
     MediaRepresentation, MediaWireFormat, ModelInfo, ModelInputCapability, ModelInputSource,
@@ -22,6 +21,26 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "cargo xtask manual-gui",
+    bin_name = "cargo xtask manual-gui",
+    about = "Start an isolated native GUI with a local provider fixture for manual review"
+)]
+pub(crate) struct ManualGuiOptions {
+    /// Run the regular, stress, single-item long-body stress (`stress-body`,
+    /// `stress-body-large`), isolated call-statistics, realtime, paused
+    /// history-writer, or history-fault retry/resume acceptance journey.
+    #[arg(long, default_value = "gui", value_parser = pl_provider_fixture::GUI_SCENARIOS)]
+    pub(crate) scenario: String,
+    /// Directory for sanitized evidence (defaults to target/manual-gui/<timestamp>-<pid>).
+    #[arg(long, value_name = "DIR")]
+    pub(crate) output: Option<std::path::PathBuf>,
+    /// Run tool-scroll against an explicitly supplied SSH test host (user@host).
+    #[arg(long, value_name = "USER@HOST")]
+    pub(crate) ssh_target: Option<String>,
+}
 
 #[derive(Deserialize)]
 struct FixtureReady {

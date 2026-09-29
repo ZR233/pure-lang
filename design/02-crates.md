@@ -33,6 +33,15 @@ Cargo.toml 为准；Flutter 应用目录本身不是 workspace 成员，其 Rust
 | pl-remote-helper | 本地进程监督、SSH 远端文件/进程协议及统一进程创建策略 |
 | pl-studio-runtime | TOML/SQLite 持久化及 core 时间线存储适配、产品条目投影、项目、Profile、Mode/workflow/Plan、子代理协调、资源租约与 root/child/恢复的唯一 Thread 装配 |
 | pl-studio-bridge / pl-studio-server | 同一 Studio 运行时的 FRB / HTTP 适配 |
+| pl-xtask | 轻量工程命令编排；按需通过子进程调用独立验收工具，不链接 Studio 运行时、模型或数据库 |
+| pl-studio-acceptance | 隔离 GUI 验收场景、canonical 配置构造、模拟供应商协调、数据库故障观察与证据采集 |
+| pl-dev-support | 工程工具共享的仓库路径、命令执行及平台进程树所有权，不依赖 Studio、模型、数据库或模拟供应商 |
+
+工程工具的依赖方向为 `pl-xtask → pl-dev-support`、
+`pl-studio-acceptance → pl-dev-support / pl-studio-runtime / pl-model / pl-provider-fixture`。
+xtask 对验收工具只有命令调用关系，不建立 Cargo 依赖；验收工具也不反向依赖 xtask。
+验收所需数据库依赖归验收工具。普通工程命令不因验收能力而编译 Studio 运行时；GUI 构建
+显式构建 bridge、验收显式构建验收工具以及全 workspace 检查仍正常编译各自所需组件。
 
 core 不提供默认工具安装、provider 配置、MCP 目录、产品 working set 或旧引擎门面。工具实例通过
 不透明注册句柄向 Thread 转移所有权（见 [09](./09-tool-runtime.md)）；模型通过核心模型会话契约

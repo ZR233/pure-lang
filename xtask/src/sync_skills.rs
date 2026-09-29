@@ -12,8 +12,8 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-use crate::paths::workspace_root;
-use crate::process::configure_background_command;
+use pl_dev_support::paths::workspace_root;
+use pl_dev_support::process::configure_background_command;
 
 struct PresetSkillSource {
     /// 缓存目录名，位于 `target/xtask-sync-skills/` 下。

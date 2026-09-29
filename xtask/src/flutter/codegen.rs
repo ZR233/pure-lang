@@ -1,8 +1,9 @@
 use super::{
     DemoMode, ensure_flutter_dependencies, print_context, run_flutter, run_os_tool, run_tool,
 };
-use crate::{paths, pubspec_lock};
+use crate::pubspec_lock;
 use anyhow::{Context, Result, bail};
+use pl_dev_support::paths;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;

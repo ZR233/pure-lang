@@ -24,6 +24,12 @@ cargo xtask build-gui --check-generated
 当前产品只支持 Windows 与 Linux 桌面工程。不要直接执行 `flutter build windows|linux` 或
 `flutter run -d windows|linux`；xtask 负责 Rust bridge 预构建、环境注入、Flutter 调用和进程回收。
 
+普通 xtask 不链接 Studio runtime、模型、数据库或 GUI 验收工具。`cargo xtask manual-gui`
+仅在调用时编译并启动独立 `pl-studio-acceptance`，参数由该工具唯一解析；路径与平台进程
+支持由轻量 `pl-dev-support` 共享。验收工具使用正常 workspace 构建目录并尊重显式
+`CARGO_TARGET_DIR`，不复用 xtask alias 专用的 `target/xtask` 参数。全 workspace 门禁
+仍会编译验收工具；GUI 构建显式编译 bridge 也仍会编译 runtime，不应误判为依赖回流。
+
 ## 依赖与生成文件
 
 `run-gui` 和 `build-gui` 在 `.dart_tool/pure-xtask-pub.sha256` 记录 `pubspec.yaml`、

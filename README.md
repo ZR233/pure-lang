@@ -48,6 +48,13 @@ model/tool 实现核心接口且不相互依赖。Studio 拥有配置、项目�
 | `pl-studio-bridge` | `code/anywork/rust/` | Flutter Rust Bridge v2 transport 适配器 |
 | `anywork`（非 Cargo 成员） | `code/anywork/` | Flutter 桌面应用：Material 3、Riverpod、Thread 事件订阅 |
 | `pl-xtask` | `xtask/` | GUI 生成、验证、运行、构建与发布编排入口 |
+| `pl-studio-acceptance` | `code/pl-studio-acceptance/` | 按需编译的隔离 GUI 验收工具，保留全部模拟与故障场景 |
+| `pl-dev-support` | `code/pl-dev-support/` | 工程工具共享的轻量路径、命令和进程树支持 |
+
+`cargo xtask manual-gui` 只在执行验收时编译并调用 `pl-studio-acceptance`；验收场景与参数
+在独立工具内维护。普通 xtask、Flutter/Dart 包装命令不再链接 Studio runtime、模型、
+模拟供应商和 SeaORM。GUI 构建显式构建 bridge，以及全 workspace 检查，仍会正常编译
+所需 runtime；这与 xtask 自身的编译依赖解耦是不同阶段。
 
 ### 依赖规则
 
@@ -266,10 +273,12 @@ pure-lang/
 │   ├── pl-remote-helper/     # 本地进程监督与 SSH 远端助手
 │   ├── pl-studio-runtime/    # Studio 业务 runtime
 │   ├── pl-studio-server/     # HTTP/OpenAPI/SSE server
+│   ├── pl-studio-acceptance/ # 独立按需 GUI 验收工具
+│   ├── pl-dev-support/       # 轻量工程路径与进程支持
 │   └── anywork/          # Flutter 桌面应用与 FRB crate
 ├── design/                   # 架构设计文档及原型/视觉资产
 ├── .cargo/config.toml        # Cargo 配置
-├── xtask/                    # pl-xtask 开发任务入口
+├── xtask/                    # pl-xtask 轻量开发任务入口
 └── AGENTS.md                 # 项目协作与工程规范
 ```
 

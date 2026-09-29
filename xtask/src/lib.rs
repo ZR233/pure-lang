@@ -3,13 +3,11 @@ use std::ffi::OsString;
 
 mod cli;
 mod flutter;
-mod manual_gui;
-mod paths;
-mod process;
 mod pubspec_lock;
 mod release;
 mod remote_helper;
 mod rust_bridge;
+mod studio_acceptance;
 mod studio_tool;
 mod studio_version;
 mod sync_skills;
@@ -30,7 +28,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
             cli::Command::GenerateGui => flutter::generate_gui(),
             cli::Command::CheckGuiGenerated => flutter::check_gui_generated(),
             cli::Command::VerifyGui => flutter::verify_gui(),
-            cli::Command::ManualGui(options) => manual_gui::run(options),
+            cli::Command::ManualGui(options) => studio_acceptance::run(&options.args),
             cli::Command::RunGui(options) => flutter::run_gui(options),
             cli::Command::BuildGui(options) => flutter::build_gui(options),
             cli::Command::ReleaseGui { action } => release::run(action),

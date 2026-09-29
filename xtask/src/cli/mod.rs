@@ -1,5 +1,4 @@
 use std::ffi::OsString;
-use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::error::ErrorKind;
@@ -30,8 +29,8 @@ pub(crate) enum Command {
     CheckGuiGenerated,
     /// Check generated sources, formatting, and Flutter analysis.
     VerifyGui,
-    /// Start an isolated native GUI with a local provider fixture for manual review.
-    ManualGui(ManualGuiOptions),
+    /// Build and run the isolated GUI acceptance tool (arguments forwarded).
+    ManualGui(ToolOptions),
     /// Run the anywork desktop app.
     RunGui(RunGuiOptions),
     /// Build release artifacts for the current desktop OS.
@@ -59,21 +58,6 @@ pub(crate) struct ToolOptions {
     /// Arguments forwarded to the tool.
     #[arg(value_name = "ARGS", allow_hyphen_values = true)]
     pub(crate) args: Vec<OsString>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Args)]
-pub(crate) struct ManualGuiOptions {
-    /// Run the regular, stress, single-item long-body stress (`stress-body`,
-    /// `stress-body-large`), isolated call-statistics, realtime, paused
-    /// history-writer, or history-fault retry/resume acceptance journey.
-    #[arg(long, default_value = "gui", value_parser = pl_provider_fixture::GUI_SCENARIOS)]
-    pub(crate) scenario: String,
-    /// Directory for sanitized evidence (defaults to target/manual-gui/<timestamp>-<pid>).
-    #[arg(long, value_name = "DIR")]
-    pub(crate) output: Option<PathBuf>,
-    /// Run tool-scroll against an explicitly supplied SSH test host (user@host).
-    #[arg(long, value_name = "USER@HOST")]
-    pub(crate) ssh_target: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
@@ -163,7 +147,7 @@ pub(crate) struct BuildRemoteHelperOptions {
 
 pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<ParseOutcome> {
     let args = args.into_iter().collect::<Vec<_>>();
-    if let Some(command) = parse_studio_tool(&args) {
+    if let Some(command) = parse_forwarded_command(&args) {
         return Ok(ParseOutcome::Run(command));
     }
 
@@ -181,13 +165,20 @@ pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Result<ParseOut
     }
 }
 
-fn parse_studio_tool(args: &[OsString]) -> Option<Command> {
+/// Matches subcommands whose whole argument tail is another program's CLI.
+///
+/// Forwarding before clap keeps `--help` and every validation with the program
+/// that actually defines the options, so xtask never keeps a second copy.
+fn parse_forwarded_command(args: &[OsString]) -> Option<Command> {
     let forwarded_args = || args.iter().skip(2).cloned().collect();
     match args.get(1).and_then(|arg| arg.to_str()) {
         Some("flutter") => Some(Command::Flutter(ToolOptions {
             args: forwarded_args(),
         })),
         Some("dart") => Some(Command::Dart(ToolOptions {
+            args: forwarded_args(),
+        })),
+        Some("manual-gui") => Some(Command::ManualGui(ToolOptions {
             args: forwarded_args(),
         })),
         _ => None,

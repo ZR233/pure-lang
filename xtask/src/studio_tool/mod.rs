@@ -4,7 +4,8 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use crate::{paths, process, pubspec_lock};
+use crate::pubspec_lock;
+use pl_dev_support::{paths, process};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StudioTool {

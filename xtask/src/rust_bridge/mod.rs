@@ -1,6 +1,6 @@
-use crate::paths;
-use crate::process;
 use anyhow::{Context, Result, bail};
+use pl_dev_support::paths;
+use pl_dev_support::process;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};

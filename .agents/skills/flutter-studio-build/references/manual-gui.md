@@ -4,8 +4,9 @@
 
 - 从仓库根目录运行 `cargo xtask manual-gui`，由 harness 创建隔离的 `ANYWORK_HOME`、
   本地模拟供应商和真实 bridge GUI，不修改用户配置或凭据。不要用 demo 证明持久化行为。
-- 先明确要验证的交互、状态变化、异常路径及证据；通过 `xtask/src/cli/mod.rs` 和
-  `xtask/src/manual_gui.rs` 核实当前场景参数，不为绕过终端检查选择无关场景。
+  xtask 仅按需编译并调用独立 `pl-studio-acceptance`，不链接该工具的重依赖。
+- 先明确要验证的交互、状态变化、异常路径及证据；通过 `code/pl-studio-acceptance/src/`
+  核实当前 CLI 与场景参数，不为绕过终端检查选择无关场景。
 - `cargo xtask verify-gui` 负责生成一致性、格式及静态分析，不包含 GUI 人工结论。
 - 真实供应商验收使用 `cargo xtask run-gui --driver`，不把模拟通过外推为真实模型兼容。
   使用外部 helper 模式的 Linux Studio/Server 入口按根 `AGENTS.md` 预先安装 remote helper；

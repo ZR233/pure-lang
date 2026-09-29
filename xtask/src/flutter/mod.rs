@@ -1,6 +1,4 @@
 use crate::cli::{BuildGuiOptions, LogLevel, RunGuiOptions};
-use crate::paths;
-use crate::process;
 use crate::pubspec_lock::{self, LockfileChange};
 use crate::remote_helper::{self, BUNDLE_DIR_ENV};
 use crate::rust_bridge::{
@@ -8,6 +6,8 @@ use crate::rust_bridge::{
 };
 use crate::studio_version;
 use anyhow::{Context, Result, bail, ensure};
+use pl_dev_support::paths;
+use pl_dev_support::process;
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fs;

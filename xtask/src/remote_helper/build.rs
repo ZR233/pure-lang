@@ -7,8 +7,8 @@ use sha2::{Digest, Sha256};
 
 use super::{HELPER_FILE_NAME, SUPPORTED_TARGETS, local_helper_path};
 use crate::cli::BuildRemoteHelperOptions;
-use crate::paths;
-use crate::process::run_checked;
+use pl_dev_support::paths;
+use pl_dev_support::process::run_checked;
 
 const BUILDER_ENV: &str = "PURE_REMOTE_HELPER_BUILDER";
 const CARGO_ZIGBUILD_EXECUTABLE: &str = "cargo-zigbuild";

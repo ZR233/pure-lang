@@ -1,7 +1,8 @@
 use super::asset_name;
 use crate::cli::BuildGuiOptions;
-use crate::{flutter, paths, process};
+use crate::flutter;
 use anyhow::{Context, Result, bail};
+use pl_dev_support::{paths, process};
 use semver::Version;
 use std::env;
 use std::ffi::OsString;
