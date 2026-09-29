@@ -317,7 +317,7 @@ pure-lang/
 | 用户交互 | `request_user_input` |
 | 技能 | `skills_list`, `skill_view`, `skill_manage` |
 | MCP | 动态注册（`mcp__<server>__<tool>`） |
-| 联网搜索 | DeepSeek/OpenAI Responses hosted search，或 OpenAI standalone search；由当前 route 能力自动仲裁 |
+| 联网搜索 | OpenAI Responses hosted/standalone search；DeepSeek 通过 function tool 使用 standalone search |
 
 ### 在其他应用中注册工具
 

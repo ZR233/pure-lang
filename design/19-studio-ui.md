@@ -91,11 +91,12 @@ DeepSeek、TOML 等标准缩写、产品名和协议名可以保留。界面展�
 
 ## 19.5 联网搜索设置
 
-General 页把 OpenAI Web Search 与 DeepSeek 原生联网搜索显示为两张独立卡片。OpenAI 卡片
+General 页把 OpenAI Web Search 与可选的 DeepSeek hosted 搜索显示为两张独立卡片。OpenAI 卡片
 保留 mode、context size、域名和位置等配置，并明确文案只表示 OpenAI 搜索；DeepSeek 卡片
 只提供启用开关，不展示官方未承诺的 cached/indexed、域名、位置或上下文选项。两张卡片都
 消费 bridge 返回的 configured、effective、availability、selected provider/model；当前
-DeepSeek route 可用时其原生搜索优先，OpenAI 卡片仍可显示"可用但未选中"。保存必须携带
+endpoint 显式声明 DeepSeek hosted 能力时该搜索优先；官方 DeepSeek Responses route 显示
+provider unsupported，并可使用 OpenAI standalone 搜索。保存必须携带
 Settings CAS revision，并以返回的完整 canonical snapshot 原子更新 UI；不得本地推演 backend
 仲裁、凭据或模型能力（仲裁合同见 [20](./20-config.md)）。
 
