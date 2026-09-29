@@ -82,6 +82,10 @@ include usage 与 tool stream 配置。厂商原生选项在具体客户端公�
 共用请求和事件解释；Chat 保留独立 wire codec。HTTP JSON、SSE 和 multipart 由共享 reqwest
 transport 执行，重试预算只由调用编排拥有。供应商 backend 组合附件准备、请求选项和错误分类。
 
+SSE transport 按完整行向事件解析器交付数据，增量扫描只处理新收到的字节，避免超大
+`data` 行在每个网络分块到达时反复扫描已有前缀。LF、CRLF 与 CR 行尾语义一致，UTF-8
+字符可以跨网络分块；下游提前停止或取消时，读取器与未完成行一同释放，不创建后台读取任务。
+
 附件输入描述来源而非发送方式：URL、Base64、共享 bytes 或宿主资源引用在准备阶段解析；backend
 选择 URL、Data URL 或上传后的 file id。持久历史仍只保存资源引用与快照，上传 id 是按 endpoint、
 凭据身份和内容摘要隔离的可重建会话缓存。DeepSeek Files 上传使用 user_data 与 24 小时租期，

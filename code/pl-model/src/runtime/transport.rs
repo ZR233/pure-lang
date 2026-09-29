@@ -1,4 +1,6 @@
 //! Network execution only. The invocation owner decides whether an operation can be retried.
+mod sse_lines;
+
 use eventsource_stream::Eventsource;
 use futures::{StreamExt, stream::BoxStream};
 use pl_protocol::{PureError, Result};
@@ -122,7 +124,7 @@ pub(crate) async fn sse(
     request: reqwest::RequestBuilder,
 ) -> Result<BoxStream<'static, Result<SseStreamEvent>>> {
     let response = checked(request.send().await.map_err(reqwest_error_to_pure)?).await?;
-    let stream = response.bytes_stream().eventsource();
+    let stream = sse_lines::complete_lines(response.bytes_stream()).eventsource();
     Ok(stream
         .take_while(|event| {
             futures::future::ready(
