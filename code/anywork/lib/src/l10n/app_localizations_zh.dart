@@ -595,13 +595,36 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sessionMoreActionsTooltip => '更多操作';
 
   @override
+  String get sessionOpenWorkspace => '打开工作区';
+
+  @override
   String get sessionOpenInVsCode => '在 VS Code 中打开';
+
+  @override
+  String get sessionOpenInTerminal => '在终端中打开';
+
+  @override
+  String get sessionVsCodeUnavailable => '未在这台机器上找到 VS Code';
+
+  @override
+  String get sessionTerminalUnavailableWindows =>
+      '未找到 Windows Terminal（wt.exe）';
+
+  @override
+  String get sessionTerminalUnavailableLinux =>
+      '未找到 xdg-terminal-exec 或 x-terminal-emulator';
+
+  @override
+  String get sessionTerminalUnavailableGeneric => '当前平台不支持外部终端';
 
   @override
   String get sessionVsCodeOpenFailed => '打开 VS Code 失败';
 
   @override
-  String get sessionVsCodeServerMissing => '该项目的 SSH 别名已不在 ~/.ssh/config 中';
+  String get sessionTerminalOpenFailed => '打开终端失败';
+
+  @override
+  String get sessionOpenServerMissing => '该项目的 SSH 别名已不在 ~/.ssh/config 中';
 
   @override
   String get statusCurrentAgentTokenSpeed => '当前智能体词元速度';

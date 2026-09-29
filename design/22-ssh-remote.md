@@ -116,6 +116,11 @@ SSH 连接、平台探测、helper 上传和协议握手都通过统一后台进
 输出协议，因此固定关闭伪终端与 X11 转发，不打开交互式终端或图形会话；SSH 以 BatchMode
 运行，只接受 ssh-agent 与密钥等非交互认证，不注入密码或 askpass。
 
+上述非交互与进程回收约定只适用于 Studio 管理的 helper transport。会话顶栏的外部「终端」
+入口是用户主动启动的独立交互 SSH 会话，复用同一 Host 别名与用户 SSH 安全设置，进入会话
+canonical 工作区目录，不承载 helper 协议，也不随 Studio 退出终止。平台选择、路径引用与
+错误反馈契约见 [18.9](./18-studio-state.md#189-顶栏工作区打开菜单)。
+
 连接状态穷尽为 disconnected、connecting、ready、reconnecting 与 failed。SSH 建连超时为 15 秒，存活探测每 15 秒一次、连续三次无响应后断开；平台与资产
 探测最多等待 30 秒，资产上传最多等待 120 秒，helper 握手最多等待 25 秒，目录重开最多
 等待 15 秒。超时关闭并回收所属 SSH 进程；本地进程回收失败保留责任，远端失联不阻止

@@ -43,7 +43,7 @@ class _Header extends StatelessWidget {
             ],
           );
           // Actions stay on one row when they fit and stack vertically when the
-          // window is too narrow, so the labeled open button never overflows.
+          // window is too narrow, so the open-workspace menu never overflows.
           final actions = OverflowBar(
             spacing: 8,
             overflowSpacing: 4,
@@ -51,7 +51,7 @@ class _Header extends StatelessWidget {
             children: [
               _AgentSwitcher(state: state),
               _SessionCostChip(cost: state.sessionCost),
-              _SessionOpenInVsCode(state: state),
+              _SessionOpenWorkspaceMenu(state: state),
             ],
           );
           if (constraints.maxWidth < 520) {
@@ -117,74 +117,156 @@ String _purposeLabel(BuildContext context, String? purpose) =>
       String value => value,
     };
 
-/// 会话顶栏「在 VS Code 中打开工作区」直达入口。
+/// 会话顶栏「打开工作区」菜单：并列 VS Code 与终端两个外部入口。
 ///
-/// 仅在探测到 VS Code 安装且当前会话存在所属项目时渲染，否则不占位。优先显示
-/// 宿主系统为 `vscode` 协议默认处理应用解析的系统图标；取不到可解码图标时退回
-/// 带文字的按钮，不使用预置图片或「...」菜单。远端项目经 Remote-SSH 打开，
-/// 连接参数由 `~/.ssh/config` 的 Host 别名解析。
-class _SessionOpenInVsCode extends ConsumerWidget {
-  const _SessionOpenInVsCode({required this.state});
+/// 有当前会话及所属项目即显示入口，不以 VS Code 安装情况控制整个入口；
+/// 两项各自探测可用性，不可用时禁用并说明原因。两个入口的目标都由会话
+/// canonical `workspacePath` 决定，GUI 不推导工作树布局，图标使用通用
+/// 「打开」图标，不读取品牌图。远端项目复用 `~/.ssh/config` 的 Host 别名。
+class _SessionOpenWorkspaceMenu extends ConsumerStatefulWidget {
+  const _SessionOpenWorkspaceMenu({required this.state});
 
   final HeaderView state;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final project = state.selectedProject;
-    final thread = state.selectedRootThread;
-    final availability = ref.watch(vsCodeAvailabilityProvider);
-    if (project == null ||
-        thread == null ||
-        !availability.hasValue ||
-        availability.value != true) {
+  ConsumerState<_SessionOpenWorkspaceMenu> createState() =>
+      _SessionOpenWorkspaceMenuState();
+}
+
+class _SessionOpenWorkspaceMenuState
+    extends ConsumerState<_SessionOpenWorkspaceMenu> {
+  final MenuController _menuController = MenuController();
+
+  static const double _menuItemWidth = 320;
+
+  @override
+  Widget build(BuildContext context) {
+    final project = widget.state.selectedProject;
+    final thread = widget.state.selectedRootThread;
+    if (project == null || thread == null) {
       return const SizedBox.shrink();
     }
-    final label = context.l10n.sessionOpenInVsCode;
-    // 悬停与读屏都暴露完整打开目标路径；图标按钮无可见文字时尤为关键。
-    final tooltip = '$label\n${thread.workspacePath}';
-    Future<void> open() => _open(context, ref, project, thread);
-    final icon = ref.watch(vsCodeIconProvider).value;
-    if (icon != null) {
-      return IconButton(
-        key: StudioDriverKeys.sessionOpenInVsCode,
-        tooltip: tooltip,
-        onPressed: open,
-        icon: Image.memory(
-          icon,
-          width: 20,
-          height: 20,
-          filterQuality: FilterQuality.medium,
+    final vsCodeAvailable =
+        ref.watch(vsCodeAvailabilityProvider).value ?? false;
+    final terminalAvailable =
+        ref.watch(terminalAvailabilityProvider).value ?? false;
+    final label = context.l10n.sessionOpenWorkspace;
+    // 悬停与读屏都暴露完整打开目标；远端项目补充 Host 别名前缀。
+    final alias = project.sshAlias;
+    final targetDescription = alias == null
+        ? thread.workspacePath
+        : '$alias:${thread.workspacePath}';
+    return MenuAnchor(
+      controller: _menuController,
+      alignmentOffset: const Offset(0, 6),
+      menuChildren: [
+        _menuItem(
+          key: StudioDriverKeys.sessionOpenWorkspaceVsCode,
+          icon: Icons.code,
+          label: context.l10n.sessionOpenInVsCode,
+          targetDescription: targetDescription,
+          available: vsCodeAvailable,
+          unavailableReason: context.l10n.sessionVsCodeUnavailable,
+          onPressed: () => _openVsCode(project, thread),
         ),
-      );
-    }
-    return Tooltip(
-      message: tooltip,
-      child: TextButton(
-        key: StudioDriverKeys.sessionOpenInVsCode,
-        onPressed: open,
-        child: Text(label),
+        _menuItem(
+          key: StudioDriverKeys.sessionOpenWorkspaceTerminal,
+          icon: Icons.terminal,
+          label: context.l10n.sessionOpenInTerminal,
+          targetDescription: targetDescription,
+          available: terminalAvailable,
+          unavailableReason: _terminalUnavailableReason(context),
+          onPressed: () => _openTerminal(project, thread),
+        ),
+      ],
+      builder: (context, controller, child) {
+        return IconButton(
+          key: StudioDriverKeys.sessionOpenWorkspaceMenu,
+          tooltip: '$label\n$targetDescription',
+          onPressed: () => _menuController.isOpen
+              ? _menuController.close()
+              : _menuController.open(),
+          icon: const Icon(Icons.open_in_new),
+        );
+      },
+    );
+  }
+
+  /// 平台无关的入口条目：可用时点击启动，不可用时禁用并给出具体原因；
+  /// 悬停与读屏可获取完整打开目标说明。
+  Widget _menuItem({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required String targetDescription,
+    required bool available,
+    required String unavailableReason,
+    required VoidCallback onPressed,
+  }) {
+    final subtitle = available ? targetDescription : unavailableReason;
+    return MenuItemButton(
+      key: key,
+      leadingIcon: Icon(icon, size: 18),
+      onPressed: available
+          ? () {
+              _menuController.close();
+              onPressed();
+            }
+          : null,
+      child: Tooltip(
+        message: '$label\n$targetDescription',
+        child: SizedBox(
+          width: _menuItemWidth,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.text.labelSmall?.copyWith(
+                  color: available
+                      ? context.colors.onSurfaceVariant
+                      : context.colors.error,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Future<void> _open(
-    BuildContext context,
-    WidgetRef ref,
-    StudioProject project,
-    StudioThread thread,
-  ) async {
+  /// 终端不可用的原因按宿主终端入口说明，不猜测其他已安装终端。
+  String _terminalUnavailableReason(BuildContext context) {
+    if (isWindowsPlatform) {
+      return context.l10n.sessionTerminalUnavailableWindows;
+    }
+    if (isLinuxPlatform) {
+      return context.l10n.sessionTerminalUnavailableLinux;
+    }
+    return context.l10n.sessionTerminalUnavailableGeneric;
+  }
+
+  Future<void> _openVsCode(StudioProject project, StudioThread thread) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
     final l10n = context.l10n;
+    // launcher 必须在首个 await 前读取；widget 卸载后再访问 ref 会抛错。
+    final launcher = ref.read(vsCodeLauncherProvider);
     String? uri;
     String? failure;
     if (project.sshAlias case final alias?) {
       try {
         final servers = await ref.read(studioApiProvider).listSshServers();
+        // await 恢复后先确认 widget 仍在，再继续启动或反馈 UI。
+        if (!mounted) return;
         final server = servers
             .where((server) => server.alias == alias)
             .firstOrNull;
         if (server == null) {
-          failure = l10n.sessionVsCodeServerMissing;
+          failure = l10n.sessionOpenServerMissing;
         } else {
           uri = buildRemoteVsCodeFolderUri(
             alias: server.alias,
@@ -198,14 +280,54 @@ class _SessionOpenInVsCode extends ConsumerWidget {
       uri = buildLocalVsCodeFolderUri(thread.workspacePath);
     }
     if (uri != null) {
-      final launcher = ref.read(vsCodeLauncherProvider);
       try {
         await launcher(uri);
       } on Object {
         failure = l10n.sessionVsCodeOpenFailed;
       }
     }
-    if (failure != null && messenger != null) {
+    if (failure != null && mounted && messenger != null && messenger.mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(failure)));
+    }
+  }
+
+  Future<void> _openTerminal(StudioProject project, StudioThread thread) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final l10n = context.l10n;
+    // launcher 必须在首个 await 前读取；widget 卸载后再访问 ref 会抛错。
+    final launcher = ref.read(terminalLauncherProvider);
+    HostTerminalTarget? target;
+    String? failure;
+    if (project.sshAlias case final alias?) {
+      try {
+        final servers = await ref.read(studioApiProvider).listSshServers();
+        // await 恢复后先确认 widget 仍在，再继续启动或反馈 UI。
+        if (!mounted) return;
+        final server = servers
+            .where((server) => server.alias == alias)
+            .firstOrNull;
+        if (server == null) {
+          failure = l10n.sessionOpenServerMissing;
+        } else {
+          target = RemoteSshTerminalTarget(
+            alias: server.alias,
+            remotePath: thread.workspacePath,
+          );
+        }
+      } on Object {
+        failure = l10n.sessionTerminalOpenFailed;
+      }
+    } else {
+      target = LocalHostTerminalTarget(directory: thread.workspacePath);
+    }
+    if (target != null) {
+      try {
+        await launcher(target);
+      } on Object {
+        failure = l10n.sessionTerminalOpenFailed;
+      }
+    }
+    if (failure != null && mounted && messenger != null && messenger.mounted) {
       messenger.showSnackBar(SnackBar(content: Text(failure)));
     }
   }

@@ -88,7 +88,15 @@ abstract final class StudioDriverKeys {
   static const attachmentDraftRail = ValueKey<String>('attachment-draft-rail');
   static const agentSwitcher = ValueKey<String>('agent-switcher');
   static const sessionCost = ValueKey<String>('session-cost');
-  static const sessionOpenInVsCode = ValueKey<String>('session-open-in-vscode');
+  static const sessionOpenWorkspaceMenu = ValueKey<String>(
+    'session-open-workspace-menu',
+  );
+  static const sessionOpenWorkspaceVsCode = ValueKey<String>(
+    'session-open-workspace-vscode',
+  );
+  static const sessionOpenWorkspaceTerminal = ValueKey<String>(
+    'session-open-workspace-terminal',
+  );
   static const threadThroughput = ValueKey<String>('thread-throughput');
   static const statisticsSummary = ValueKey<String>('statistics-summary');
   static const statisticsHistory = ValueKey<String>('statistics-history');

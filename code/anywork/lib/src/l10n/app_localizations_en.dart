@@ -621,13 +621,38 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sessionMoreActionsTooltip => 'More actions';
 
   @override
+  String get sessionOpenWorkspace => 'Open workspace';
+
+  @override
   String get sessionOpenInVsCode => 'Open in VS Code';
+
+  @override
+  String get sessionOpenInTerminal => 'Open in terminal';
+
+  @override
+  String get sessionVsCodeUnavailable =>
+      'VS Code was not found on this machine';
+
+  @override
+  String get sessionTerminalUnavailableWindows =>
+      'Windows Terminal (wt.exe) was not found';
+
+  @override
+  String get sessionTerminalUnavailableLinux =>
+      'xdg-terminal-exec or x-terminal-emulator was not found';
+
+  @override
+  String get sessionTerminalUnavailableGeneric =>
+      'External terminals are unsupported on this platform';
 
   @override
   String get sessionVsCodeOpenFailed => 'Failed to open VS Code';
 
   @override
-  String get sessionVsCodeServerMissing =>
+  String get sessionTerminalOpenFailed => 'Failed to open terminal';
+
+  @override
+  String get sessionOpenServerMissing =>
       'The SSH alias for this project is no longer in ~/.ssh/config';
 
   @override

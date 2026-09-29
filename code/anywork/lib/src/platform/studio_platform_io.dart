@@ -2,6 +2,8 @@ import 'dart:io';
 
 bool get isWindowsPlatform => Platform.isWindows;
 
+bool get isLinuxPlatform => Platform.isLinux;
+
 Future<void> openExternalUrl(String url) async {
   if (Platform.isWindows) {
     await Process.start('rundll32.exe', [

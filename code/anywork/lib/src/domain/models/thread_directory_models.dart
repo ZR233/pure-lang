@@ -71,7 +71,8 @@ class StudioThread {
 
   /// Canonical 会话工作区地址；`local` 为项目目录，`worktree` 为工作树路径。
   ///
-  /// 唯一决定会话级「在 VS Code 中打开工作区」的打开目标，GUI 不推导工作树布局。
+  /// 唯一决定会话级外部「打开工作区」入口（VS Code 与终端）的打开目标，
+  /// GUI 不推导工作树布局。
   final String workspacePath;
 
   bool get isRoot => parentThreadId == null;

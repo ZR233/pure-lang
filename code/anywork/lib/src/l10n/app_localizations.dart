@@ -1184,11 +1184,47 @@ abstract class AppLocalizations {
   /// **'More actions'**
   String get sessionMoreActionsTooltip;
 
+  /// No description provided for @sessionOpenWorkspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Open workspace'**
+  String get sessionOpenWorkspace;
+
   /// No description provided for @sessionOpenInVsCode.
   ///
   /// In en, this message translates to:
   /// **'Open in VS Code'**
   String get sessionOpenInVsCode;
+
+  /// No description provided for @sessionOpenInTerminal.
+  ///
+  /// In en, this message translates to:
+  /// **'Open in terminal'**
+  String get sessionOpenInTerminal;
+
+  /// No description provided for @sessionVsCodeUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'VS Code was not found on this machine'**
+  String get sessionVsCodeUnavailable;
+
+  /// No description provided for @sessionTerminalUnavailableWindows.
+  ///
+  /// In en, this message translates to:
+  /// **'Windows Terminal (wt.exe) was not found'**
+  String get sessionTerminalUnavailableWindows;
+
+  /// No description provided for @sessionTerminalUnavailableLinux.
+  ///
+  /// In en, this message translates to:
+  /// **'xdg-terminal-exec or x-terminal-emulator was not found'**
+  String get sessionTerminalUnavailableLinux;
+
+  /// No description provided for @sessionTerminalUnavailableGeneric.
+  ///
+  /// In en, this message translates to:
+  /// **'External terminals are unsupported on this platform'**
+  String get sessionTerminalUnavailableGeneric;
 
   /// No description provided for @sessionVsCodeOpenFailed.
   ///
@@ -1196,11 +1232,17 @@ abstract class AppLocalizations {
   /// **'Failed to open VS Code'**
   String get sessionVsCodeOpenFailed;
 
-  /// No description provided for @sessionVsCodeServerMissing.
+  /// No description provided for @sessionTerminalOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to open terminal'**
+  String get sessionTerminalOpenFailed;
+
+  /// No description provided for @sessionOpenServerMissing.
   ///
   /// In en, this message translates to:
   /// **'The SSH alias for this project is no longer in ~/.ssh/config'**
-  String get sessionVsCodeServerMissing;
+  String get sessionOpenServerMissing;
 
   /// No description provided for @statusCurrentAgentTokenSpeed.
   ///
