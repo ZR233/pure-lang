@@ -340,12 +340,12 @@ impl StudioRuntime {
             .models
             .resolve_route(StudioRole::Planner.id(), &selector)?;
         crate::mode::validate_thread_mode_model(Some(&mode_definition), &route.model)?;
+        Self::validate_model_media(&state, &route.model, &[])?;
         match thread
             .queue_deferred_model_update_if_current(
                 Self::deferred_model_update(&route, &settings.config)?,
-                pl_core::thread::DeferredModelUpdatePrecondition::extension(
-                    route_extension_id,
-                    Some(request.expected_model_route_revision),
+                pl_core::thread::DeferredModelUpdatePrecondition::commit_sequence(
+                    state.commit_sequence,
                 ),
                 vec![pl_core::thread::extensions::ExtensionMutation::Put {
                     id: route_extension_id.into(),

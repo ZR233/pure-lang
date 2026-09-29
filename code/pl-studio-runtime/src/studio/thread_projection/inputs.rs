@@ -1,15 +1,13 @@
 //! Accepted input items retain stable product identity across queueing, steering and retries.
 use super::{ProjectionError, content::input_content};
-use pl_core::thread::{ThreadSnapshot, input::InputState};
+use pl_core::thread::input::InputState;
 use pl_protocol::{
     MessagePresentation, ThreadContentLifecycle, ThreadItem, ThreadItemState, ThreadTextChannel,
     ThreadTextItem,
 };
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn project_input(
     thread_id: &str,
-    snapshot: &ThreadSnapshot,
     input: &pl_core::thread::input::InputRecord,
     ordinal: u64,
     created_at: i64,
@@ -25,13 +23,9 @@ pub(super) fn project_input(
     }
     let turn_id = match &input.state {
         InputState::Consumed { turn_id, .. } => turn_id.clone(),
-        InputState::Pending | InputState::Discarded => snapshot
-            .turns
-            .iter()
-            .rev()
-            .find(|turn| turn.input_id.as_deref() == Some(input.input.id.as_str()))
-            .map(|turn| turn.turn_id.clone())
-            .unwrap_or_default(),
+        // Preparation may fail without consuming the input. Only consumption establishes its
+        // permanent Turn binding; a later attempt can still consume the same queued input.
+        InputState::Pending | InputState::Discarded => String::new(),
     };
     let lifecycle = match input.state {
         InputState::Pending | InputState::Consumed { .. } => {

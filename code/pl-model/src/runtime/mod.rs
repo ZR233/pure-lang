@@ -1,4 +1,6 @@
 //! A single completion facade backed by concrete, accessible provider clients.
+pub use pl_core::{context::ContextContent, model::ModelError};
+
 mod client;
 mod clock;
 mod compaction;
@@ -44,4 +46,5 @@ pub use thread_model::{
     ThreadCompaction, ThreadCompactionOptions, ThreadCompactionStrategy, ThreadModel,
     ToolAttachment, attachment_content, decode_attachment, model_failure_receipt,
     model_request_receipt, model_response_receipt, thread_tool_declaration,
+    validate_attachment_content,
 };

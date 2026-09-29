@@ -1796,6 +1796,49 @@ async fn accepted_message_can_bind_to_its_turn_without_changing_identity() {
 }
 
 #[tokio::test]
+async fn saved_input_can_bind_after_terminal_cache_eviction() {
+    for tail in [0, 400, 4200] {
+        let session = Session::new(Stored::default());
+        let mut accepted = item(1, 1, "submitted", true);
+        accepted.turn_id = "legacy-attempt".into();
+        session.publish(durable(accepted)).unwrap();
+        for order in 2..=tail {
+            session
+                .publish(durable(item(order, 1, "tail", true)))
+                .unwrap();
+        }
+        let mut migrated = item(1, 2, "submitted", true);
+        migrated.turn_id.clear();
+        session.publish(migrated).unwrap();
+        session.publish(item(1, 3, "submitted", true)).unwrap();
+        let bound = session.read_item("item-1").await.unwrap().unwrap();
+        assert_eq!(bound.turn_id, "turn-1");
+        assert_eq!(bound.order, 1);
+        assert_eq!(bound.revision, 3);
+        assert!(!bound.saved);
+        let view = session
+            .open_chat(ChatFocus::Around("item-1".into()))
+            .await
+            .unwrap();
+        session.confirm_saved("item-1", 2);
+        assert!(!session.read_item("item-1").await.unwrap().unwrap().saved);
+        session.confirm_saved("item-1", 3);
+        assert!(
+            view.snapshot()
+                .items
+                .iter()
+                .find(|item| item.item_id == "item-1")
+                .unwrap()
+                .saved
+        );
+        assert!(matches!(
+            session.publish_preview(item(1, 4, "late", false)),
+            Err(ChatError::Conflict(_))
+        ));
+    }
+}
+
+#[tokio::test]
 async fn different_items_cannot_overwrite_one_unsaved_order() {
     let session = Session::new(Stored::default());
     session.publish(item(1, 1, "first", false)).unwrap();

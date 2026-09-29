@@ -48,6 +48,44 @@ fn assistant(text: &str) -> Message {
     }
 }
 
+#[test]
+fn retained_media_is_validated_before_model_admission() {
+    use pl_core::context::ResourceReference;
+    use pl_model::model::{
+        MediaRepresentation, MediaWireFormat, ModelInputCapability, ModelInputSource,
+        ModelMediaInputProfile, ModelModality,
+    };
+    use pl_model::runtime::{attachment_content, validate_attachment_content};
+    let content = attachment_content(
+        ResourceReference::new(
+            "retained-image".into(),
+            format!("sha256:{}", "0".repeat(64)),
+            16,
+            "image/png".into(),
+        )
+        .unwrap(),
+        AttachmentModality::Image,
+    )
+    .unwrap();
+    let mut model = ModelInfo::compatible("media-admission");
+    assert!(validate_attachment_content([&content], &model).is_err());
+    let mut capability =
+        ModelInputCapability::media(ModelModality::Image, vec![ModelInputSource::Local]);
+    capability.limits.max_count = Some(1);
+    model.capabilities.input.push(capability);
+    model.binding.request.media.push(ModelMediaInputProfile {
+        modality: ModelModality::Image,
+        wire: MediaWireFormat::ChatImageUrl,
+        first_send: vec![MediaRepresentation::DataUrl],
+        replay: vec![MediaRepresentation::DataUrl],
+    });
+    validate_attachment_content([&content], &model).unwrap();
+    // One historical reference plus the new input counts twice even with shared bytes.
+    assert!(validate_attachment_content([&content, &content], &model).is_err());
+    model.binding.request.media[0].replay = vec![MediaRepresentation::RemoteUrl];
+    assert!(validate_attachment_content([&content], &model).is_err());
+}
+
 fn request(prompt: &str) -> CompletionRequest {
     CompletionRequest::builder()
         .messages(vec![user(prompt)])

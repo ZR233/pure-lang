@@ -19,7 +19,7 @@ use sea_orm::{
     SqliteTransactionMode, Statement, TransactionOptions, TransactionTrait, Value,
 };
 
-const HISTORY_SCHEMA_VERSION: i64 = 3;
+const HISTORY_SCHEMA_VERSION: i64 = 4;
 /// 单页返回的总 payload 字节预算；达到预算即停止装入更多条目。
 const PAGE_BYTE_BUDGET: usize = 2 * 1024 * 1024;
 /// 单条预览预算必须小于整页预算，否则一条预览都无法落入一页。
@@ -560,6 +560,18 @@ impl HistoryStore {
             })),
             None => Ok(None),
         }
+    }
+
+    /// Upgrades existing history before an active owner seeds its canonical projection.
+    pub(crate) async fn prepare_activation(&self) -> Result<()> {
+        if self
+            .reader()
+            .await?
+            .is_some_and(|connection| connection.schema_version < HISTORY_SCHEMA_VERSION)
+        {
+            self.writer().await?;
+        }
+        Ok(())
     }
 
     /// Only a committed hidden disposition can discharge a pruned input without a timeline row.
@@ -2309,6 +2321,9 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
                     }
                     backfill_legacy_hidden_inputs(&tx).await?;
                 }
+                if version < 4 {
+                    migrate_unconsumed_input_bindings(&tx).await?;
+                }
                 tx.execute_raw(statement(
                     "UPDATE history_meta SET schema_version=? WHERE id=1 AND schema_version=?",
                     vec![HISTORY_SCHEMA_VERSION.into(), version.into()],
@@ -2334,6 +2349,60 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
             Ok(database_id)
         }
     }
+}
+
+/// The old projection inferred input bindings from running Turns before model admission. A Turn
+/// naming the input proves its identity; absence from the transactionally maintained terminal
+/// ledger proves it was not consumed or discarded at this durable watermark.
+async fn migrate_unconsumed_input_bindings(db: &impl ConnectionTrait) -> Result<()> {
+    let mut cursor = 0_i64;
+    loop {
+        let rows = db
+            .query_all_raw(statement(
+                "SELECT i.ordinal,i.payload,t.payload AS turn_payload FROM history_items i
+             JOIN history_items t ON t.turn_id=i.turn_id AND t.kind='turn'
+             LEFT JOIN history_input_identities identity ON identity.item_id=i.item_id
+             WHERE i.ordinal>? AND i.turn_id!='' AND i.kind!='turn' AND identity.item_id IS NULL
+             ORDER BY i.ordinal LIMIT 400",
+                vec![cursor.into()],
+            ))
+            .await?;
+        if rows.is_empty() {
+            break;
+        }
+        for row in rows {
+            cursor = row.try_get("", "ordinal")?;
+            let mut item: ThreadItem =
+                serde_json::from_str(&row.try_get::<String>("", "payload")?)?;
+            let turn_item: ThreadItem =
+                serde_json::from_str(&row.try_get::<String>("", "turn_payload")?)?;
+            let ThreadItemState::Turn(turn) = turn_item.state() else {
+                continue;
+            };
+            if turn.input_id() != Some(item.id.as_str()) {
+                continue;
+            }
+            let old_turn = std::mem::take(&mut item.turn_id);
+            item.revision = item
+                .revision
+                .checked_add(1)
+                .context("migrated input revision overflow")?;
+            db.execute_raw(statement(
+                "UPDATE history_items SET turn_id='',revision=?,payload=? WHERE item_id=?",
+                vec![
+                    integer(item.revision)?.into(),
+                    serde_json::to_string(&item)?.into(),
+                    item.id.into(),
+                ],
+            ))
+            .await?;
+            db.execute_raw(statement(
+                "UPDATE history_turns SET first_ordinal=(SELECT MIN(ordinal) FROM history_items WHERE turn_id=?) WHERE turn_id=?",
+                vec![old_turn.clone().into(), old_turn.into()],
+            )).await?;
+        }
+    }
+    Ok(())
 }
 
 /// Legacy v2 rows have no presentation. Only a resolved interaction receipt that names the
@@ -2932,10 +3001,139 @@ mod storage_fault_tests {
                 .await?
                 .context("missing migrated history")?
                 .schema_version,
-            3
+            HISTORY_SCHEMA_VERSION
         );
         assert!(migrated.existing_items([id.into()]).await?.is_empty());
         assert_eq!(migrated.watermark().await?, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn activation_migrates_only_proven_unconsumed_input_bindings() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("history.sqlite");
+        let store = HistoryStore::open(&path, "migration").await?;
+        let mut items = Vec::new();
+        for (ordinal, id, input_id) in [
+            (1, "pending", "pending"),
+            (3, "consumed", "consumed"),
+            (5, "other", "unknown"),
+        ] {
+            let turn_id = format!("turn-{id}");
+            let mut item = ThreadItem::completed_user_message(
+                id.into(),
+                "migration".into(),
+                turn_id.clone(),
+                "preserved".into(),
+                vec![],
+                7,
+            );
+            item.ordinal = ordinal;
+            item.revision = 3;
+            items.push(item);
+            items.push(ThreadItem::new(
+                crate::studio::thread_projection::order::turn_id(&turn_id),
+                "migration".into(),
+                turn_id,
+                ordinal + 1,
+                1,
+                7,
+                8,
+                ThreadItemState::Turn(
+                    pl_protocol::ThreadTurnItem::new(pl_protocol::TurnState::Completed(
+                        pl_protocol::CompletedTurnState::new(
+                            Some(1),
+                            1,
+                            pl_protocol::TurnCompletion::Normal,
+                        ),
+                    ))
+                    .with_input_id(Some(input_id.into())),
+                ),
+            ));
+        }
+        store
+            .commit_effect(
+                10,
+                EffectCommit {
+                    items: &items,
+                    rolled_back_turns: &Default::default(),
+                    identities: &[],
+                    messages: &[],
+                    receipts: &[],
+                    tasks: &[],
+                    deliveries: &[],
+                    delivery_repairs: &[],
+                    attempt: None,
+                },
+            )
+            .await?;
+        write_input_identity(
+            &store.writer().await?.db,
+            10,
+            &InputIdentityWrite {
+                entry: crate::studio::storage::state::InputIdentityEntry::new(
+                    pl_core::thread::input::InputIdentity {
+                        id: "consumed".into(),
+                        ordinal: 3,
+                        revision: 2,
+                        digest: "retained-digest".into(),
+                        delivery: Default::default(),
+                        state: pl_core::thread::input::InputState::Consumed {
+                            turn_id: "turn-consumed".into(),
+                            attempt_id: "attempt".into(),
+                        },
+                    },
+                    1,
+                ),
+                request_digest: None,
+                presentation: pl_protocol::MessagePresentation::Visible,
+            },
+        )
+        .await?;
+        store
+            .writer()
+            .await?
+            .db
+            .execute_unprepared("UPDATE history_meta SET schema_version=3")
+            .await?;
+        drop(store);
+        let migrated = HistoryStore::open(&path, "migration").await?;
+        // Ordinary cold reads retain their read-only contract.
+        assert_eq!(
+            migrated.existing_items(["pending".into()]).await?["pending"].turn_id,
+            "turn-pending"
+        );
+        migrated.prepare_activation().await?;
+        let saved = migrated
+            .existing_items(items.iter().map(|item| item.id.clone()))
+            .await?;
+        let mut expected = items[0].clone();
+        expected.turn_id.clear();
+        expected.revision += 1;
+        assert_eq!(saved["pending"], expected);
+        for item in &items[1..] {
+            assert_eq!(&saved[&item.id], item);
+        }
+        assert_eq!(migrated.watermark().await?, 10);
+        let first = migrated
+            .reader()
+            .await?
+            .context("migrated connection")?
+            .db
+            .query_one_raw(statement(
+                "SELECT first_ordinal FROM history_turns WHERE turn_id=?",
+                vec!["turn-pending".into()],
+            ))
+            .await?
+            .context("migrated Turn")?
+            .try_get::<i64>("", "first_ordinal")?;
+        assert_eq!(first, 2);
+        assert!(migrated.input_identity("consumed").await?.is_some());
+        migrated.prepare_activation().await?;
+        assert_eq!(
+            migrated.existing_items(["pending".into()]).await?["pending"],
+            expected
+        );
         Ok(())
     }
 

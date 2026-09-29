@@ -104,7 +104,6 @@ pub(in crate::studio) fn project_effect_items(
         let (ordinal, created_at) = stamp(existing, reserved, id, effect.committed_at);
         if let Some(item) = super::inputs::project_input(
             &thread.id,
-            state,
             input,
             ordinal,
             created_at,

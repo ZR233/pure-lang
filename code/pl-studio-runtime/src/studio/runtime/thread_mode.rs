@@ -31,6 +31,7 @@ impl StudioRuntime {
         crate::mode::validate_thread_mode_model(Some(&mode), &route.model)?;
         let thread = self.ensure_thread_owner(thread_id).await?;
         let state = thread.snapshot();
+        Self::validate_model_media(&state, &route.model, &[])?;
         let previous = state
             .extensions
             .get("studio.instructions")

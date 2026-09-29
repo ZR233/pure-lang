@@ -15,6 +15,33 @@ use pl_model::{
 use std::sync::Arc;
 
 impl StudioRuntime {
+    pub(super) fn validate_model_media(
+        state: &pl_core::thread::ThreadSnapshot,
+        model: &pl_model::model::ModelInfo,
+        additional: &[pl_core::context::ContextContent],
+    ) -> Result<()> {
+        let history = state
+            .context
+            .records
+            .iter()
+            .flat_map(|record| &record.content);
+        let pending = state
+            .inputs
+            .iter()
+            .filter(|record| record.state == pl_core::thread::input::InputState::Pending)
+            .flat_map(|record| &record.input.context);
+        pl_model::runtime::validate_attachment_content(
+            history.chain(pending).chain(additional),
+            model,
+        )
+        .map_err(|error| {
+            pl_protocol::PureError::ConfigError(format!(
+                "所选模型无法读取当前会话的附件，请选择支持这些附件的模型：{error}"
+            ))
+            .into()
+        })
+    }
+
     pub(super) async fn model_binding(
         &self,
         thread_id: &str,
@@ -51,6 +78,7 @@ impl StudioRuntime {
                 crate::config::StudioRole::Planner.id()
             };
             let route = config.models.resolve_route(role, &selector)?;
+            Self::validate_model_media(&state, &route.model, &[])?;
             if !is_child {
                 let mode_id =
                     crate::studio::thread_projection::saved_mode(&state)?.unwrap_or(record.mode);

@@ -983,6 +983,7 @@ async fn cold_seed(
         return Ok((Vec::new(), BTreeSet::new()));
     }
     let history = store.history(&thread.id).await?;
+    history.prepare_activation().await?;
     let mut items = history.existing_items(item_ids).await?;
     turn_ids.extend(
         items

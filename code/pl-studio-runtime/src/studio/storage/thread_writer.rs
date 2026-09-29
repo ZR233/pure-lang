@@ -2382,6 +2382,75 @@ mod storage_fault_tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn unconsumed_input_survives_failed_preparation_and_a_new_turn() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let id = "unconsumed-retry";
+        let sink =
+            ThreadStorageSink::new(store.clone(), pl_protocol::Thread::placeholder(id), None)
+                .await?;
+        let chat = store.chat_session(id).await?;
+        let mut projection = live_projection();
+        let mut input = consumed_visible_input("pending-input", "second-turn", 1)?;
+        input.state = InputState::Pending;
+        let mut accepted = ticket(id, 1);
+        accepted.checkpoint.state.inputs = Arc::from([input.clone()]);
+        Arc::make_mut(&mut accepted.effect).inputs =
+            Arc::from([InputChange::Accepted(input.clone())]);
+        drive_live_projection(&mut projection, &chat, &sink, id, accepted)?;
+        // Both runs publish a Turn before model preparation consumes anything. The first one
+        // failed preparation, so the same pending identity legitimately enters the second run.
+        for (sequence, turn_id, turn_state) in [
+            (2, "first-turn", TurnState::Running),
+            (
+                3,
+                "first-turn",
+                TurnState::Failed {
+                    description: "model preparation rejected media".into(),
+                },
+            ),
+            (4, "second-turn", TurnState::Running),
+        ] {
+            let mut turn = turn_record(turn_id, "pending-input", turn_state);
+            if sequence == 3 {
+                turn.elapsed_ms = Some(1);
+            }
+            let mut write = ticket(id, sequence);
+            write.checkpoint.state.inputs = Arc::from([input.clone()]);
+            write.checkpoint.state.turns = Arc::from([turn.clone()]);
+            Arc::make_mut(&mut write.effect).turn = Some(turn);
+            drive_live_projection(&mut projection, &chat, &sink, id, write)?;
+            tokio::time::timeout(Duration::from_secs(5), sink.flush(id, sequence)).await??;
+            let saved = store
+                .history(id)
+                .await?
+                .existing_items(["pending-input".into()])
+                .await?;
+            assert!(saved["pending-input"].turn_id.is_empty());
+        }
+        input.state = InputState::Consumed {
+            turn_id: "second-turn".into(),
+            attempt_id: "attempt".into(),
+        };
+        input.revision += 1;
+        let mut consumed = ticket(id, 5);
+        consumed.checkpoint.state.inputs = Arc::from([input.clone()]);
+        Arc::make_mut(&mut consumed.effect).inputs = Arc::from([InputChange::Transition {
+            id: input.input.id.clone(),
+            revision: input.revision,
+            state: input.state.clone(),
+        }]);
+        drive_live_projection(&mut projection, &chat, &sink, id, consumed)?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush(id, 5)).await??;
+        let history = store.history(id).await?;
+        let saved = history.existing_items(["pending-input".into()]).await?;
+        assert_eq!(saved["pending-input"].turn_id, "second-turn");
+        assert_eq!(history.watermark().await?, 5);
+        assert_eq!(sink.0.channel.subscribe().borrow().fault, None);
+        Ok(())
+    }
+
     /// One visible, already-consumed input record owned by `turn_id`.
     ///
     /// This is exactly what core's consuming commit leaves behind: the input is `Consumed`, so it has

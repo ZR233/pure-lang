@@ -108,44 +108,47 @@ pub(super) fn decode(payload: &OpaquePayload) -> Result<Attachment, ModelError> 
     Ok(attachment)
 }
 
-pub(super) async fn prepare(
-    request: &ModelRequest,
-    encoded: &mut CompletionRequest,
+/// Checks retained media metadata before admitting a model binding or new input.
+/// No resource reads or provider requests are made. Byte integrity and image dimensions remain
+/// checked when preparing the request with its resource reader.
+///
+/// # Errors
+/// Rejects unsupported modalities, replay profiles, conflicting identities and media limits.
+pub fn validate_attachment_content<'a>(
+    content: impl IntoIterator<Item = &'a ContextContent>,
     model: &ModelInfo,
 ) -> Result<(), ModelError> {
+    validated_attachments(content, model).map(|_| ())
+}
+
+fn validated_attachments<'a>(
+    content: impl IntoIterator<Item = &'a ContextContent>,
+    model: &ModelInfo,
+) -> Result<BTreeMap<String, Attachment>, ModelError> {
     let mut attachments = BTreeMap::<String, Attachment>::new();
     let mut occurrences = BTreeMap::<String, u64>::new();
-    for record in request.context.records.iter() {
-        for content in &record.content {
-            if let ContextContent::Opaque { payload } = content
-                && payload.format() == FORMAT
-            {
-                let attachment = decode(payload)?;
-                let count = occurrences
-                    .entry(attachment.reference.id().to_owned())
-                    .or_default();
-                *count = count
-                    .checked_add(1)
-                    .ok_or_else(|| invalid("attachment count overflow"))?;
-                if let Some(previous) = attachments.get(attachment.reference.id()) {
-                    if previous.reference != attachment.reference
-                        || previous.modality != attachment.modality
-                    {
-                        return Err(invalid("conflicting attachment identity"));
-                    }
-                } else {
-                    attachments.insert(attachment.reference.id().to_owned(), attachment);
+    for content in content {
+        if let ContextContent::Opaque { payload } = content
+            && payload.format() == FORMAT
+        {
+            let attachment = decode(payload)?;
+            let count = occurrences
+                .entry(attachment.reference.id().to_owned())
+                .or_default();
+            *count = count
+                .checked_add(1)
+                .ok_or_else(|| invalid("attachment count overflow"))?;
+            if let Some(previous) = attachments.get(attachment.reference.id()) {
+                if previous.reference != attachment.reference
+                    || previous.modality != attachment.modality
+                {
+                    return Err(invalid("conflicting attachment identity"));
                 }
+            } else {
+                attachments.insert(attachment.reference.id().to_owned(), attachment);
             }
         }
     }
-    if attachments.is_empty() {
-        return Ok(());
-    }
-    let resources = request
-        .resources
-        .as_ref()
-        .ok_or_else(|| invalid("attachment resource reader is missing"))?;
     let mut totals = HashMap::<AttachmentModality, (u64, u64)>::new();
     for attachment in attachments.values() {
         let capability = model
@@ -208,6 +211,29 @@ pub(super) async fn prepare(
             return Err(invalid("model cannot replay retained media bytes"));
         }
     }
+    Ok(attachments)
+}
+
+pub(super) async fn prepare(
+    request: &ModelRequest,
+    encoded: &mut CompletionRequest,
+    model: &ModelInfo,
+) -> Result<(), ModelError> {
+    let attachments = validated_attachments(
+        request
+            .context
+            .records
+            .iter()
+            .flat_map(|record| &record.content),
+        model,
+    )?;
+    if attachments.is_empty() {
+        return Ok(());
+    }
+    let resources = request
+        .resources
+        .as_ref()
+        .ok_or_else(|| invalid("attachment resource reader is missing"))?;
     for attachment in attachments.into_values() {
         let bytes = resources
             .read(&attachment.reference, request.cancellation.clone())

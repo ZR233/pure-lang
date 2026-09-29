@@ -26,8 +26,8 @@ const ITEM_PREVIEW_BYTES: usize = 256 * 1024;
 /// Each marker is tiny compared with the body it protects. When the bound is exceeded the marker
 /// with the smallest order is evicted and its order is folded into the session's `terminal_floor`,
 /// so eviction never reopens the identity: order slots are allocated strictly increasing and never
-/// reused for a different identity, so no later publication can legitimately carry an order at or
-/// below the floor. Living on a live reservation or on a cold history read stays legal.
+/// reused for a different identity. Speculative publications below the floor are rejected;
+/// authoritative terminal revisions may still update committed history at its original order.
 const TERMINAL_ITEMS: usize = 4096;
 /// Bound on how long ordinary already-started text is merged into one delivered frame.
 ///
@@ -382,15 +382,15 @@ struct TimelineState {
     allocated: BTreeMap<String, u64>,
     allocated_order: BTreeMap<u64, String>,
     // Terminal identities recalled after their item leaves `recent`, bounded to `TERMINAL_ITEMS`.
-    // Each entry keeps only the id and its terminal revision, so a late preview for a committed
+    // Each entry keeps the stable order and terminal revision, so a late preview for a committed
     // identity that was cache-evicted is still rejected instead of resurrecting a body.
-    terminal: BTreeMap<String, u64>,
+    terminal: BTreeMap<String, (u64, u64)>,
     // The same markers indexed by order for bounded eviction: the smallest order is dropped first.
     terminal_order: BTreeMap<u64, String>,
     // Monotonic order watermark: the greatest order whose terminal marker was evicted from
     // `terminal`. Order slots are allocated strictly increasing and never reused, so any
-    // publication at or below this floor that has no live reservation is a late update for an
-    // already committed identity rather than a legitimate new one.
+    // speculative publication at or below this floor without a live reservation is a late update.
+    // Reliable terminal revisions remain legal: the publisher and writer own their durable facts.
     terminal_floor: u64,
     highest_order: u64,
     version: u64,
@@ -708,6 +708,10 @@ impl Session {
                 .get(&item.order)
                 .is_some_and(|existing| existing != &item.item_id)
             || state
+                .terminal_order
+                .get(&item.order)
+                .is_some_and(|existing| existing != &item.item_id)
+            || state
                 .allocated
                 .get(&item.item_id)
                 .is_some_and(|order| *order != item.order)
@@ -732,7 +736,8 @@ impl Session {
                 || (!previous.turn_id.is_empty()
                     && previous.turn_id != item.turn_id
                     && !((item.saved && !previous.saved)
-                        || (item.is_terminal() && previous.is_streaming())))
+                        || (item.is_terminal() && previous.is_streaming())
+                        || (reliable && item.is_terminal() && item.revision > previous.revision)))
             {
                 return Err(ChatError::Conflict(item.item_id));
             }
@@ -764,24 +769,29 @@ impl Session {
                     return Ok(());
                 }
             }
-        } else if let Some(&terminal_revision) = state.terminal.get(&item.item_id) {
+        } else if let Some(&(terminal_order, terminal_revision)) = state.terminal.get(&item.item_id)
+        {
+            if item.order != terminal_order {
+                return Err(ChatError::Conflict(item.item_id));
+            }
             // The terminal identity already left the recent cache, so memory holds no body to compare
             // against. An older revision is a stale duplicate and is ignored; a preview at the
-            // terminal revision or any newer revision is a late update for a committed identity and
-            // is rejected instead of resurrecting a stale body. Durable history stays the ultimate
-            // owner beyond this bound.
+            // terminal revision or beyond cannot resurrect a stale body. Reliable terminal updates
+            // still belong to the authoritative publisher and durable writer.
             if item.revision < terminal_revision {
                 return Ok(());
             }
-            if item.revision > terminal_revision
-                || (item.revision == terminal_revision && item.is_streaming())
-            {
+            // New reliable terminal facts (input binding, resource supplements) remain legal
+            // after eviction. Content completion prohibits previews, not authoritative revisions.
+            if item.is_streaming() || (!reliable && item.revision > terminal_revision) {
                 return Err(ChatError::Conflict(item.item_id));
             }
-        } else if item.order <= state.terminal_floor && !state.allocated.contains_key(&item.item_id)
+        } else if item.order <= state.terminal_floor
+            && !state.allocated.contains_key(&item.item_id)
+            && !(reliable && item.is_terminal())
         {
             // The marker for this order was evicted, but an order slot is allocated strictly
-            // increasing and never reused for another identity. A publication at or below the
+            // increasing and never reused for another identity. A speculative publication below the
             // evicted-terminal floor without a live reservation can therefore only be a late update
             // for an identity this session already committed, so it is rejected rather than
             // resurrecting a stale body. Durable history stays the ultimate owner of the content.
@@ -1222,11 +1232,11 @@ fn resident_item(state: &TimelineState, item_id: &str) -> Option<ChatItem> {
 
 /// Recalls one terminal identity, evicting the smallest-order marker past `TERMINAL_ITEMS`.
 ///
-/// Each marker keeps only the id and its terminal revision, so it is tiny compared with the body it
+/// Each marker keeps the order and terminal revision, so it is tiny compared with the body it
 /// protects. Eviction folds the dropped order into the session's `terminal_floor`, so an evicted
 /// identity is still rejected by the order watermark instead of needing an unbounded tombstone.
 fn remember_terminal(state: &mut TimelineState, item_id: &str, order: u64, revision: u64) {
-    state.terminal.insert(item_id.to_owned(), revision);
+    state.terminal.insert(item_id.to_owned(), (order, revision));
     state.terminal_order.insert(order, item_id.to_owned());
     while state.terminal_order.len() > TERMINAL_ITEMS {
         let Some(evicted_order) = state.terminal_order.keys().next().copied() else {

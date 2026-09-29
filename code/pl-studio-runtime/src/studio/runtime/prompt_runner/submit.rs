@@ -197,6 +197,7 @@ impl StudioRuntime {
                 attachments: &attachments,
             })?,
         )?;
+        Self::validate_model_media(&thread.snapshot(), &route.model, &context)?;
         self.queue_thread_model(&thread, &route, &config, binding_precondition)
             .await?;
         if let Some(suggestions) =
