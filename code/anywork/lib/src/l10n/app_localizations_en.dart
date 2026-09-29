@@ -725,6 +725,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statisticsModel => 'Provider / model';
 
   @override
+  String get statisticsHistoryModelHeader => 'Model';
+
+  @override
   String get statisticsConfiguredModel => 'Configured model';
 
   @override
@@ -734,10 +737,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statisticsReportedModel => 'Reported model';
 
   @override
+  String get statisticsUpstreamReportedModel => 'Upstream response model';
+
+  @override
   String get statisticsModelMatched => 'Matched';
 
   @override
   String get statisticsModelMismatched => 'Mismatch';
+
+  @override
+  String get statisticsModelMismatchBadge => 'Model mismatch';
 
   @override
   String get statisticsModelUnreported => 'Not reported';

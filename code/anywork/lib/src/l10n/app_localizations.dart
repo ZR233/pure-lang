@@ -1370,6 +1370,12 @@ abstract class AppLocalizations {
   /// **'Provider / model'**
   String get statisticsModel;
 
+  /// No description provided for @statisticsHistoryModelHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get statisticsHistoryModelHeader;
+
   /// No description provided for @statisticsConfiguredModel.
   ///
   /// In en, this message translates to:
@@ -1388,6 +1394,12 @@ abstract class AppLocalizations {
   /// **'Reported model'**
   String get statisticsReportedModel;
 
+  /// No description provided for @statisticsUpstreamReportedModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Upstream response model'**
+  String get statisticsUpstreamReportedModel;
+
   /// No description provided for @statisticsModelMatched.
   ///
   /// In en, this message translates to:
@@ -1399,6 +1411,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Mismatch'**
   String get statisticsModelMismatched;
+
+  /// No description provided for @statisticsModelMismatchBadge.
+  ///
+  /// In en, this message translates to:
+  /// **'Model mismatch'**
+  String get statisticsModelMismatchBadge;
 
   /// No description provided for @statisticsModelUnreported.
   ///

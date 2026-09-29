@@ -690,6 +690,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statisticsModel => '模型服务商 / 模型';
 
   @override
+  String get statisticsHistoryModelHeader => '模型';
+
+  @override
   String get statisticsConfiguredModel => '配置模型';
 
   @override
@@ -699,10 +702,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statisticsReportedModel => '返回模型';
 
   @override
+  String get statisticsUpstreamReportedModel => '上游响应模型';
+
+  @override
   String get statisticsModelMatched => '一致';
 
   @override
   String get statisticsModelMismatched => '不一致';
+
+  @override
+  String get statisticsModelMismatchBadge => '模型不匹配';
 
   @override
   String get statisticsModelUnreported => '未报告';

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
-import '../../shared/studio_badges.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
 
@@ -447,7 +446,7 @@ class _WideHistoryHeader extends StatelessWidget {
       emphasized: true,
       children: [
         Text(context.l10n.statisticsCompletedAt),
-        Text(context.l10n.statisticsModel),
+        Text(context.l10n.statisticsHistoryModelHeader),
         Text(context.l10n.statisticsReasoningEffort),
         Text(context.l10n.statisticsOutputTokens),
         const Text('TTFT'),
@@ -529,70 +528,62 @@ class _CompactHistoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final description = _modelIdentityDescription(context, sample);
-    final configuredDiffers =
-        sample.configuredModel != null &&
-        sample.configuredModel != sample.displayModel;
-    return Tooltip(
-      message: description,
-      child: Semantics(
-        container: true,
-        label: description,
-        child: SettingsResourceRow(
-          title: _identityLabel(context, sample.displayModel),
-          subtitle:
-              '${_identityLabel(context, sample.providerDisplayName)} · ${_identityLabel(context, sample.providerInstanceId)} · ${_formatCompletedAt(context, sample.completedAt)}',
-          status: _ModelStatusChip(sample: sample),
-          children: [
-            Wrap(
-              spacing: 16,
-              runSpacing: 8,
-              children: [
-                if (configuredDiffers)
-                  SettingsMetric(
-                    context.l10n.statisticsConfiguredModel,
-                    _identityLabel(context, sample.configuredModel!),
-                  ),
-                SettingsMetric(
-                  context.l10n.statisticsReportedModel,
-                  sample.reportedModel == null
-                      ? context.l10n.statisticsModelUnavailable
-                      : _identityLabel(context, sample.reportedModel!),
-                ),
-                SettingsMetric(
-                  context.l10n.statisticsReasoningEffort,
-                  _formatReasoningEffort(context, sample.reasoningEffort),
-                ),
-                SettingsMetric(
-                  context.l10n.statisticsSpeed,
-                  _formatSampleSpeed(context, sample.tokensPerSecond),
-                ),
-                SettingsMetric(
-                  context.l10n.statisticsOutputTokens,
-                  formatTokenCount(sample.completionTokens),
-                ),
-                SettingsMetric(
-                  'TTFT',
-                  _formatSampleMillis(context, sample.ttftMillis),
-                ),
-                SettingsMetric(
-                  context.l10n.statisticsDecode,
-                  _formatSampleMillis(context, sample.decodeMillis),
-                ),
-                SettingsMetric(
-                  context.l10n.statisticsTotalResponse,
-                  _formatSampleMillis(context, sample.totalResponseMillis),
-                ),
-              ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _ModelIdentity(sample: sample),
+          const SizedBox(height: 4),
+          Text(
+            _formatCompletedAt(context, sample.completedAt),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: context.text.bodySmall?.copyWith(
+              color: context.colors.onSurfaceVariant,
             ),
-            const Divider(height: 24),
-          ],
-        ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              SettingsMetric(
+                context.l10n.statisticsReasoningEffort,
+                _formatReasoningEffort(context, sample.reasoningEffort),
+              ),
+              SettingsMetric(
+                context.l10n.statisticsSpeed,
+                _formatSampleSpeed(context, sample.tokensPerSecond),
+              ),
+              SettingsMetric(
+                context.l10n.statisticsOutputTokens,
+                formatTokenCount(sample.completionTokens),
+              ),
+              SettingsMetric(
+                'TTFT',
+                _formatSampleMillis(context, sample.ttftMillis),
+              ),
+              SettingsMetric(
+                context.l10n.statisticsDecode,
+                _formatSampleMillis(context, sample.decodeMillis),
+              ),
+              SettingsMetric(
+                context.l10n.statisticsTotalResponse,
+                _formatSampleMillis(context, sample.totalResponseMillis),
+              ),
+            ],
+          ),
+          const Divider(height: 24),
+        ],
       ),
     );
   }
 }
 
+/// 历史行模型身份：第一行为请求（配置）模型，缺失时回退发送模型或历史模型；
+/// 仅在配置与发送模型都存在且不同时展示映射行，发送与响应模型都存在且不同时
+/// 展示橙色上游响应行并跟随不匹配徽标；未报告/未采集仅保留中性文字提示。
 class _ModelIdentity extends StatelessWidget {
   const _ModelIdentity({required this.sample});
 
@@ -600,9 +591,25 @@ class _ModelIdentity extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final configuredDiffers =
-        sample.configuredModel != null &&
-        sample.configuredModel != sample.displayModel;
+    final configured = sample.configuredModel;
+    final sent = sample.sentModel;
+    final reported = sample.reportedModel;
+    final hasMapping = configured != null && sent != null && configured != sent;
+    final responseDiffers =
+        sent != null && reported != null && reported != sent;
+    final mismatched = sample.modelMatchState == ModelMatchState.mismatched;
+    final neutralStatus = switch (sample.modelMatchState) {
+      ModelMatchState.unreported => context.l10n.statisticsModelUnreported,
+      ModelMatchState.legacyUnknown =>
+        context.l10n.statisticsModelLegacyUnknown,
+      _ => null,
+    };
+    final detailStyle = context.text.labelSmall?.copyWith(
+      color: context.colors.onSurfaceVariant,
+    );
+    final warning = Theme.of(context)
+        .extension<StudioSemanticColors>()!
+        .warning;
     final description = _modelIdentityDescription(context, sample);
     return Tooltip(
       message: description,
@@ -614,31 +621,62 @@ class _ModelIdentity extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              _identityLabel(context, sample.displayModel),
-              maxLines: 1,
+              _identityLabel(context, configured ?? sample.displayModel),
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
+              style: context.text.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            if (sample.modelMatchState != ModelMatchState.matched) ...[
-              const SizedBox(height: 4),
-              _ModelStatusChip(sample: sample),
-            ],
-            if (configuredDiffers)
-              Text(
-                '${context.l10n.statisticsConfiguredModel}: ${_identityLabel(context, sample.configuredModel!)}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.text.labelSmall?.copyWith(
-                  color: context.colors.onSurfaceVariant,
+            if (hasMapping)
+              Padding(
+                padding: const EdgeInsets.only(left: 12, top: 2),
+                child: Text(
+                  '↳ ${_identityLabel(context, sent)}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: detailStyle,
                 ),
               ),
-            Text(
-              '${_identityLabel(context, sample.providerDisplayName)} · ${_identityLabel(context, sample.providerInstanceId)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: context.text.labelSmall?.copyWith(
-                color: context.colors.onSurfaceVariant,
+            if (responseDiffers)
+              Padding(
+                padding: EdgeInsets.only(left: hasMapping ? 24 : 12, top: 2),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 2,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      '↳ ${context.l10n.statisticsUpstreamReportedModel}: '
+                      '${_identityLabel(context, reported)}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: detailStyle?.copyWith(color: warning),
+                    ),
+                    if (mismatched)
+                      _ModelMismatchBadge(
+                        label: context.l10n.statisticsModelMismatchBadge,
+                      ),
+                  ],
+                ),
               ),
-            ),
+            if (mismatched && !responseDiffers)
+              Padding(
+                padding: const EdgeInsets.only(left: 12, top: 2),
+                child: _ModelMismatchBadge(
+                  label: context.l10n.statisticsModelMismatchBadge,
+                ),
+              ),
+            if (neutralStatus != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 12, top: 2),
+                child: Text(
+                  neutralStatus,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: detailStyle,
+                ),
+              ),
           ],
         ),
       ),
@@ -646,41 +684,33 @@ class _ModelIdentity extends StatelessWidget {
   }
 }
 
-class _ModelStatusChip extends StatelessWidget {
-  const _ModelStatusChip({required this.sample});
+/// 「模型不匹配」徽标：浅橙底、橙字、橙色细边框的小圆角标签。
+class _ModelMismatchBadge extends StatelessWidget {
+  const _ModelMismatchBadge({required this.label});
 
-  final ModelPerformanceSampleView sample;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    final (label, icon, tone) = switch (sample.modelMatchState) {
-      ModelMatchState.matched => (
-        context.l10n.statisticsModelMatched,
-        Icons.check_rounded,
-        StudioTone.success,
+    final semantic = Theme.of(context).extension<StudioSemanticColors>()!;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: semantic.warningContainer,
+        borderRadius: BorderRadius.circular(StudioRadii.xs),
+        border: Border.all(color: semantic.warning.withValues(alpha: 0.6)),
       ),
-      ModelMatchState.mismatched => (
-        context.l10n.statisticsModelMismatched,
-        Icons.warning_amber_rounded,
-        StudioTone.warning,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: context.text.labelSmall?.copyWith(
+            fontSize: 10,
+            color: semantic.warning,
+          ),
+        ),
       ),
-      ModelMatchState.unreported => (
-        context.l10n.statisticsModelUnreported,
-        Icons.help_outline_rounded,
-        StudioTone.neutral,
-      ),
-      ModelMatchState.legacyUnknown => (
-        context.l10n.statisticsModelLegacyUnknown,
-        Icons.history_rounded,
-        StudioTone.neutral,
-      ),
-    };
-    return StudioCompactChip(
-      label: label,
-      icon: icon,
-      tone: tone,
-      maxWidth: 100,
-      tooltip: _modelIdentityDescription(context, sample),
     );
   }
 }
@@ -739,8 +769,14 @@ String _modelIdentityDescription(
     ModelMatchState.unreported => context.l10n.statisticsModelUnreported,
     ModelMatchState.legacyUnknown => context.l10n.statisticsModelLegacyUnknown,
   };
+  final providerName = _identityLabel(context, sample.providerDisplayName);
+  final instanceId = _identityLabel(context, sample.providerInstanceId);
+  final provider = sample.providerDisplayName == sample.providerInstanceId
+      ? providerName
+      : '$providerName · $instanceId';
   final unavailable = context.l10n.statisticsModelUnavailable;
   return [
+    provider,
     '${context.l10n.statisticsConfiguredModel}: ${sample.configuredModel == null ? unavailable : _identityLabel(context, sample.configuredModel!)}',
     '${context.l10n.statisticsSentModel}: ${sample.sentModel == null ? unavailable : _identityLabel(context, sample.sentModel!)}',
     '${context.l10n.statisticsReportedModel}: ${sample.reportedModel == null ? unavailable : _identityLabel(context, sample.reportedModel!)}',
