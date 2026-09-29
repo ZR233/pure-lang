@@ -56,6 +56,7 @@ if("$ENV{ANYWORK_DEMO}" STREQUAL "true")
   message(STATUS "ANYWORK_DEMO=true; skipping Rust bridge DLL staging.")
 else()
   set(ANYWORK_BRIDGE_LIBRARY "$ENV{ANYWORK_BRIDGE_LIBRARY}")
+  file(TO_CMAKE_PATH "${ANYWORK_BRIDGE_LIBRARY}" ANYWORK_BRIDGE_LIBRARY)
   if(ANYWORK_BRIDGE_LIBRARY STREQUAL "")
     message(FATAL_ERROR
       "ANYWORK_BRIDGE_LIBRARY is required. Build or run the Windows GUI "
@@ -80,6 +81,7 @@ else()
   set(ANYWORK_BRIDGE_COPY_DEBUG_SYMBOLS)
 
   set(ANYWORK_BRIDGE_DEBUG_SYMBOLS "$ENV{ANYWORK_BRIDGE_DEBUG_SYMBOLS}")
+  file(TO_CMAKE_PATH "${ANYWORK_BRIDGE_DEBUG_SYMBOLS}" ANYWORK_BRIDGE_DEBUG_SYMBOLS)
   if(NOT ANYWORK_BRIDGE_DEBUG_SYMBOLS STREQUAL "")
     if(NOT IS_ABSOLUTE "${ANYWORK_BRIDGE_DEBUG_SYMBOLS}")
       message(FATAL_ERROR
@@ -127,6 +129,9 @@ if("$ENV{ANYWORK_DEMO}" STREQUAL "true")
   message(STATUS "ANYWORK_DEMO=true; skipping remote helper resource staging.")
 else()
   set(ANYWORK_REMOTE_HELPER_DIR "$ENV{ANYWORK_REMOTE_HELPER_DIR}")
+  # Environment paths use native Windows separators. Normalize before install()
+  # serializes them into CMake source, where backslashes become escape sequences.
+  file(TO_CMAKE_PATH "${ANYWORK_REMOTE_HELPER_DIR}" ANYWORK_REMOTE_HELPER_DIR)
   if(ANYWORK_REMOTE_HELPER_DIR STREQUAL "")
     message(FATAL_ERROR
       "ANYWORK_REMOTE_HELPER_DIR is required. Build or run the Windows GUI "

@@ -1,15 +1,10 @@
 import 'dart:io';
 
-import 'package:flutter/services.dart';
-
-/// 宿主应用通道名；仅承载 VS Code 可执行文件解析，与各平台 runner 共享。
-const MethodChannel _hostAppsChannel = MethodChannel(
-  'io.github.zr233.anywork/host_apps',
-);
+import 'host_app_icons.dart';
 
 /// 可用性与启动共用同一解析入口，保证探测和实际启动一致。
 Future<String?> _executable() async {
-  final path = await _hostAppsChannel.invokeMethod<String>('vsCodeExecutable');
+  final path = await hostAppsChannel.invokeMethod<String>('vsCodeExecutable');
   return path == null || path.isEmpty ? null : path;
 }
 

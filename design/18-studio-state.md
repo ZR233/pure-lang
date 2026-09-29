@@ -330,7 +330,7 @@ Thread runtime 的缓存统计是独立的 typed 投影 `cache_usage`，包含�
 
 ## 18.9 顶栏工作区打开菜单
 
-会话顶栏 actions 区（与智能体切换器、费用 chip 同级）提供通用「打开」图标按钮，点击展开
+会话顶栏 actions 区（与智能体切换器、费用 chip 同级）提供带图标与文字的「打开工作区」按钮，点击展开
 下拉菜单，并列提供「VS Code」与「终端」。有当前会话及所属项目时显示入口，不以 VS Code
 安装情况控制整个入口；各项独立探测可用性，不可用项禁用并说明原因。入口与菜单项提供
 可本地化 tooltip、读屏名称和打开目标路径说明。
@@ -341,8 +341,10 @@ Thread runtime 的缓存统计是独立的 typed 投影 `cache_usage`，包含�
 项目路径仍表示项目根目录。
 
 两个入口的目标均由会话 canonical `workspacePath` 决定，不按 `workspace_mode` 分别取
-Project 路径或工作树路径，GUI 不推导工作树布局。通用打开图标不依赖 VS Code 系统图标，
-不再保留无调用的原生应用图标读取链。GUI 负责目标选择与反馈，平台启动器负责可用性与启动。
+Project 路径或工作树路径，GUI 不推导工作树布局。菜单读取宿主的 VS Code 与终端应用图标，
+保留应用原色；Windows Terminal 使用注册的打包应用图标，不能使用执行别名的通用文件图标。
+图标缺失或解码失败时仍显示明确的文字和通用入口图标，不影响启动。GUI 负责目标选择与反馈，
+平台启动器负责可用性与启动。
 
 打开直接启动宿主解析出的 VS Code 可执行文件，通过 `--folder-uri` 传递一个文件夹 URI，
 不经过 shell 或 `vscode://` 外部链接处理器，避免触发外部应用打开路径确认。本地使用
@@ -356,8 +358,9 @@ Linux 优先解析同一协议的 GIO 默认应用可执行文件，无关联时
 可用性与启动共用该解析入口。结果缓存于进程内 provider，demo 与测试可覆写。
 
 Windows 终端使用 Windows Terminal（`wt.exe`），本地工作目录为会话工作区，不回退成独立
-cmd 或 PowerShell 窗口。Linux 优先使用 `xdg-terminal-exec`，其次使用系统配置的
-`x-terminal-emulator`，遵循各自的工作目录与执行参数契约，不猜测其他已安装终端，不使用
+cmd 或 PowerShell 窗口。Windows 入口探测接受 WindowsApps 执行别名，不要求将该别名
+解析为普通文件；执行别名由系统在启动时解析。Linux 优先使用 `xdg-terminal-exec`，其次
+使用系统配置的 `x-terminal-emulator`，遵循各自的工作目录与执行参数契约，不猜测其他已安装终端，不使用
 文件管理器代替终端；无可用默认终端入口时明确反馈不可用。
 
 远端项目在宿主终端中启动系统 OpenSSH，使用项目 Host 别名复用 `~/.ssh/config`，不复制

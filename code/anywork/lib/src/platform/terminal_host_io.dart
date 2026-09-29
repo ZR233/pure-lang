@@ -59,14 +59,17 @@ Future<String?> _findExecutableInPath(String name) async {
   for (final directory in directories) {
     if (directory.isEmpty) continue;
     final candidate = '$directory${Platform.pathSeparator}$name';
-    final stat = await FileStat.stat(candidate);
-    if (stat.type == FileSystemEntityType.notFound) continue;
     if (Platform.isWindows) {
-      if (stat.type == FileSystemEntityType.file ||
-          stat.type == FileSystemEntityType.link) {
+      // WindowsApps execution aliases are reparse points, not ordinary symlinks.
+      // Following them with FileStat.stat reports notFound even when Windows
+      // can launch the alias. Inspect the entry itself and let startup resolve it.
+      final type = await FileSystemEntity.type(candidate, followLinks: false);
+      if (type == FileSystemEntityType.file ||
+          type == FileSystemEntityType.link) {
         return candidate;
       }
     } else {
+      final stat = await FileStat.stat(candidate);
       // 0x49 = 0o111：任一执行位即可执行。
       final executable =
           stat.type == FileSystemEntityType.file && (stat.mode & 0x49) != 0;

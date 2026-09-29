@@ -122,8 +122,8 @@ String _purposeLabel(BuildContext context, String? purpose) =>
 ///
 /// 有当前会话及所属项目即显示入口，不以 VS Code 安装情况控制整个入口；
 /// 两项各自探测可用性，不可用时禁用并说明原因。两个入口的目标都由会话
-/// canonical `workspacePath` 决定，GUI 不推导工作树布局，图标使用通用
-/// 「打开」图标，不读取品牌图。远端项目复用 `~/.ssh/config` 的 Host 别名。
+/// canonical `workspacePath` 决定，GUI 不推导工作树布局；菜单图标读取
+/// 宿主应用图标。远端项目复用 `~/.ssh/config` 的 Host 别名。
 class _SessionOpenWorkspaceMenu extends ConsumerStatefulWidget {
   const _SessionOpenWorkspaceMenu({required this.state});
 
@@ -163,7 +163,7 @@ class _SessionOpenWorkspaceMenuState
       menuChildren: [
         _menuItem(
           key: StudioDriverKeys.sessionOpenWorkspaceVsCode,
-          icon: Icons.code,
+          icon: _appIcon(HostAppIcon.vsCode, Icons.code),
           label: context.l10n.sessionOpenInVsCode,
           targetDescription: targetDescription,
           available: vsCodeAvailable,
@@ -172,7 +172,7 @@ class _SessionOpenWorkspaceMenuState
         ),
         _menuItem(
           key: StudioDriverKeys.sessionOpenWorkspaceTerminal,
-          icon: Icons.terminal,
+          icon: _appIcon(HostAppIcon.terminal, Icons.terminal),
           label: context.l10n.sessionOpenInTerminal,
           targetDescription: targetDescription,
           available: terminalAvailable,
@@ -181,13 +181,16 @@ class _SessionOpenWorkspaceMenuState
         ),
       ],
       builder: (context, controller, child) {
-        return IconButton(
-          key: StudioDriverKeys.sessionOpenWorkspaceMenu,
-          tooltip: '$label\n$targetDescription',
-          onPressed: () => _menuController.isOpen
-              ? _menuController.close()
-              : _menuController.open(),
-          icon: const Icon(Icons.open_in_new),
+        return Tooltip(
+          message: '$label\n$targetDescription',
+          child: TextButton.icon(
+            key: StudioDriverKeys.sessionOpenWorkspaceMenu,
+            onPressed: () => _menuController.isOpen
+                ? _menuController.close()
+                : _menuController.open(),
+            icon: const Icon(Icons.open_in_new, size: 18),
+            label: Text(label),
+          ),
         );
       },
     );
@@ -197,7 +200,7 @@ class _SessionOpenWorkspaceMenuState
   /// 悬停与读屏可获取完整打开目标说明。
   Widget _menuItem({
     required Key key,
-    required IconData icon,
+    required Widget icon,
     required String label,
     required String targetDescription,
     required bool available,
@@ -207,7 +210,7 @@ class _SessionOpenWorkspaceMenuState
     final subtitle = available ? targetDescription : unavailableReason;
     return MenuItemButton(
       key: key,
-      leadingIcon: Icon(icon, size: 18),
+      leadingIcon: icon,
       onPressed: available
           ? () {
               _menuController.close();
@@ -237,6 +240,18 @@ class _SessionOpenWorkspaceMenuState
           ),
         ),
       ),
+    );
+  }
+
+  Widget _appIcon(HostAppIcon app, IconData fallback) {
+    final bytes = ref.watch(hostAppIconProvider(app)).value;
+    if (bytes == null) return Icon(fallback, size: 20);
+    return Image.memory(
+      bytes,
+      width: 20,
+      height: 20,
+      filterQuality: FilterQuality.medium,
+      errorBuilder: (_, error, stackTrace) => Icon(fallback, size: 20),
     );
   }
 

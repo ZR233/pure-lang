@@ -17,6 +17,7 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/app_localizations.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../platform/studio_platform.dart';
+import '../../platform/host_app_icons.dart';
 import '../../platform/terminal_launcher.dart';
 import '../../platform/vscode_launcher.dart';
 import '../../shared/studio_chrome.dart';

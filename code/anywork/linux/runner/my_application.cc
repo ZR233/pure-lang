@@ -28,8 +28,42 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
-// Hosts the host-apps method channel used by the Studio UI (see
-// vscode_host_io.dart). Resolves the executable GIO associates with the
+// Uses the registered VS Code application or the desktop's terminal artwork.
+// Returns a new reference, or nullptr if the desktop cannot provide an icon.
+static FlValue* application_icon_value(bool terminal) {
+  g_autoptr(GAppInfo) app_info = terminal
+      ? nullptr : g_app_info_get_default_for_uri_scheme("vscode");
+  g_autoptr(GIcon) terminal_icon = terminal
+      ? g_themed_icon_new("utilities-terminal") : nullptr;
+  GIcon* icon = terminal ? terminal_icon
+      : (app_info == nullptr ? nullptr : g_app_info_get_icon(app_info));
+  if (icon == nullptr) {
+    return nullptr;
+  }
+  g_autoptr(GtkIconInfo) icon_info = gtk_icon_theme_lookup_by_gicon(
+      gtk_icon_theme_get_default(), icon, 256, GTK_ICON_LOOKUP_FORCE_SIZE);
+  if (icon_info == nullptr) {
+    return nullptr;
+  }
+  g_autoptr(GError) error = nullptr;
+  g_autoptr(GdkPixbuf) pixbuf = gtk_icon_info_load_icon(icon_info, &error);
+  if (pixbuf == nullptr) {
+    return nullptr;
+  }
+  gchar* png_buffer = nullptr;
+  gsize png_size = 0;
+  if (!gdk_pixbuf_save_to_buffer(pixbuf, &png_buffer, &png_size, "png", &error,
+                                 nullptr)) {
+    return nullptr;
+  }
+  FlValue* value =
+      fl_value_new_uint8_list((const uint8_t*)png_buffer, png_size);
+  g_free(png_buffer);
+  return value;
+}
+
+// Hosts the host-apps method channel used by the Studio UI. Resolves application
+// icons and the executable GIO associates with the
 // `vscode` URL protocol, falling back to `code` on PATH; a null value means
 // "not found", not an error.
 static void host_apps_method_call_cb(FlMethodChannel* channel,
@@ -37,7 +71,12 @@ static void host_apps_method_call_cb(FlMethodChannel* channel,
                                      gpointer user_data) {
   const gchar* method = fl_method_call_get_name(method_call);
   g_autoptr(FlMethodResponse) response = nullptr;
-  if (g_strcmp0(method, "vsCodeExecutable") == 0) {
+  if (g_strcmp0(method, "vsCodeIcon") == 0 ||
+      g_strcmp0(method, "terminalIcon") == 0) {
+    g_autoptr(FlValue) icon =
+        application_icon_value(g_strcmp0(method, "terminalIcon") == 0);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(icon));
+  } else if (g_strcmp0(method, "vsCodeExecutable") == 0) {
     g_autoptr(GAppInfo) app_info =
         g_app_info_get_default_for_uri_scheme("vscode");
     const gchar* executable =

@@ -3,6 +3,13 @@
 #include <windows.h>
 
 #include <shlwapi.h>
+#include <shellapi.h>
+#include <shlobj.h>
+#include <wincodec.h>
+#include <wrl/client.h>
+#include <cstdint>
+#include <limits>
+#include <vector>
 
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
@@ -16,7 +23,7 @@
 
 namespace {
 
-// Channel and method shared with the Dart host (see vscode_host_io.dart).
+// Shared with host_app_icons.dart and the VS Code launcher.
 constexpr char kHostAppsChannel[] = "io.github.zr233.anywork/host_apps";
 constexpr char kVsCodeExecutableMethod[] = "vsCodeExecutable";
 
@@ -39,6 +46,87 @@ bool QueryVsCodeExecutable(std::wstring* executable) {
   }
   *executable = std::wstring(buffer.c_str());
   return !executable->empty();
+}
+
+// WIC preserves icon alpha and handles legacy masks. COM is initialized by
+// wWinMain; every interface below is released before the method call returns.
+std::vector<uint8_t> EncodeIconAsPng(HICON icon) {
+  using Microsoft::WRL::ComPtr;
+  ComPtr<IWICImagingFactory> factory;
+  ComPtr<IWICBitmap> bitmap;
+  ComPtr<IStream> stream;
+  ComPtr<IWICBitmapEncoder> encoder;
+  ComPtr<IWICBitmapFrameEncode> frame;
+  if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                              CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) ||
+      FAILED(factory->CreateBitmapFromHICON(icon, &bitmap)) ||
+      FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) ||
+      FAILED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) ||
+      FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) ||
+      FAILED(encoder->CreateNewFrame(&frame, nullptr)) ||
+      FAILED(frame->Initialize(nullptr))) {
+    return {};
+  }
+  WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+  if (FAILED(frame->SetPixelFormat(&format)) ||
+      FAILED(frame->WriteSource(bitmap.Get(), nullptr)) ||
+      FAILED(frame->Commit()) || FAILED(encoder->Commit())) {
+    return {};
+  }
+  STATSTG stat = {};
+  if (FAILED(stream->Stat(&stat, STATFLAG_NONAME)) ||
+      stat.cbSize.QuadPart == 0 ||
+      stat.cbSize.QuadPart > std::numeric_limits<ULONG>::max() ||
+      FAILED(stream->Seek({}, STREAM_SEEK_SET, nullptr))) {
+    return {};
+  }
+  const auto size = static_cast<ULONG>(stat.cbSize.QuadPart);
+  std::vector<uint8_t> png(size);
+  ULONG read = 0;
+  if (FAILED(stream->Read(png.data(), size, &read)) || read != size) {
+    return {};
+  }
+  return png;
+}
+
+// Reads the icon of the `vscode` protocol's associated executable. Returns an
+// empty vector when there is no association or no icon, so the UI falls back to
+// a labeled button instead of any guessed artwork.
+std::vector<uint8_t> LoadVsCodeIconPng() {
+  std::wstring executable;
+  if (!QueryVsCodeExecutable(&executable)) {
+    return {};
+  }
+  SHFILEINFOW file_info = {};
+  if (SHGetFileInfoW(executable.c_str(), 0, &file_info, sizeof(file_info),
+                     SHGFI_ICON | SHGFI_LARGEICON) == 0 ||
+      file_info.hIcon == nullptr) {
+    return {};
+  }
+  auto png = EncodeIconAsPng(file_info.hIcon);
+  DestroyIcon(file_info.hIcon);
+  return png;
+}
+
+// Execution aliases carry a generic file icon. Ask the shell for the registered
+// Terminal application instead; these are application identities, not install paths.
+std::vector<uint8_t> LoadTerminalIconPng() {
+  for (const auto* app : {
+           L"shell:AppsFolder\\Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
+           L"shell:AppsFolder\\Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe!App"}) {
+    PIDLIST_ABSOLUTE item = nullptr;
+    if (FAILED(SHParseDisplayName(app, nullptr, &item, 0, nullptr))) continue;
+    SHFILEINFOW info = {};
+    const auto found = SHGetFileInfoW(
+        reinterpret_cast<LPCWSTR>(item), 0, &info, sizeof(info),
+        SHGFI_PIDL | SHGFI_ICON | SHGFI_LARGEICON);
+    CoTaskMemFree(item);
+    if (found == 0 || info.hIcon == nullptr) continue;
+    auto png = EncodeIconAsPng(info.hIcon);
+    DestroyIcon(info.hIcon);
+    if (!png.empty()) return png;
+  }
+  return {};
 }
 
 }  // namespace
@@ -79,6 +167,18 @@ bool FlutterWindow::OnCreate() {
                 flutter::EncodableValue(Utf8FromUtf16(executable.c_str())));
           } else {
             result->Success();
+          }
+          return;
+        }
+        if (call.method_name() == "vsCodeIcon" ||
+            call.method_name() == "terminalIcon") {
+          const auto png = call.method_name() == "vsCodeIcon"
+                               ? LoadVsCodeIconPng()
+                               : LoadTerminalIconPng();
+          if (png.empty()) {
+            result->Success();
+          } else {
+            result->Success(flutter::EncodableValue(png));
           }
           return;
         }
