@@ -634,6 +634,13 @@ admitted 水位，之后的新准入不会把屏障推远；它不启动新工�
 诊断。恢复将遗留 Running 状态收束为 Interrupted，不重建模型、工具、外部进程或取消令牌，
 不执行历史副作用。需要继续执行时由 Studio 装配当前服务实例。
 
+已提交的 Pending Interaction 是可恢复的逻辑状态，不是必须随进程取消的运行资源。
+正常关闭 Thread 或应用时，保存其原始请求、身份、revision 和关联扩展，不隐式提交交互
+取消；关闭仍须停止并等待模型、工具和后台任务收束，权限请求不因此获得跨重启授权。
+重开会话从 checkpoint 原样发布 Pending Interaction；只有显式回答或显式取消才能改变
+其逻辑状态。恢复展示不触发模型或工具执行，回答产生的 continuation 沿现有原子提交与
+去重契约保存。正常退出必须等待包含这些事实的最终 checkpoint 与 history fence。
+
 本次大版本不迁移旧会话；原有 `ThreadCommit` journal decoder、完整 replay 与共享
 `sessions.sqlite` 不是 `v2/` 正常启动或聊天窗口的入口。旧数据原位保留，配置与凭据关联按
 [20](./20-config.md) 升级；正常启动、查询、激活和订阅不能调用旧 replay。

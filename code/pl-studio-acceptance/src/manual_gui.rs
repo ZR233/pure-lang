@@ -13,7 +13,7 @@ use sea_orm::sqlx::{
     sqlite::{SqliteConnectOptions, SqliteConnection},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
@@ -31,7 +31,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub(crate) struct ManualGuiOptions {
     /// Run the regular, stress, single-item long-body stress (`stress-body`,
     /// `stress-body-large`), isolated call-statistics, realtime, paused
-    /// history-writer, or history-fault retry/resume acceptance journey.
+    /// history-writer, history-fault retry/resume, or plan shutdown/restart
+    /// recovery (`plan-recovery`) acceptance journey.
     #[arg(long, default_value = "gui", value_parser = pl_provider_fixture::GUI_SCENARIOS)]
     pub(crate) scenario: String,
     /// Directory for sanitized evidence (defaults to target/manual-gui/<timestamp>-<pid>).
@@ -186,6 +187,18 @@ struct HistoryFaultScenario<'a> {
     output: &'a Path,
     fixture_log: &'a Path,
     requests_file: &'a Path,
+    interrupt: &'a mpsc::Receiver<()>,
+}
+
+struct PlanRecoveryScenario<'a> {
+    workspace: &'a Path,
+    app_dir: &'a Path,
+    home: &'a Path,
+    working: &'a Path,
+    output: &'a Path,
+    fixture_log: &'a Path,
+    requests_file: &'a Path,
+    status_file: &'a Path,
     interrupt: &'a mpsc::Receiver<()>,
 }
 
@@ -358,9 +371,9 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         options.ssh_target.is_none() || options.scenario == "tool-scroll",
         "--ssh-target is supported only by --scenario tool-scroll"
     );
-    // The statistics, realtime and history-writer journeys are fully driven by
-    // Flutter Driver and reviewed from captured evidence, so they do not require
-    // an interactive stdin.
+    // The statistics, realtime, history and plan-recovery journeys are fully
+    // driven by Flutter Driver and reviewed from captured evidence, so they do
+    // not require an interactive stdin.
     if !matches!(
         options.scenario.as_str(),
         "statistics"
@@ -369,6 +382,7 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             | "stress-body-large"
             | "history-lock"
             | "history-fault"
+            | "plan-recovery"
             | "tool-scroll"
     ) {
         ensure!(
@@ -427,6 +441,9 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     let stress_stage = working.path().join("stress-stage");
     let stress_sessions_stage = working.path().join("stress-sessions-stage");
     let stress_sessions_report = working.path().join("stress-sessions.json");
+    // Live strict-script counters written by the plan-recovery fixture watcher;
+    // every other scenario leaves the flag off and never creates the file.
+    let status_file = working.path().join("plan-recovery-status.json");
     let probe_ready = working.path().join("probe-ready");
     let probe_finished = working.path().join("probe-finished");
     let fixture_log_path = working.path().join("fixture.log");
@@ -450,6 +467,9 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         .arg(&stress_report_file)
         .stdout(Stdio::from(fixture_log.try_clone()?))
         .stderr(Stdio::from(fixture_log));
+    if options.scenario == "plan-recovery" {
+        fixture_command.arg("--status-file").arg(&status_file);
+    }
     #[cfg(windows)]
     process::own_current_process_tree()?;
     let mut fixture = match OwnedProcess::start(&mut fixture_command, true) {
@@ -545,6 +565,23 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
                 output: &output,
                 fixture_log: &fixture_log_path,
                 requests_file: &requests_file,
+                interrupt: &interrupt_rx,
+            },
+            fixture,
+        );
+    }
+
+    if options.scenario == "plan-recovery" {
+        return run_plan_recovery_scenario(
+            &PlanRecoveryScenario {
+                workspace: &workspace,
+                app_dir: &app_dir,
+                home: &home,
+                working: working.path(),
+                output: &output,
+                fixture_log: &fixture_log_path,
+                requests_file: &requests_file,
+                status_file: &status_file,
                 interrupt: &interrupt_rx,
             },
             fixture,
@@ -2831,6 +2868,532 @@ fn run_history_fault_scenario(
         "history-fault fixture or GUI health incomplete; human verdict pending"
     );
     Ok(())
+}
+
+/// Plan shutdown/restart recovery acceptance journey driven through Flutter Driver.
+///
+/// Three real GUI lifecycles share one isolated home and one strict fixture
+/// script. The first lifecycle submits a real `plan_submit` through the GUI and
+/// shuts the GUI down normally while the confirmation is pending; the restart
+/// proves the reopened session restores the exact Plan body, interaction and
+/// turn identity with no provider request before the answer (the coordinator
+/// holds the Driver on a quiet marker until the fixture counters prove it),
+/// approves, and stages the Revise branch before a second normal shutdown; the
+/// recheck restores that second pending Plan, answers Revise (which must produce
+/// a rewritten Plan confirmation with a fresh interaction identity), approves
+/// it, and proves neither answered Plan re-pops. The strict fixture script
+/// rejects any extra or duplicated model request, so the run fails closed; the
+/// human verdict stays pending either way.
+fn run_plan_recovery_scenario(
+    context: &PlanRecoveryScenario<'_>,
+    mut fixture: OwnedProcess,
+) -> Result<()> {
+    let PlanRecoveryScenario {
+        workspace,
+        app_dir,
+        home,
+        working,
+        output,
+        fixture_log,
+        requests_file,
+        status_file,
+        interrupt,
+    } = context;
+    let gui_logs = [
+        (
+            working.join("plan-recovery-first-gui.log"),
+            "plan-recovery-first-gui.log",
+        ),
+        (
+            working.join("plan-recovery-restart-gui.log"),
+            "plan-recovery-restart-gui.log",
+        ),
+        (
+            working.join("plan-recovery-recheck-gui.log"),
+            "plan-recovery-recheck-gui.log",
+        ),
+    ];
+    let stage = working.join("plan-recovery-stage");
+    let project = working.join("plan-recovery-project");
+    let quiet_restart_marker = working.join("plan-recovery-quiet-restart");
+    let quiet_recheck_marker = working.join("plan-recovery-quiet-recheck");
+    let mut driver_exits: BTreeMap<&'static str, Option<std::process::ExitStatus>> =
+        BTreeMap::new();
+    let journey = (|| -> Result<()> {
+        fs::create_dir(&project)?;
+        ensure!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .arg(&project)
+                .status()?
+                .success(),
+            "failed to initialize isolated plan-recovery project"
+        );
+
+        // 1. First lifecycle: submit the Approve-branch Plan, then shut the GUI
+        // down normally through the Driver while the confirmation is pending.
+        let at_first_card = {
+            let mut gui = start_plan_recovery_gui(workspace, home, &gui_logs[0].0)?;
+            let vm_url = wait_for_vm(&gui_logs[0].0, &mut gui, &mut fixture, interrupt)?;
+            let mut driver = start_plan_recovery_driver(context, "first", &vm_url, &project)?;
+            wait_for_plan_recovery_stage(
+                "plan_recovery_first_card",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+                Duration::from_secs(600),
+            )?;
+            let at_card = plan_recovery_settled_baseline(status_file)?;
+            let exit = wait_for_plan_recovery_driver(
+                "first",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+            )?;
+            driver_exits.insert("first", Some(exit));
+            at_card
+            // The scoped handle terminates and reaps the resident process group
+            // after the native shutdown completed, before this home reopens.
+        };
+        let after_first = plan_recovery_read_status(status_file)?;
+        ensure!(
+            after_first.rejected == 0,
+            "fixture rejected a request during the first plan-recovery lifecycle: \
+             {after_first:?}"
+        );
+        ensure!(
+            after_first.total == at_first_card.total
+                && after_first.consumed_steps == at_first_card.consumed_steps,
+            "the first normal GUI shutdown issued provider requests: \
+             {at_first_card:?} -> {after_first:?}"
+        );
+        fs::write(
+            output.join("plan-recovery-requests-first.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "note": "baseline settled at the pending card; the normal shutdown itself added no provider request",
+                "atCard": at_first_card,
+                "afterShutdown": after_first,
+            }))?,
+        )?;
+
+        // 2. Restart lifecycle: restore the pending Plan, prove the reopened
+        // window stays quiet, approve, stage the Revise branch, shut down again.
+        let at_revise_card = {
+            let mut gui = start_plan_recovery_gui(workspace, home, &gui_logs[1].0)?;
+            let vm_url = wait_for_vm(&gui_logs[1].0, &mut gui, &mut fixture, interrupt)?;
+            let mut driver = start_plan_recovery_driver(context, "restart", &vm_url, &project)?;
+            wait_for_plan_recovery_stage(
+                "plan_recovery_reopened",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+                Duration::from_secs(600),
+            )?;
+            let mut quiet_evidence = serde_json::Map::new();
+            plan_recovery_quiet_window(
+                status_file,
+                after_first,
+                &mut quiet_evidence,
+                &quiet_restart_marker,
+            )?;
+            wait_for_plan_recovery_stage(
+                "plan_recovery_revise_card",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+                Duration::from_secs(600),
+            )?;
+            let at_card = plan_recovery_settled_baseline(status_file)?;
+            let exit = wait_for_plan_recovery_driver(
+                "restart",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+            )?;
+            driver_exits.insert("restart", Some(exit));
+            fs::write(
+                output.join("plan-recovery-requests-restart.json"),
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "quietBeforeAnswer": quiet_evidence,
+                    "note": "baseline settled at the second pending card; the second normal shutdown added no provider request",
+                    "atReviseCard": at_card,
+                }))?,
+            )?;
+            at_card
+        };
+        let after_restart = plan_recovery_read_status(status_file)?;
+        ensure!(
+            after_restart.rejected == 0,
+            "fixture rejected a request during the restart plan-recovery lifecycle: \
+             {after_restart:?}"
+        );
+        ensure!(
+            after_restart.total == at_revise_card.total
+                && after_restart.consumed_steps == at_revise_card.consumed_steps,
+            "the second normal GUI shutdown issued provider requests: \
+             {at_revise_card:?} -> {after_restart:?}"
+        );
+        if let Some(value) = serde_json::from_slice::<serde_json::Value>(&fs::read(
+            output.join("plan-recovery-requests-restart.json"),
+        )?)?
+        .as_object_mut()
+        {
+            value.insert("afterShutdown".into(), serde_json::to_value(after_restart)?);
+            fs::write(
+                output.join("plan-recovery-requests-restart.json"),
+                serde_json::to_vec_pretty(value)?,
+            )?;
+        }
+
+        // 3. Recheck lifecycle: restore the second pending Plan, answer Revise
+        // then Approve, and prove neither answered Plan re-pops.
+        {
+            let mut gui = start_plan_recovery_gui(workspace, home, &gui_logs[2].0)?;
+            let vm_url = wait_for_vm(&gui_logs[2].0, &mut gui, &mut fixture, interrupt)?;
+            let mut driver = start_plan_recovery_driver(context, "recheck", &vm_url, &project)?;
+            wait_for_plan_recovery_stage(
+                "plan_recovery_recheck_reopened",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+                Duration::from_secs(600),
+            )?;
+            let mut quiet_evidence = serde_json::Map::new();
+            plan_recovery_quiet_window(
+                status_file,
+                after_restart,
+                &mut quiet_evidence,
+                &quiet_recheck_marker,
+            )?;
+            let exit = wait_for_plan_recovery_driver(
+                "recheck",
+                &stage,
+                &mut driver,
+                &mut gui,
+                &mut fixture,
+                interrupt,
+            )?;
+            driver_exits.insert("recheck", Some(exit));
+            let final_status = plan_recovery_read_status(status_file)?;
+            fs::write(
+                output.join("plan-recovery-requests-recheck.json"),
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "quietBeforeAnswer": quiet_evidence,
+                    "final": final_status,
+                }))?,
+            )?;
+        }
+        Ok(())
+    })();
+
+    for (source, name) in &gui_logs {
+        if source.is_file() {
+            write_sanitized_log(source, &output.join(name))?;
+        }
+    }
+    if stage.is_file() {
+        let value = fs::read_to_string(&stage)?;
+        if value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.'))
+        {
+            fs::write(output.join("plan-recovery-stage.txt"), value)?;
+        }
+    }
+    let redactions = [
+        (app_dir.to_string_lossy().into_owned(), "<app>"),
+        (workspace.to_string_lossy().into_owned(), "<workspace>"),
+        (home.to_string_lossy().into_owned(), "<home>"),
+        (working.to_string_lossy().into_owned(), "<coord>"),
+    ];
+    for phase in ["first", "restart", "recheck"] {
+        let driver_log = working.join(format!("plan-recovery-{phase}-driver.log"));
+        write_realtime_driver_evidence(
+            &driver_log,
+            output,
+            &format!("plan-recovery-{phase}"),
+            driver_exits.get(phase).cloned().flatten(),
+            journey.as_ref().err(),
+            &redactions,
+        )?;
+    }
+    let fixture_result = fixture.stop(requests_file);
+    drop(fixture);
+    write_fixture_log(fixture_log, &output.join("fixture.log"))?;
+    let requests = if requests_file.is_file() {
+        sanitize_requests(requests_file, &output.join("requests.json"))?;
+        serde_json::from_slice::<Vec<serde_json::Value>>(&fs::read(requests_file)?)?
+    } else {
+        Vec::new()
+    };
+    let accepted = requests
+        .iter()
+        .filter(|row| row["accepted"] == true)
+        .count();
+    let rejected = requests
+        .iter()
+        .filter(|row| row["accepted"] == false)
+        .count();
+    let final_status = plan_recovery_read_status(status_file).ok();
+    fs::write(
+        output.join("fixture-status.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "scenario": "plan-recovery",
+            "acceptedRequests": accepted,
+            "rejectedRequests": rejected,
+            "completed": fixture_result.as_ref().is_ok_and(|status| status.success()),
+            "liveStatus": final_status,
+        }))?,
+    )?;
+    let errors = gui_logs
+        .iter()
+        .filter(|(path, _)| path.is_file())
+        .map(|(path, _)| count_gui_errors(path))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .sum::<usize>();
+    fs::write(
+        output.join("gui-health.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "unhandledErrors": errors, "humanVerdict": "pending"
+        }))?,
+    )?;
+    println!("Evidence: {} (human verdict pending)", output.display());
+    journey?;
+    for phase in ["first", "restart", "recheck"] {
+        let summary: serde_json::Value = serde_json::from_slice(
+            &fs::read(output.join(format!("plan-recovery-{phase}-summary.json"))).with_context(
+                || format!("Flutter Driver did not write the plan-recovery {phase} summary"),
+            )?,
+        )?;
+        ensure!(
+            summary["scenario"] == "plan-recovery"
+                && summary["phase"] == phase
+                && summary["verdict"] == "pending",
+            "plan-recovery {phase} summary is missing its scenario, phase or pending verdict"
+        );
+        ensure!(
+            summary["status"] == "complete",
+            "plan-recovery {phase} journey did not complete: stage={} failedChecks={}",
+            summary["stage"],
+            summary["failedChecks"],
+        );
+    }
+    ensure!(
+        fixture_result.is_ok_and(|status| status.success())
+            && accepted >= pl_provider_fixture::PLAN_RECOVERY_REQUIRED_STEPS
+            && rejected == 0
+            && errors == 0,
+        "plan-recovery fixture or GUI health incomplete; human verdict pending"
+    );
+    Ok(())
+}
+
+/// Reads the fixture's live strict-script counters.
+fn plan_recovery_read_status(status_file: &Path) -> Result<pl_provider_fixture::FixtureLiveStatus> {
+    serde_json::from_slice(&fs::read(status_file).with_context(|| {
+        format!(
+            "fixture live status file is missing: {}",
+            status_file.display()
+        )
+    })?)
+    .with_context(|| {
+        format!(
+            "fixture live status file is corrupt: {}",
+            status_file.display()
+        )
+    })
+}
+
+/// Samples the live counters twice and requires them unchanged, so a baseline
+/// taken at a stage marker cannot race a still-in-flight request.
+fn plan_recovery_settled_baseline(
+    status_file: &Path,
+) -> Result<pl_provider_fixture::FixtureLiveStatus> {
+    let first = plan_recovery_read_status(status_file)?;
+    ensure!(
+        first.rejected == 0,
+        "fixture rejected a request before the plan-recovery baseline: {first:?}"
+    );
+    thread::sleep(Duration::from_millis(1_500));
+    let second = plan_recovery_read_status(status_file)?;
+    ensure!(
+        second == first,
+        "fixture counters still moving while sampling a plan-recovery baseline: \
+         {first:?} -> {second:?}"
+    );
+    Ok(second)
+}
+
+/// Proves a reopened-card window recorded no provider traffic, then releases
+/// the Driver's quiet marker.
+///
+/// The baseline comes from the previous lifecycle's settled counters, so any
+/// model request issued by the restart display itself — an eager continuation
+/// or an auto-execution — fails here instead of hiding behind a later answer.
+fn plan_recovery_quiet_window(
+    status_file: &Path,
+    baseline: pl_provider_fixture::FixtureLiveStatus,
+    evidence: &mut serde_json::Map<String, serde_json::Value>,
+    marker: &Path,
+) -> Result<()> {
+    let reopened = plan_recovery_read_status(status_file)?;
+    ensure!(
+        reopened.rejected == 0,
+        "fixture rejected a request after the restart display: {reopened:?}"
+    );
+    ensure!(
+        reopened.total == baseline.total && reopened.consumed_steps == baseline.consumed_steps,
+        "provider traffic appeared between the restart display and the answer: \
+         {baseline:?} -> {reopened:?}"
+    );
+    thread::sleep(Duration::from_millis(2_500));
+    let after_window = plan_recovery_read_status(status_file)?;
+    ensure!(
+        after_window == reopened,
+        "provider traffic appeared during the quiet window: {reopened:?} -> {after_window:?}"
+    );
+    evidence.insert("baseline".into(), serde_json::to_value(baseline)?);
+    evidence.insert("reopened".into(), serde_json::to_value(reopened)?);
+    evidence.insert("quietWindowMillis".into(), serde_json::json!(2_500));
+    fs::write(marker, "quiet")?;
+    Ok(())
+}
+
+fn start_plan_recovery_gui(workspace: &Path, home: &Path, log_path: &Path) -> Result<OwnedProcess> {
+    let log = File::create(log_path)?;
+    let mut command = Command::new("cargo");
+    command
+        .current_dir(workspace)
+        .args(["xtask", "run-gui", "--driver"])
+        .env("ANYWORK_HOME", home)
+        .stdout(Stdio::from(log.try_clone()?))
+        .stderr(Stdio::from(log));
+    OwnedProcess::start(&mut command, false)
+}
+
+fn start_plan_recovery_driver(
+    context: &PlanRecoveryScenario<'_>,
+    phase: &str,
+    vm_url: &str,
+    project: &Path,
+) -> Result<OwnedProcess> {
+    let log = File::create(
+        context
+            .working
+            .join(format!("plan-recovery-{phase}-driver.log")),
+    )?;
+    let mut command = process::path_command("dart", &[]);
+    command
+        .current_dir(context.app_dir)
+        .args([
+            "run",
+            "test_driver/plan_recovery_journey.dart",
+            phase,
+            vm_url,
+        ])
+        .arg(project)
+        .arg(context.output)
+        .arg(context.working)
+        .env("ANYWORK_HOME", context.home)
+        .stdout(Stdio::from(log.try_clone()?))
+        .stderr(Stdio::from(log));
+    OwnedProcess::start(&mut command, false)
+}
+
+/// Waits, bounded, for the Driver to publish [expected] as a reached stage.
+///
+/// Each stage is its own marker file, written once and never overwritten: the
+/// latest-stage file is rewritten by the shutdown and the final summary
+/// moments later, so polling its content could skip a stage between two
+/// polls. The Driver's stage names match the marker file names exactly.
+fn wait_for_plan_recovery_stage(
+    expected: &str,
+    stage: &Path,
+    driver: &mut OwnedProcess,
+    gui: &mut OwnedProcess,
+    fixture: &mut OwnedProcess,
+    interrupt: &mpsc::Receiver<()>,
+    timeout: Duration,
+) -> Result<()> {
+    let marker = stage.with_file_name(format!("plan-recovery-stage-{expected}"));
+    let deadline = Instant::now() + timeout;
+    loop {
+        if marker.is_file() {
+            return Ok(());
+        }
+        if let Some(status) = driver.child.try_wait()? {
+            bail!("plan-recovery Driver exited before {expected}: {status}");
+        }
+        ensure!(!gui.exited()?, "GUI exited before {expected}");
+        ensure!(
+            !fixture.exited()?,
+            "provider fixture exited before {expected}"
+        );
+        ensure!(
+            interrupt.try_recv().is_err(),
+            "plan-recovery journey cancelled"
+        );
+        ensure!(
+            Instant::now() < deadline,
+            "plan-recovery Driver timed out before {expected} (last stage: {})",
+            fs::read_to_string(stage).unwrap_or_else(|_| "connect".to_owned())
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Waits for the Driver to finish and returns its real exit status.
+fn wait_for_plan_recovery_driver(
+    phase: &str,
+    stage: &Path,
+    driver: &mut OwnedProcess,
+    gui: &mut OwnedProcess,
+    fixture: &mut OwnedProcess,
+    interrupt: &mpsc::Receiver<()>,
+) -> Result<std::process::ExitStatus> {
+    let deadline = Instant::now() + Duration::from_secs(900);
+    loop {
+        if let Some(status) = driver.child.try_wait()? {
+            driver.stopped = true;
+            ensure!(
+                status.success(),
+                "plan-recovery {phase} Driver failed with {status} (last stage: {})",
+                fs::read_to_string(stage).unwrap_or_else(|_| "connect".to_owned())
+            );
+            return Ok(status);
+        }
+        ensure!(
+            !gui.exited()?,
+            "GUI exited before the plan-recovery {phase} journey completed"
+        );
+        ensure!(
+            !fixture.exited()?,
+            "provider fixture exited during the plan-recovery {phase} journey"
+        );
+        ensure!(
+            interrupt.try_recv().is_err(),
+            "plan-recovery {phase} journey cancelled"
+        );
+        ensure!(
+            Instant::now() < deadline,
+            "plan-recovery {phase} journey timed out (last stage: {})",
+            fs::read_to_string(stage).unwrap_or_else(|_| "connect".to_owned())
+        );
+        thread::sleep(Duration::from_millis(200));
+    }
 }
 
 /// Durable history state read back after the faulted turn committed.

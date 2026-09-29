@@ -151,6 +151,10 @@ Thread effect，防止正文与业务状态处于不同版本；core 不尝试�
 二者的 section ID 由 Studio 定义，core 统一校验当前请求中的 section ID 唯一性与原始正文
 摘要，重复来源或摘要不符时拒绝冻结，不猜测哪个业务来源优先。
 
+Thread 资源关闭不隐式取消已提交的 Pending Interaction：交互属于可持久化的逻辑状态，
+关闭后由 checkpoint 保留，恢复时不重放工具。显式交互取消与运行资源关闭是不同操作；
+权限审批仍按其独立生命周期收束，不能通过交互恢复继承已失效的执行授权。
+
 Thread 交互以不透明请求/回答载荷和显式 Pending/Resolved/Cancelled 状态保存；resolve
 校验 revision，回答正文与状态在同一 commit 成立，并保持 Runtime 来源；payload 中的
 approved 等业务字段不会被 core 解释。交互 resolve 可携带一条通用 continuation 输入：

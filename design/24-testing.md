@@ -57,6 +57,12 @@ Studio 专项场景还通过真实 SQLite 写库拒绝验证两个在途工具�
 模拟只证明当前实现与约定样本的行为，不证明供应商线上接口的最新兼容性。真实接口
 保持显式人工观察，采集证据后由人判断，不参与确定性提交门禁。
 
+Plan 恢复使用显式 `plan-recovery` 原生 GUI 人工场景：在同一隔离数据根中提交真实计划
+确认、正常关闭并等待进程回收，再重启并打开原会话。分别观察批准与修改路径，比较恢复
+前后的计划正文与交互身份，并核对回答前无新增模型请求、回答后无重复 continuation、
+已回答计划不重新弹出。场景保存截图、快照、请求和生命周期日志，人工结论独立于脚本
+退出状态记录；不以直接写入数据库或伪造 UI 状态代替真实 `plan_submit`。
+
 现有 `pl-model/tests/provider_wire.rs` 从公开入口核对 Responses HTTP/WS、Chat、原生
 OpenAI cache 选项、文本与推理流、function/custom/programmatic 工具、托管搜索、图片、
 DeepSeek 上传与搜索方言、智谱 Chat 与 Coding Plan、远程压缩、使用量/价格、错误与取消、

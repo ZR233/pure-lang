@@ -421,19 +421,10 @@ impl Owner {
         self.drain_background().await;
         self.retry_tool_commits()?;
         self.cancel_pending_calls(None)?;
-        let pending_interactions = self
-            .state
-            .interactions
-            .iter()
-            .filter(|(_, record)| record.state == interactions::InteractionState::Pending)
-            .map(|(id, record)| interactions::InteractionCancellation {
-                id: id.clone(),
-                expected_revision: record.revision,
-            })
-            .collect::<Vec<_>>();
-        for cancellation in pending_interactions {
-            self.settle_interaction_cancellation(cancellation)?;
-        }
+        // Submitted interactions are persistent logical facts, not runtime resources: closing the
+        // model, tools and background tasks must not answer or cancel them. Only the explicit
+        // cancel command settles Pending -> Cancelled, so the final checkpoint below keeps every
+        // pending request (with its revision and extension association) for recovery.
         self.publish();
         if self
             .state

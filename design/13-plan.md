@@ -59,6 +59,13 @@ resolution 使用 interaction ID、Plan revision 和 resolution hash。相同 id
 pending ID，由产品状态机解释 Approve/Revise，然后原子提交交互回答、Plan 扩展、实际上下文
 与 continuation 输入。冲突仍保持 Pending；重复回答只返回原回执，不再次推进或入队。
 
+关闭 GUI 或释放 Thread 运行资源不是计划拒绝或交互取消。尚待确认的 Plan 扩展与同一
+Pending Interaction 必须一起保存，正常退出等待相应保存屏障；重新打开会话时恢复原计划
+正文、revision、内容 hash 和 pending ID，并从 canonical snapshot 恢复可回答的确认入口。
+冷恢复本身不调用模型、不重新执行 `plan_submit`、不生成新问题，也不自动批准或入队
+continuation。恢复后用户批准或提出修改仍走上述同一原子回答入口及幂等规则；已经回答的
+计划不得重新弹出。不能从历史文本猜测授权或重新构造已经取消的交互。
+
 confirmation continuation mail 以完整、原样的 Markdown Plan question 作为用户输入内容。
 宿主注册 session Plan 工具时预设批准后输入的 MessagePresentation，默认及内置 Task Mode
 使用 hidden；模型工具参数不能覆盖该值。两种 presentation 都向 provider 产生同一条 user

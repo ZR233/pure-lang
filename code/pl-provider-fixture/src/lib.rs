@@ -34,7 +34,7 @@ pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
 /// The coordinator's ready-file check, the fixture CLI parser and the script
 /// selection all read this single list, so a scenario can no longer be accepted
 /// by one of them and rejected by another.
-pub const GUI_SCENARIOS: [&str; 9] = [
+pub const GUI_SCENARIOS: [&str; 10] = [
     "gui",
     "stress",
     "stress-body",
@@ -43,6 +43,7 @@ pub const GUI_SCENARIOS: [&str; 9] = [
     "realtime",
     "history-lock",
     "history-fault",
+    "plan-recovery",
     "tool-scroll",
 ];
 
@@ -472,6 +473,60 @@ pub const GUI_HISTORY_FAULT_TOOL_MARKER: &str = "history-fault-tool-marker";
 /// run it), then the post-resume turn that carries the committed tool output.
 pub const HISTORY_FAULT_REQUIRED_STEPS: usize = 3;
 
+/// Plan-recovery acceptance prompt for the Approve branch.
+///
+/// One user prompt; the scripted model answers it with a single `plan_submit`
+/// call, so the GUI reaches a pending Plan confirmation the acceptance can shut
+/// down on and restore.
+pub const GUI_PLAN_RECOVERY_APPROVE_PROMPT: &str = "Local GUI plan recovery approve fixture";
+
+/// Plan-recovery acceptance prompt for the Revise branch.
+pub const GUI_PLAN_RECOVERY_REVISE_PROMPT: &str = "Local GUI plan recovery revise fixture";
+
+/// The Plan the Approve branch submits, exactly as the confirmation card and the
+/// continuation user message must carry it.
+pub const GUI_PLAN_RECOVERY_APPROVE_PLAN: &str = "# Plan Recovery Approve Blueprint\n\n\
+     ## Goal\n\n\
+     Prove a pending Plan confirmation survives a normal GUI shutdown and restart.\n\n\
+     ## Steps\n\n\
+     1. Keep the pending confirmation restorable across a normal shutdown.\n\
+     2. Reopen the same session and restore the exact Plan body and identity.\n\
+     3. Approve the restored Plan and continue exactly once.";
+
+/// The first Plan the Revise branch submits.
+pub const GUI_PLAN_RECOVERY_REVISE_PLAN: &str = "# Plan Recovery Revision Blueprint\n\n\
+     ## Goal\n\n\
+     Exercise the Revise path on a restored pending Plan confirmation.\n\n\
+     ## Steps\n\n\
+     1. Restore the pending Plan after the second normal shutdown.\n\
+     2. Request a revision with concrete feedback.\n\
+     3. Approve the rewritten Plan and finish the continuation.";
+
+/// The rewritten Plan the Revise branch's model submits after the user asked for
+/// a revision; only the step list changes, so the two bodies stay comparable.
+pub const GUI_PLAN_RECOVERY_REVISED_PLAN: &str = "# Plan Recovery Revision Blueprint\n\n\
+     ## Goal\n\n\
+     Exercise the Revise path on a restored pending Plan confirmation.\n\n\
+     ## Revised Steps\n\n\
+     1. Restore the pending Plan after the second normal shutdown.\n\
+     2. Request a revision with concrete feedback that tightens the wording.\n\
+     3. Approve the rewritten Plan and finish the continuation exactly once.";
+
+/// Final answers of the two plan-recovery continuations.
+pub const GUI_PLAN_RECOVERY_APPROVE_ANSWER: &str = "plan recovery approve answer complete";
+pub const GUI_PLAN_RECOVERY_REVISE_ANSWER: &str = "plan recovery revise answer complete";
+
+/// Non-optional steps in the plan-recovery fixture script.
+///
+/// The fixture verifies only after every one of them is consumed, so a passing
+/// run has accepted at least this many requests: the Approve-branch prompt, its
+/// post-approve continuation, the Revise-branch prompt, the post-revise
+/// continuation that resubmits the rewritten Plan, and the final post-approve
+/// continuation. Any extra or duplicated model request — for example a second
+/// continuation after the Plan was already answered — is rejected by the strict
+/// script and fails the run.
+pub const PLAN_RECOVERY_REQUIRED_STEPS: usize = 5;
+
 /// Final answers for each realtime scenario.
 ///
 /// `exec` is a background tool: a command that outlives the runtime's one-second
@@ -734,6 +789,18 @@ pub struct StressReport {
     pub finished_unix_millis: Option<u128>,
 }
 
+/// A mid-run snapshot of the strict script counters, written by the optional
+/// fixture status watcher so an acceptance coordinator can prove a window had no
+/// provider traffic without waiting for the fixture to stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FixtureLiveStatus {
+    pub accepted: usize,
+    pub rejected: usize,
+    pub total: usize,
+    pub consumed_steps: usize,
+    pub expected_steps: usize,
+}
+
 #[derive(Default)]
 struct StressProgress {
     started: Option<std::time::Instant>,
@@ -983,6 +1050,26 @@ impl FixtureServer {
             .expect("fixture state poisoned")
             .requests
             .clone()
+    }
+
+    /// Read-only strict-script counters for a coordinator polling mid-run.
+    ///
+    /// The values are derived from the same script state the requests match
+    /// against, so a sampled count can never disagree with the final report.
+    pub fn live_status(&self) -> FixtureLiveStatus {
+        let state = self.state.script.lock().expect("fixture state poisoned");
+        let accepted = state
+            .requests
+            .iter()
+            .filter(|request| request.accepted)
+            .count();
+        FixtureLiveStatus {
+            accepted,
+            rejected: state.requests.len() - accepted,
+            total: state.requests.len(),
+            consumed_steps: state.cursor,
+            expected_steps: state.steps.len(),
+        }
     }
 
     pub async fn finish(self) -> Result<Vec<RecordedRequest>> {
@@ -1709,6 +1796,124 @@ pub fn gui_history_fault_script() -> Vec<Step> {
             )),
         )
     });
+    script.finish()
+}
+
+/// Strict state script for the plan-recovery acceptance journey.
+///
+/// Two sessions cover the two confirmation answers a restored pending Plan must
+/// still accept. Session A submits one Plan and later approves it after a normal
+/// GUI shutdown and restart; session B submits one Plan, restarts a second time,
+/// then answers Revise — which must produce a rewritten Plan confirmation — and
+/// finally approves that rewrite. Every continuation is matched strictly on the
+/// exact Plan markdown as the last user message, because the runtime delivers
+/// the full Plan question as the continuation mail; a request that merely
+/// repeats the original prompt can never satisfy those steps. The script never
+/// tolerates an unknown request, so any extra or duplicated continuation fails
+/// the fixture.
+pub fn gui_plan_recovery_script() -> Vec<Step> {
+    let approve_title = session_title_prompt(GUI_PLAN_RECOVERY_APPROVE_PROMPT);
+    let revise_title = session_title_prompt(GUI_PLAN_RECOVERY_REVISE_PROMPT);
+    let mut script = RealtimeScript::new();
+    // Session A: one prompt answered by a single plan_submit call.
+    script.optional_title(&approve_title);
+    script.add(|step| {
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            GUI_PLAN_RECOVERY_APPROVE_PROMPT,
+            step,
+            Reply::Sse(responses_tool_calls(
+                "plan-recovery-approve",
+                "fixture-model",
+                &[RealtimeToolCall {
+                    item_id: "plan-recovery-approve-item",
+                    call_id: "plan-recovery-approve-call",
+                    name: "plan_submit",
+                    arguments: json!({
+                        "expectedRevision": 0,
+                        "plan": GUI_PLAN_RECOVERY_APPROVE_PLAN,
+                    })
+                    .to_string(),
+                }],
+            )),
+        )
+    });
+    script.optional_title(&approve_title);
+    // Approve continuation: the whole Plan markdown is the user message.
+    script.add(|step| {
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            GUI_PLAN_RECOVERY_APPROVE_PLAN,
+            step,
+            Reply::Sse(responses_text(
+                GUI_PLAN_RECOVERY_APPROVE_ANSWER,
+                "plan-recovery-approve-done",
+                "fixture-model",
+            )),
+        )
+    });
+    // Session B: one prompt answered by a single plan_submit call.
+    script.optional_title(&revise_title);
+    script.add(|step| {
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            GUI_PLAN_RECOVERY_REVISE_PROMPT,
+            step,
+            Reply::Sse(responses_tool_calls(
+                "plan-recovery-revise",
+                "fixture-model",
+                &[RealtimeToolCall {
+                    item_id: "plan-recovery-revise-item",
+                    call_id: "plan-recovery-revise-call",
+                    name: "plan_submit",
+                    arguments: json!({
+                        "expectedRevision": 0,
+                        "plan": GUI_PLAN_RECOVERY_REVISE_PLAN,
+                    })
+                    .to_string(),
+                }],
+            )),
+        )
+    });
+    script.optional_title(&revise_title);
+    // Revise continuation: the model rewrites the Plan. The revision CAS is the
+    // revision the Revise answer leaves behind (submit 0->1, revise 1->2).
+    script.add(|step| {
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            GUI_PLAN_RECOVERY_REVISE_PLAN,
+            step,
+            Reply::Sse(responses_tool_calls(
+                "plan-recovery-revised",
+                "fixture-model",
+                &[RealtimeToolCall {
+                    item_id: "plan-recovery-revised-item",
+                    call_id: "plan-recovery-revised-call",
+                    name: "plan_submit",
+                    arguments: json!({
+                        "expectedRevision": 2,
+                        "plan": GUI_PLAN_RECOVERY_REVISED_PLAN,
+                    })
+                    .to_string(),
+                }],
+            )),
+        )
+    });
+    script.optional_title(&revise_title);
+    // Approve continuation of the rewritten Plan.
+    script.add(|step| {
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            GUI_PLAN_RECOVERY_REVISED_PLAN,
+            step,
+            Reply::Sse(responses_text(
+                GUI_PLAN_RECOVERY_REVISE_ANSWER,
+                "plan-recovery-revise-done",
+                "fixture-model",
+            )),
+        )
+    });
+    script.optional_title(&revise_title);
     script.finish()
 }
 
