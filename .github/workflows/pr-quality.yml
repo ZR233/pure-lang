@@ -53,24 +53,40 @@ jobs:
           reporter: local
 
       - name: Validate Release Please configuration and dry run
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VALIDATION_BRANCH: ${{ github.head_ref || github.ref_name }}
           VALIDATION_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
         run: |
-          Get-Content -Raw release-please-config.json | ConvertFrom-Json | Out-Null
-          Get-Content -Raw .release-please-manifest.json | ConvertFrom-Json | Out-Null
-          npx --yes release-please@17.10.4 release-pr `
-            --dry-run `
-            --repo-url=$env:VALIDATION_REPOSITORY `
-            --target-branch=$env:VALIDATION_BRANCH `
-            --config-file=release-please-config.json `
-            --manifest-file=.release-please-manifest.json `
-            --token=$env:GH_TOKEN
-          if ($LASTEXITCODE -ne 0) {
-            throw "Release Please dry run failed with exit code $LASTEXITCODE"
-          }
+          set -o pipefail
+          python3 -m json.tool release-please-config.json > /dev/null
+          python3 -m json.tool .release-please-manifest.json > /dev/null
+
+          log_file="$(mktemp)"
+          trap 'rm -f "$log_file"' EXIT
+          for attempt in 1 2 3; do
+            if npx --yes release-please@17.10.4 release-pr \
+              --dry-run \
+              --repo-url="$VALIDATION_REPOSITORY" \
+              --target-branch="$VALIDATION_BRANCH" \
+              --config-file=release-please-config.json \
+              --manifest-file=.release-please-manifest.json \
+              --token="$GH_TOKEN" 2>&1 | tee "$log_file"; then
+              exit 0
+            fi
+            if ! grep -Fq 'GraphqlResponseError:' "$log_file"; then
+              exit 1
+            fi
+            if ! grep -Fq 'Something went wrong while executing your query' "$log_file" \
+              && ! grep -Fq "We couldn't respond to your request in time" "$log_file"; then
+              exit 1
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 2))"
+          done
 
   rust-quality:
     name: Rust (Windows)

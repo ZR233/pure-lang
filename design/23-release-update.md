@@ -14,6 +14,9 @@ patch，`feat:` 递增 minor，带 `!` 或 `BREAKING CHANGE:` 的提交递增 ma
 `docs:` 与 `chore:` 等非产品修改不单独触发版本。人工审查并合并 Release PR 即批准发版，
 不从 Actions 输入或推算版本。
 
+PR Quality Gate 对 PR head 分支运行 Release Please dry run，验证该分支的发布配置；
+仅在 GitHub GraphQL 返回已识别的瞬时错误时有限重试，其他错误直接失败。
+
 发布 workflow 按 Release Please 官方模式运行，并使用仓库专属 fine-grained PAT 创建或
 更新 Release PR，使 PR 自身及其合并提交能触发正常 Actions；workflow 必须先确认 PAT
 属于仓库所有者，不得以默认 token 代替。Release PR 维护根 CHANGELOG；合并后，同一次
