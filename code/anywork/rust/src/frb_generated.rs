@@ -7675,17 +7675,37 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeStaleResource {
     }
 }
 
+impl SseDecode for crate::api::studio::types::runtime::BridgeStartupRecovery {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_backupPath = <String>::sse_decode(deserializer);
+        let mut var_reason = <String>::sse_decode(deserializer);
+        let mut var_createdAt = <i64>::sse_decode(deserializer);
+        return crate::api::studio::types::runtime::BridgeStartupRecovery {
+            backup_path: var_backupPath,
+            reason: var_reason,
+            created_at: var_createdAt,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::runtime::BridgeStartupStage {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
-            0 => crate::api::studio::types::runtime::BridgeStartupStage::OpeningStorage,
-            1 => crate::api::studio::types::runtime::BridgeStartupStage::LoadingConfiguration,
-            2 => crate::api::studio::types::runtime::BridgeStartupStage::ReadingProjects,
-            3 => crate::api::studio::types::runtime::BridgeStartupStage::PreparingResources,
-            4 => crate::api::studio::types::runtime::BridgeStartupStage::Ready,
-            5 => crate::api::studio::types::runtime::BridgeStartupStage::Failed,
+            0 => crate::api::studio::types::runtime::BridgeStartupStage::Preparing,
+            1 => crate::api::studio::types::runtime::BridgeStartupStage::WaitingForSteps,
+            2 => crate::api::studio::types::runtime::BridgeStartupStage::ClosingResources,
+            3 => crate::api::studio::types::runtime::BridgeStartupStage::BackingUp,
+            4 => crate::api::studio::types::runtime::BridgeStartupStage::Resetting,
+            5 => crate::api::studio::types::runtime::BridgeStartupStage::StartingServices,
+            6 => crate::api::studio::types::runtime::BridgeStartupStage::OpeningStorage,
+            7 => crate::api::studio::types::runtime::BridgeStartupStage::LoadingConfiguration,
+            8 => crate::api::studio::types::runtime::BridgeStartupStage::ReadingProjects,
+            9 => crate::api::studio::types::runtime::BridgeStartupStage::PreparingResources,
+            10 => crate::api::studio::types::runtime::BridgeStartupStage::Ready,
+            11 => crate::api::studio::types::runtime::BridgeStartupStage::Failed,
             _ => unreachable!("Invalid variant for BridgeStartupStage: {}", inner),
         };
     }
@@ -11539,6 +11559,21 @@ impl SseDecode
     }
 }
 
+impl SseDecode for Option<crate::api::studio::types::runtime::BridgeStartupRecovery> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(
+                <crate::api::studio::types::runtime::BridgeStartupRecovery>::sse_decode(
+                    deserializer,
+                ),
+            );
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::studio::types::runtime::BridgeStateError> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -12058,12 +12093,16 @@ impl SseDecode for crate::api::studio::types::runtime::RuntimeSnapshot {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_revision = <u64>::sse_decode(deserializer);
+        let mut var_startupRecovery = <Option<
+            crate::api::studio::types::runtime::BridgeStartupRecovery,
+        >>::sse_decode(deserializer);
         let mut var_state =
             <crate::api::studio::types::runtime::BridgeRuntimeState>::sse_decode(deserializer);
         let mut var_activeTurns =
             <Vec<crate::api::studio::types::runtime::BridgeActiveTurn>>::sse_decode(deserializer);
         return crate::api::studio::types::runtime::RuntimeSnapshot {
             revision: var_revision,
+            startup_recovery: var_startupRecovery,
             state: var_state,
             active_turns: var_activeTurns,
         };
@@ -16454,15 +16493,43 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Bridg
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeStartupRecovery {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.backup_path.into_into_dart().into_dart(),
+            self.reason.into_into_dart().into_dart(),
+            self.created_at.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::runtime::BridgeStartupRecovery
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::BridgeStartupRecovery>
+    for crate::api::studio::types::runtime::BridgeStartupRecovery
+{
+    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeStartupRecovery {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeStartupStage {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
-            Self::OpeningStorage => 0.into_dart(),
-            Self::LoadingConfiguration => 1.into_dart(),
-            Self::ReadingProjects => 2.into_dart(),
-            Self::PreparingResources => 3.into_dart(),
-            Self::Ready => 4.into_dart(),
-            Self::Failed => 5.into_dart(),
+            Self::Preparing => 0.into_dart(),
+            Self::WaitingForSteps => 1.into_dart(),
+            Self::ClosingResources => 2.into_dart(),
+            Self::BackingUp => 3.into_dart(),
+            Self::Resetting => 4.into_dart(),
+            Self::StartingServices => 5.into_dart(),
+            Self::OpeningStorage => 6.into_dart(),
+            Self::LoadingConfiguration => 7.into_dart(),
+            Self::ReadingProjects => 8.into_dart(),
+            Self::PreparingResources => 9.into_dart(),
+            Self::Ready => 10.into_dart(),
+            Self::Failed => 11.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -20050,6 +20117,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::Runti
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.revision.into_into_dart().into_dart(),
+            self.startup_recovery.into_into_dart().into_dart(),
             self.state.into_into_dart().into_dart(),
             self.active_turns.into_into_dart().into_dart(),
         ]
@@ -23200,17 +23268,32 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeStaleResource {
     }
 }
 
+impl SseEncode for crate::api::studio::types::runtime::BridgeStartupRecovery {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.backup_path, serializer);
+        <String>::sse_encode(self.reason, serializer);
+        <i64>::sse_encode(self.created_at, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::runtime::BridgeStartupStage {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(
             match self {
-                crate::api::studio::types::runtime::BridgeStartupStage::OpeningStorage => 0,
-                crate::api::studio::types::runtime::BridgeStartupStage::LoadingConfiguration => 1,
-                crate::api::studio::types::runtime::BridgeStartupStage::ReadingProjects => 2,
-                crate::api::studio::types::runtime::BridgeStartupStage::PreparingResources => 3,
-                crate::api::studio::types::runtime::BridgeStartupStage::Ready => 4,
-                crate::api::studio::types::runtime::BridgeStartupStage::Failed => 5,
+                crate::api::studio::types::runtime::BridgeStartupStage::Preparing => 0,
+                crate::api::studio::types::runtime::BridgeStartupStage::WaitingForSteps => 1,
+                crate::api::studio::types::runtime::BridgeStartupStage::ClosingResources => 2,
+                crate::api::studio::types::runtime::BridgeStartupStage::BackingUp => 3,
+                crate::api::studio::types::runtime::BridgeStartupStage::Resetting => 4,
+                crate::api::studio::types::runtime::BridgeStartupStage::StartingServices => 5,
+                crate::api::studio::types::runtime::BridgeStartupStage::OpeningStorage => 6,
+                crate::api::studio::types::runtime::BridgeStartupStage::LoadingConfiguration => 7,
+                crate::api::studio::types::runtime::BridgeStartupStage::ReadingProjects => 8,
+                crate::api::studio::types::runtime::BridgeStartupStage::PreparingResources => 9,
+                crate::api::studio::types::runtime::BridgeStartupStage::Ready => 10,
+                crate::api::studio::types::runtime::BridgeStartupStage::Failed => 11,
                 _ => {
                     unimplemented!("");
                 }
@@ -26018,6 +26101,18 @@ impl SseEncode
     }
 }
 
+impl SseEncode for Option<crate::api::studio::types::runtime::BridgeStartupRecovery> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::studio::types::runtime::BridgeStartupRecovery>::sse_encode(
+                value, serializer,
+            );
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::studio::types::runtime::BridgeStateError> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -26443,6 +26538,10 @@ impl SseEncode for crate::api::studio::types::runtime::RuntimeSnapshot {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <u64>::sse_encode(self.revision, serializer);
+        <Option<crate::api::studio::types::runtime::BridgeStartupRecovery>>::sse_encode(
+            self.startup_recovery,
+            serializer,
+        );
         <crate::api::studio::types::runtime::BridgeRuntimeState>::sse_encode(
             self.state, serializer,
         );

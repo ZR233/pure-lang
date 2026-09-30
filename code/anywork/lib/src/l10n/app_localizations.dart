@@ -4660,6 +4660,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Stopping'**
   String get conversationActivityStopping;
+
+  /// No description provided for @startupWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for initialization steps…'**
+  String get startupWaiting;
+
+  /// No description provided for @startupClosing.
+  ///
+  /// In en, this message translates to:
+  /// **'Closing local data…'**
+  String get startupClosing;
+
+  /// No description provided for @startupBackingUp.
+  ///
+  /// In en, this message translates to:
+  /// **'Backing up unrecoverable data…'**
+  String get startupBackingUp;
+
+  /// No description provided for @startupResetting.
+  ///
+  /// In en, this message translates to:
+  /// **'Rebuilding initial settings…'**
+  String get startupResetting;
+
+  /// No description provided for @startupServices.
+  ///
+  /// In en, this message translates to:
+  /// **'Starting services…'**
+  String get startupServices;
+
+  /// No description provided for @startupRecoveredNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Unrecoverable data was backed up and initial settings restored. Backup location:'**
+  String get startupRecoveredNotice;
 }
 
 class _AppLocalizationsDelegate

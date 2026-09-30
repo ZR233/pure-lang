@@ -15,6 +15,7 @@ platforms: [windows, linux]
 cargo xtask run-gui
 cargo xtask run-gui --demo
 cargo xtask run-gui --driver
+cargo xtask run-gui --release
 cargo xtask build-gui
 cargo xtask build-gui --demo
 cargo xtask build-gui --no-clean
@@ -31,6 +32,8 @@ cargo xtask build-gui --check-generated
 仍会编译验收工具；GUI 构建显式编译 bridge 也仍会编译 runtime，不应误判为依赖回流。
 
 ## 依赖与生成文件
+
+`run-gui --release` 仅运行 `dist/anywork-release` 中已有的当前平台原生程序，不执行构建、生成或依赖解析。缺少程序时先执行 `build-gui`；不要将 demo 构建当作真实发布程序。关闭和取消沿用平台进程树所有权。
 
 `run-gui` 和 `build-gui` 在 `.dart_tool/pure-xtask-pub.sha256` 记录 `pubspec.yaml`、
 `pubspec.lock`、`pubspec_overrides.yaml` 与 `PUB_HOSTED_URL` 的依赖指纹；指纹未变时使用

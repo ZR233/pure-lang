@@ -4751,6 +4751,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeStartupRecovery dco_decode_box_autoadd_bridge_startup_recovery(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_startup_recovery(raw);
+  }
+
+  @protected
   BridgeStateError dco_decode_box_autoadd_bridge_state_error(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_state_error(raw);
@@ -7540,6 +7548,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeStartupRecovery dco_decode_bridge_startup_recovery(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return BridgeStartupRecovery(
+      backupPath: dco_decode_String(arr[0]),
+      reason: dco_decode_String(arr[1]),
+      createdAt: dco_decode_i_64(arr[2]),
+    );
+  }
+
+  @protected
   BridgeStartupStage dco_decode_bridge_startup_stage(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return BridgeStartupStage.values[raw as int];
@@ -10131,6 +10152,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeStartupRecovery? dco_decode_opt_box_autoadd_bridge_startup_recovery(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_bridge_startup_recovery(raw);
+  }
+
+  @protected
   BridgeStateError? dco_decode_opt_box_autoadd_bridge_state_error(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_bridge_state_error(raw);
@@ -10486,12 +10517,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeSnapshot dco_decode_runtime_snapshot(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return RuntimeSnapshot(
       revision: dco_decode_u_64(arr[0]),
-      state: dco_decode_bridge_runtime_state(arr[1]),
-      activeTurns: dco_decode_list_bridge_active_turn(arr[2]),
+      startupRecovery: dco_decode_opt_box_autoadd_bridge_startup_recovery(
+        arr[1],
+      ),
+      state: dco_decode_bridge_runtime_state(arr[2]),
+      activeTurns: dco_decode_list_bridge_active_turn(arr[3]),
     );
   }
 
@@ -11384,6 +11418,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_stale_resource(deserializer));
+  }
+
+  @protected
+  BridgeStartupRecovery sse_decode_box_autoadd_bridge_startup_recovery(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_startup_recovery(deserializer));
   }
 
   @protected
@@ -14892,6 +14934,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       revision: var_revision,
       staleAt: var_staleAt,
       lastCheckedAt: var_lastCheckedAt,
+    );
+  }
+
+  @protected
+  BridgeStartupRecovery sse_decode_bridge_startup_recovery(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_backupPath = sse_decode_String(deserializer);
+    var var_reason = sse_decode_String(deserializer);
+    var var_createdAt = sse_decode_i_64(deserializer);
+    return BridgeStartupRecovery(
+      backupPath: var_backupPath,
+      reason: var_reason,
+      createdAt: var_createdAt,
     );
   }
 
@@ -18509,6 +18566,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeStartupRecovery? sse_decode_opt_box_autoadd_bridge_startup_recovery(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_startup_recovery(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   BridgeStateError? sse_decode_opt_box_autoadd_bridge_state_error(
     SseDeserializer deserializer,
   ) {
@@ -19019,10 +19089,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeSnapshot sse_decode_runtime_snapshot(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_revision = sse_decode_u_64(deserializer);
+    var var_startupRecovery =
+        sse_decode_opt_box_autoadd_bridge_startup_recovery(deserializer);
     var var_state = sse_decode_bridge_runtime_state(deserializer);
     var var_activeTurns = sse_decode_list_bridge_active_turn(deserializer);
     return RuntimeSnapshot(
       revision: var_revision,
+      startupRecovery: var_startupRecovery,
       state: var_state,
       activeTurns: var_activeTurns,
     );
@@ -20045,6 +20118,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_stale_resource(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_startup_recovery(
+    BridgeStartupRecovery self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_startup_recovery(self, serializer);
   }
 
   @protected
@@ -22899,6 +22981,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.revision, serializer);
     sse_encode_i_64(self.staleAt, serializer);
     sse_encode_opt_box_autoadd_i_64(self.lastCheckedAt, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_startup_recovery(
+    BridgeStartupRecovery self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.backupPath, serializer);
+    sse_encode_String(self.reason, serializer);
+    sse_encode_i_64(self.createdAt, serializer);
   }
 
   @protected
@@ -25825,6 +25918,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_bridge_startup_recovery(
+    BridgeStartupRecovery? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_startup_recovery(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_bridge_state_error(
     BridgeStateError? self,
     SseSerializer serializer,
@@ -26277,6 +26383,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_64(self.revision, serializer);
+    sse_encode_opt_box_autoadd_bridge_startup_recovery(
+      self.startupRecovery,
+      serializer,
+    );
     sse_encode_bridge_runtime_state(self.state, serializer);
     sse_encode_list_bridge_active_turn(self.activeTurns, serializer);
   }

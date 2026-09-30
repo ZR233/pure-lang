@@ -62,6 +62,9 @@ pub(crate) struct ToolOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub(crate) struct RunGuiOptions {
+    /// Run the existing release bundle without building or resolving dependencies.
+    #[arg(long, conflicts_with_all = ["demo", "driver", "profile"])]
+    pub(crate) release: bool,
     /// Run with ANYWORK_DEMO=true.
     #[arg(long)]
     pub(crate) demo: bool,

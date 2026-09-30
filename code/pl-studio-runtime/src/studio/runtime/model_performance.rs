@@ -157,16 +157,24 @@ impl ModelPerformanceOwner {
     }
 
     /// 恢复固定上限缓存；不读取调用库，执行恢复不依赖 calls。
-    pub(crate) async fn load_cache(&self) -> Result<(), PureError> {
+    pub(crate) async fn load_cache(&self) -> anyhow::Result<()> {
+        let calls = self.store.calls();
+        let (costs, samples, summaries) = tokio::join!(
+            calls.session_cost_rollups(),
+            calls.recent_performance_samples(history_limit()),
+            calls.performance_summary_rows()
+        );
+        costs?;
+        samples?;
+        summaries?;
         let Some(restored) =
             load_object::<ModelPerformanceState>(self.store.database(), MODEL_PERFORMANCE_OWNER_ID)
-                .await
-                .map_err(|error| PureError::MemoryError(error.to_string()))?
+                .await?
         else {
             return Ok(());
         };
         if restored.version < LEGACY_CACHE_VERSION || restored.version > CACHE_VERSION {
-            return Err(PureError::MemoryError(format!(
+            return Err(crate::studio::startup::data_error(anyhow::anyhow!(
                 "unsupported model performance cache version {}",
                 restored.version
             )));

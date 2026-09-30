@@ -1,4 +1,4 @@
-use anyhow::{Error, Result};
+use anyhow::Result;
 
 use crate::studio::ids::unix_seconds;
 use crate::studio::{StudioRuntimeCommand, StudioRuntimeSnapshot};
@@ -6,104 +6,6 @@ use crate::studio::{StudioRuntimeCommand, StudioRuntimeSnapshot};
 use super::super::StudioRuntime;
 
 impl StudioRuntime {
-    pub async fn initialize_runtime(&self) -> Result<StudioRuntimeSnapshot> {
-        let _timing = crate::startup_timing::Stage::new("initialize_runtime");
-        let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        let current = self.runtime_snapshot().await?;
-        if current.state.is_ready() {
-            return self.runtime_snapshot().await;
-        }
-        let _ = self
-            .runtime_state
-            .apply(StudioRuntimeCommand::BeginInitialize {
-                expected_revision: current.revision,
-                at: unix_seconds(),
-            })?;
-        let initialization = async {
-            let settings = self
-                .config_runtime
-                .read()
-                .map_err(|error| startup_failure("read_configuration", error))?;
-            let cache_timing = crate::startup_timing::Stage::new("load_cached_observations");
-            self.provider_usage
-                .load_cache()
-                .await
-                .map_err(|error| startup_failure("load_provider_usage", error))?;
-            self.model_performance
-                .load_cache()
-                .await
-                .map_err(|error| startup_failure("load_model_performance", error))?;
-            self.updater
-                .load_cache()
-                .await
-                .map_err(|error| startup_failure("load_update_cache", error))?;
-            drop(cache_timing);
-            (self.startup_observer)(crate::StudioStartupStage::ReadingProjects);
-            let directory_timing = crate::startup_timing::Stage::new("read_project_directory");
-            self.agent_facility
-                .product_events
-                .initialize_directories()
-                .await
-                .map_err(|error| startup_failure("initialize_product_directories", error))?;
-            self.agent_facility.worktrees.restore(
-                crate::studio::agent_host::worktree_lease::load_leases(&self.store).await?,
-            );
-            drop(directory_timing);
-            self.start_model_refresh().await;
-            self.start_tool_refresh().await;
-            self.start_mcp_health_watcher().await;
-            self.start_lsp_state_watcher().await;
-            self.start_mcp_reconcile_background()
-                .await
-                .map_err(|error| startup_failure("start_mcp_reconcile", error))?;
-            (self.startup_observer)(crate::StudioStartupStage::PreparingResources);
-            let skills_timing = crate::startup_timing::Stage::new("prepare_system_skills");
-            self.skills
-                .refresh_system_skills(&settings.config.skills)
-                .await
-                .map_err(|error| startup_failure("refresh_system_skills", error))?;
-            drop(skills_timing);
-            self.publish_settings_state(settings)
-                .map_err(|error| startup_failure("publish_settings", error))?;
-            Ok::<_, anyhow::Error>(())
-        }
-        .await;
-        match initialization {
-            Ok(()) => {
-                let _ = self
-                    .runtime_state
-                    .apply(StudioRuntimeCommand::FinishInitialize {
-                        expected_revision: self.runtime_state.snapshot().revision,
-                        at: unix_seconds(),
-                    })?;
-                self.start_recovery_scan().await;
-                (self.startup_observer)(crate::StudioStartupStage::Ready);
-                self.runtime_snapshot().await
-            }
-            Err(error) => {
-                (self.startup_observer)(crate::StudioStartupStage::Failed);
-                let _ = self
-                    .runtime_state
-                    .apply(StudioRuntimeCommand::FailInitialize {
-                        expected_revision: self.runtime_state.snapshot().revision,
-                        at: unix_seconds(),
-                        error: pl_protocol::StateError {
-                            code: "studioInitializationFailed".to_string(),
-                            message: format!("{error:#}"),
-                            retryable: true,
-                        },
-                    });
-                Err(error)
-            }
-        }
-    }
-
-    pub async fn start_runtime(&self) -> Result<StudioRuntimeSnapshot> {
-        self.initialize_runtime()
-            .await
-            .map_err(|error| startup_failure("initialize_runtime", error))
-    }
-
     /// Stops all Studio runtime services.
     pub async fn shutdown_runtime(&self) -> Result<StudioRuntimeSnapshot> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
@@ -189,6 +91,14 @@ impl StudioRuntime {
                 ));
             self.external_runtimes.lsp.shutdown().await;
             self.external_runtimes.lsp_state.stopped().await?;
+            super::super::background_task::stop(&self.persistence_observer)
+                .await
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            let writer = self.agent_facility.persistence.lock().await.take();
+            if let Some(writer) = writer {
+                writer.shutdown().await?;
+            }
+            self.store.close().await?;
             Ok::<_, anyhow::Error>(())
         }
         .await;
@@ -239,14 +149,4 @@ impl StudioRuntime {
     pub async fn shutdown(&self) {
         let _ = self.shutdown_runtime().await;
     }
-}
-
-fn startup_failure(stage: &'static str, error: impl Into<Error>) -> Error {
-    let error = error.into();
-    tracing::error!(
-        startup_stage = stage,
-        diagnostic_bytes = error.to_string().len(),
-        "Studio runtime startup stage failed"
-    );
-    error
 }

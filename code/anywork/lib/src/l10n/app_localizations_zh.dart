@@ -2472,4 +2472,22 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get conversationActivityStopping => '停止中';
+
+  @override
+  String get startupWaiting => '正在等待初始化步骤完成…';
+
+  @override
+  String get startupClosing => '正在关闭本地数据…';
+
+  @override
+  String get startupBackingUp => '正在备份无法恢复的数据…';
+
+  @override
+  String get startupResetting => '正在重建初始配置…';
+
+  @override
+  String get startupServices => '正在启动服务…';
+
+  @override
+  String get startupRecoveredNotice => '已备份无法恢复的数据，并恢复初始配置。备份位置：';
 }

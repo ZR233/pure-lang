@@ -68,7 +68,7 @@ pub(in crate::studio) struct WorkspaceStore {
 impl WorkspaceStore {
     pub(in crate::studio) async fn load(path: PathBuf) -> Result<Self> {
         let document = match tokio::fs::read_to_string(&path).await {
-            Ok(content) => decode(&path, &content)?,
+            Ok(content) => decode(&path, &content).map_err(crate::studio::startup::data_error)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => WorkspacesDocument {
                 schema_version: WORKSPACES_SCHEMA_VERSION,
                 revision: 1,

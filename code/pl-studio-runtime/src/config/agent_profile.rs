@@ -45,6 +45,21 @@ pub struct AgentProfileCatalog {
 }
 
 impl AgentProfileCatalog {
+    /// Startup validates every owned profile before publishing a mixed configuration.
+    pub(crate) fn validate_for_startup(paths: &ConfigPaths, config: &StudioConfig) -> Result<()> {
+        let entries = match fs::read_dir(paths.agents_dir()) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        for entry in entries {
+            let path = entry?.path();
+            if path.extension().and_then(|value| value.to_str()) == Some("toml") {
+                load_user_profile(&path, config, true)?;
+            }
+        }
+        Ok(())
+    }
     pub fn discover(paths: &ConfigPaths, config: &StudioConfig) -> Self {
         Self::discover_with_disabled(paths, config, false)
     }
@@ -235,11 +250,8 @@ fn load_user_profile(
         )));
     }
     let content = fs::read_to_string(path)?;
-    let profile: UserAgentProfile = toml::from_str(&content).map_err(|error| {
-        PureError::ConfigError(format!(
-            "failed to parse Agent Profile `{profile_id}`: {error}"
-        ))
-    })?;
+    let profile: UserAgentProfile = toml::from_str(&content)
+        .map_err(|_| PureError::ConfigError(format!("invalid Agent Profile TOML: {profile_id}")))?;
     validate_user_profile(profile_id, &profile, config)?;
     if !profile.enabled && !include_disabled {
         return Ok(None);

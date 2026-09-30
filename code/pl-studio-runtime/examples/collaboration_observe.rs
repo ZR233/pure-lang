@@ -89,13 +89,12 @@ async fn main() -> Result<()> {
         .map(|v| v.parse::<u64>())
         .transpose()?
         .unwrap_or(180);
-    let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+    let runtime = StudioRuntime::initialize(StudioRuntimeOptions {
         studio_home: Some(home),
         host: StudioHostKind::Desktop,
         ..StudioRuntimeOptions::desktop()
     })
     .await?;
-    runtime.start_runtime().await?;
     let result = async {
         let project = runtime.open_project(&workspace).await?;
         let thread = runtime.create_thread(&project.id, "真实协作过程观察").await?;

@@ -2583,4 +2583,23 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get conversationActivityStopping => 'Stopping';
+
+  @override
+  String get startupWaiting => 'Waiting for initialization steps…';
+
+  @override
+  String get startupClosing => 'Closing local data…';
+
+  @override
+  String get startupBackingUp => 'Backing up unrecoverable data…';
+
+  @override
+  String get startupResetting => 'Rebuilding initial settings…';
+
+  @override
+  String get startupServices => 'Starting services…';
+
+  @override
+  String get startupRecoveredNotice =>
+      'Unrecoverable data was backed up and initial settings restored. Backup location:';
 }

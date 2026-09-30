@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use pl_core::model::ModelUsage;
 use pl_core::thread::journal::AttemptUpdate;
 use pl_core::thread::{AttemptOutcome, ThreadEffectBatch};
@@ -230,6 +230,13 @@ struct CallsWriter {
 #[derive(Clone)]
 pub(crate) struct CallsStore {
     writer: Arc<CallsWriter>,
+    task: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CallsOpenPolicy {
+    Degraded,
+    Strict,
 }
 
 impl CallsStore {
@@ -265,6 +272,16 @@ impl CallsStore {
     }
 
     pub(crate) async fn open(path: &Path) -> Result<Self> {
+        let store = Self::prepare_with_policy(path, CallsOpenPolicy::Degraded).await?;
+        store.start().await;
+        Ok(store)
+    }
+
+    pub(crate) async fn prepare(path: &Path) -> Result<Self> {
+        Self::prepare_with_policy(path, CallsOpenPolicy::Strict).await
+    }
+
+    async fn prepare_with_policy(path: &Path, policy: CallsOpenPolicy) -> Result<Self> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -272,7 +289,10 @@ impl CallsStore {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
-        let mut log = CallLog::open(root_dir.join(CALL_LOG_DIR_NAME)).await?;
+        let mut log = match policy {
+            CallsOpenPolicy::Degraded => CallLog::open(root_dir.join(CALL_LOG_DIR_NAME)).await?,
+            CallsOpenPolicy::Strict => CallLog::prepare(root_dir.join(CALL_LOG_DIR_NAME)).await?,
+        };
         let mut options = ConnectOptions::new(crate::studio::paths::sqlite_url(path));
         options
             .max_connections(2)
@@ -288,9 +308,22 @@ impl CallsStore {
             })
             .sqlx_logging(false);
         let db = Database::connect(options).await?;
-        schema::initialize(&db, &mut log, &root_dir).await?;
+        if let Err(error) = schema::initialize(&db, &mut log, &root_dir).await {
+            let error = crate::studio::startup::input_error(error);
+            db.close()
+                .await
+                .context("failed to close calls database after initialization failure")?;
+            return Err(error);
+        }
         let mut startup_error = None;
         if let Err(error) = log.rebuild_index(&db).await {
+            if policy == CallsOpenPolicy::Strict {
+                let error = crate::studio::startup::input_error(error);
+                db.close()
+                    .await
+                    .context("failed to close calls database after index failure")?;
+                return Err(error);
+            }
             startup_error = Some(error.to_string());
             tracing::warn!(%error, "调用日志索引重建失败，诊断降级");
         }
@@ -315,8 +348,32 @@ impl CallsStore {
             #[cfg(test)]
             panic_next_mutation: AtomicBool::new(false),
         });
-        tokio::spawn(supervise_writer(writer.clone()));
-        Ok(Self { writer })
+        Ok(Self {
+            writer,
+            task: Arc::new(tokio::sync::Mutex::new(None)),
+        })
+    }
+
+    pub(crate) async fn start(&self) {
+        let mut task = self.task.lock().await;
+        if task.is_none() {
+            *task = Some(tokio::spawn(supervise_writer(self.writer.clone())));
+        }
+    }
+
+    pub(crate) async fn close(&self) -> Result<()> {
+        self.stop_best_effort();
+        let mut task = self.task.lock().await;
+        let completion = match task.as_mut() {
+            Some(handle) => handle.await.context("failed to join calls writer"),
+            None => Ok(()),
+        };
+        task.take();
+        self.writer.log.lock().await.close();
+        let database = self.writer.db.close_by_ref().await;
+        completion?;
+        database?;
+        Ok(())
     }
 
     /// 用可靠 writer 的 revision 绝对投影替换某个 root/thread 的累计费用摘要。
@@ -845,7 +902,7 @@ async fn maintenance(db: &DatabaseConnection, log: &mut CallLog) -> Result<()> {
         tx.commit().await?;
     }
     if let Some(failure) = outcome.failure {
-        bail!("call log cleanup incomplete: {failure}");
+        return Err(failure).context("call log cleanup incomplete");
     }
     let root_dir = log.root_dir();
     schema::retry_pending_cleanup(db, &root_dir).await?;

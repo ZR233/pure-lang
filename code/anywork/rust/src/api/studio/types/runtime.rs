@@ -98,8 +98,17 @@ pub struct BridgeStateError {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshot {
     pub revision: u64,
+    pub startup_recovery: Option<BridgeStartupRecovery>,
     pub state: BridgeRuntimeState,
     pub active_turns: Vec<BridgeActiveTurn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStartupRecovery {
+    pub backup_path: String,
+    pub reason: String,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -374,6 +383,12 @@ pub enum BridgeLspActivity {
 /// Startup state can be observed before a Studio runtime has been installed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeStartupStage {
+    Preparing,
+    WaitingForSteps,
+    ClosingResources,
+    BackingUp,
+    Resetting,
+    StartingServices,
     OpeningStorage,
     LoadingConfiguration,
     ReadingProjects,

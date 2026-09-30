@@ -279,6 +279,7 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                                 ],
                               ),
                               const _PersistenceStatusPanel(),
+                              const _StartupRecoveryBanner(),
                               if (chrome.applicationRecoveryIssues.isNotEmpty)
                                 _ApplicationRecoveryBanner(
                                   issues: chrome.applicationRecoveryIssues,

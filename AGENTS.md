@@ -58,10 +58,12 @@
 
   ```powershell
   cargo xtask run-gui [--demo] [--driver]
+  cargo xtask run-gui --release
   cargo xtask build-gui [--demo] [--no-clean] [--check-generated]
   ```
 
 - 不支持直接执行 `flutter build windows|linux` 或 `flutter run -d windows|linux`，也不新增 PowerShell GUI wrapper。
+- `run-gui --release` 直接启动已有 `dist/anywork-release` 原生程序，不执行构建或依赖解析；缺失时提示先执行 `build-gui`。它与 `--demo`、`--driver`、`--profile` 互斥，并沿用平台进程树管理。
 - Linux 原生 GUI 需要 Clang/C++ 标准库、CMake、Ninja、pkg-config 与 GTK 3 开发文件；Debian/Ubuntu 示例为 `sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev`。xtask 必须用当前 PATH 和真实最小 GTK/C++ 工程预检，缺失时透传实际命令与原始错误；不得写死编译器版本、系统库路径或注入机器专用 include/library 环境。Rust 桥以 `libpl_studio_bridge.so` 预构建并经 `ANYWORK_BRIDGE_LIBRARY` 环境变量注入 CMake，与 Windows 的 DLL 契约一致。
 - `cargo xtask run-gui --driver` 使用 `test_driver/driver_main.dart` 启用 Flutter Driver extension，供 Dart MCP 的 `flutter_driver_command` 操作 GUI；xtask 不负责启动实验性的 `dart mcp-server`。
 - `cargo xtask manual-gui` 启动隔离的原生 Studio 和本地模拟供应商，记录截图、快照、请求与日志供人工判定；真实供应商人工验收仍用 `cargo xtask run-gui --driver` 直接读取用户已有配置，不修改其凭据。

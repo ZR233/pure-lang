@@ -41,6 +41,9 @@ pub(crate) struct ManualGuiOptions {
     /// Run tool-scroll against an explicitly supplied SSH test host (user@host).
     #[arg(long, value_name = "USER@HOST")]
     pub(crate) ssh_target: Option<String>,
+    /// Damage an isolated startup input, then capture recovery and its backup.
+    #[arg(long, value_parser = ["config", "database", "log", "cache"])]
+    pub(crate) startup_fault: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -368,6 +371,10 @@ impl Drop for OwnedProcess {
 
 pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     ensure!(
+        options.startup_fault.is_none() || options.scenario == "gui",
+        "--startup-fault requires --scenario gui"
+    );
+    ensure!(
         options.ssh_target.is_none() || options.scenario == "tool-scroll",
         "--ssh-target is supported only by --scenario tool-scroll"
     );
@@ -501,6 +508,9 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         write_fixture_log(&fixture_log_path, &output.join("fixture.log"))?;
         return Err(error);
     }
+    if let Some(fault) = &options.startup_fault {
+        seed_startup_fault(&home, fault)?;
+    }
 
     if options.scenario == "statistics" {
         return run_statistics_scenario(
@@ -613,6 +623,9 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         .env("ANYWORK_HOME", &home)
         .stdout(Stdio::from(gui_log.try_clone()?))
         .stderr(Stdio::from(gui_log));
+    if options.scenario == "gui" {
+        gui_command.args(["--log-level", "info"]);
+    }
     if options.scenario == "stress" {
         gui_command.arg("--profile");
     }
@@ -859,6 +872,29 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         fs::copy(&probe_frames, output.join("probe-frames.json"))?;
     }
     drop(gui);
+    let runtime_log = home.join("studio/logs/studio.log");
+    if runtime_log.is_file() {
+        write_sanitized_log(&runtime_log, &output.join("startup-timing.log"))?;
+    }
+    if options.startup_fault.is_some() {
+        let backups = home.join("startup-backups");
+        ensure!(
+            backups.is_dir() && fs::read_dir(&backups)?.count() == 1,
+            "startup did not produce exactly one recovery backup"
+        );
+        ensure!(
+            !home.join("startup-recovery.toml").exists(),
+            "startup recovery did not complete"
+        );
+        fs::write(
+            output.join("startup-recovery.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "fault": options.startup_fault, "backupCount": 1, "completed": true,
+                "preservedOldVersion": fs::read(home.join("sessions/old/retained"))? == b"old session",
+            }))?,
+        )?;
+        copy_startup_evidence(&backups, &output.join("startup-backups"))?;
+    }
     let fixture_result = fixture.stop(&requests_file);
     drop(fixture);
     write_fixture_log(&fixture_log_path, &output.join("fixture.log"))?;
@@ -1329,6 +1365,51 @@ fn wait_for_vm(
         );
         thread::sleep(Duration::from_millis(300));
     }
+}
+
+fn seed_startup_fault(home: &Path, fault: &str) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let studio =
+            pl_studio_runtime::StudioRuntime::initialize(pl_studio_runtime::StudioRuntimeOptions {
+                studio_home: Some(home.to_owned()),
+                host: pl_studio_runtime::StudioHostKind::Test,
+                ..pl_studio_runtime::StudioRuntimeOptions::desktop()
+            })
+            .await?;
+        studio.shutdown_runtime().await?;
+        Ok::<_, anyhow::Error>(())
+    })?;
+    fs::create_dir_all(home.join("sessions/old"))?;
+    fs::write(home.join("sessions/old/retained"), b"old session")?;
+    match fault {
+        "config" => fs::write(home.join("config.toml"), b"schema_version = invalid"),
+        "database" => fs::write(home.join("studio/v2/studio.sqlite"), b"invalid database"),
+        "log" => fs::write(home.join("v2/calls/logs/calls-0000020000-000001.jsonl"), b"invalid complete record\n"),
+        "cache" => fs::write(home.join("v2/settings.toml"), b"schemaVersion = 1\nrevision = 2\n[[entries]]\nkey = 'observed:providerUsage:v2'\nvalue = 'invalid JSON'\nupdatedAt = 1\n"),
+        _ => bail!("unknown startup fault"),
+    }?;
+    Ok(())
+}
+
+fn copy_startup_evidence(source: &Path, target: &Path) -> Result<()> {
+    fs::create_dir(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        ensure!(
+            !kind.is_symlink(),
+            "unexpected link in isolated recovery evidence"
+        );
+        if kind.is_dir() {
+            copy_startup_evidence(&entry.path(), &target.join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), target.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
 }
 
 fn capture(
@@ -3904,12 +3985,24 @@ fn write_sanitized_log(source: &Path, destination: &Path) -> Result<()> {
     let log = fs::read_to_string(source)?;
     let mut output = File::create(destination)?;
     for line in log.lines() {
-        if let Some(stage) = line.strip_prefix("startup_stage=") {
-            if stage
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'=' | b' '))
+        if let Some((_, timing)) = line.split_once("startup_stage=") {
+            let mut fields = timing.split_whitespace();
+            let stage = fields.next().unwrap_or_default().trim_matches('"');
+            if !stage.is_empty()
+                && stage
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
             {
-                writeln!(output, "startup_stage={stage}")?;
+                let elapsed = fields.find_map(|field| {
+                    field
+                        .strip_prefix("elapsed_ms=")
+                        .and_then(|value| value.parse::<u64>().ok())
+                });
+                if let Some(elapsed) = elapsed {
+                    writeln!(output, "startup_stage={stage} elapsed_ms={elapsed}")?;
+                } else {
+                    writeln!(output, "startup_stage={stage}")?;
+                }
             }
         } else if line.contains("available at: http://127.0.0.1:") {
             writeln!(output, "vm_service=ready (address redacted)")?;

@@ -129,7 +129,16 @@ impl PersistedStudioObject for WorktreeLease {
                 pl_tool::remote::normalize_remote_absolute_path(&dto.repository_root)?;
             dto.path = pl_tool::remote::normalize_remote_absolute_path(&dto.path)?;
         }
+        dto.validate_identity()?;
         Ok(dto)
+    }
+
+    fn validate_owner(&self, owner_id: &str) -> Result<()> {
+        anyhow::ensure!(
+            owner_id == self.owner_thread_id,
+            "worktree lease owner identity mismatch"
+        );
+        Ok(())
     }
 }
 

@@ -22,6 +22,9 @@ pub(in crate::studio) trait PersistedStudioObject: Sized {
     fn revision(&self) -> u64;
     fn to_persistence_dto(&self) -> Self::PersistenceDto;
     fn from_persistence_dto(dto: Self::PersistenceDto) -> Result<Self>;
+    fn validate_owner(&self, _owner_id: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub(in crate::studio) async fn load_object<T>(
@@ -34,7 +37,9 @@ where
     let Some(row) = load_object_row::<T>(db, owner_id).await? else {
         return Ok(None);
     };
-    decode_object::<T>(row).map(Some)
+    decode_object::<T>(row)
+        .map(Some)
+        .map_err(crate::studio::startup::input_error)
 }
 
 pub(in crate::studio) async fn load_objects<T>(db: &impl ConnectionTrait) -> Result<Vec<T>>
@@ -47,7 +52,7 @@ where
         .all(db)
         .await?
         .into_iter()
-        .map(decode_object::<T>)
+        .map(|row| decode_object::<T>(row).map_err(crate::studio::startup::input_error))
         .collect()
 }
 
@@ -119,6 +124,7 @@ where
     }
     let dto = serde_json::from_str::<T::PersistenceDto>(&row.payload_json)?;
     let value = T::from_persistence_dto(dto)?;
+    value.validate_owner(&row.owner_id)?;
     let payload_revision =
         i64::try_from(value.revision()).context("object payload revision exceeds SQLite")?;
     if payload_revision != row.revision {

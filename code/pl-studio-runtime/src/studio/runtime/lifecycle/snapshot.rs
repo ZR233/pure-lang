@@ -31,6 +31,7 @@ impl StudioRuntime {
 
     pub async fn runtime_snapshot(&self) -> Result<StudioRuntimeSnapshot> {
         let mut snapshot = self.runtime_state.snapshot();
+        snapshot.startup_recovery = self.startup_recovery.clone();
         snapshot.active_turns = self.derive_active_turns().await?;
         Ok(snapshot)
     }

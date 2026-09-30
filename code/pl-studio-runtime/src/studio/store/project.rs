@@ -87,16 +87,24 @@ impl StudioStore {
     }
 
     pub(super) async fn open_database(path: &Path) -> Result<Self> {
+        let store = Self::prepare_database(path).await?;
+        store.calls.start().await;
+        Ok(store)
+    }
+
+    pub(crate) async fn prepare_database(path: &Path) -> Result<Self> {
         let path = resolve_configured_database_path(path).await?;
         let database_exists = tokio::fs::try_exists(&path).await?;
         let family_exists = database_family_exists(&path).await?;
         let existing_state = if database_exists {
             Some(inspect_database(&path).await?)
         } else {
-            anyhow::ensure!(
-                !family_exists,
-                "orphan Studio WAL/SHM files require explicit recovery"
-            );
+            if family_exists {
+                return Err(StudioDatabaseError::CorruptDatabase {
+                    reason: "orphan Studio WAL/SHM files".into(),
+                }
+                .into());
+            }
             None
         };
         // The data root is resolved once; every session, call and attachment path comes from the
@@ -135,18 +143,18 @@ impl StudioStore {
                 Ok(())
             };
             return match (close, cleanup) {
-                (Ok(()), Ok(())) => {
-                    Err(error).context("Studio database initialization failed")
+                (Ok(()), Ok(())) => Err(error).context("Studio database initialization failed"),
+                (Err(close_error), Ok(())) => {
+                    Err(crate::studio::startup::cleanup_error(close_error).context(error))
                 }
-                (Err(close_error), Ok(())) => Err(error).context(format!(
-                    "Studio database initialization failed; closing the database also failed: {close_error:#}"
-                )),
-                (Ok(()), Err(cleanup_error)) => Err(error).context(format!(
-                    "Studio database initialization failed; partial database cleanup also failed: {cleanup_error:#}"
-                )),
-                (Err(close_error), Err(cleanup_error)) => Err(error).context(format!(
-                    "Studio database initialization failed; closing the database failed: {close_error:#}; partial database cleanup also failed: {cleanup_error:#}"
-                )),
+                (Ok(()), Err(cleanup_error)) => {
+                    Err(crate::studio::startup::cleanup_error(cleanup_error).context(error))
+                }
+                (Err(close_error), Err(cleanup_error)) => {
+                    Err(crate::studio::startup::cleanup_error(close_error)
+                        .context(cleanup_error)
+                        .context(error))
+                }
             };
         }
         // Canonical TOML is the only fact source for directory and settings reads. A missing or
@@ -158,15 +166,24 @@ impl StudioStore {
                 let close = db.close().await;
                 return Err(match close {
                     Ok(()) => error,
-                    Err(close_error) => error.context(format!(
-                        "canonical Studio documents failed to load; closing the database also failed: {close_error:#}"
-                    )),
+                    Err(close_error) => {
+                        crate::studio::startup::cleanup_error(close_error).context(error)
+                    }
                 });
             }
         };
         let (catalog, settings, workspaces) = documents;
         let calls =
-            crate::studio::storage::calls::CallsStore::open(&paths.calls_database()).await?;
+            match crate::studio::storage::calls::CallsStore::prepare(&paths.calls_database()).await
+            {
+                Ok(calls) => calls,
+                Err(error) => {
+                    db.close().await.context(
+                        "failed to close product database after calls preparation failed",
+                    )?;
+                    return Err(error);
+                }
+            };
         let store = Self {
             db,
             calls,
@@ -178,6 +195,13 @@ impl StudioStore {
             paths,
         };
         Ok(store)
+    }
+
+    pub(crate) async fn close(&self) -> Result<()> {
+        let (calls, product) = tokio::join!(self.calls.close(), self.db.close_by_ref());
+        calls?;
+        product?;
+        Ok(())
     }
 
     pub async fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
@@ -295,6 +319,8 @@ async fn load_canonical_documents(
     let catalog = CatalogStore::load(paths.catalog_file()).await?;
     let settings = SettingsStore::load(paths.settings_file()).await?;
     let workspaces = WorkspaceStore::load(paths.workspaces_file()).await?;
+    validate_directory_references(&catalog, &workspaces)
+        .map_err(crate::studio::startup::data_error)?;
     if installation == InstallationState::Fresh {
         // A truly new installation starts with complete, empty canonical documents: the fact source
         // exists before the first mutation, and a later missing document is unambiguously a loss
@@ -307,13 +333,70 @@ async fn load_canonical_documents(
     Ok((catalog, settings, workspaces))
 }
 
+fn validate_directory_references(
+    catalog: &CatalogStore,
+    workspaces: &WorkspaceStore,
+) -> Result<()> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let entries = catalog.entries();
+    let threads = entries
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect::<BTreeMap<_, _>>();
+    let projects = workspaces
+        .entries()
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect::<BTreeSet<_>>();
+    for entry in &entries {
+        ensure!(
+            projects.contains(&entry.project_id),
+            "catalog references a missing project"
+        );
+        if let Some(parent_id) = &entry.parent_thread_id {
+            let parent = threads
+                .get(parent_id.as_str())
+                .context("catalog references a missing parent")?;
+            let root = threads
+                .get(entry.root_thread_id.as_str())
+                .context("catalog references a missing root")?;
+            ensure!(
+                parent.project_id == entry.project_id
+                    && root.project_id == entry.project_id
+                    && root.parent_thread_id.is_none()
+                    && parent.root_thread_id == entry.root_thread_id,
+                "catalog parent/root references are inconsistent"
+            );
+        }
+    }
+    let mut checked = BTreeSet::new();
+    for entry in &entries {
+        let mut path = BTreeSet::new();
+        let mut current = entry;
+        while !checked.contains(current.id.as_str()) {
+            ensure!(
+                path.insert(current.id.as_str()),
+                "catalog parent references contain a cycle"
+            );
+            let Some(parent) = &current.parent_thread_id else {
+                break;
+            };
+            current = threads
+                .get(parent.as_str())
+                .context("catalog parent is missing")?;
+        }
+        checked.extend(path);
+    }
+    Ok(())
+}
+
 async fn require_canonical_document(path: &Path, name: &str) -> Result<()> {
-    ensure!(
-        tokio::fs::try_exists(path).await?,
-        "Studio {name} is missing on an existing installation; refusing to substitute an empty \
-         document and preserving existing data ({})",
-        path.display()
-    );
+    if !tokio::fs::try_exists(path).await? {
+        return Err(crate::studio::startup::data_error(anyhow::anyhow!(
+            "Studio {name} is missing on an existing installation ({})",
+            path.display()
+        )));
+    }
     Ok(())
 }
 
@@ -376,9 +459,9 @@ async fn inspect_database(path: &Path) -> Result<ExistingDatabaseState> {
         (Ok(state), Ok(())) => Ok(state),
         (Err(error), Ok(())) => Err(error),
         (Ok(_), Err(error)) => Err(error).context("failed to close Studio schema probe"),
-        (Err(error), Err(close_error)) => Err(error).context(format!(
-            "Studio schema probe failed; closing its connection also failed: {close_error}"
-        )),
+        (Err(error), Err(close_error)) => {
+            Err(crate::studio::startup::cleanup_error(close_error).context(error))
+        }
     }
 }
 
@@ -443,10 +526,12 @@ async fn validate_database_version(db: &DatabaseConnection, expected_version: i6
 
     let actual = schema_fingerprint(db).await?;
     let expected = expected_schema_fingerprint().await?;
-    ensure!(
-        actual == expected,
-        "Studio SQLite required tables, columns, indexes, or schema fingerprint are incompatible"
-    );
+    if actual != expected {
+        return Err(StudioDatabaseError::CorruptDatabase {
+            reason: "incompatible schema fingerprint".into(),
+        }
+        .into());
+    }
     Ok(())
 }
 

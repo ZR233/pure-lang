@@ -41,6 +41,18 @@ class _StudioStartup extends StatelessWidget {
                     liveRegion: true,
                     child: Text(
                       switch (phase) {
+                        StudioStartupPhase.preparing =>
+                          context.l10n.startupPreparing,
+                        StudioStartupPhase.waitingForSteps =>
+                          context.l10n.startupWaiting,
+                        StudioStartupPhase.closingResources =>
+                          context.l10n.startupClosing,
+                        StudioStartupPhase.backingUp =>
+                          context.l10n.startupBackingUp,
+                        StudioStartupPhase.resetting =>
+                          context.l10n.startupResetting,
+                        StudioStartupPhase.startingServices =>
+                          context.l10n.startupServices,
                         StudioStartupPhase.loadingBridge =>
                           context.l10n.startupPreparing,
                         StudioStartupPhase.openingStorage =>

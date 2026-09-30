@@ -2256,7 +2256,10 @@ class StudioController extends _$StudioController {
     if (latest != null) state = AsyncData(applyLspState(latest, snapshot));
   }
 
-  void retryInitialization() => ref.invalidateSelf();
+  void retryInitialization() {
+    FrbStudioApi.retryInitialization();
+    ref.invalidateSelf();
+  }
 
   Future<void> retryPersistence() async {
     final current = state.value;

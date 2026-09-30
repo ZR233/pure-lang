@@ -955,5 +955,11 @@
   "conversationActivityStoragePressure": "存储受限",
   "conversationActivityResumeReady": "已保存，等待继续执行",
   "conversationActivityResumeRequired": "等待保存恢复",
-  "conversationActivityStopping": "停止中"
+  "conversationActivityStopping": "停止中",
+  "startupWaiting": "正在等待初始化步骤完成…",
+  "startupClosing": "正在关闭本地数据…",
+  "startupBackingUp": "正在备份无法恢复的数据…",
+  "startupResetting": "正在重建初始配置…",
+  "startupServices": "正在启动服务…",
+  "startupRecoveredNotice": "已备份无法恢复的数据，并恢复初始配置。备份位置："
 }

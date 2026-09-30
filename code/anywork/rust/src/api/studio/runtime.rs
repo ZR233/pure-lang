@@ -19,7 +19,7 @@ pub(crate) struct BridgeRuntime {
 impl BridgeRuntime {
     async fn new() -> Result<Self> {
         Ok(Self {
-            studio: StudioRuntime::with_startup_observer(
+            studio: StudioRuntime::initialize_with_observer(
                 desktop_runtime_options()?,
                 std::sync::Arc::new(super::handlers::lifecycle::publish_startup_stage),
             )

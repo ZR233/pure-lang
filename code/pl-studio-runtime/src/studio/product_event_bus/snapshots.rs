@@ -110,7 +110,7 @@ impl ProductEventBus {
     pub(in crate::studio) fn observe_persistence(
         &self,
         mut state: watch::Receiver<PersistenceStateSnapshot>,
-    ) {
+    ) -> tokio::task::JoinHandle<()> {
         let bus = self.clone();
         let mut threads = bus.store.thread_persistence().subscribe();
         bus.update_persistence(state.borrow().clone(), threads.borrow().clone());
@@ -125,7 +125,7 @@ impl ProductEventBus {
                     threads.borrow_and_update().clone(),
                 );
             }
-        });
+        })
     }
 
     fn update_persistence(

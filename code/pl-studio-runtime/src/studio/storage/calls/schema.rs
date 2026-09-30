@@ -678,6 +678,14 @@ async fn legacy_payload(
                         }
                     }
                 }
+                if original
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+                {
+                    return Err(crate::studio::startup::data_error(anyhow::anyhow!(
+                        "referenced legacy call body is missing"
+                    )));
+                }
                 return Err(original);
             }
         }

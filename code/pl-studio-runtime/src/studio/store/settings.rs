@@ -47,7 +47,7 @@ pub(in crate::studio) struct SettingsStore {
 impl SettingsStore {
     pub(in crate::studio) async fn load(path: PathBuf) -> Result<Self> {
         let document = match tokio::fs::read_to_string(&path).await {
-            Ok(content) => decode(&path, &content)?,
+            Ok(content) => decode(&path, &content).map_err(crate::studio::startup::data_error)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => SettingsDocument {
                 schema_version: SETTINGS_SCHEMA_VERSION,
                 revision: 1,

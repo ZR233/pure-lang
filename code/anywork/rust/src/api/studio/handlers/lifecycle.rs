@@ -24,7 +24,7 @@ pub async fn start_studio_runtime() -> Result<RuntimeSnapshot, BridgeError> {
             return Err(error.into());
         }
     };
-    Ok(runtime_snapshot(bridge.studio.start_runtime().await?))
+    Ok(runtime_snapshot(bridge.studio.runtime_snapshot().await?))
 }
 
 pub async fn shutdown_runtime() -> Result<RuntimeSnapshot, BridgeError> {
@@ -105,6 +105,12 @@ pub(crate) fn publish_startup_stage(stage: pl_studio_runtime::StudioStartupStage
     use super::super::types::BridgeStartupStage as Target;
     use pl_studio_runtime::StudioStartupStage as Source;
     STARTUP.send_replace(match stage {
+        Source::Preparing => Target::Preparing,
+        Source::WaitingForSteps => Target::WaitingForSteps,
+        Source::ClosingResources => Target::ClosingResources,
+        Source::BackingUp => Target::BackingUp,
+        Source::Resetting => Target::Resetting,
+        Source::StartingServices => Target::StartingServices,
         Source::OpeningStorage => Target::OpeningStorage,
         Source::LoadingConfiguration => Target::LoadingConfiguration,
         Source::ReadingProjects => Target::ReadingProjects,

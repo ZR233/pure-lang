@@ -12,6 +12,7 @@ mod recovery_registry;
 mod runtime;
 mod runtime_lock;
 mod runtime_state;
+pub(crate) mod startup;
 mod storage;
 pub(crate) mod store;
 mod store_support;
@@ -28,6 +29,7 @@ pub use recovery_registry::StudioRecoveryRegistry;
 pub use runtime::*;
 pub use runtime_lock::{StudioHostKind, StudioRuntimeOptions};
 pub use runtime_state::*;
+pub use startup::{StudioStartupError, StudioStartupErrorKind, StudioStartupRecovery};
 pub use store::{StudioDatabaseError, StudioStore};
 
 pub(crate) use thread_factory::StudioThreadFactory;

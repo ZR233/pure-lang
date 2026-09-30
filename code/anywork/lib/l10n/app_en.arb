@@ -1349,5 +1349,11 @@
   "conversationActivityStoragePressure": "Storage pressure",
   "conversationActivityResumeReady": "Saved, waiting to resume",
   "conversationActivityResumeRequired": "Waiting for save recovery",
-  "conversationActivityStopping": "Stopping"
+  "conversationActivityStopping": "Stopping",
+  "startupWaiting": "Waiting for initialization steps…",
+  "startupClosing": "Closing local data…",
+  "startupBackingUp": "Backing up unrecoverable data…",
+  "startupResetting": "Rebuilding initial settings…",
+  "startupServices": "Starting services…",
+  "startupRecoveredNotice": "Unrecoverable data was backed up and initial settings restored. Backup location:"
 }

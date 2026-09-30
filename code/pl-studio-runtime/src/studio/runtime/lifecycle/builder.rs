@@ -1,8 +1,8 @@
 use anyhow::Result;
 
-use crate::config::{ConfigRuntime, ConfigStore};
+use crate::config::ConfigRuntime;
 use crate::studio::agent_host::ThreadWriteBehindWriter;
-use crate::studio::runtime_lock::{RuntimeLock, RuntimeLockOwner};
+use crate::studio::runtime_lock::RuntimeLockOwner;
 use crate::studio::{ProductEventBus, StudioRuntimeState, StudioStore};
 use pl_tool::mcp::{McpConnector, McpRuntime};
 
@@ -17,87 +17,12 @@ use super::super::{
 };
 
 impl StudioRuntime {
-    pub async fn default_app() -> pl_protocol::studio::StudioResult<Self> {
-        Self::with_options(crate::StudioRuntimeOptions::desktop()).await
-    }
-
-    /// Creates the one Studio runtime owning the resolved home and its process lock.
-    pub async fn with_options(
-        options: crate::StudioRuntimeOptions,
-    ) -> pl_protocol::studio::StudioResult<Self> {
-        Self::with_startup_observer(options, std::sync::Arc::new(|_| {})).await
-    }
-
-    /// Creates a runtime with a nonblocking observer for pre-publication startup phases.
-    /// The observer must not call back into the runtime. It owns no startup resources.
-    pub async fn with_startup_observer(
-        options: crate::StudioRuntimeOptions,
-        observer: std::sync::Arc<dyn Fn(crate::StudioStartupStage) + Send + Sync>,
-    ) -> pl_protocol::studio::StudioResult<Self> {
-        let _timing = crate::startup_timing::Stage::new("construct_runtime");
-        observer(crate::StudioStartupStage::OpeningStorage);
-        let resolved = options.resolve()?;
-        let helper_source = resolved.helper_source;
-        let lock_path = resolved.paths.runtime_lock();
-        let system_skills_dir = resolved.paths.system_skills_dir();
-        let host = resolved.host;
-        let lock_timing = crate::startup_timing::Stage::new("acquire_runtime_lock");
-        let instance_lock =
-            tokio::task::spawn_blocking(move || RuntimeLock::acquire(&lock_path, host))
-                .await
-                .map_err(|error| {
-                    tracing::error!(error = %error, "Studio runtime lock task failed");
-                    pl_protocol::studio::StudioError::internal()
-                })??;
-        drop(lock_timing);
-        // Old session data and its migration markers stay untouched in the previous layout.
-        let database_timing = crate::startup_timing::Stage::new("open_database");
-        let store = StudioStore::open(resolved.paths.database())
-            .await
-            .map_err(|error| {
-                tracing::error!(error = %error, "failed to open Studio storage");
-                pl_protocol::studio::StudioError::storage()
-            })?;
-        drop(database_timing);
-        observer(crate::StudioStartupStage::LoadingConfiguration);
-        let config_store = match host {
-            crate::StudioHostKind::Test => ConfigStore::new(resolved.paths.config_paths()),
-            crate::StudioHostKind::Desktop | crate::StudioHostKind::HttpServer => {
-                ConfigStore::for_studio_home(resolved.paths.home().to_path_buf())
-            }
-        };
-        let runtime = Self::with_runtime_state_and_lock(
-            store,
-            config_store,
-            StudioRuntimeState::new(),
-            Some(instance_lock),
-            Some(system_skills_dir),
-            helper_source,
-            observer,
-        )
-        .map_err(|error| {
-            tracing::error!(error = %error, "failed to initialize Studio runtime");
-            pl_protocol::studio::StudioError::internal()
-        })?;
-        runtime.hydrate_ssh_servers().await.map_err(|error| {
-            tracing::error!(error = %error, "failed to initialize SSH server registry");
-            pl_protocol::studio::StudioError::storage()
-        })?;
-        Ok(runtime)
-    }
-
-    fn with_runtime_state_and_lock(
+    pub(super) fn assemble(
         store: StudioStore,
-        config_store: ConfigStore,
-        runtime_state: StudioRuntimeState,
-        instance_lock: Option<RuntimeLock>,
-        system_skills_dir: Option<std::path::PathBuf>,
+        config_runtime: ConfigRuntime,
+        system_skills_dir: std::path::PathBuf,
         helper_source: crate::worker_assets::RemoteHelperSource,
-        startup_observer: std::sync::Arc<dyn Fn(crate::StudioStartupStage) + Send + Sync>,
     ) -> Result<Self> {
-        let config_timing = crate::startup_timing::Stage::new("load_configuration");
-        let config_runtime = ConfigRuntime::initialize(config_store)?;
-        drop(config_timing);
         let (settings_updates, _) = tokio::sync::watch::channel(config_runtime.read()?);
         // 进程级共享 writer 先于所有 owner 构造：ProductEventBus 与
         // ThreadRepository 共用同一 write-behind 队列。
@@ -108,7 +33,6 @@ impl StudioRuntime {
         let worktrees =
             crate::studio::agent_host::worktree_lease::WorktreeLeaseOwner::new(writer.clone());
         let persistence = writer;
-        product_events.observe_persistence(persistence.subscribe_state());
         let provider_usage = ProviderUsageRuntime::new(store.clone(), product_events.clone());
         let updater = StudioUpdateRuntime::new(store.clone(), product_events.clone())?;
         let mcp_state = McpStateRuntime::new();
@@ -118,12 +42,7 @@ impl StudioRuntime {
         crate::studio::thread::register_builtins(&thread_modes)?;
         let mcp = McpRuntime::new(McpConnector::default()).handle();
         let lsp = pl_lsp::runtime::LspRuntimeRegistry::new();
-        let skills = match system_skills_dir {
-            Some(system_skills_dir) => {
-                SkillCatalogRuntime::new(product_events.clone(), system_skills_dir)
-            }
-            None => SkillCatalogRuntime::default(),
-        };
+        let skills = SkillCatalogRuntime::new(product_events.clone(), system_skills_dir);
         let thread_factory = crate::studio::thread_factory::StudioThreadFactory::new(
             crate::studio::thread_factory::StudioThreadServices {
                 store: store.clone(),
@@ -160,7 +79,8 @@ impl StudioRuntime {
         );
         thread_observations.install(thread_factory.clone())?;
         Ok(Self {
-            startup_observer,
+            startup_recovery: None,
+            persistence_observer: Default::default(),
             thread_observations,
             settings_updates,
             settings_refresh: Default::default(),
@@ -169,7 +89,7 @@ impl StudioRuntime {
             tool_catalog_updates: Default::default(),
             threads,
             thread_factory,
-            instance_lock: RuntimeLockOwner::new(instance_lock),
+            instance_lock: RuntimeLockOwner::new(None),
             store,
             residency: ThreadResidency::new(),
             shutdown_progress: ShutdownProgressBus::new(),
@@ -188,7 +108,7 @@ impl StudioRuntime {
                 persistence: std::sync::Arc::new(tokio::sync::Mutex::new(Some(persistence))),
                 product_events: product_events.clone(),
             },
-            runtime_state,
+            runtime_state: StudioRuntimeState::new(),
             recovery: crate::studio::StudioRecoveryRegistry::new(),
             recovery_task: Default::default(),
             skills,

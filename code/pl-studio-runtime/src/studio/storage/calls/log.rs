@@ -37,11 +37,11 @@ pub(super) struct AppendOutcome {
 }
 
 /// 清理结果；`failure` 非空表示这次清理没有完全成功，调用方应记录可重试降级。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(super) struct CleanupOutcome {
     pub(super) removed: Vec<String>,
     pub(super) over_capacity: bool,
-    pub(super) failure: Option<String>,
+    pub(super) failure: Option<anyhow::Error>,
 }
 
 struct Segment {
@@ -65,6 +65,12 @@ pub(super) struct CallLog {
     total_bytes: u64,
     next_sequence: u64,
     degraded: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpenPolicy {
+    Degraded,
+    Strict,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -118,6 +124,14 @@ impl CallLog {
 
     /// 打开（必要时创建）日志目录，统计现有段并修复最新段的半条尾记录。
     pub(super) async fn open(dir: PathBuf) -> Result<Self> {
+        Self::open_with_policy(dir, OpenPolicy::Degraded).await
+    }
+
+    pub(super) async fn prepare(dir: PathBuf) -> Result<Self> {
+        Self::open_with_policy(dir, OpenPolicy::Strict).await
+    }
+
+    async fn open_with_policy(dir: PathBuf, policy: OpenPolicy) -> Result<Self> {
         let setup = async {
             tokio::fs::create_dir_all(&dir).await?;
             list_segments(&dir).await
@@ -126,6 +140,9 @@ impl CallLog {
         let mut segments = match setup {
             Ok(segments) => segments,
             Err(error) => {
+                if policy == OpenPolicy::Strict {
+                    return Err(error);
+                }
                 tracing::warn!(%error, "调用日志不可用，会话仍可运行");
                 return Ok(Self {
                     dir,
@@ -155,6 +172,9 @@ impl CallLog {
             let repaired = match repair_tail(&path).await {
                 Ok(length) => length,
                 Err(error) => {
+                    if policy == OpenPolicy::Strict {
+                        return Err(error);
+                    }
                     log.degraded = Some(error.to_string());
                     newest.len
                 }
@@ -169,6 +189,10 @@ impl CallLog {
             }
         }
         Ok(log)
+    }
+
+    pub(super) fn close(&mut self) {
+        self.current.take();
     }
 
     /// 日志目录所属的 calls 根目录。
@@ -195,11 +219,11 @@ impl CallLog {
             let outcome = self.cleanup_budget(now, len).await;
             removed.extend(outcome.removed);
             if outcome.over_capacity || self.total_bytes.saturating_add(len) > LOG_MAX_BYTES {
-                let message = outcome
+                let error = outcome
                     .failure
-                    .unwrap_or_else(|| "call log is over capacity".to_owned());
-                self.degraded = Some(message.clone());
-                bail!("call log is over capacity: {message}");
+                    .unwrap_or_else(|| std::io::Error::other("call log is over capacity").into());
+                self.degraded = Some(error.to_string());
+                return Err(error).context("call log is over capacity");
             }
         }
 
@@ -224,7 +248,9 @@ impl CallLog {
             self.degraded = Some(error.to_string());
             if let Err(repair) = repair {
                 self.current = None;
-                bail!("call log append failed: {error}; tail repair failed: {repair}");
+                return Err(repair)
+                    .context(error)
+                    .context("call log append and tail repair failed");
             }
             return Err(error.into());
         }
@@ -264,7 +290,7 @@ impl CallLog {
                 let failure = error.to_string();
                 self.degraded = Some(failure.clone());
                 return CleanupOutcome {
-                    failure: Some(failure),
+                    failure: Some(error),
                     ..CleanupOutcome::default()
                 };
             }
@@ -310,7 +336,7 @@ impl CallLog {
                 Err(error) => {
                     let failure = error.to_string();
                     self.degraded = Some(failure.clone());
-                    outcome.failure = Some(failure);
+                    outcome.failure = Some(error.into());
                     break;
                 }
             }
@@ -406,7 +432,8 @@ impl CallLog {
 }
 
 fn is_expired(day: i64, now: i64) -> bool {
-    now.saturating_sub(day.saturating_mul(SECONDS_PER_DAY)) >= LOG_RETENTION_SECONDS
+    // The cutoff day can contain records newer than the exact retention deadline.
+    day < event::record_day(now.saturating_sub(LOG_RETENTION_SECONDS))
 }
 
 async fn list_segments(dir: &Path) -> Result<Vec<SegmentInfo>> {
@@ -440,10 +467,11 @@ fn parse_segment_name(name: &str) -> Option<(i64, u64)> {
 
 /// 把段文件回退到最后一个换行之后，丢弃不完整的尾部记录；返回修复后的字节数。
 async fn repair_tail(path: &Path) -> Result<u64> {
-    ensure!(
-        tokio::fs::metadata(path).await?.len() <= SEGMENT_MAX_BYTES,
-        "oversized call log segment"
-    );
+    if tokio::fs::metadata(path).await?.len() > SEGMENT_MAX_BYTES {
+        return Err(crate::studio::startup::data_error(anyhow::anyhow!(
+            "oversized call log segment"
+        )));
+    }
     let bytes = tokio::fs::read(path).await?;
     if bytes.is_empty() || bytes.last() == Some(&b'\n') {
         return Ok(bytes.len() as u64);
@@ -479,6 +507,24 @@ mod storage_fault_tests {
             ..Default::default()
         };
         let (line, _) = event::encode_record(&record)?;
+        // A retained record can belong to the UTC day containing the seven-day cutoff.
+        let retained_at = now - LOG_RETENTION_SECONDS + SECONDS_PER_DAY - 1;
+        let retained = CallLogRecord {
+            recorded_at: retained_at,
+            call_id: "retained-boundary".into(),
+            ..record.clone()
+        };
+        let (retained_line, _) = event::encode_record(&retained)?;
+        let boundary_now = now + SECONDS_PER_DAY / 2;
+        let boundary = log
+            .append(event::record_day(retained_at), boundary_now, &retained_line)
+            .await?;
+        assert!(log.cleanup(boundary_now).await.removed.is_empty());
+        let retained_path = temp.path().join(&boundary.record.segment);
+        assert_eq!(
+            tokio::fs::read_to_string(&retained_path).await?,
+            format!("{retained_line}\n")
+        );
         let first = log.append(day, now, &line).await?;
         assert!(
             log.read(
@@ -502,9 +548,14 @@ mod storage_fault_tests {
             tokio::fs::metadata(&path).await?.len(),
             first.record.length + 1
         );
+        assert!(tokio::fs::try_exists(&retained_path).await?);
         let second = log.append(day + 1, now + SECONDS_PER_DAY, "{}").await?;
         assert_ne!(first.record.segment, second.record.segment);
         let expired = log.cleanup(now + LOG_RETENTION_SECONDS).await;
+        assert!(!expired.removed.contains(&first.record.segment));
+        let expired = log
+            .cleanup(now + LOG_RETENTION_SECONDS + SECONDS_PER_DAY)
+            .await;
         assert!(expired.removed.contains(&first.record.segment));
         let missing = log
             .read(

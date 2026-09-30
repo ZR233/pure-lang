@@ -165,6 +165,33 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let workspace_root = paths::workspace_root()?;
     let app_dir = paths::studio_app_dir(&workspace_root);
     let target = DesktopTarget::current()?;
+    if options.release {
+        let dist_dir = paths::release_dist_dir(&workspace_root);
+        let name = match target {
+            DesktopTarget::Windows => "anywork.exe",
+            DesktopTarget::Linux => "anywork",
+            DesktopTarget::Macos => bail!("release GUI entrypoint supports Windows and Linux"),
+        };
+        let executable = dist_dir.join(name);
+        ensure!(
+            executable.is_file(),
+            "release executable is missing: {}; run cargo xtask build-gui first",
+            executable.display()
+        );
+        let mut command = Command::new(&executable);
+        command.current_dir(&dist_dir);
+        configure_flutter_environment(
+            &mut command,
+            FlutterInvocation {
+                demo_mode: DemoMode::Native,
+                process_mode: FlutterProcessMode::ResidentDriver,
+                bridge_artifacts: None,
+                remote_helper_bundle_dir: None,
+                log_level: options.log_level,
+            },
+        );
+        return process::run_resident_checked(&mut command, "anywork release");
+    }
     let app_version = studio_version::read(&app_dir)?;
     let version_define = format!("--dart-define=ANYWORK_VERSION={app_version}");
     print_context(&workspace_root, &app_dir);

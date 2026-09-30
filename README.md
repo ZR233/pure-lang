@@ -403,6 +403,9 @@ cargo xtask run-gui
 
 # 从仓库根目录构建当前 OS 的 release 产物
 cargo xtask build-gui
+
+# 启动已有发布目录，不重新构建
+cargo xtask run-gui --release
 ```
 
 Markdown/timeline 视觉检查可以使用本地 demo 数据启动，不连接 runtime：

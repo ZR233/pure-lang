@@ -68,7 +68,7 @@ fn entry(provider_id: &str) -> Result<Entry> {
 }
 
 fn credential_error(action: &str, provider_id: &str, error: KeyringError) -> PureError {
-    PureError::ConfigError(format!(
+    PureError::Io(std::io::Error::other(format!(
         "failed to {action} system credential for provider {provider_id}: {error}"
-    ))
+    )))
 }

@@ -375,6 +375,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStaleResource dco_decode_box_autoadd_bridge_stale_resource(dynamic raw);
 
   @protected
+  BridgeStartupRecovery dco_decode_box_autoadd_bridge_startup_recovery(
+    dynamic raw,
+  );
+
+  @protected
   BridgeStateError dco_decode_box_autoadd_bridge_state_error(dynamic raw);
 
   @protected
@@ -1142,6 +1147,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStaleResource dco_decode_bridge_stale_resource(dynamic raw);
 
   @protected
+  BridgeStartupRecovery dco_decode_bridge_startup_recovery(dynamic raw);
+
+  @protected
   BridgeStartupStage dco_decode_bridge_startup_stage(dynamic raw);
 
   @protected
@@ -1865,6 +1873,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(dynamic raw);
 
   @protected
+  BridgeStartupRecovery? dco_decode_opt_box_autoadd_bridge_startup_recovery(
+    dynamic raw,
+  );
+
+  @protected
   BridgeStateError? dco_decode_opt_box_autoadd_bridge_state_error(dynamic raw);
 
   @protected
@@ -2445,6 +2458,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeStaleResource sse_decode_box_autoadd_bridge_stale_resource(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStartupRecovery sse_decode_box_autoadd_bridge_startup_recovery(
     SseDeserializer deserializer,
   );
 
@@ -3426,6 +3444,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeStartupRecovery sse_decode_bridge_startup_recovery(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeStartupStage sse_decode_bridge_startup_stage(
     SseDeserializer deserializer,
   );
@@ -4323,6 +4346,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeStartupRecovery? sse_decode_opt_box_autoadd_bridge_startup_recovery(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeStateError? sse_decode_opt_box_autoadd_bridge_state_error(
     SseDeserializer deserializer,
   );
@@ -5009,6 +5037,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_stale_resource(
     BridgeStaleResource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_startup_recovery(
+    BridgeStartupRecovery self,
     SseSerializer serializer,
   );
 
@@ -6180,6 +6214,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_startup_recovery(
+    BridgeStartupRecovery self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_startup_stage(
     BridgeStartupStage self,
     SseSerializer serializer,
@@ -7271,6 +7311,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(
     BridgePromptPrefixChangedReason? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_startup_recovery(
+    BridgeStartupRecovery? self,
     SseSerializer serializer,
   );
 

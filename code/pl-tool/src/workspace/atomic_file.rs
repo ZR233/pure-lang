@@ -91,7 +91,36 @@ fn atomic_write(path: &Path, content: &[u8], permissions: AtomicPermissions) -> 
     sync_directory(directory)
 }
 
+/// Moves an owned file or directory and synchronizes its parent entries.
+/// The caller must hold exclusive ownership of both paths and ensure the target is absent.
+///
+/// # Errors
+/// Returns the original move or synchronization error; a failed synchronization can follow a completed move.
+pub fn move_owned_path(source: &Path, target: &Path) -> io::Result<()> {
+    if target.try_exists()? {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "move target exists",
+        ));
+    }
+    move_path(source, target, false)?;
+    sync_directory(
+        source
+            .parent()
+            .ok_or_else(|| io::Error::other("source has no parent"))?,
+    )?;
+    sync_directory(
+        target
+            .parent()
+            .ok_or_else(|| io::Error::other("target has no parent"))?,
+    )
+}
+
 fn replace_file(source: &Path, target: &Path) -> io::Result<()> {
+    move_path(source, target, true)
+}
+
+fn move_path(source: &Path, target: &Path, replace: bool) -> io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -110,14 +139,20 @@ fn replace_file(source: &Path, target: &Path) -> io::Result<()> {
             .encode_wide()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
-        // SAFETY: 两个路径缓冲区均以 NUL 结尾，并在调用期间保持有效。
-        let replaced = unsafe {
-            MoveFileExW(
-                source.as_ptr(),
-                target.as_ptr(),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-        };
+        if source[..source.len() - 1].contains(&0) || target[..target.len() - 1].contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "path contains NUL",
+            ));
+        }
+        let flags = MOVEFILE_WRITE_THROUGH
+            | if replace {
+                MOVEFILE_REPLACE_EXISTING
+            } else {
+                0
+            };
+        // SAFETY: 两个拥有的路径缓冲区无内部 NUL，均以 NUL 结尾，在同步调用期间保持有效；系统不保留指针。
+        let replaced = unsafe { MoveFileExW(source.as_ptr(), target.as_ptr(), flags) };
         if replaced == 0 {
             return Err(io::Error::last_os_error());
         }
@@ -126,6 +161,7 @@ fn replace_file(source: &Path, target: &Path) -> io::Result<()> {
 
     #[cfg(not(windows))]
     {
+        let _ = replace;
         fs::rename(source, target)
     }
 }

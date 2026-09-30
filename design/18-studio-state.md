@@ -54,6 +54,10 @@ directory command 发布 canonical delta。
 
 ## 18.3 Activation
 
+启动通过唯一异步初始化入口返回已经就绪的运行时；构造和初始化不再分两次发布。
+桥接与服务端仅安装成功结果，普通读取不改变启动状态，失败不由后续查询隐式重试。
+启动进度与恢复摘要来自同一协调器，展示并行准备、汇合、备份重建及终态；恢复规则见 [17.2](./17-studio-storage.md#172-启动与按需激活)。
+RuntimeSnapshot 的可空 `startupRecovery` 携带 `backupPath`、脱敏 `reason` 与 Unix 秒 `createdAt`，只在本次恢复完成后发布；界面保留可关闭的备份提示，不由后台工作区审计覆盖。
 启动只等待迁移、全局 TOML、轻量目录和本地预置资源就绪。启动不打开会话数据库、不读取会话
 checkpoint，也不调度全部会话恢复。全局 worktree/数据根审计由 runtime 持有的后台任务完成，
 Recovery 使用现有 ObservedResource 发布 loading、ready 和失败状态，

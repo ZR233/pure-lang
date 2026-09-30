@@ -81,7 +81,8 @@ pub use studio::{
     StudioHostKind, StudioRecoveryIssue, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
     StudioRecoveryIssueScope, StudioRecoveryWorktreeOwner, StudioRuntime,
     StudioRuntimeLifecycleState, StudioRuntimeOptions, StudioRuntimeSnapshot,
-    StudioRuntimeStateKind, StudioStartNewThreadResponse, StudioStore, StudioThreadSubscription,
+    StudioRuntimeStateKind, StudioStartNewThreadResponse, StudioStartupError,
+    StudioStartupErrorKind, StudioStartupRecovery, StudioStore, StudioThreadSubscription,
     StudioUpdateStateSnapshot, StudioWorktreeRecoveryPreview, ThreadRecord,
 };
 pub use updater::{

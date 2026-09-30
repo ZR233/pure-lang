@@ -122,7 +122,7 @@ impl CatalogStore {
     /// 从磁盘加载（缺失时为带 revision 1 的空目录）。
     pub(in crate::studio) async fn load(path: PathBuf) -> Result<Self> {
         let document = match tokio::fs::read_to_string(&path).await {
-            Ok(content) => decode(&path, &content)?,
+            Ok(content) => decode(&path, &content).map_err(crate::studio::startup::data_error)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => CatalogDocument {
                 schema_version: CATALOG_SCHEMA_VERSION,
                 revision: 1,

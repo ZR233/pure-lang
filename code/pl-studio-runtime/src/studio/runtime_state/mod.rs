@@ -258,6 +258,7 @@ pub struct StudioRuntimeSnapshot {
     pub revision: u64,
     pub state: StudioRuntimeLifecycleState,
     pub active_turns: Vec<StudioActiveTurn>,
+    pub startup_recovery: Option<crate::StudioStartupRecovery>,
 }
 
 impl StudioRuntimeSnapshot {
@@ -328,6 +329,7 @@ impl StudioRuntimeState {
                     unix_seconds(),
                 )),
                 active_turns: Vec::new(),
+                startup_recovery: None,
             })),
         }
     }

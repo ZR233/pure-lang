@@ -41,6 +41,46 @@ class _StudioFatalError extends ConsumerWidget {
   );
 }
 
+class _StartupRecoveryBanner extends StatelessWidget {
+  const _StartupRecoveryBanner();
+
+  @override
+  Widget build(BuildContext context) =>
+      ValueListenableBuilder<StartupRecoveryReport?>(
+        valueListenable: FrbStudioApi.startupRecovery,
+        builder: (context, report, _) {
+          if (report == null) return const SizedBox.shrink();
+          return ColoredBox(
+            key: const ValueKey('startup-recovery-report'),
+            color: Theme.of(context).colorScheme.errorContainer,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(context.l10n.startupRecoveredNotice),
+                        SelectableText(
+                          '${report.reason}\n${report.backupPath}',
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: context.l10n.recoveryArchiveDismiss,
+                    onPressed: () => FrbStudioApi.startupRecovery.value = null,
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+}
+
 class _ApplicationRecoveryBanner extends StatefulWidget {
   const _ApplicationRecoveryBanner({required this.issues});
 

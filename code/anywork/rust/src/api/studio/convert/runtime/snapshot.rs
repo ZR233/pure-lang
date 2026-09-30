@@ -6,6 +6,13 @@ use pl_studio_runtime::*;
 pub(crate) fn runtime_snapshot(snapshot: StudioRuntimeSnapshot) -> RuntimeSnapshot {
     RuntimeSnapshot {
         revision: snapshot.revision,
+        startup_recovery: snapshot
+            .startup_recovery
+            .map(|report| BridgeStartupRecovery {
+                backup_path: report.backup_path,
+                reason: report.reason,
+                created_at: report.created_at,
+            }),
         state: match snapshot.state {
             StudioRuntimeLifecycleState::Uninitialized(state) => {
                 BridgeRuntimeState::Uninitialized(BridgeRuntimeTimestamp {

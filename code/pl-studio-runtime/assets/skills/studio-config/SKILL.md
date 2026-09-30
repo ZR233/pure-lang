@@ -23,13 +23,14 @@ The home directory can be overridden, in resolution order:
 2. `ANYWORK_HOME` environment variable (absolute, non-empty)
 3. default `<user home>/.anywork`
 
-Product metadata lives in `<home>/studio/studio.sqlite`, and model/tool call records live in `<home>/studio/calls.sqlite`. Each Thread keeps its current state checkpoint in `<home>/sessions/<thread-key>/state.toml` plus the previous `state.prev.toml`, and its Timeline history in the sibling `history.sqlite`; `<thread-key>` is derived from the Thread identity, not the raw id. Never edit these files by hand.
+Product metadata lives in `<home>/studio/v2/studio.sqlite`; global directories and product settings live in `<home>/v2/`. Call records use `<home>/v2/calls/calls.sqlite` and rolling logs under `logs/`. Each Thread keeps its history and current checkpoint in `<home>/v2/sessions/<thread-key>/history.sqlite`; `<thread-key>` is derived from the Thread identity. Old-version directories remain isolated. Never edit these files by hand.
 
 ## Format Rules
 
 - TOML with snake_case keys; the current runtime accepts `schema_version = 20`. Changing the version number alone does not migrate a configuration.
 - A missing file means in-memory defaults shown in Settings; nothing is written until you save.
-- Version upgrades must preserve anywork user settings and credential associations through migration; backup followed by a reset is not a migration. Startup migrates schema 18 to 19 by removing only `planner` from `disabled_system_agents`, then migrates 19 to 20 by copying the old `planner` route to `mode.simple` and `mode.task` before deleting it from child routes. Migration failures preserve the original. Do not rely on restart to repair an invalid file; preserve the original and report the gap instead.
+- Known version upgrades preserve user settings and credential associations through migration. Startup migrates schema 18 to 19 by removing only `planner` from `disabled_system_agents`, then migrates 19 to 20 by copying the old `planner` route to `mode.simple` and `mode.task` before deleting it from child routes. Migration runs before recovery; a reset is never a substitute for a supported migration.
+- Unrecoverable global data corruption, unsupported versions and invalid references trigger one complete startup backup of `config.toml`, `agents/`, `v2/` and `studio/v2/` under `<home>/startup-backups/<unique-id>/original/`, followed by initialization with current defaults. The durable `startup-recovery.toml` journal resumes an interrupted recovery. The UI reports the backup location. Permission, capacity, file-lock, credential-service and internal failures stop initialization without resetting. System credentials, old-version directories, remote connection configuration and physical project/worktree directories are preserved. Individual session read failures do not reset global data.
 - Explicit reload while Studio is running remains strict: it reports the invalid file instead of replacing it.
 - Saving from Settings writes atomically. External file edits are not picked up automatically; use explicit reload after editing a valid current-schema file.
 

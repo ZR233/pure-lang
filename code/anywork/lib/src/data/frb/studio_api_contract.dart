@@ -242,6 +242,7 @@ class FrbStudioApi
   static final startupProgress = ValueNotifier(
     StudioStartupPhase.loadingBridge,
   );
+  static final startupRecovery = ValueNotifier<StartupRecoveryReport?>(null);
 
   @override
   Future<RecoveryStateSnapshot> retryRecovery() async {
@@ -251,6 +252,15 @@ class FrbStudioApi
 
   static void _readStartupPhase() {
     startupProgress.value = switch (frb.readStartupStage()) {
+      frb.BridgeStartupStage.preparing => StudioStartupPhase.preparing,
+      frb.BridgeStartupStage.waitingForSteps =>
+        StudioStartupPhase.waitingForSteps,
+      frb.BridgeStartupStage.closingResources =>
+        StudioStartupPhase.closingResources,
+      frb.BridgeStartupStage.backingUp => StudioStartupPhase.backingUp,
+      frb.BridgeStartupStage.resetting => StudioStartupPhase.resetting,
+      frb.BridgeStartupStage.startingServices =>
+        StudioStartupPhase.startingServices,
       frb.BridgeStartupStage.openingStorage =>
         StudioStartupPhase.openingStorage,
       frb.BridgeStartupStage.loadingConfiguration =>
@@ -259,7 +269,7 @@ class FrbStudioApi
         StudioStartupPhase.readingProjects,
       frb.BridgeStartupStage.preparingResources =>
         StudioStartupPhase.preparingResources,
-      frb.BridgeStartupStage.ready => StudioStartupPhase.readingState,
+      frb.BridgeStartupStage.ready => StudioStartupPhase.ready,
       frb.BridgeStartupStage.failed => StudioStartupPhase.failed,
     };
   }
@@ -268,9 +278,16 @@ class FrbStudioApi
   static Future<void>? _shutdownFuture;
   static Future<void> Function()? _initializationOverrideForTesting;
   static bool _rustInitialized = false;
+  static bool _runtimeInitialized = false;
   ProviderCatalogView? _providerCatalogCache;
 
   static Future<void> ensureReady() => _ensureReady();
+
+  static void retryInitialization() {
+    if (startupProgress.value == StudioStartupPhase.failed) {
+      _initFuture = null;
+    }
+  }
 
   @visibleForTesting
   static void debugOverrideInitialization(
@@ -312,16 +329,22 @@ class FrbStudioApi
             (_) => _readStartupPhase(),
           );
           try {
-            await frb.startStudioRuntime();
-            _readStartupPhase();
+            final runtime = await frb.startStudioRuntime();
+            _runtimeInitialized = true;
+            final report = runtime.startupRecovery;
+            startupRecovery.value = report == null
+                ? null
+                : StartupRecoveryReport(
+                    backupPath: report.backupPath,
+                    reason: report.reason,
+                    createdAt: report.createdAt.toInt(),
+                  );
+            startupProgress.value = StudioStartupPhase.ready;
           } finally {
             progress.cancel();
           }
         }
       } catch (error, stackTrace) {
-        if (identical(_initFuture, attempt)) {
-          _initFuture = null;
-        }
         startupProgress.value = StudioStartupPhase.failed;
         Error.throwWithStackTrace(_studioFailure(error), stackTrace);
       }
@@ -345,7 +368,7 @@ class FrbStudioApi
     }
     if (!_rustInitialized) return;
     try {
-      await frb.shutdownRuntime();
+      if (_runtimeInitialized) await frb.shutdownRuntime();
     } on Object {
       // Preserve the native owner and allow an explicit retry of failed cleanup.
       _shutdownFuture = null;
@@ -353,6 +376,7 @@ class FrbStudioApi
     }
     RustLib.dispose();
     _rustInitialized = false;
+    _runtimeInitialized = false;
     _initFuture = null;
   }
 
@@ -477,7 +501,6 @@ class FrbStudioApi
     debugPrint(
       'startup_stage=read_state elapsed_ms=${watch.elapsedMilliseconds}',
     );
-    startupProgress.value = StudioStartupPhase.ready;
     return state;
   }
 

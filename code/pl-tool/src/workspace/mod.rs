@@ -9,7 +9,7 @@ pub use path_policy::{PathAccess, ToolPathPolicy};
 
 mod instructions;
 
-pub use atomic_file::{WriteMode, write_file_atomically, write_file_with_mode};
+pub use atomic_file::{WriteMode, move_owned_path, write_file_atomically, write_file_with_mode};
 
 pub use instructions::{
     WorkspaceInstructionDocument, WorkspaceInstructions, load_workspace_instruction_documents,

@@ -12,9 +12,12 @@
 mod builder;
 mod external_state;
 mod framework;
+mod initialization;
 mod project;
 mod recovery;
 mod recovery_task;
 mod snapshot;
+#[cfg(test)]
+mod startup_fault_tests;
 mod thread_activation;
 mod transitions;

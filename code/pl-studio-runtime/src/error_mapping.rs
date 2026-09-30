@@ -17,6 +17,22 @@ fn studio_error_from_ref(error: &anyhow::Error) -> StudioError {
     if let Some(error) = error.downcast_ref::<StudioError>() {
         return error.clone();
     }
+    if let Some(startup) = error.downcast_ref::<crate::StudioStartupError>() {
+        if let Some(original) = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<StudioError>())
+        {
+            return original.clone();
+        }
+        let (code, retryable) = match startup.kind {
+            crate::StudioStartupErrorKind::PersistentData => (StudioErrorCode::Storage, false),
+            crate::StudioStartupErrorKind::Environment => (StudioErrorCode::Storage, true),
+            crate::StudioStartupErrorKind::Cancelled => (StudioErrorCode::Cancelled, true),
+            crate::StudioStartupErrorKind::Internal => (StudioErrorCode::Internal, false),
+        };
+        return StudioError::new(code, format!("应用初始化失败（{}，{:?}）", startup.step, startup.kind), retryable)
+            .with_details(serde_json::json!({"startupStep": startup.step, "startupKind": format!("{:?}", startup.kind)}));
+    }
     if error.downcast_ref::<StudioDatabaseError>().is_some()
         || error.downcast_ref::<std::io::Error>().is_some()
     {

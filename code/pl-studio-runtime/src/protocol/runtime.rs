@@ -62,6 +62,12 @@ pub struct StudioLspServer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum StudioStartupStage {
+    Preparing,
+    WaitingForSteps,
+    ClosingResources,
+    BackingUp,
+    Resetting,
+    StartingServices,
     OpeningStorage,
     LoadingConfiguration,
     ReadingProjects,

@@ -66,11 +66,9 @@ pub async fn serve(options: ServerOptions) -> anyhow::Result<()> {
     let listener = TcpListener::bind(options.listen)
         .await
         .with_context(|| format!("failed to bind {}", options.listen))?;
-    let runtime =
-        StudioRuntime::with_options(StudioRuntimeOptions::http_server(options.studio_home))
-            .await
-            .map_err(anyhow::Error::new)?;
-    runtime.start_runtime().await?;
+    let runtime = StudioRuntime::initialize(StudioRuntimeOptions::http_server(options.studio_home))
+        .await
+        .map_err(anyhow::Error::new)?;
     let shutdown = CancellationToken::new();
     let app = router(AppState::new(runtime.clone(), shutdown.clone()));
     let signal = shutdown_signal(shutdown.clone());

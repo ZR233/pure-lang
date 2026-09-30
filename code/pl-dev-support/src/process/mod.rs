@@ -13,6 +13,8 @@ use std::process::{Command, ExitStatus, Stdio};
 
 pub use anyhow::Result;
 
+#[cfg(target_os = "linux")]
+mod unix;
 #[cfg(windows)]
 mod windows;
 
@@ -86,38 +88,47 @@ pub fn run_checked(command: &mut Command, display: &str) -> Result<()> {
 /// child's whole lifetime, and on Windows the current process is first placed
 /// in a kill-on-close Job Object so the resident tree cannot outlive it.
 /// The caller's terminal stays attached for stdout/stderr.
+/// Linux engineering entrypoints exclusively create and wait for children during this call;
+/// existing children are rejected before enabling descendant adoption. Resident runs are serialized.
 ///
 /// # Errors
 /// Returns an error when the process tree cannot be owned (Windows), the
 /// command cannot be started, or the wait fails; a non-zero exit is reported
 /// through the shared failure summary like in [`run_checked`].
 pub fn run_resident_checked(command: &mut Command, display: &str) -> Result<()> {
-    configure_background_command(command);
-    print_command_context(command, display);
-    own_current_process_tree()
-        .with_context(|| format!("failed to own resident command process tree: {display}"))?;
+    #[cfg(target_os = "linux")]
+    {
+        unix::run_resident(command, display)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        configure_background_command(command);
+        print_command_context(command, display);
+        own_current_process_tree()
+            .with_context(|| format!("failed to own resident command process tree: {display}"))?;
 
-    command.stdin(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("failed to start command from PATH: {display}"))?;
-    eprintln!(
-        "resident command started: pid={}, command={display}",
-        child.id()
-    );
-    let control = child
-        .stdin
-        .take()
-        .with_context(|| format!("failed to keep resident command stdin open: {display}"))?;
-    let status = child
-        .wait()
-        .with_context(|| format!("failed to wait for resident command: {display}"))?;
-    drop(control);
-    eprintln!(
-        "resident command exited: pid={}, status={status}",
-        child.id()
-    );
-    ensure_success(status, display)
+        command.stdin(Stdio::piped());
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("failed to start command from PATH: {display}"))?;
+        eprintln!(
+            "resident command started: pid={}, command={display}",
+            child.id()
+        );
+        let control = child
+            .stdin
+            .take()
+            .with_context(|| format!("failed to keep resident command stdin open: {display}"))?;
+        let status = child
+            .wait()
+            .with_context(|| format!("failed to wait for resident command: {display}"))?;
+        drop(control);
+        eprintln!(
+            "resident command exited: pid={}, status={status}",
+            child.id()
+        );
+        ensure_success(status, display)
+    }
 }
 
 /// Runs [command] to completion, feeding [input] to its stdin first.

@@ -71,6 +71,7 @@ impl ConfigRuntime {
     /// 从磁盘加载并校验初始 desired config。
     pub fn initialize(store: ConfigStore) -> ConfigRuntimeResult<Self> {
         let config = store.load_for_startup()?;
+        super::AgentProfileCatalog::validate_for_startup(store.paths(), &config)?;
         Ok(Self {
             store,
             command_lock: Arc::new(Mutex::new(())),
