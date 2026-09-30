@@ -8,6 +8,7 @@
 *.ps1 text eol=crlf
 *.rc text eol=crlf
 *.iss text eol=crlf
+*.isl text eol=crlf
 
 code/anywork/*/flutter/generated_plugin_registrant.cc text eol=lf
 code/anywork/*/flutter/generated_plugin_registrant.h text eol=lf

@@ -43,12 +43,10 @@ LicenseFile={#SourceDir}\LICENSE
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "zh"; MessagesFile: "compiler:Default.isl"
+Name: "zh"; MessagesFile: "Languages\ChineseSimplified.isl"
 Name: "zhTW"; MessagesFile: "compiler:Default.isl"
 
 [LangOptions]
-zh.LanguageName=简体中文
-zh.LanguageID=$0804
 zhTW.LanguageName=繁體中文
 zhTW.LanguageID=$0404
 

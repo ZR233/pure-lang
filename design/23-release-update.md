@@ -53,6 +53,9 @@ Flutter 与 Rust toolchain 版本由 workflow 固定；第三方 Action 固定�
 完全一致，不接受带 `v`、prerelease 或 build metadata 的形式。stage 复用 GUI 构建生成
 per-user Inno Setup 安装器和便携 zip；安装器使用稳定 AppId，默认安装到 LocalAppData，
 声明 CloseApplications/RestartApplications。打包输入排除 PDB，包含 LICENSE 与第三方声明。
+安装器的标准安装向导、错误提示与卸载界面支持英语和简体中文；首次安装根据系统界面语言
+选择默认语言，用户可以手动切换，后续安装沿用已保存的语言选择。简体中文资源随源码固定，
+本地与发布构建使用同一份翻译，不依赖编译器安装目录是否附带中文资源。
 便携版只供手动分发；便携用户执行应用内升级时进入正式安装版，不对当前运行目录做原地
 覆盖。
 
