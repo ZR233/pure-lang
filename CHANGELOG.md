@@ -5,6 +5,24 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.0.0](https://github.com/ZR233/pure-lang/compare/v5.0.0...v6.0.0) (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **studio:** 删除分离的运行时构造与启动接口，调用方改用 StudioRuntime::initialize 或 initialize_with_observer 获取已就绪运行时。
+
+### Bug Fixes
+
+* **release:** 修复 Windows 安装程序简体中文界面 ([403c4a7](https://github.com/ZR233/pure-lang/commit/403c4a7eb5d2c2fb12f519cbbc7d11ca1fd8fe2f))
+* **studio:** 统一初始化并恢复启动持久化故障 ([cd1d891](https://github.com/ZR233/pure-lang/commit/cd1d8914b41af907ef2b3db799dbf1a948763175))
+* **studio:** 统一条目布局协调并优化图片展示 ([147f7f8](https://github.com/ZR233/pure-lang/commit/147f7f8049f1cbd460d6422af6de92b14c05a4d7))
+
+
+### Documentation
+
+* **studio:** 完善只读规划与并行探索协作提示 ([ce8aa2c](https://github.com/ZR233/pure-lang/commit/ce8aa2c61f3a5dda997f51e12f41d6b52a3ae276))
+
 ## [5.0.0](https://github.com/ZR233/pure-lang/compare/v4.0.0...v5.0.0) (2026-09-30)
 
 
