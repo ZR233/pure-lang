@@ -201,12 +201,8 @@ class _PersistenceStatusPanelState
         workspaces.values.any(
           (workspace) => workspace.storage?.pressurePaused == true,
         );
-    final statisticsGap = queue?.statisticsGap == true;
-    if (!attention &&
-        !historyFault &&
-        block == null &&
-        !pressurePaused &&
-        !statisticsGap) {
+    // 调用日志缺口属于统计页，不触发可靠保存横幅。
+    if (!attention && !historyFault && block == null && !pressurePaused) {
       return const SizedBox.shrink();
     }
     final colors = Theme.of(context).colorScheme;

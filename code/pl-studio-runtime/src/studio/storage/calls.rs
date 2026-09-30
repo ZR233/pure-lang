@@ -14,8 +14,8 @@
 //! 索引/统计）。队列满或写入失败只记录统计缺口，不阻塞 Thread 的权威历史提交。
 //!
 //! 打开时会校验 `calls_meta.schema_version`：schema <= 4 的旧库先保全累计摘要与性能样本、再把保留
-//! 期正文转换进日志，全部成功后才前移版本并删除旧结构；未来版本显式失败并保留原字节。运行期不会
-//! 触碰用户 home 下的旧数据根。
+//! 期正文转换进日志，全部成功后才前移版本并删除旧结构；schema 5 修复遗留样本外键，并从保留
+//! 日志重建性能投影。未来版本显式失败并保留原字节，不触碰用户 home 下的旧数据根。
 
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -49,7 +49,7 @@ pub(crate) use summary::{PurposeUsageProjection, SessionUsageProjection};
 use event::CallLogRecord;
 use log::{CallLog, LOG_CLEANUP_INTERVAL};
 
-pub(crate) const CALLS_SCHEMA_VERSION: i64 = 5;
+pub(crate) const CALLS_SCHEMA_VERSION: i64 = 6;
 /// `calls` 目录下日志段所在子目录名。
 const CALL_LOG_DIR_NAME: &str = "logs";
 /// 一天对应的秒数；日志轮转/保留期以 UTC 自然日为准。

@@ -328,6 +328,7 @@ impl CallLog {
         segments.sort_by_key(|segment| (segment.day, segment.seq));
         let tx = db.begin().await?;
         tx.execute_unprepared("DELETE FROM call_log_index").await?;
+        let mut recovered_samples = 0usize;
         for segment in segments {
             ensure!(
                 segment.len <= SEGMENT_MAX_BYTES,
@@ -354,9 +355,29 @@ impl CallLog {
                     record.truncated,
                 )
                 .await?;
+                // The JSONL append can survive a rolled-back SQLite batch. Rebuild
+                // both disposable projections, including samples lost by schema 5's
+                // legacy foreign key, without reading or adding reliable cost totals.
+                if record.status == CallStatus::Committed.as_str()
+                    && matches!(
+                        record.kind.as_str(),
+                        event::CALL_LOG_KIND_BILLING | event::CALL_LOG_KIND_MIGRATED
+                    )
+                {
+                    super::performance::record(
+                        &tx,
+                        &super::performance::sample_from_record(&record),
+                    )
+                    .await?;
+                    recovered_samples += 1;
+                    if recovered_samples.is_multiple_of(256) {
+                        super::performance::trim(&tx).await?;
+                    }
+                }
                 offset += line.len();
             }
         }
+        super::performance::trim(&tx).await?;
         tx.commit().await?;
         Ok(())
     }

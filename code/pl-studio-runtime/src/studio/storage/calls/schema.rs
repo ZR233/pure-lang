@@ -1,4 +1,4 @@
-//! `calls.sqlite` 的当前 schema、启动清理与 schema 4 → 5 的保源迁移。
+//! `calls.sqlite` 的当前 schema、启动清理与 旧调用结构 → 当前结构 的保源迁移。
 //!
 //! 迁移只做加法并保持可重入：先把旧 `model_calls` 的累计费用保全为摘要、把成功调用保全为性能样本，
 //! 再把保留期内的正文按批转换成 JSONL 日志记录（按 `(thread_id, call_id, kind)` 幂等去重），最后
@@ -99,8 +99,17 @@ pub(super) async fn initialize(
         ))
         .await?;
     }
-    if version < CALLS_SCHEMA_VERSION {
+    if version < 5 {
         migrate_from_legacy(db, log).await?;
+    } else if version < CALLS_SCHEMA_VERSION {
+        let tx = db.begin().await?;
+        detach_legacy_performance(&tx).await?;
+        tx.execute_raw(statement(
+            "UPDATE calls_meta SET schema_version=? WHERE id=1",
+            vec![CALLS_SCHEMA_VERSION.into()],
+        ))
+        .await?;
+        tx.commit().await?;
     }
     retry_pending_cleanup(db, root_dir).await?;
     Ok(())
@@ -230,6 +239,45 @@ async fn ensure_schema(db: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
+/// Keep the performance projection independent of retired source tables. This also
+/// repairs schema 5 databases whose parent was already dropped; log replay refills
+/// any samples erased by the old cascading delete, without touching billing totals.
+async fn detach_legacy_performance(tx: &DatabaseTransaction) -> Result<()> {
+    let foreign_keys = tx
+        .query_all_raw(statement(
+            "PRAGMA foreign_key_list(performance_samples)",
+            vec![],
+        ))
+        .await?;
+    if foreign_keys.is_empty() {
+        return Ok(());
+    }
+    ensure!(
+        foreign_keys.iter().all(|row| row
+            .try_get::<String>("", "table")
+            .is_ok_and(|table| table == "model_calls")),
+        "unexpected performance sample foreign key; existing data preserved"
+    );
+    tx.execute_unprepared(
+        "CREATE TABLE performance_samples_detached (
+            thread_id TEXT NOT NULL, call_id TEXT NOT NULL, completed_at INTEGER NOT NULL,
+            provider_instance_id TEXT, provider_display_name TEXT, configured_model TEXT,
+            sent_model TEXT, reported_model TEXT, reasoning_effort TEXT, output_tokens INTEGER,
+            ttft_millis INTEGER, decode_millis INTEGER, response_millis INTEGER,
+            PRIMARY KEY(thread_id,call_id));
+         INSERT INTO performance_samples_detached
+            SELECT thread_id,call_id,completed_at,provider_instance_id,provider_display_name,
+                   configured_model,sent_model,reported_model,reasoning_effort,output_tokens,
+                   ttft_millis,decode_millis,response_millis FROM performance_samples;
+         DROP TABLE performance_samples;
+         ALTER TABLE performance_samples_detached RENAME TO performance_samples;
+         CREATE INDEX performance_samples_by_completion
+            ON performance_samples(completed_at DESC,thread_id DESC,call_id DESC);",
+    )
+    .await?;
+    Ok(())
+}
+
 /// 把旧库保全地迁移到当前日志格式；只有全部成功才前移版本并删除旧结构。
 async fn migrate_from_legacy(db: &DatabaseConnection, log: &mut CallLog) -> Result<()> {
     let from_version: i64 = db
@@ -263,8 +311,10 @@ async fn migrate_from_legacy(db: &DatabaseConnection, log: &mut CallLog) -> Resu
     if table_exists(db, "tool_calls").await? {
         convert_legacy_tools(db, log).await?;
     }
-    // Publishing the version and retiring source tables is a single atomic step.
+    // Detach the child table before dropping model_calls: its old ON DELETE CASCADE
+    // would otherwise erase the preserved samples and leave an unusable foreign key.
     let tx = db.begin().await?;
+    detach_legacy_performance(&tx).await?;
     tx.execute_unprepared("DROP TABLE IF EXISTS model_calls; DROP TABLE IF EXISTS tool_calls; DROP TABLE IF EXISTS call_bodies;").await?;
     tx.execute_raw(statement(
         "UPDATE calls_meta SET schema_version=?, pending_cleanup=1 WHERE id=1",
@@ -554,6 +604,13 @@ CREATE TABLE tool_calls (
     body_ref TEXT,
     PRIMARY KEY(thread_id, call_id)
 );
+CREATE TABLE performance_samples (
+    thread_id TEXT NOT NULL,
+    call_id TEXT NOT NULL,
+    completed_at INTEGER NOT NULL,
+    PRIMARY KEY(thread_id,call_id),
+    FOREIGN KEY(thread_id,call_id) REFERENCES model_calls(thread_id,call_id) ON DELETE CASCADE
+);
 CREATE TABLE call_bodies (
     body_ref TEXT PRIMARY KEY,
     byte_length INTEGER NOT NULL,
@@ -724,6 +781,101 @@ async fn convert_legacy_tools(db: &DatabaseConnection, log: &mut CallLog) -> Res
 #[cfg(test)]
 mod storage_fault_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn published_v5_repairs_foreign_key_and_replays_lost_samples_without_rebilling()
+    -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("calls.sqlite");
+        seed_legacy_for_test(
+            &path,
+            "UPDATE calls_meta SET schema_version=5; DROP TABLE model_calls;",
+        )
+        .await?;
+        let db = Database::connect(crate::studio::paths::sqlite_url(&path)).await?;
+        ensure_schema(&db).await?;
+        let tx = db.begin().await?;
+        summary::replace(
+            &tx,
+            &SessionUsageProjection {
+                root_thread_id: "thread".into(),
+                thread_id: "thread".into(),
+                revision: 7,
+                has_unpriced_usage: false,
+                purpose_costs: vec![PurposeUsageProjection {
+                    purpose: None,
+                    estimated_costs: vec![RuntimeCostAmount {
+                        currency: "USD".into(),
+                        amount: 3.0,
+                    }],
+                }],
+            },
+        )
+        .await?;
+        tx.commit().await?;
+        db.close().await?;
+        let mut log = CallLog::open(temp.path().join("logs")).await?;
+        let record = CallLogRecord {
+            version: event::CALL_LOG_RECORD_VERSION,
+            kind: "billing".into(),
+            thread_id: "thread".into(),
+            call_id: "lost-sample".into(),
+            status: "committed".into(),
+            terminal: true,
+            recorded_at: crate::studio::unix_seconds(),
+            provider_instance_id: Some("provider".into()),
+            sent_model: Some("model".into()),
+            usage: Some(event::CallUsageRecord {
+                output_tokens: Some(41),
+                ..Default::default()
+            }),
+            timing: Some(event::CallTimingRecord {
+                ttft_millis: 2700,
+                decode_millis: 278,
+                response_millis: 2978,
+            }),
+            ..Default::default()
+        };
+        let (line, _) = event::encode_record(&record)?;
+        log.append(
+            event::record_day(record.recorded_at),
+            record.recorded_at,
+            &line,
+        )
+        .await?;
+        drop(log);
+        let store = CallsStore::open(&path).await?;
+        assert!(!store.statistics_gap());
+        assert_eq!(store.recent_performance_samples(10).await?.len(), 1);
+        assert_eq!(
+            store.performance_summary_rows().await?[0].completion_tokens,
+            41
+        );
+        // A fresh successful call must also insert into the repaired table.
+        let mut next = record;
+        next.call_id = "new-sample".into();
+        let tx = store.writer.db.begin().await?;
+        apply_billing(&mut *store.writer.log.lock().await, &tx, &next).await?;
+        tx.commit().await?;
+        assert_eq!(store.performance_summary_rows().await?[0].sample_count, 2);
+        assert_eq!(
+            store.session_cost_rollups().await?[0].estimated_costs[0].amount,
+            3.0
+        );
+        store.stop_best_effort();
+        let reopened = CallsStore::open(&path).await?;
+        assert!(!reopened.statistics_gap());
+        assert_eq!(
+            reopened.performance_summary_rows().await?[0].sample_count,
+            2
+        );
+        assert_eq!(
+            reopened.session_cost_rollups().await?[0].estimated_costs[0].amount,
+            3.0
+        );
+        reopened.stop_best_effort();
+        Ok(())
+    }
 
     #[tokio::test]
     async fn legacy_running_tool_arguments_and_review_billing_survive_migration() -> Result<()> {
