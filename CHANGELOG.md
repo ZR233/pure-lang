@@ -5,6 +5,152 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [5.0.0](https://github.com/ZR233/pure-lang/compare/v4.0.0...v5.0.0) (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **storage:** RequestAttempt 改为轻量执行记录，checkpoint 升级为新结构；旧持久化格式仅在显式迁移边界解码。
+* **studio:** 删除 embedded-remote-helpers feature；桌面发布必须携带 data/remote-helper 资源，Rust 宿主通过 RemoteHelperSource 显式选择随包或外部来源。
+* **pl-core:** ModelUsage adds total_tokens and ModelError.usage is now Box<ModelUsage>; update Rust struct literal consumers. Existing SQLite schema 8 databases require migration::migrate_to_current before opening.
+* **pl-core:** migrate_v6 和 migrate_v7 不再是公开入口；调用方改用 migrate_to_current。
+* **studio:** Thread model route updates now require expectedModelRouteRevision from the canonical modelRoute revision instead of expectedThreadRevision.
+* **studio:** SSH remote protocol upgraded to v6; client and helper must be updated together.
+* 移除 pl-tool 的 GitShellCredential、GitShellCommandRequest、git_shell_command、git_shell_credential_prelude 和 git_shell_retry_function；仓库外调用方需迁移到当前 Git 工具执行接口。
+* 移除 pl-tool::attachment 和 pl-output::HeadTailBuffer 等废弃公共接口。
+* **xtask:** 删除 cargo xtask build-rust-bridge；GUI 构建改用 cargo xtask build-gui，由其内部构建并注入 bridge。
+* **studio:** Studio 会话采用 v2 存储布局，不导入旧版本会话；供应商配置与凭据关联保留。
+* 重建公开 API 集成测试与本地模拟供应商
+* **studio:** Studio sessions no longer expose complete journal-driven runtime snapshots; history and calls use independent SQLite stores and existing homes must pass the staged migration.
+* **studio:** ThreadRuntimeUsage 使用 cacheUsage 替代 cacheHitRate 和 cacheMissTokens；Bridge 与 GUI 消费方须同步升级。
+* **studio:** planner is reserved for the main agent route and is no longer a spawnable child profile.
+* **model:** CompletionRequest 使用 AttachmentInput 来源对象；ProviderClient 改为借用运行时的类型化视图，移除旧附件准备接口与 live test 入口。
+* **agent-runtime:** 统一子代理 Turn 汇报与协作恢复
+* **studio:** SSH 密码认证与进程内密码 lease/askpass 机制移除，仅支持 ssh-agent 与密钥；桥协议 SshServerDto/SaveSshServerRequest/连接快照重塑为 别名模型，studio.sqlite 升级到 v21（ssh_servers 迁出为用户 ssh config 标记块）。
+
+### test
+
+* 重建公开 API 集成测试与本地模拟供应商 ([774d96e](https://github.com/ZR233/pure-lang/commit/774d96ecec15b9a52b038376c7c1a0572ba4aba9))
+
+
+### Features
+
+* **agent-runtime:** 子代理每 Turn 256 步且主代理保持无限预算 ([b840c26](https://github.com/ZR233/pure-lang/commit/b840c26faa9ae19e674d0e5ebffad572ce32b274))
+* **agent-runtime:** 统一会话工作区地址并在归档时清理工作树 ([ef121ce](https://github.com/ZR233/pure-lang/commit/ef121ce7e2ecffcc1cf77a4464814bc58a61fc76))
+* **model:** Coding Plan 接入智谱官方 Responses 协议端点 ([6f14a44](https://github.com/ZR233/pure-lang/commit/6f14a4407727544bcece4d6c1798ed833e922925))
+* **model:** 增加 OpenAI GPT-6 Sol 与 Luna 预设 ([8ef2d9e](https://github.com/ZR233/pure-lang/commit/8ef2d9efd4fea4c78771338c644f56a4351828b6))
+* **pl-core:** expose typed Thread persistence and shared search ([#67](https://github.com/ZR233/pure-lang/issues/67)) ([7c65688](https://github.com/ZR233/pure-lang/commit/7c656883ea3b19b0e4752f19e1ef08d70b740392))
+* **studio:** SSH 配置统一迁移 ~/.ssh/config 并支持在 VS Code 中打开工作区 ([57dd3c7](https://github.com/ZR233/pure-lang/commit/57dd3c7a1c6bb6a263f208510c90a341bc6a824f))
+* **studio:** 优化智能体列表展示 ([cf32ea7](https://github.com/ZR233/pure-lang/commit/cf32ea7f5c1c3d17c761e9eb32cdb640041c4763))
+* **studio:** 增加工作区打开菜单与终端支持 ([f58d50d](https://github.com/ZR233/pure-lang/commit/f58d50d221ac3c6ac5e0b406b3da8ec16986e3ee))
+* **studio:** 展示调用模型不一致 ([ba34f49](https://github.com/ZR233/pure-lang/commit/ba34f4928bc36d8ebb82be869398fe9eb3d8a1e3))
+* **studio:** 支持使用 Zed 打开工作区 ([ba962da](https://github.com/ZR233/pure-lang/commit/ba962da5ba1cf467a56910ca84f8e5142e9f2bfb))
+* **studio:** 支持按模型覆盖上下文自动压缩阈值 ([1fc5f8c](https://github.com/ZR233/pure-lang/commit/1fc5f8c53b6c00d33079922bd42f91196f320ad0))
+* **studio:** 支持粘贴图片并优化 DeepSeek 识图 ([f2f3f02](https://github.com/ZR233/pure-lang/commit/f2f3f02891664c5da8cc697e87691361949d23b6))
+* **studio:** 支持调整计划详情宽度 ([8add16d](https://github.com/ZR233/pure-lang/commit/8add16dfdde5bdaf48a0e7f1697f2b4dcd2ba0e3))
+* **studio:** 新会话支持本地目录与新建工作树工作区模式 ([fbdcc45](https://github.com/ZR233/pure-lang/commit/fbdcc453d5f4f26bb0fb5f35e011454949e35d34))
+* **studio:** 添加猫咪敲键盘启动动画 ([4ed10d5](https://github.com/ZR233/pure-lang/commit/4ed10d5d374b925c05c3398a565388235e166cf2))
+* **studio:** 统一按会话工作区地址打开工作区 ([878ef15](https://github.com/ZR233/pure-lang/commit/878ef1503fc348e17db72796ab8ed7e17a6ff057))
+* **studio:** 远程项目支持会话工作树 ([8b1a82c](https://github.com/ZR233/pure-lang/commit/8b1a82c01e81386b93afa11b45a95a719998f3c9))
+* **studio:** 重构可靠历史与有界聊天窗口 ([e85b3ae](https://github.com/ZR233/pure-lang/commit/e85b3ae9d99f6b3f780749a7d133c6518f50c45f))
+* **studio:** 隔离会话模型并保存 Mode 默认路由 ([1bc5407](https://github.com/ZR233/pure-lang/commit/1bc5407b48450a36c741dcadb7a6a6a1fd793873))
+
+
+### Bug Fixes
+
+* **agent-runtime:** 归档清理失败后的恢复必须落到可用会话工作区 ([17e6f7c](https://github.com/ZR233/pure-lang/commit/17e6f7c0670ca5d42203b7286ebf2264d7cdabf1))
+* **agent-runtime:** 让代理直接读取本地与 SSH 工作区图片 ([da7f440](https://github.com/ZR233/pure-lang/commit/da7f440930a94e8ebdca97e07ec8b51537631bce))
+* **agent-runtime:** 防止后台结果消息身份在历史裁剪后重复 ([09643f2](https://github.com/ZR233/pure-lang/commit/09643f235ec6cebdb54276b992efbac0021bf87b))
+* **model:** stop advertising ignored DeepSeek web search ([#69](https://github.com/ZR233/pure-lang/issues/69)) ([dca616f](https://github.com/ZR233/pure-lang/commit/dca616f75c733c7b04c812ab4858eacf03672d8f))
+* **model:** 对齐估算与请求准备的不兼容上下文分类并透出模型失败原因 ([585c100](https://github.com/ZR233/pure-lang/commit/585c1004c6b14265def2b2ff99c7a80661075d5d))
+* **model:** 避免大段 SSE 响应反复解析导致超时 ([fc0bdb3](https://github.com/ZR233/pure-lang/commit/fc0bdb3545c1bc344b851dd93d9769824735979f))
+* **pl-core:** 修复 SQLite Thread 用量累计与迁移 ([#68](https://github.com/ZR233/pure-lang/issues/68)) ([07262c7](https://github.com/ZR233/pure-lang/commit/07262c796d62e2aab7833dbc398b2d001177203d))
+* **release:** retry transient GraphQL failures in release dry run ([3878185](https://github.com/ZR233/pure-lang/commit/3878185b436a62de9bc0b7d368ccb97dc4c73203))
+* **studio:** archive unrecoverable migrations and start fresh ([43b9bfd](https://github.com/ZR233/pure-lang/commit/43b9bfd62d9ab4570653987b5bc5eaef6941b7ce))
+* **studio:** classify prompt admission errors during running turns ([eea000b](https://github.com/ZR233/pure-lang/commit/eea000b5e4439bdadbc89ea518946cabc4b0f84e))
+* **studio:** GUI 退出时收束远端 helper 与命令进程 ([7d59be8](https://github.com/ZR233/pure-lang/commit/7d59be81c228499c464b1640c379daa799d617ea))
+* **studio:** keep checkpoint recovery advisory and sync blobs on Windows ([14d4cd4](https://github.com/ZR233/pure-lang/commit/14d4cd4aa0757e063bd8981b0222179098a4d41f))
+* **studio:** show migration archive notice only once ([dd848c3](https://github.com/ZR233/pure-lang/commit/dd848c3093a9736506c2c52720f7a879c84586f4))
+* **studio:** 优化 Markdown 阅读排版与代码字体 ([f0fa25b](https://github.com/ZR233/pure-lang/commit/f0fa25b03aea269d4b7e1ff69c372d6c14339961))
+* **studio:** 优化并行子代理审查验收并统一中文提示词 ([6eee69a](https://github.com/ZR233/pure-lang/commit/6eee69a50e9cf1c9da6a7169abd31c2ce823f958))
+* **studio:** 优化调用历史模型层级展示 ([354bd29](https://github.com/ZR233/pure-lang/commit/354bd298603cb4f3e4b2ea14bf6c8dcb13c80619))
+* **studio:** 修复 Windows 下 ssh config 写入的未使用变量 ([b9eae19](https://github.com/ZR233/pure-lang/commit/b9eae199a0278dfe1ae36dfadc703929e80a8547))
+* **studio:** 修复 Windows 构建及工作区打开入口 ([3ac6b80](https://github.com/ZR233/pure-lang/commit/3ac6b80aedf33670165e27ca14ac8247f276496a))
+* **studio:** 修复 Windows 远程路径测试 ([#66](https://github.com/ZR233/pure-lang/issues/66)) ([d823b2b](https://github.com/ZR233/pure-lang/commit/d823b2b7033ec69bbb029d9c7430eb10c9e4568e))
+* **studio:** 修复上下文详情缓存命中率消失 ([4f0b192](https://github.com/ZR233/pure-lang/commit/4f0b19207f9c6ab589ab16f61f50d71ecb88e70f))
+* **studio:** 修复最新会话窗口补屏与历史分页 ([547512a](https://github.com/ZR233/pure-lang/commit/547512acf19d83aa65ca60dd9282d9896845b0e8))
+* **studio:** 修复历史会话归档失败 ([d5040c0](https://github.com/ZR233/pure-lang/commit/d5040c08947fdf6823ed1528d7bcce494912f5fc))
+* **studio:** 修复历史工具展开跳动与长正文重复截断 ([3d080b1](https://github.com/ZR233/pure-lang/commit/3d080b1a8dcc5805767659b1885a431b2d8a29ee))
+* **studio:** 修复历史滚动与模型可用性误报 ([1d47f2a](https://github.com/ZR233/pure-lang/commit/1d47f2a2367de3fccb84eb94488a921ece10f153))
+* **studio:** 修复历史翻页后滚轮无法返回最新 ([e8cf7df](https://github.com/ZR233/pure-lang/commit/e8cf7dfac3c97ebe5bacf7ceca60bc0c4e5d824e))
+* **studio:** 修复历史输入绑定冲突与模型媒体预检 ([09ce64d](https://github.com/ZR233/pure-lang/commit/09ce64d0f4d78ec0518d7617229295be3f8f5c3b))
+* **studio:** 修复后台输出流与原生界面验收交互 ([1c4e3c1](https://github.com/ZR233/pure-lang/commit/1c4e3c1e70cad547d6fee8dd22ae53d7f502afe6))
+* **studio:** 修复子代理消息身份过早释放导致执行阻塞 ([96782de](https://github.com/ZR233/pure-lang/commit/96782de19835b355ecf34d24d7314c73795489d9))
+* **studio:** 修复子会话终态唤醒与调用持久化水位 ([3f96fd7](https://github.com/ZR233/pure-lang/commit/3f96fd7857ab6fc8d5893bf8f240c1a15ab4e30b))
+* **studio:** 修复存储压力并限制统计与日志保留 ([fe748d7](https://github.com/ZR233/pure-lang/commit/fe748d7432345bed4847940b3fc4c745e0ddf9b7))
+* **studio:** 修复工具图片预览与放大查看 ([532ec54](https://github.com/ZR233/pure-lang/commit/532ec5495011e3c0192734edd1267249cd995530))
+* **studio:** 修复晚到工具结果投影并覆盖保存故障 ([9f2059e](https://github.com/ZR233/pure-lang/commit/9f2059eb285990a2966d370ddc09b76569befab2))
+* **studio:** 修复调用统计刷新与虚拟 GUI 验收 ([edb2087](https://github.com/ZR233/pure-lang/commit/edb208758abbc966a418925f61f4e947b351972e))
+* **studio:** 修复迁移后性能统计丢失与持久化横幅常驻 ([de289d0](https://github.com/ZR233/pure-lang/commit/de289d0316fe24c15a1fc66e0bcc1c41ed42d2a5))
+* **studio:** 修复远程工作树会话创建失败并支持运行中会话结束归档 ([8f0d3be](https://github.com/ZR233/pure-lang/commit/8f0d3bedff1987243653dad44bb5c5476768abc3))
+* **studio:** 修复隐藏输入导致的历史保存阻塞 ([7594946](https://github.com/ZR233/pure-lang/commit/7594946f3389f6d34bd4395b7a74a60b20c82571))
+* **studio:** 修正会话滚动高度估算与分页索引 ([8151aa1](https://github.com/ZR233/pure-lang/commit/8151aa109cb67a645f49001b0f1791fe7d8c3098))
+* **studio:** 修正工作区模式测试在 Windows 下的平台假设 ([5f4e40e](https://github.com/ZR233/pure-lang/commit/5f4e40e7268aa0d2729d9a0ee33a14c909d4f7b9))
+* **studio:** 同步规模验收的 SQL 历史窗口字段 ([4a7fb4c](https://github.com/ZR233/pure-lang/commit/4a7fb4cbbba7b7423868a3ec612fe0218ff33a4d))
+* **studio:** 完善 Windows VS Code 系统图标适配 ([ab7697d](https://github.com/ZR233/pure-lang/commit/ab7697d8b095dc555e5afda3859db60849c63223))
+* **studio:** 对齐编辑器 Markdown 样式并修复标题复制顺序 ([22bb141](https://github.com/ZR233/pure-lang/commit/22bb14120dc52760bd2434da22be16d94fbecc5c))
+* **studio:** 将计划者明确为主智能体 ([37563ad](https://github.com/ZR233/pure-lang/commit/37563ad8a26e28d93c0e69c77f61161def0ec2a0))
+* **studio:** 恢复重启后的计划确认状态 ([45641f4](https://github.com/ZR233/pure-lang/commit/45641f421cabbe2420960b0fde26bbf5a8560d63))
+* **studio:** 按最近用户消息元信息排序会话列表 ([41bf435](https://github.com/ZR233/pure-lang/commit/41bf435b52d00993e4a6befff855e0f7b9c4f27e))
+* **studio:** 整合累计缓存统计与最新主线 ([f6103d3](https://github.com/ZR233/pure-lang/commit/f6103d33ccc66f8312a93505c4127c2b219baf7d))
+* **studio:** 显示工作树会话悬停路径 ([7b89baf](https://github.com/ZR233/pure-lang/commit/7b89baf0941912e6f388af0e55e7936f343a17b4))
+* **studio:** 用系统 VS Code 图标替代会话更多菜单 ([f6da488](https://github.com/ZR233/pure-lang/commit/f6da488c3de98d45cfc9af958c7ba7390e7a88c4))
+* **studio:** 直接启动 VS Code 工作区避免外部链接确认 ([7e847d5](https://github.com/ZR233/pure-lang/commit/7e847d535cfa8c18a35dbb686bbeef50b23ad1bc))
+* **studio:** 禁止子代理继承父会话历史 ([5641815](https://github.com/ZR233/pure-lang/commit/56418155d38980d539c260644827c3c92e5e904f))
+* **studio:** 移除运行中发送打断提示 ([ba5ccd3](https://github.com/ZR233/pure-lang/commit/ba5ccd32332d5bd7f35148063342ef73cbd1e927))
+* **studio:** 稳定会话滚轮与滑块滚动并简化位置恢复 ([bb72122](https://github.com/ZR233/pure-lang/commit/bb72122613f7105bad8e12afcef7197971a25410))
+* **studio:** 精简工作区打开菜单 ([048aa27](https://github.com/ZR233/pure-lang/commit/048aa271e577437a263e351aebadb2c7c3a1327b))
+* **studio:** 统一分组模型选择并修复会话切换版本校验 ([b8cfb29](https://github.com/ZR233/pure-lang/commit/b8cfb29a2614ed31e269a0f5e1c320c628067b2d))
+* **studio:** 统一智能体设置与会话模型选择器 ([46c895d](https://github.com/ZR233/pure-lang/commit/46c895dcce636ac140d7b44590d8e4055f1feb16))
+* **studio:** 统一远程 worktree 路径规范化 ([833d969](https://github.com/ZR233/pure-lang/commit/833d969dc9345d5c949179fcaa0652989998ded4))
+* **studio:** 自动加载选中会话并隐藏正常保存诊断 ([3d26b6f](https://github.com/ZR233/pure-lang/commit/3d26b6f64a07c8edb42920f1b7c3b892c77451d1))
+* **studio:** 补齐会话恢复提交的历史引用初始化 ([aa2c7d2](https://github.com/ZR233/pure-lang/commit/aa2c7d21eee98e0e8315a91965f8df3e664854c8))
+* **studio:** 让模型文本能力图标清晰可见 ([3aecf4f](https://github.com/ZR233/pure-lang/commit/3aecf4f3587c30d7c60b50f892f43bbf46934fd2))
+* **studio:** 说明模型切换限制并移除 Esc 提示 ([862c344](https://github.com/ZR233/pure-lang/commit/862c344dcb5e5ca977edde3a5815f4c0f23f9e42))
+* **studio:** 避免正常排队写入触发持久化诊断 ([694d61c](https://github.com/ZR233/pure-lang/commit/694d61c68b268f6b1c1b134e84d4c2a476692e59))
+* **studio:** 避免远程助手链接器弃用警告 ([ede9586](https://github.com/ZR233/pure-lang/commit/ede9586de82cb6c87e4a12fc8cf094a472c71146))
+* **tool:** gate Linux-only exec test helpers ([e6c392d](https://github.com/ZR233/pure-lang/commit/e6c392df74e858a97a5763fa2b3ff914f0fd2076))
+* **xtask:** 仅在 Linux 编译 CMake 安装测试模块 ([dbb6d3d](https://github.com/ZR233/pure-lang/commit/dbb6d3d906ffa7f6eff1603c795e4cf0c671acee))
+
+
+### Performance
+
+* **studio:** 优化会话内存实时链路与活动界面 ([4034547](https://github.com/ZR233/pure-lang/commit/40345472ed475d3a7402b622e54ced3c6d99c13a))
+* **studio:** 重构惰性聊天列表并保障本地与远程图片展示 ([744709d](https://github.com/ZR233/pure-lang/commit/744709d1e4a8ccd2ab55126ad7bb5033974e3345))
+
+
+### Refactoring
+
+* **agent-runtime:** 统一子代理 Turn 汇报与协作恢复 ([9383dbd](https://github.com/ZR233/pure-lang/commit/9383dbded5168dcb8e6161b7be3442b44ce9ff97))
+* **model:** 统一协议执行栈与供应商附件处理 ([072e0ef](https://github.com/ZR233/pure-lang/commit/072e0eff43c75516288aed4acdc4b54eedc0818b))
+* **storage:** 分离可靠会话存储与滚动诊断日志 ([3a3c910](https://github.com/ZR233/pure-lang/commit/3a3c9101a60d820efbdc983f8e3b54136bb51fa4))
+* **studio:** replace journal with TOML checkpoints and SQLite history ([a2ee7cc](https://github.com/ZR233/pure-lang/commit/a2ee7ccc73dc851a89351cfef140804f7cb58b85))
+* **studio:** 分离分页历史与实时会话流 ([6a8735c](https://github.com/ZR233/pure-lang/commit/6a8735ca39c285fa05bf78e054c826ebacb8393c))
+* **studio:** 将 helper 改为桌面随包资源 ([be1823b](https://github.com/ZR233/pure-lang/commit/be1823b0c27feb2f47a5028c44e424f1639f095e))
+* **xtask:** 按需编译独立 GUI 验收工具 ([1bfcf7f](https://github.com/ZR233/pure-lang/commit/1bfcf7fa5888a37ff91f4d68a4652d64dfbcc403))
+* **xtask:** 精简 GUI 构建与移除闲置桥命令 ([9f1e418](https://github.com/ZR233/pure-lang/commit/9f1e4185bdd1f5a144433e215cd7f87be0d8204d))
+* 收敛重复存储与工具实现 ([93c42f2](https://github.com/ZR233/pure-lang/commit/93c42f2613421ac1bbcedbffcaf34d8b90430f36))
+* 清理遗留代码并合并重复逻辑 ([737e78b](https://github.com/ZR233/pure-lang/commit/737e78b095ecd37a3b3c241f88828cfed5cdf6c1))
+
+
+### Documentation
+
+* **agent-runtime:** 将系统提示词与协作规范的产品名统一为「糊来帮」 ([4a661a6](https://github.com/ZR233/pure-lang/commit/4a661a6bb2a398e58ac724dec64cade3eb5155af))
+* **studio:** 明确累计缓存统计与消费者升级契约 ([f5295ad](https://github.com/ZR233/pure-lang/commit/f5295ad1d5ff315eac07c6df747e96dfb1543949))
+* **studio:** 沉淀原生 GUI 人工验收技能 ([131c4c5](https://github.com/ZR233/pure-lang/commit/131c4c56ac63894151c4b8390736c750e362ea78))
+* **studio:** 统一会话工作区地址并定义归档清理语义 ([d676aa7](https://github.com/ZR233/pure-lang/commit/d676aa7fd26b3f453c32521192edfb5c8df792ff))
+* **studio:** 补全会话恢复对清理失败现场的处置语义 ([0ddef15](https://github.com/ZR233/pure-lang/commit/0ddef15972da3c0edee130df8a2973f72177131d))
+
 ## [4.0.0](https://github.com/ZR233/pure-lang/compare/v3.0.0...v4.0.0) (2026-09-17)
 
 
