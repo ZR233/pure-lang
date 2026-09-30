@@ -11,9 +11,7 @@ anywork 使用独立产品身份，默认仅访问 `~/.anywork`，凭据服务�
 仍遵循既有参数优先级。
 
 配置文件固定为 `~/.anywork/config.toml`（Windows 下 `%USERPROFILE%\.anywork\config.toml`）。
-桌面产品库保存在 `~/.anywork/studio/studio.sqlite`，每会话状态与历史保存在应用 home 根下的
-`~/.anywork/sessions/<storage-key>/`（`state.toml` / `history.sqlite`），全局调用库在
-`~/.anywork/calls/calls.sqlite`（存储合同见 [17](./17-studio-storage.md)）。用户 Agent Profile
+会话、产品库与调试日志的数据布局由 [存储契约](./17-studio-storage.md) 统一定义。用户 Agent Profile
 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代码常量为准。
 
 配置运行时在 Studio 启动时读取配置；此后普通对话和设置查询只读内存 canonical snapshot；

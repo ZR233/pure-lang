@@ -100,6 +100,7 @@ impl StudioStore {
 
     pub(crate) fn state(&self, thread_id: &str) -> StateStore {
         StateStore::new(self.thread_storage_dir(thread_id), thread_id)
+            .with_legacy_calls(self.calls.clone())
     }
 
     pub(crate) fn calls(&self) -> &CallsStore {

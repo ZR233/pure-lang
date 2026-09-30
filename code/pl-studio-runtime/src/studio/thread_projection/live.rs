@@ -648,6 +648,7 @@ pub(in crate::studio) struct LiveProjection {
     /// the projection emit a `turnUpdated` frame for each real phase transition instead of leaving
     /// the activity row at the phase captured when the Turn started.
     turn_phases: BTreeMap<String, TurnPhase>,
+    turn_failures: BTreeMap<String, pl_protocol::TurnFailure>,
     /// Identity of the attempt the resident streaming previews belong to.
     ///
     /// A new attempt uses entirely new observation identities, so the caches of the previous one no
@@ -712,6 +713,7 @@ impl LiveProjection {
             hidden_inputs: BTreeSet::new(),
             turns_seen: BTreeSet::new(),
             turn_phases: BTreeMap::new(),
+            turn_failures: BTreeMap::new(),
             preview_attempt: None,
             previews: BTreeMap::new(),
             observed: HashMap::new(),
@@ -801,6 +803,11 @@ impl LiveProjection {
                 .saturating_add(turn_id.len() as u64)
                 .saturating_add(RETAINED_ENTRY_OVERHEAD);
         }
+        for (turn_id, failure) in &self.turn_failures {
+            bytes = bytes
+                .saturating_add(turn_id.len() as u64)
+                .saturating_add(serde_json::to_vec(failure).map_or(0, |bytes| bytes.len() as u64));
+        }
         for turn_id in self.turn_phases.keys() {
             bytes = bytes
                 .saturating_add(turn_id.len() as u64)
@@ -836,6 +843,15 @@ impl LiveProjection {
         }
         let mut events = Vec::new();
         self.emit_frames(thread, effect, state, &mut events)?;
+        if let Some(canonical) = super::prepared_terminal_turn(&prepared) {
+            for event in &mut events {
+                if let LiveEvent::Turn { turn, .. } = event
+                    && turn.id == canonical.id
+                {
+                    *turn = canonical.clone();
+                }
+            }
+        }
         self.retain(state);
         Ok((events, prepared))
     }
@@ -873,6 +889,16 @@ impl LiveProjection {
         effect: &ThreadEffectBatch,
         state: &ThreadSnapshot,
     ) -> Result<Arc<PreparedEffect>, ProjectionError> {
+        self.turn_failures
+            .retain(|turn, _| state.turns.iter().any(|record| &record.turn_id == turn));
+        if let Some(attempt) = &effect.attempt {
+            if let pl_core::thread::AttemptOutcome::Failed(error) = &attempt.outcome {
+                self.turn_failures
+                    .insert(attempt.turn_id.clone(), super::turns::model_failure(error));
+            } else if matches!(attempt.outcome, pl_core::thread::AttemptOutcome::Running) {
+                self.turn_failures.remove(&attempt.turn_id);
+            }
+        }
         for change in effect.inputs.iter() {
             if let pl_core::thread::input::InputChange::Accepted(record) = change
                 && super::input_presentation(record) == pl_protocol::MessagePresentation::Hidden
@@ -945,6 +971,23 @@ impl LiveProjection {
         // 实时帧同样不允许带着无法补全的 identity 继续：投影失败由调用方转成报告并 fail-closed。
         projected.ensure_complete()?;
         let mut items = projected.items;
+        for item in &mut items {
+            if let pl_protocol::ThreadItemState::Turn(turn) = item.state()
+                && let pl_protocol::TurnState::Failed(failed) = turn.state()
+                && let Some(failure) = self.turn_failures.get(&item.turn_id)
+            {
+                let state = pl_protocol::TurnState::Failed(pl_protocol::FailedTurnState::new(
+                    failed.started_at(),
+                    failed.completed_at(),
+                    failure.clone(),
+                ));
+                let turn = pl_protocol::ThreadTurnItem::new(state)
+                    .with_input_id(turn.input_id().map(str::to_owned));
+                *item = item
+                    .clone()
+                    .with_state(pl_protocol::ThreadItemState::Turn(turn));
+            }
+        }
         // 内容版本基线：把这里解析到的 canonical 事实的 revision 抬成本投影的单调下限。已在内存里的
         // 身份不复查（`adopt_revisions` 跳过 `self.items` 持有的 id），只有冷恢复/被淘汰后重现的身份才
         // 由放置元数据恢复；同一条目因此绝不因为缓存淘汰而从 1 重编、被会话当成旧帧丢弃。
@@ -1836,15 +1879,14 @@ impl LiveProjection {
             // A tool result whose call belongs to a still-resident attempt is part of the same
             // unfinished Turn: a later effect of that Turn re-references the tool identity, so it is
             // as required as the attempt's own channels.
-            if let pl_core::thread::AttemptOutcome::Committed(output) = &attempt.outcome {
-                referenced.extend(
-                    output
-                        .tool_calls
-                        .iter()
-                        .map(|call| super::order::tool_id(&call.call_id)),
-                );
-            }
         }
+        referenced.extend(
+            state
+                .live_calls
+                .iter()
+                .filter(|(_, turn)| state.turns.iter().any(|record| &record.turn_id == *turn))
+                .map(|(id, _)| super::order::tool_id(id)),
+        );
         // A result still owed to model context is delivered by a later effect of a live Turn, so its
         // tool identity is required until that delivery commits.
         referenced.extend(

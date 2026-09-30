@@ -1242,6 +1242,10 @@ fn write_config(home: &Path, ready: &FixtureReady) -> Result<()> {
     let mut config = StudioConfig::default_config();
     let mut model = ModelInfo::compatible("fixture-model");
     model.display_name = "Local GUI fixture".into();
+    if ready.scenario == "storage-compaction" {
+        model.context_window = Some(1_000_000);
+        model.auto_compact_token_limit = Some(1);
+    }
     model
         .binding
         .set_transport(ModelTransportProfile::responses_http());
@@ -1796,11 +1800,10 @@ fn statistics_db_counts(home: &Path) -> Result<StatisticsDbCounts> {
             .read_only(true);
         let mut connection = SqliteConnection::connect_with(&options).await?;
         let (rows, committed, samples): (i64, i64, i64) = sea_orm::sqlx::query_as(
-            "SELECT COUNT(*),
-                    COALESCE(SUM(CASE WHEN terminal=1 AND status='committed' THEN 1 ELSE 0 END),0),
-                    COALESCE(SUM(CASE WHEN terminal=1 AND status='committed' AND decode_millis>0
-                        AND output_tokens IS NOT NULL THEN 1 ELSE 0 END),0)
-             FROM model_calls",
+            "SELECT (SELECT COUNT(*) FROM call_log_index WHERE kind='attempt'),
+                    COUNT(*),
+                    COALESCE(SUM(CASE WHEN decode_millis>0 AND output_tokens IS NOT NULL THEN 1 ELSE 0 END),0)
+             FROM performance_samples",
         )
         .fetch_one(&mut connection)
         .await

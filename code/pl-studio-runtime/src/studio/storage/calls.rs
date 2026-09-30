@@ -1,16 +1,21 @@
-//! 全局调用统计投影（`calls.sqlite`）；Thread 历史与工具任务由会话库负责。
+//! 全局调用统计投影（`calls.sqlite`）与版本化 JSONL 滚动调用日志。
 //!
-//! 每次实际 attempt 的调用身份、状态、时延、token 与价格摘要按尽力而为写入；
-//! 正文以内容寻址 calls blob 文件保存，数据库只保留引用。
+//! 调用正文写入 `<calls>/logs/` 下的版本化 JSONL 段文件：单段最大 16 MiB、跨 UTC 自然日轮转、
+//! 单条记录 1 MiB 上限（超过显式 `truncated`）、整体保留 7 天且总量不超过 256 MiB。启动、每 15
+//! 分钟与每次轮转都会清理过期/超量段；清理失败记录为可重试降级并在下一次追加前阻塞增长，因此日志
+//! 不会无限膨胀。段尾半条记录（进程在写入中途退出）在打开时回退到最后一个换行。
 //!
-//! 单库只有一个逻辑 writer：effect 与计费观察进入同一条有界队列，后台批量落库。
-//! 统计队列满或写入失败只记录统计缺口，不阻塞 Thread 的权威历史提交。
+//! `calls.sqlite` 只保留有界数据：随段回收的日志索引（`call_log_index`）、按 root/thread/purpose
+//! 的累计费用摘要（`call_usage_summary`，由可靠 writer 通过
+//! [`CallsStore::replace_session_usage`] 以 revision 绝对投影幂等供给，不依赖将被删除的正文），
+//! 以及有界的性能样本（`performance_samples`，最多 [`PERFORMANCE_SAMPLE_LIMIT`] 条）。
 //!
-//! 调用库不参与 Thread 恢复或 Timeline 排序；计费与性能统计从本库的查询/聚合投影读取，不扫描
-//! 会话历史（见 design/15 §15.7/§15.8）。
+//! 单库只有一个逻辑 writer：轻量调用事件进入同一条有界队列，后台批量落盘（JSONL 追加 + SQLite
+//! 索引/统计）。队列满或写入失败只记录统计缺口，不阻塞 Thread 的权威历史提交。
 //!
-//! 打开时会校验 `calls_meta.schema_version`：低版本数据保全地迁移到当前外置 blobs 格式（补齐
-//! 当前列/表、把历史内联正文改写为内容寻址 blob 并回填引用），未来版本显式失败并保留原字节。
+//! 打开时会校验 `calls_meta.schema_version`：schema <= 4 的旧库先保全累计摘要与性能样本、再把保留
+//! 期正文转换进日志，全部成功后才前移版本并删除旧结构；未来版本显式失败并保留原字节。运行期不会
+//! 触碰用户 home 下的旧数据根。
 
 use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -18,7 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Result, bail, ensure};
 use pl_core::model::ModelUsage;
 use pl_core::thread::journal::AttemptUpdate;
 use pl_core::thread::{AttemptOutcome, ThreadEffectBatch};
@@ -32,13 +37,23 @@ use tokio::sync::{Notify, watch};
 
 use crate::hash::merge_costs;
 
+mod event;
+mod log;
 mod performance;
+mod schema;
+mod summary;
+
 pub(crate) use performance::PERFORMANCE_SAMPLE_LIMIT;
+pub(crate) use summary::{PurposeUsageProjection, SessionUsageProjection};
 
-pub(crate) const CALLS_SCHEMA_VERSION: i64 = 4;
+use event::CallLogRecord;
+use log::{CallLog, LOG_CLEANUP_INTERVAL};
 
-/// calls 正文的内容寻址文件根目录名（`calls/blobs`）。
-const CALLS_BLOBS_DIR_NAME: &str = "blobs";
+pub(crate) const CALLS_SCHEMA_VERSION: i64 = 5;
+/// `calls` 目录下日志段所在子目录名。
+const CALL_LOG_DIR_NAME: &str = "logs";
+/// 一天对应的秒数；日志轮转/保留期以 UTC 自然日为准。
+pub(super) const SECONDS_PER_DAY: i64 = 86_400;
 /// 单批最多应用的 mutation 数。
 const MAX_BATCH_MUTATIONS: usize = 64;
 /// 单批最多聚合的字节预算。
@@ -98,7 +113,7 @@ impl CallRetention {
     }
 }
 
-/// 单个 root 会话的费用聚合投影（由调用库 SQL 聚合得到）。
+/// 单个 root 会话的费用聚合投影（由调用库摘要聚合得到）。
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SessionCostRollup {
     pub(crate) root_thread_id: String,
@@ -145,26 +160,28 @@ pub(crate) struct PerformanceSummaryRow {
     pub(crate) total_response_millis: u64,
 }
 
-/// 受理一次调用写入的不可变工作单元。
+/// 受理一次调用写入的轻量工作单元。
 enum CallMutation {
-    Effect(Box<ThreadEffectBatch>),
-    Billing {
-        root_thread_id: String,
+    /// 一次 effect：可能携带一条轻量 attempt 记录；无论是否携带都要推进该 Thread 的 durable 水位。
+    Effect {
         thread_id: String,
-        retention: CallRetention,
-        billing: Box<InferenceBillingRecord>,
+        sequence: i64,
+        records: Vec<CallLogRecord>,
     },
+    Billing(Box<CallLogRecord>),
+    Summary(SessionUsageProjection),
 }
 
 impl CallMutation {
-    /// 估算条目保留字节，用于队列与批次的压力预算。
+    /// 估算条目保留字节，用于队列与批次的压力预算；只序列化轻量记录。
     fn estimated_bytes(&self) -> usize {
         match self {
-            Self::Effect(effect) => effect
-                .encode()
-                .map_or(1024, |payload| payload.content().len()),
-            Self::Billing { billing, .. } => {
-                serde_json::to_vec(billing.as_ref()).map_or(512, |bytes| bytes.len())
+            Self::Effect { records, .. } => {
+                128 + records.iter().map(event::estimate_bytes).sum::<usize>()
+            }
+            Self::Billing(record) => event::estimate_bytes(record),
+            Self::Summary(projection) => {
+                serde_json::to_vec(projection).map_or(256, |bytes| bytes.len())
             }
         }
     }
@@ -191,10 +208,10 @@ struct QueuePressure {
     oldest_accepted_at: Option<tokio::time::Instant>,
 }
 
-/// 单一逻辑 writer 的共享状态：唯一 SQLite 连接、唯一队列与水位。
+/// 单一逻辑 writer 的共享状态：唯一 SQLite 连接、唯一滚动日志、唯一队列与水位。
 struct CallsWriter {
     db: DatabaseConnection,
-    blobs_dir: PathBuf,
+    log: tokio::sync::Mutex<CallLog>,
     queue: Mutex<VecDeque<QueuedCallMutation>>,
     work_notify: Notify,
     retry_notify: Notify,
@@ -209,7 +226,7 @@ struct CallsWriter {
     panic_next_mutation: AtomicBool,
 }
 
-/// 全局调用库句柄；clone 共享同一条队列、水位与后台 writer。
+/// 全局调用库句柄；clone 共享同一条队列、日志与后台 writer。
 #[derive(Clone)]
 pub(crate) struct CallsStore {
     writer: Arc<CallsWriter>,
@@ -246,15 +263,16 @@ impl CallsStore {
             .panic_next_mutation
             .store(true, Ordering::Release);
     }
+
     pub(crate) async fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        let blobs_dir = path
+        let root_dir = path
             .parent()
             .unwrap_or_else(|| Path::new("."))
-            .join(CALLS_BLOBS_DIR_NAME);
-        tokio::fs::create_dir_all(&blobs_dir).await?;
+            .to_path_buf();
+        let mut log = CallLog::open(root_dir.join(CALL_LOG_DIR_NAME)).await?;
         let mut options = ConnectOptions::new(crate::studio::paths::sqlite_url(path));
         options
             .max_connections(2)
@@ -270,11 +288,21 @@ impl CallsStore {
             })
             .sqlx_logging(false);
         let db = Database::connect(options).await?;
-        initialize(&db, &blobs_dir).await?;
+        schema::initialize(&db, &mut log, &root_dir).await?;
+        let mut startup_error = None;
+        if let Err(error) = log.rebuild_index(&db).await {
+            startup_error = Some(error.to_string());
+            tracing::warn!(%error, "调用日志索引重建失败，诊断降级");
+        }
+        // 启动清理尽力而为：失败记录降级，周期任务会重试。
+        if let Err(error) = maintenance(&db, &mut log).await {
+            startup_error = Some(error.to_string());
+            tracing::warn!(error = %error, "调用库启动清理失败，稍后重试");
+        }
         let (durable_ticket, _) = watch::channel(0u64);
         let writer = Arc::new(CallsWriter {
             db,
-            blobs_dir,
+            log: tokio::sync::Mutex::new(log),
             queue: Mutex::new(VecDeque::new()),
             work_notify: Notify::new(),
             retry_notify: Notify::new(),
@@ -282,13 +310,49 @@ impl CallsStore {
             durable_ticket,
             in_flight_bytes: AtomicU64::new(0),
             stopping: AtomicBool::new(false),
-            last_error: Mutex::new(None),
-            statistics_gap: AtomicBool::new(false),
+            statistics_gap: AtomicBool::new(startup_error.is_some()),
+            last_error: Mutex::new(startup_error),
             #[cfg(test)]
             panic_next_mutation: AtomicBool::new(false),
         });
         tokio::spawn(supervise_writer(writer.clone()));
         Ok(Self { writer })
+    }
+
+    /// 用可靠 writer 的 revision 绝对投影替换某个 root/thread 的累计费用摘要。
+    ///
+    /// 主代理从 Thread 折叠出的权威累计值（含 purpose 拆分）调用本接口；更小的 revision 被忽略，
+    /// 因此重复投递同一投影是幂等的，且摘要不依赖将被删除的日志正文。
+    pub(crate) fn replace_session_usage(&self, projection: SessionUsageProjection) -> Result<()> {
+        ensure!(
+            !self.writer.stopping.load(Ordering::Acquire),
+            "call writer is stopping"
+        );
+        let mutation = CallMutation::Summary(projection);
+        let bytes = mutation.estimated_bytes();
+        {
+            let mut queue = self
+                .writer
+                .queue
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let CallMutation::Summary(newest) = &mutation {
+                queue.retain(|entry| !matches!(&entry.mutation, CallMutation::Summary(previous) if previous.thread_id == newest.thread_id && previous.revision <= newest.revision));
+            }
+            ensure!(
+                queue.len() < MAX_QUEUE_MUTATIONS
+                    && queue_bytes(&queue).saturating_add(bytes) <= MAX_QUEUE_BYTES,
+                "call summary queue is full"
+            );
+            queue.push_back(QueuedCallMutation {
+                ticket: self.next_ticket(),
+                accepted_at: tokio::time::Instant::now(),
+                bytes,
+                mutation,
+            });
+        }
+        self.writer.work_notify.notify_one();
+        Ok(())
     }
 
     /// 当前已受理的最高统计 ticket，供持久化进度观测。
@@ -381,6 +445,9 @@ impl CallsStore {
 
     /// Best-effort call statistics. Full task identities and deliveries belong to history.sqlite.
     /// An unavailable/full statistics queue never blocks the executing Thread.
+    ///
+    /// 这里只从 effect 提取轻量调用记录，绝不 clone/encode 整个 [`ThreadEffectBatch`]，
+    /// 也不把 context / tools 带进队列。
     pub(crate) fn try_admit_effect(&self, effect: &ThreadEffectBatch) -> bool {
         if self.writer.stopping.load(Ordering::Acquire) {
             record_last_error(
@@ -389,7 +456,33 @@ impl CallsStore {
             );
             return false;
         }
-        let mutation = CallMutation::Effect(Box::new(effect.clone()));
+        let sequence = i64::try_from(effect.sequence).unwrap_or(i64::MAX);
+        let mut records: Vec<_> = effect
+            .attempt
+            .as_ref()
+            .map(|attempt| {
+                event::attempt_record(&effect.thread_id, sequence, effect.committed_at, attempt)
+            })
+            .into_iter()
+            .collect();
+        records.extend(effect.deliveries.iter().map(|delivery| {
+            event::tool_record(
+                &effect.thread_id,
+                effect
+                    .tasks
+                    .iter()
+                    .find(|task| task.call_id == delivery.call_id)
+                    .map(|task| task.turn_id.clone()),
+                sequence,
+                effect.committed_at,
+                delivery,
+            )
+        }));
+        let mutation = CallMutation::Effect {
+            thread_id: effect.thread_id.clone(),
+            sequence,
+            records,
+        };
         let bytes = mutation.estimated_bytes();
         let admitted = {
             let mut queue = self
@@ -432,18 +525,15 @@ impl CallsStore {
         root_thread_id: &str,
         thread_id: &str,
         billing: &InferenceBillingRecord,
+        status: CallStatus,
         retention: CallRetention,
     ) -> Result<u64> {
         if self.writer.stopping.load(Ordering::Acquire) {
             self.writer.statistics_gap.store(true, Ordering::Release);
             bail!("call writer is stopping");
         }
-        let mutation = CallMutation::Billing {
-            root_thread_id: root_thread_id.to_owned(),
-            thread_id: thread_id.to_owned(),
-            retention,
-            billing: Box::new(billing.clone()),
-        };
+        let record = event::billing_record(root_thread_id, thread_id, retention, billing, status);
+        let mutation = CallMutation::Billing(Box::new(record));
         let bytes = mutation.estimated_bytes();
         let ticket = {
             let mut queue = self
@@ -487,121 +577,118 @@ impl CallsStore {
             .wrapping_add(1)
     }
 
-    /// 按 root 会话聚合费用；调用库是唯一事实源，不依赖进程内缓存。
-    pub(crate) async fn session_cost_rollups(&self) -> Result<Vec<SessionCostRollup>> {
-        let mut rollups: Vec<SessionCostRollup> = Vec::new();
-        let roots = self
+    /// 按 root 会话聚合费用；摘要由可靠 writer 供给，不依赖已被清理的日志正文。
+    pub(crate) async fn legacy_auxiliary_usage(
+        &self,
+        thread_id: &str,
+    ) -> Result<pl_core::thread::UsageSummary> {
+        match self
             .writer
             .db
-            .query_all_raw(statement(
-                "SELECT root_thread_id, MAX(has_unpriced_usage) AS unpriced
-                 FROM model_calls
-                 WHERE terminal=1 AND root_thread_id IS NOT NULL
-                 GROUP BY root_thread_id
-                 ORDER BY root_thread_id",
-                vec![],
+            .query_one_raw(statement(
+                "SELECT payload FROM legacy_auxiliary_usage WHERE thread_id=?",
+                vec![thread_id.into()],
             ))
-            .await?;
-        for row in &roots {
-            rollups.push(SessionCostRollup {
-                root_thread_id: row.try_get("", "root_thread_id")?,
-                estimated_costs: Vec::new(),
-                purpose_costs: Vec::new(),
-                has_unpriced_usage: row.try_get::<i64>("", "unpriced")? != 0,
-            });
+            .await?
+        {
+            Some(row) => Ok(serde_json::from_str(
+                &row.try_get::<String>("", "payload")?,
+            )?),
+            None => Ok(Default::default()),
         }
-        let costs = self
-            .writer
-            .db
-            .query_all_raw(statement(
-                "SELECT root_thread_id, purpose, cost_currency, SUM(cost_amount) AS amount
-                 FROM model_calls
-                 WHERE terminal=1 AND root_thread_id IS NOT NULL
-                   AND cost_currency IS NOT NULL AND cost_amount IS NOT NULL
-                 GROUP BY root_thread_id, purpose, cost_currency
-                 ORDER BY root_thread_id, purpose IS NOT NULL, purpose, cost_currency",
-                vec![],
-            ))
-            .await?;
-        for row in &costs {
-            let root_thread_id: String = row.try_get("", "root_thread_id")?;
-            let purpose: Option<String> = row.try_get("", "purpose")?;
-            let cost = RuntimeCostAmount {
-                currency: row.try_get("", "cost_currency")?,
-                amount: row.try_get("", "amount")?,
-            };
-            let index = match rollups
-                .iter()
-                .position(|rollup| rollup.root_thread_id == root_thread_id)
-            {
-                Some(index) => index,
-                None => {
-                    rollups.push(SessionCostRollup {
-                        root_thread_id: root_thread_id.clone(),
-                        ..Default::default()
-                    });
-                    rollups.len() - 1
-                }
-            };
-            let rollup = &mut rollups[index];
-            merge_costs(&mut rollup.estimated_costs, std::slice::from_ref(&cost));
-            let purpose_index = rollup
-                .purpose_costs
-                .iter()
-                .position(|entry| entry.purpose == purpose);
-            match purpose_index {
-                Some(position) => merge_costs(
-                    &mut rollup.purpose_costs[position].estimated_costs,
-                    std::slice::from_ref(&cost),
-                ),
-                None => rollup.purpose_costs.push(PurposeCostRollup {
-                    purpose,
-                    estimated_costs: vec![cost],
-                    has_unpriced_usage: false,
-                }),
-            }
-        }
-        for rollup in &mut rollups {
-            for entry in &mut rollup.purpose_costs {
-                entry.has_unpriced_usage = rollup.has_unpriced_usage;
-            }
-            if rollup.purpose_costs.is_empty()
-                && (!rollup.estimated_costs.is_empty() || rollup.has_unpriced_usage)
-            {
-                rollup.purpose_costs.push(PurposeCostRollup {
-                    purpose: None,
-                    estimated_costs: rollup.estimated_costs.clone(),
-                    has_unpriced_usage: rollup.has_unpriced_usage,
-                });
-            }
-        }
-        Ok(rollups)
     }
 
-    /// 读取最近的成功调用（新到旧），包含尚无有效性能计时的记录。
+    /// Migration-only baseline, retained independently of disposable diagnostic logs.
+    pub(crate) async fn legacy_session_costs(
+        &self,
+        thread_id: &str,
+        fence: u64,
+    ) -> Result<Vec<PurposeUsageProjection>> {
+        let watermark = self.durable_effect_sequence(thread_id).await?;
+        ensure!(
+            watermark <= fence,
+            "legacy call watermark is ahead of checkpoint"
+        );
+        let rows = self.writer.db.query_all_raw(statement("SELECT purpose,cost_currency,amount FROM call_usage_summary WHERE thread_id=? AND revision=0 AND cost_currency<>''", vec![thread_id.into()])).await?;
+        let mut purposes =
+            std::collections::BTreeMap::<Option<String>, Vec<RuntimeCostAmount>>::new();
+        for row in rows {
+            let purpose: String = row.try_get("", "purpose")?;
+            purposes
+                .entry((!purpose.is_empty()).then_some(purpose))
+                .or_default()
+                .push(RuntimeCostAmount {
+                    currency: row.try_get("", "cost_currency")?,
+                    amount: row.try_get("", "amount")?,
+                });
+        }
+        Ok(purposes
+            .into_iter()
+            .map(|(purpose, estimated_costs)| PurposeUsageProjection {
+                purpose,
+                estimated_costs,
+            })
+            .collect())
+    }
+
+    pub(crate) async fn session_cost_rollups(&self) -> Result<Vec<SessionCostRollup>> {
+        summary::read_rollups(&self.writer.db).await
+    }
+
+    /// 调用明细只读取仍在保留期的日志；性能摘要的 3000 条上限不决定明细生命周期。
     pub(crate) async fn recent_performance_samples(
         &self,
         limit: u32,
     ) -> Result<Vec<PerformanceSampleRow>> {
+        let log = self.writer.log.lock().await;
         let rows = self
             .writer
             .db
             .query_all_raw(statement(
-                "SELECT COALESCE(finished_at, started_at) AS completed_at,
-                        COALESCE(provider_instance_id, '') AS provider_instance_id,
-                        COALESCE(provider_display_name, '') AS provider_display_name,
-                        configured_model, COALESCE(sent_model, '') AS sent_model,
-                        reported_model, reasoning_effort, output_tokens,
-                        ttft_millis, decode_millis, response_millis
-                 FROM model_calls
-                 WHERE (thread_id,call_id) IN (SELECT thread_id,call_id FROM performance_samples)
-                   AND terminal=1 AND status='committed'
-                 ORDER BY COALESCE(finished_at,started_at) DESC,thread_id DESC,call_id DESC
-                 LIMIT ?",
-                vec![i64::from(limit).into()],
+                "SELECT segment,offset,length,content_hash,recorded_at FROM call_log_index
+             WHERE kind IN ('billing','migrated') AND recorded_at>?
+             ORDER BY recorded_at DESC,thread_id DESC,call_id DESC LIMIT ?",
+                vec![
+                    (crate::studio::unix_seconds() - log::LOG_RETENTION_SECONDS).into(),
+                    i64::from(limit).into(),
+                ],
             ))
             .await?;
-        rows.iter().map(performance_sample_row).collect()
+        let mut samples = Vec::with_capacity(rows.len());
+        for row in rows {
+            let location = log::AppendedRecord {
+                segment: row.try_get("", "segment")?,
+                offset: u64::try_from(row.try_get::<i64>("", "offset")?)?,
+                length: u64::try_from(row.try_get::<i64>("", "length")?)?,
+            };
+            let record = log
+                .read(
+                    &location,
+                    &row.try_get::<String>("", "content_hash")?,
+                    row.try_get("", "recorded_at")?,
+                )
+                .await?;
+            if record.status != CallStatus::Committed.as_str() {
+                continue;
+            }
+            samples.push(PerformanceSampleRow {
+                completed_at: record.recorded_at,
+                provider_instance_id: record.provider_instance_id.unwrap_or_default(),
+                provider_display_name: record.provider_display_name.unwrap_or_default(),
+                configured_model: record.configured_model,
+                sent_model: record.sent_model.unwrap_or_default(),
+                reported_model: record.reported_model,
+                reasoning_effort: record.reasoning_effort,
+                completion_tokens: record
+                    .usage
+                    .and_then(|usage| usage.output_tokens)
+                    .unwrap_or(0),
+                ttft_millis: record.timing.map(|timing| timing.ttft_millis),
+                decode_millis: record.timing.map(|timing| timing.decode_millis),
+                response_millis: record.timing.map(|timing| timing.response_millis),
+            });
+        }
+        Ok(samples)
     }
 
     /// 按 provider instance/发送模型/effort 聚合性能汇总（数据库聚合投影）。
@@ -619,11 +706,9 @@ impl CallsStore {
                         COALESCE(SUM(ttft_millis), 0) AS total_ttft_millis,
                         COALESCE(SUM(decode_millis), 0) AS total_decode_millis,
                         COALESCE(SUM(response_millis), 0) AS total_response_millis
-                 FROM model_calls
-                 WHERE (thread_id,call_id) IN (SELECT thread_id,call_id FROM performance_samples)
-                   AND terminal=1 AND status='committed' AND provider_instance_id IS NOT NULL
-                   AND sent_model IS NOT NULL AND decode_millis > 0
-                   AND output_tokens IS NOT NULL
+                 FROM performance_samples
+                 WHERE provider_instance_id IS NOT NULL AND sent_model IS NOT NULL
+                   AND decode_millis > 0 AND output_tokens IS NOT NULL
                  GROUP BY provider_instance_id, sent_model, reasoning_effort
                  ORDER BY provider_instance_id, sent_model,
                           reasoning_effort IS NOT NULL, reasoning_effort",
@@ -632,400 +717,6 @@ impl CallsStore {
             .await?;
         rows.iter().map(performance_summary_row).collect()
     }
-}
-
-async fn initialize(db: &DatabaseConnection, blobs_dir: &Path) -> Result<()> {
-    ensure_calls_schema(db, blobs_dir).await
-}
-
-/// Ensures the current calls schema exists, upgrading any older revision in place.
-///
-/// Additive upgrades keep existing v2 facts; a future revision fails closed.
-async fn ensure_calls_schema(db: &DatabaseConnection, blobs_dir: &Path) -> Result<()> {
-    db.execute_unprepared(
-        "CREATE TABLE IF NOT EXISTS calls_meta (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            schema_version INTEGER NOT NULL,
-            database_id TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS call_watermarks (
-            thread_id TEXT PRIMARY KEY,
-            admitted_write_seq INTEGER NOT NULL,
-            durable_write_seq INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS model_calls (
-            thread_id TEXT NOT NULL,
-            call_id TEXT NOT NULL,
-            root_thread_id TEXT,
-            turn_id TEXT NOT NULL,
-            attempt_id TEXT NOT NULL,
-            retry_of TEXT,
-            revision INTEGER NOT NULL,
-            admitted_at INTEGER NOT NULL,
-            started_at INTEGER NOT NULL,
-            finished_at INTEGER,
-            status TEXT NOT NULL,
-            terminal INTEGER NOT NULL,
-            retention TEXT,
-            purpose TEXT,
-            provider_instance_id TEXT,
-            provider_display_name TEXT,
-            configured_model TEXT,
-            sent_model TEXT,
-            reported_model TEXT,
-            reasoning_effort TEXT,
-            input_tokens INTEGER,
-            output_tokens INTEGER,
-            cache_read_tokens INTEGER,
-            cache_write_tokens INTEGER,
-            reasoning_tokens INTEGER,
-            total_tokens INTEGER,
-            ttft_millis INTEGER,
-            decode_millis INTEGER,
-            response_millis INTEGER,
-            cost_currency TEXT,
-            cost_amount REAL,
-            has_unpriced_usage INTEGER NOT NULL DEFAULT 0,
-            body_ref TEXT,
-            billing_ref TEXT,
-            PRIMARY KEY(thread_id, call_id)
-        );
-        CREATE TABLE IF NOT EXISTS tool_calls (
-            thread_id TEXT NOT NULL,
-            call_id TEXT NOT NULL,
-            turn_id TEXT NOT NULL,
-            tool_id TEXT NOT NULL,
-            revision INTEGER NOT NULL,
-            admitted_at INTEGER NOT NULL,
-            started_at INTEGER NOT NULL,
-            finished_at INTEGER,
-            status TEXT NOT NULL,
-            terminal INTEGER NOT NULL,
-            body_ref TEXT,
-            cancel_requested INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY(thread_id, call_id)
-        );
-        CREATE TABLE IF NOT EXISTS call_bodies (
-            body_ref TEXT PRIMARY KEY,
-            byte_length INTEGER NOT NULL,
-            created_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS model_calls_by_thread
-            ON model_calls(thread_id, started_at);
-        CREATE INDEX IF NOT EXISTS model_calls_by_root
-            ON model_calls(root_thread_id, finished_at);
-        CREATE INDEX IF NOT EXISTS tool_calls_by_thread
-            ON tool_calls(thread_id, started_at);
-        CREATE TABLE IF NOT EXISTS performance_samples (
-            thread_id TEXT NOT NULL,
-            call_id TEXT NOT NULL,
-            completed_at INTEGER NOT NULL,
-            PRIMARY KEY(thread_id,call_id),
-            FOREIGN KEY(thread_id,call_id) REFERENCES model_calls(thread_id,call_id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS performance_samples_by_completion
-            ON performance_samples(completed_at DESC,thread_id DESC,call_id DESC);",
-    )
-    .await?;
-    // 工具调用任务来源状态列：当前 schema 版本的旧库也必须原地补齐，因此放在无条件执行的
-    // 建表之后（重复添加被显式容忍），而不是只挂在按版本运行的迁移里，否则已存在的库会缺列
-    // 而让取消回执查询失败。
-    if let Err(error) = db
-        .execute_unprepared(
-            "ALTER TABLE tool_calls ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
-        )
-        .await
-    {
-        ensure!(
-            error.to_string().contains("duplicate column name"),
-            "tool call task column cannot be added: {error}"
-        );
-    }
-    // Older `calls.sqlite` revisions share this file with the current layout. Additive `ALTER`
-    // upgrades keep every existing fact; a schema only ever moves forward.
-    ensure_columns(
-        db,
-        "calls_meta",
-        &[
-            ("schema_version", "INTEGER NOT NULL DEFAULT 0"),
-            ("database_id", "TEXT"),
-        ],
-    )
-    .await?;
-    let row = db
-        .query_one_raw(statement(
-            "SELECT schema_version,database_id FROM calls_meta WHERE id=1",
-            vec![],
-        ))
-        .await?;
-    let Some(row) = row else {
-        db.execute_raw(statement(
-            "INSERT INTO calls_meta(id,schema_version,database_id) VALUES(1,?,?)",
-            vec![
-                CALLS_SCHEMA_VERSION.into(),
-                crate::studio::new_id("calls-db").into(),
-            ],
-        ))
-        .await?;
-        return Ok(());
-    };
-    let version: i64 = row.try_get("", "schema_version")?;
-    ensure!(
-        version <= CALLS_SCHEMA_VERSION,
-        "unsupported future calls schema {version}; existing data preserved"
-    );
-    let database_id: Option<String> = row.try_get("", "database_id")?;
-    if database_id.as_deref().is_none_or(str::is_empty) {
-        db.execute_raw(statement(
-            "UPDATE calls_meta SET database_id=? WHERE id=1",
-            vec![crate::studio::new_id("calls-db").into()],
-        ))
-        .await?;
-    }
-    if version == CALLS_SCHEMA_VERSION {
-        return Ok(());
-    }
-    if version == 3 {
-        return performance::migrate(db).await;
-    }
-    tracing::warn!(
-        from = version,
-        to = CALLS_SCHEMA_VERSION,
-        "migrating calls schema to the external-blob layout"
-    );
-    migrate_calls_schema(db, blobs_dir, version).await
-}
-
-/// 当前 schema 之前的内联正文列名集合；外置 blobs 之前的任一版本都可能写入这些列。
-const LEGACY_BODY_COLUMNS: &[&str] = &["body", "body_text", "body_json"];
-/// 计费观察在旧格式中使用的内联正文列名。
-const LEGACY_BILLING_COLUMNS: &[&str] = &["billing_body", "billing_json"];
-
-/// 把旧版 `calls.sqlite` 数据保全地迁移到当前外置 blobs 格式。
-///
-/// 迁移只做加法：补齐当前列与表、把历史内联正文改写为内容寻址 blob 并在 `model_calls`/`tool_calls`
-/// 上回填引用，最后前移 `schema_version`。旧的内联列保留原值、不再被读取，因此任何一步失败都
-/// 不会丢失事实。
-async fn migrate_calls_schema(
-    db: &DatabaseConnection,
-    blobs_dir: &Path,
-    from_version: i64,
-) -> Result<()> {
-    ensure_columns(
-        db,
-        "call_watermarks",
-        &[
-            ("admitted_write_seq", "INTEGER NOT NULL DEFAULT 0"),
-            ("durable_write_seq", "INTEGER NOT NULL DEFAULT 0"),
-        ],
-    )
-    .await?;
-    let model_columns = ensure_columns(
-        db,
-        "model_calls",
-        &[
-            ("root_thread_id", "TEXT"),
-            ("turn_id", "TEXT"),
-            ("attempt_id", "TEXT"),
-            ("retry_of", "TEXT"),
-            ("retention", "TEXT"),
-            ("revision", "INTEGER NOT NULL DEFAULT 0"),
-            ("admitted_at", "INTEGER NOT NULL DEFAULT 0"),
-            ("started_at", "INTEGER NOT NULL DEFAULT 0"),
-            ("finished_at", "INTEGER"),
-            ("status", "TEXT"),
-            ("terminal", "INTEGER NOT NULL DEFAULT 0"),
-            ("purpose", "TEXT"),
-            ("provider_instance_id", "TEXT"),
-            ("provider_display_name", "TEXT"),
-            ("configured_model", "TEXT"),
-            ("sent_model", "TEXT"),
-            ("reported_model", "TEXT"),
-            ("reasoning_effort", "TEXT"),
-            ("input_tokens", "INTEGER"),
-            ("output_tokens", "INTEGER"),
-            ("cache_read_tokens", "INTEGER"),
-            ("cache_write_tokens", "INTEGER"),
-            ("reasoning_tokens", "INTEGER"),
-            ("total_tokens", "INTEGER"),
-            ("ttft_millis", "INTEGER"),
-            ("decode_millis", "INTEGER"),
-            ("response_millis", "INTEGER"),
-            ("cost_currency", "TEXT"),
-            ("cost_amount", "REAL"),
-            ("has_unpriced_usage", "INTEGER NOT NULL DEFAULT 0"),
-            ("body_ref", "TEXT"),
-            ("billing_ref", "TEXT"),
-        ],
-    )
-    .await?;
-    let tool_columns = ensure_columns(
-        db,
-        "tool_calls",
-        &[
-            ("turn_id", "TEXT"),
-            ("tool_id", "TEXT"),
-            ("revision", "INTEGER NOT NULL DEFAULT 0"),
-            ("admitted_at", "INTEGER NOT NULL DEFAULT 0"),
-            ("started_at", "INTEGER NOT NULL DEFAULT 0"),
-            ("finished_at", "INTEGER"),
-            ("status", "TEXT"),
-            ("terminal", "INTEGER NOT NULL DEFAULT 0"),
-            ("body_ref", "TEXT"),
-        ],
-    )
-    .await?;
-    // 更早的格式可能把正文内联在 `call_bodies` 中；先补齐这些引用指向的 blob 文件。
-    externalize_call_bodies(db, blobs_dir).await?;
-    for column in LEGACY_BODY_COLUMNS {
-        for (table, columns) in [
-            ("model_calls", &model_columns),
-            ("tool_calls", &tool_columns),
-        ] {
-            externalize_inline_body(db, blobs_dir, table, columns, column, "body_ref").await?;
-        }
-    }
-    for column in LEGACY_BILLING_COLUMNS {
-        externalize_inline_body(
-            db,
-            blobs_dir,
-            "model_calls",
-            &model_columns,
-            column,
-            "billing_ref",
-        )
-        .await?;
-    }
-    performance::migrate(db).await?;
-    tracing::info!(
-        from = from_version,
-        to = CALLS_SCHEMA_VERSION,
-        "calls schema migration completed with data preserved"
-    );
-    Ok(())
-}
-
-/// 把旧 `call_bodies` 中内联保存的正文补写成内容寻址 blob 文件。
-///
-/// 该布局仍然用摘要作为 `body_ref`，所以只需按引用回写文件；引用不是合法 sha256 摘要时跳过，
-/// 不猜测也无法校验的格式。
-async fn externalize_call_bodies(db: &DatabaseConnection, blobs_dir: &Path) -> Result<()> {
-    let columns = table_columns(db, "call_bodies").await?;
-    if !columns.contains("body_ref") {
-        return Ok(());
-    }
-    for inline_column in LEGACY_BODY_COLUMNS {
-        if !columns.contains(*inline_column) {
-            continue;
-        }
-        let rows = db
-            .query_all_raw(statement(
-                &format!(
-                    "SELECT body_ref AS body_ref,{inline_column} AS body
-                     FROM call_bodies WHERE {inline_column} IS NOT NULL"
-                ),
-                vec![],
-            ))
-            .await?;
-        for row in &rows {
-            let reference: String = row.try_get("", "body_ref")?;
-            let body: String = row.try_get("", "body")?;
-            if body.is_empty() || blob_file_name(&reference).is_none() {
-                continue;
-            }
-            write_blob(blobs_dir, &reference, &body).await?;
-        }
-    }
-    Ok(())
-}
-
-/// 补齐缺失的列并返回迁移后的列集合；列/表名都是编译期常量，不做动态 SQL 拼接注入面。
-async fn ensure_columns(
-    db: &DatabaseConnection,
-    table: &str,
-    specs: &[(&str, &str)],
-) -> Result<BTreeSet<String>> {
-    let mut columns = table_columns(db, table).await?;
-    for (column, declaration) in specs {
-        if !columns.contains(*column) {
-            db.execute_unprepared(&format!(
-                "ALTER TABLE {table} ADD COLUMN {column} {declaration}"
-            ))
-            .await?;
-            columns.insert((*column).to_string());
-        }
-    }
-    Ok(columns)
-}
-
-async fn table_columns(db: &DatabaseConnection, table: &str) -> Result<BTreeSet<String>> {
-    let rows = db
-        .query_all_raw(statement(&format!("PRAGMA table_info({table})"), vec![]))
-        .await?;
-    rows.iter()
-        .map(|row| row.try_get::<String>("", "name").map_err(Into::into))
-        .collect()
-}
-
-/// 把一列旧版内联正文改写为内容寻址 blob，并在目标引用列上回填摘要。
-///
-/// 只有 `<inline_column>` 已存在、目标引用列为空且正文非空时才改写；重复运行幂等。
-async fn externalize_inline_body(
-    db: &DatabaseConnection,
-    blobs_dir: &Path,
-    table: &str,
-    columns: &BTreeSet<String>,
-    inline_column: &str,
-    target_column: &str,
-) -> Result<()> {
-    if !columns.contains(inline_column) || !columns.contains(target_column) {
-        return Ok(());
-    }
-    let at_expression = if columns.contains("finished_at") && columns.contains("started_at") {
-        "COALESCE(finished_at,started_at,admitted_at)"
-    } else if columns.contains("started_at") {
-        "started_at"
-    } else if columns.contains("admitted_at") {
-        "admitted_at"
-    } else {
-        "0"
-    };
-    let rows = db
-        .query_all_raw(statement(
-            &format!(
-                "SELECT rowid AS row_id,{inline_column} AS body,{at_expression} AS at
-                 FROM {table}
-                 WHERE {inline_column} IS NOT NULL AND {target_column} IS NULL"
-            ),
-            vec![],
-        ))
-        .await?;
-    for row in &rows {
-        let row_id: i64 = row.try_get("", "row_id")?;
-        let body: String = row.try_get("", "body")?;
-        if body.is_empty() {
-            continue;
-        }
-        let at: i64 = row.try_get("", "at").unwrap_or(0);
-        let reference = body_ref(&body);
-        write_blob(blobs_dir, &reference, &body).await?;
-        db.execute_raw(statement(
-            "INSERT INTO call_bodies(body_ref,byte_length,created_at) VALUES(?,?,?)
-             ON CONFLICT(body_ref) DO NOTHING",
-            vec![
-                reference.clone().into(),
-                i64::try_from(body.len())?.into(),
-                at.into(),
-            ],
-        ))
-        .await?;
-        db.execute_raw(statement(
-            &format!("UPDATE {table} SET {target_column}=? WHERE rowid=?"),
-            vec![reference.into(), row_id.into()],
-        ))
-        .await?;
-    }
-    Ok(())
 }
 
 /// writer supervisor：worker panic 后重启；在途事实由等待方重试，不会被静默丢弃。
@@ -1049,20 +740,31 @@ async fn supervise_writer(shared: Arc<CallsWriter>) {
     }
 }
 
-/// 唯一的调用库写入循环：取批、应用、重试、推进水位。
-///
-/// 队列非空就取一批，批量大小来自并发受理自然堆积的条目。
+/// 唯一的调用库写入循环：取批、应用、重试、推进水位，并周期性清理日志。
 async fn run_writer(shared: Arc<CallsWriter>) {
     let mut retries = 0usize;
+    // 周期清理以绝对截止时间为准，即使队列一直非空（写入/重试未停）也会到点清理，
+    // 避免文档承诺的“每 15 分钟清理”被持续压力饿死。
+    let mut next_cleanup = tokio::time::Instant::now() + LOG_CLEANUP_INTERVAL;
     loop {
+        if tokio::time::Instant::now() >= next_cleanup {
+            next_cleanup = tokio::time::Instant::now() + LOG_CLEANUP_INTERVAL;
+            let mut log = shared.log.lock().await;
+            if let Err(error) = maintenance(&shared.db, &mut log).await {
+                record_last_error(&shared, format!("call log cleanup failed: {error}"));
+            }
+        }
         let stopping = shared.stopping.load(Ordering::Acquire);
         let pressure = queue_pressure(&shared);
         if pressure.mutations == 0 {
             if stopping {
                 return;
             }
-            shared.work_notify.notified().await;
-            continue;
+            tokio::select! {
+                _ = shared.work_notify.notified() => continue,
+                // 到点后唤醒执行顶部截止时间检查，而不是在空闲分支里重复清理逻辑。
+                _ = tokio::time::sleep_until(next_cleanup) => continue,
+            }
         }
         if pressure.bytes >= MAX_QUEUE_BYTES {
             tracing::warn!(
@@ -1134,12 +836,29 @@ async fn run_writer(shared: Arc<CallsWriter>) {
     }
 }
 
+/// 清理日志并回收索引；周期任务与启动路径共用。
+async fn maintenance(db: &DatabaseConnection, log: &mut CallLog) -> Result<()> {
+    let outcome = log.cleanup(crate::studio::unix_seconds()).await;
+    if !outcome.removed.is_empty() {
+        let tx = db.begin().await?;
+        prune_index(&tx, &outcome.removed).await?;
+        tx.commit().await?;
+    }
+    if let Some(failure) = outcome.failure {
+        bail!("call log cleanup incomplete: {failure}");
+    }
+    let root_dir = log.root_dir();
+    schema::retry_pending_cleanup(db, &root_dir).await?;
+    Ok(())
+}
+
 /// One disk commit per bounded batch. Each mutation uses a savepoint, so a bad statistics fact
 /// cannot poison the remaining valid facts; a transient failure leaves that suffix queued.
 async fn apply_batch(
     shared: &CallsWriter,
     pending: &VecDeque<QueuedCallMutation>,
 ) -> Result<(usize, Vec<String>, Option<BatchFailure>)> {
+    let mut log = shared.log.lock().await;
     let tx = shared.db.begin().await?;
     let mut completed = 0;
     let mut failures = Vec::new();
@@ -1149,7 +868,7 @@ async fn apply_batch(
         if shared.panic_next_mutation.swap(false, Ordering::AcqRel) {
             panic!("injected call statistics consumer exit");
         }
-        match apply_mutation(shared, &tx, &entry.mutation).await {
+        match apply_mutation(&mut log, &tx, &entry.mutation).await {
             Ok(()) => {}
             Err(failure) if failure.retryable => {
                 deferred = Some(failure);
@@ -1262,18 +981,18 @@ fn queue_pressure(shared: &CallsWriter) -> QueuePressure {
 }
 
 async fn apply_mutation(
-    shared: &CallsWriter,
+    log: &mut CallLog,
     db: &DatabaseTransaction,
     mutation: &CallMutation,
 ) -> Result<(), BatchFailure> {
     let result = match mutation {
-        CallMutation::Effect(effect) => apply_effect(shared, db, effect).await,
-        CallMutation::Billing {
-            root_thread_id,
+        CallMutation::Effect {
             thread_id,
-            retention,
-            billing,
-        } => apply_billing(shared, db, root_thread_id, thread_id, billing, *retention).await,
+            sequence,
+            records,
+        } => apply_effect(log, db, thread_id, *sequence, records).await,
+        CallMutation::Billing(record) => apply_billing(log, db, record).await,
+        CallMutation::Summary(projection) => summary::replace(db, projection).await,
     };
     result.map_err(classify_failure)
 }
@@ -1288,16 +1007,17 @@ fn classify_failure(error: anyhow::Error) -> BatchFailure {
 
 /// 把一次 effect 的调用事实写入调用库；调用开始与终态更新共享同一调用身份。
 async fn apply_effect(
-    shared: &CallsWriter,
+    log: &mut CallLog,
     db: &DatabaseTransaction,
-    effect: &ThreadEffectBatch,
+    thread_id: &str,
+    sequence: i64,
+    records: &[CallLogRecord],
 ) -> Result<()> {
-    let sequence = integer(effect.sequence)?;
     let tx = db.begin().await?;
     let current = tx
         .query_one_raw(statement(
             "SELECT durable_write_seq FROM call_watermarks WHERE thread_id=?",
-            vec![effect.thread_id.clone().into()],
+            vec![thread_id.into()],
         ))
         .await?
         .map(|row| row.try_get::<i64>("", "durable_write_seq"))
@@ -1307,9 +1027,8 @@ async fn apply_effect(
         tx.rollback().await?;
         return Ok(());
     }
-    if let Some(attempt) = &effect.attempt {
-        upsert_attempt(shared, &tx, effect, attempt, sequence).await?;
-        performance::record(&tx, &effect.thread_id, &attempt.attempt_id).await?;
+    for record in records {
+        apply_attempt(&tx, log, record).await?;
     }
     tx.execute_raw(statement(
         "INSERT INTO call_watermarks(thread_id,admitted_write_seq,durable_write_seq)
@@ -1317,251 +1036,144 @@ async fn apply_effect(
          ON CONFLICT(thread_id) DO UPDATE SET
             admitted_write_seq=MAX(excluded.admitted_write_seq,call_watermarks.admitted_write_seq),
             durable_write_seq=MAX(excluded.durable_write_seq,call_watermarks.durable_write_seq)",
-        vec![
-            effect.thread_id.clone().into(),
-            sequence.into(),
-            sequence.into(),
-        ],
+        vec![thread_id.into(), sequence.into(), sequence.into()],
     ))
     .await?;
     tx.commit().await?;
     Ok(())
 }
 
-/// 幂等写入一次计费/性能事实；同一身份不同正文明确失败。
-async fn apply_billing(
-    shared: &CallsWriter,
+/// attempt 记录按 revision 单调：更旧的修订不覆盖已索引的更新。
+async fn apply_attempt(
     db: &DatabaseTransaction,
-    root_thread_id: &str,
-    thread_id: &str,
-    billing: &InferenceBillingRecord,
-    retention: CallRetention,
+    log: &mut CallLog,
+    record: &CallLogRecord,
 ) -> Result<()> {
-    let body = serde_json::to_string(billing)?;
-    let body_ref = body_ref(&body);
-    let tx = db.begin().await?;
-    let existing = tx
+    let existing = db
         .query_one_raw(statement(
-            "SELECT billing_ref FROM model_calls WHERE thread_id=? AND call_id=?",
-            vec![thread_id.into(), billing.inference_id.clone().into()],
+            "SELECT revision FROM call_log_index WHERE thread_id=? AND call_id=? AND kind=?",
+            vec![
+                record.thread_id.clone().into(),
+                record.call_id.clone().into(),
+                record.kind.clone().into(),
+            ],
         ))
         .await?;
     if let Some(row) = existing {
-        let stored: Option<String> = row.try_get("", "billing_ref")?;
+        let stored: i64 = row.try_get("", "revision")?;
+        if record.revision <= stored {
+            return Ok(());
+        }
+    }
+    let now = crate::studio::unix_seconds();
+    append_record(db, log, record, now).await
+}
+
+/// 幂等写入一次计费/性能事实；同一身份不同正文明确失败。
+async fn apply_billing(
+    log: &mut CallLog,
+    db: &DatabaseTransaction,
+    record: &CallLogRecord,
+) -> Result<()> {
+    let (line, _) = event::encode_record(record)?;
+    let content_hash = pl_core::context::content_hash(line.as_bytes());
+    let existing = db
+        .query_one_raw(statement(
+            "SELECT content_hash FROM call_log_index WHERE thread_id=? AND call_id=? AND kind=?",
+            vec![
+                record.thread_id.clone().into(),
+                record.call_id.clone().into(),
+                record.kind.clone().into(),
+            ],
+        ))
+        .await?;
+    if let Some(row) = existing {
+        let stored: Option<String> = row.try_get("", "content_hash")?;
         match stored {
-            Some(stored) if stored == body_ref => {
-                tx.rollback().await?;
-                return Ok(());
-            }
+            Some(stored) if stored == content_hash => return Ok(()),
             Some(_) => {
                 bail!(
                     "model call {} conflicts with the durable call record",
-                    billing.inference_id
+                    record.call_id
                 );
             }
             None => {}
         }
     }
-    // 计费观察不携带 attempt 执行序号：新行以 0 起底，冲突时保留既有 revision。
-    // 这样同一调用身份的 attempt（commit）写入始终能以其 effect 序号覆盖计费快照，
-    // 而不会被计费计数推高到阻碍终态。
-    let revision: i64 = 0;
-    let usage = billing.accounting.usage.totals();
-    let has_unpriced_usage = billing.accounting.has_unpriced_usage();
-    let (cost_currency, cost_amount) = match billing.accounting.estimated_costs().into_iter().next()
-    {
-        Some(cost) => (Some(cost.currency), Some(cost.amount)),
-        None => (None, None),
-    };
-    let (ttft_millis, decode_millis, response_millis) = match billing.timing {
-        Some(timing) => (
-            opt_i64(timing.ttft_millis),
-            opt_i64(timing.decode_millis),
-            opt_i64(timing.total_millis),
-        ),
-        None => (None, None, None),
-    };
-    let (configured_model, sent_model, reported_model) = match &billing.model_observation {
-        Some(observation) => (
-            Some(observation.configured_model.clone()),
-            Some(observation.sent_model.clone()),
-            observation.reported_model.clone(),
-        ),
-        None => (None, Some(billing.model.clone()), None),
-    };
-    let recorded_at = billing.recorded_at;
-    put_body(shared, &tx, &body_ref, &body, recorded_at).await?;
-    tx.execute_raw(statement(
-        "INSERT INTO model_calls(
-            thread_id,call_id,root_thread_id,turn_id,attempt_id,retry_of,revision,admitted_at,
-            started_at,finished_at,status,terminal,retention,purpose,provider_instance_id,
-            provider_display_name,configured_model,sent_model,reported_model,reasoning_effort,
-            input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,
-            total_tokens,ttft_millis,decode_millis,response_millis,cost_currency,cost_amount,
-            has_unpriced_usage,billing_ref)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-         ON CONFLICT(thread_id,call_id) DO UPDATE SET
-            root_thread_id=COALESCE(excluded.root_thread_id,model_calls.root_thread_id),
-            revision=model_calls.revision,
-            finished_at=COALESCE(model_calls.finished_at,excluded.finished_at),
-            status=CASE WHEN model_calls.terminal=0 THEN excluded.status ELSE model_calls.status END,
-            terminal=1,
-            retention=COALESCE(excluded.retention,model_calls.retention),
-            purpose=COALESCE(excluded.purpose,model_calls.purpose),
-            provider_instance_id=COALESCE(excluded.provider_instance_id,model_calls.provider_instance_id),
-            provider_display_name=COALESCE(excluded.provider_display_name,model_calls.provider_display_name),
-            configured_model=COALESCE(excluded.configured_model,model_calls.configured_model),
-            sent_model=COALESCE(excluded.sent_model,model_calls.sent_model),
-            reported_model=COALESCE(excluded.reported_model,model_calls.reported_model),
-            reasoning_effort=COALESCE(excluded.reasoning_effort,model_calls.reasoning_effort),
-            input_tokens=COALESCE(excluded.input_tokens,model_calls.input_tokens),
-            output_tokens=COALESCE(excluded.output_tokens,model_calls.output_tokens),
-            cache_read_tokens=COALESCE(excluded.cache_read_tokens,model_calls.cache_read_tokens),
-            cache_write_tokens=COALESCE(excluded.cache_write_tokens,model_calls.cache_write_tokens),
-            reasoning_tokens=COALESCE(excluded.reasoning_tokens,model_calls.reasoning_tokens),
-            total_tokens=COALESCE(excluded.total_tokens,model_calls.total_tokens),
-            ttft_millis=COALESCE(excluded.ttft_millis,model_calls.ttft_millis),
-            decode_millis=COALESCE(excluded.decode_millis,model_calls.decode_millis),
-            response_millis=COALESCE(excluded.response_millis,model_calls.response_millis),
-            cost_currency=COALESCE(excluded.cost_currency,model_calls.cost_currency),
-            cost_amount=COALESCE(excluded.cost_amount,model_calls.cost_amount),
-            has_unpriced_usage=MAX(model_calls.has_unpriced_usage,excluded.has_unpriced_usage),
-            billing_ref=excluded.billing_ref",
-        vec![
-            thread_id.into(),
-            billing.inference_id.clone().into(),
-            root_thread_id.into(),
-            String::new().into(),
-            billing.inference_id.clone().into(),
-            Option::<String>::None.into(),
-            revision.into(),
-            recorded_at.into(),
-            recorded_at.into(),
-            Some(recorded_at).into(),
-            CallStatus::Committed.as_str().into(),
-            1_i32.into(),
-            retention.as_str().into(),
-            billing.purpose.clone().into(),
-            billing.provider_instance_id.clone().into(),
-            billing.provider.clone().into(),
-            configured_model.into(),
-            sent_model.into(),
-            reported_model.into(),
-            billing.reasoning_effort.clone().into(),
-            opt_i64(usage.prompt_tokens).into(),
-            opt_i64(usage.completion_tokens).into(),
-            opt_i64(usage.cached_prompt_tokens).into(),
-            opt_i64(usage.cache_write_tokens).into(),
-            opt_i64(usage.reasoning_tokens).into(),
-            opt_i64(usage.total_tokens).into(),
-            ttft_millis.into(),
-            decode_millis.into(),
-            response_millis.into(),
-            cost_currency.into(),
-            cost_amount.into(),
-            (has_unpriced_usage as i32).into(),
-            body_ref.into(),
-        ],
-    ))
-    .await?;
-    performance::record(&tx, thread_id, &billing.inference_id).await?;
-    tx.commit().await?;
+    let now = crate::studio::unix_seconds();
+    append_record(db, log, record, now).await?;
+    if record.status == CallStatus::Committed.as_str() {
+        let sample = performance::sample_from_record(record);
+        performance::record(db, &sample).await?;
+    }
     Ok(())
 }
 
-async fn upsert_attempt(
-    shared: &CallsWriter,
-    tx: &impl ConnectionTrait,
-    effect: &ThreadEffectBatch,
-    attempt: &AttemptUpdate,
-    sequence: i64,
+/// 追加一条记录到 JSONL 日志并在 SQLite 索引中登记位置；顺带回收被清理段的索引行。
+async fn append_record(
+    db: &impl ConnectionTrait,
+    log: &mut CallLog,
+    record: &CallLogRecord,
+    now: i64,
 ) -> Result<()> {
-    let status = attempt_status(&attempt.outcome);
-    let terminal = status.is_terminal();
-    let attempted_at = effect.committed_at;
-    let body = serde_json::to_string(attempt)?;
-    let body_ref = body_ref(&body);
-    put_body(shared, tx, &body_ref, &body, attempted_at).await?;
-    let (
-        input_tokens,
-        output_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
-        reasoning_tokens,
-        total_tokens,
-    ) = usage_columns(outcome_usage(&attempt.outcome));
-    tx.execute_raw(statement(
-        "INSERT INTO model_calls(
-            thread_id,call_id,turn_id,attempt_id,retry_of,revision,admitted_at,started_at,
-            finished_at,status,terminal,input_tokens,output_tokens,cache_read_tokens,
-            cache_write_tokens,reasoning_tokens,total_tokens,body_ref)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-         ON CONFLICT(thread_id,call_id) DO UPDATE SET
-            turn_id=excluded.turn_id,
-            attempt_id=excluded.attempt_id,
-            retry_of=COALESCE(excluded.retry_of,model_calls.retry_of),
-            revision=excluded.revision,
-            started_at=MIN(model_calls.started_at,excluded.started_at),
-            finished_at=COALESCE(excluded.finished_at,model_calls.finished_at),
-            status=excluded.status,
-            terminal=excluded.terminal,
-            input_tokens=COALESCE(excluded.input_tokens,model_calls.input_tokens),
-            output_tokens=COALESCE(excluded.output_tokens,model_calls.output_tokens),
-            cache_read_tokens=COALESCE(excluded.cache_read_tokens,model_calls.cache_read_tokens),
-            cache_write_tokens=COALESCE(excluded.cache_write_tokens,model_calls.cache_write_tokens),
-            reasoning_tokens=COALESCE(excluded.reasoning_tokens,model_calls.reasoning_tokens),
-            total_tokens=COALESCE(excluded.total_tokens,model_calls.total_tokens),
-            body_ref=COALESCE(excluded.body_ref,model_calls.body_ref)
-         WHERE excluded.revision >= model_calls.revision
-            AND (excluded.terminal=1 OR model_calls.terminal=0)",
+    if now.saturating_sub(record.recorded_at) >= log::LOG_RETENTION_SECONDS {
+        return Ok(());
+    }
+    let (line, truncated) = event::encode_record(record)?;
+    let outcome = log
+        .append(event::record_day(record.recorded_at), now, &line)
+        .await?;
+    prune_index(db, &outcome.removed).await?;
+    index_record(db, record, &line, &outcome.record, truncated).await
+}
+
+async fn index_record(
+    db: &impl ConnectionTrait,
+    record: &CallLogRecord,
+    line: &str,
+    location: &log::AppendedRecord,
+    truncated: bool,
+) -> Result<()> {
+    let content_hash = pl_core::context::content_hash(line.as_bytes());
+    db.execute_raw(statement(
+        "INSERT INTO call_log_index(
+            thread_id,call_id,kind,revision,content_hash,segment,offset,length,truncated,recorded_at)
+         VALUES(?,?,?,?,?,?,?,?,?,?)
+         ON CONFLICT(thread_id,call_id,kind) DO UPDATE SET
+            revision=MAX(excluded.revision,call_log_index.revision),
+            content_hash=excluded.content_hash,
+            segment=excluded.segment,
+            offset=excluded.offset,
+            length=excluded.length,
+            truncated=excluded.truncated,
+            recorded_at=excluded.recorded_at WHERE excluded.revision >= call_log_index.revision",
         vec![
-            effect.thread_id.clone().into(),
-            attempt.attempt_id.clone().into(),
-            attempt.turn_id.clone().into(),
-            attempt.attempt_id.clone().into(),
-            attempt.retry_of.clone().into(),
-            sequence.into(),
-            attempted_at.into(),
-            attempted_at.into(),
-            (if terminal { Some(attempted_at) } else { None }).into(),
-            status.as_str().into(),
-            (if terminal { 1_i32 } else { 0_i32 }).into(),
-            input_tokens.into(),
-            output_tokens.into(),
-            cache_read_tokens.into(),
-            cache_write_tokens.into(),
-            reasoning_tokens.into(),
-            total_tokens.into(),
-            body_ref.into(),
+            record.thread_id.clone().into(),
+            record.call_id.clone().into(),
+            record.kind.clone().into(),
+            record.revision.into(),
+            content_hash.into(),
+            location.segment.clone().into(),
+            integer(location.offset)?.into(),
+            integer(location.length)?.into(),
+            (truncated as i32).into(),
+            record.recorded_at.into(),
         ],
     ))
     .await?;
     Ok(())
 }
 
-fn performance_sample_row(row: &QueryResult) -> Result<PerformanceSampleRow> {
-    Ok(PerformanceSampleRow {
-        completed_at: row.try_get("", "completed_at")?,
-        provider_instance_id: row.try_get("", "provider_instance_id")?,
-        provider_display_name: row.try_get("", "provider_display_name")?,
-        configured_model: row.try_get("", "configured_model")?,
-        sent_model: row.try_get("", "sent_model")?,
-        reported_model: row.try_get("", "reported_model")?,
-        reasoning_effort: row.try_get("", "reasoning_effort")?,
-        completion_tokens: required_u64(row, "output_tokens")?,
-        ttft_millis: row
-            .try_get::<Option<i64>>("", "ttft_millis")?
-            .map(u64::try_from)
-            .transpose()?,
-        decode_millis: row
-            .try_get::<Option<i64>>("", "decode_millis")?
-            .map(u64::try_from)
-            .transpose()?,
-        response_millis: row
-            .try_get::<Option<i64>>("", "response_millis")?
-            .map(u64::try_from)
-            .transpose()?,
-    })
+/// 删除被清理段的索引行。
+async fn prune_index(db: &impl ConnectionTrait, segments: &[String]) -> Result<()> {
+    for segment in segments {
+        db.execute_raw(statement(
+            "DELETE FROM call_log_index WHERE segment=?",
+            vec![segment.clone().into()],
+        ))
+        .await?;
+    }
+    Ok(())
 }
 
 fn performance_summary_row(row: &QueryResult) -> Result<PerformanceSummaryRow> {
@@ -1576,68 +1188,6 @@ fn performance_summary_row(row: &QueryResult) -> Result<PerformanceSummaryRow> {
         total_decode_millis: required_u64(row, "total_decode_millis")?,
         total_response_millis: required_u64(row, "total_response_millis")?,
     })
-}
-
-/// 写入内容寻址 calls blob 文件，并在库中登记引用与字节数。
-async fn put_body(
-    shared: &CallsWriter,
-    tx: &impl ConnectionTrait,
-    body_ref: &str,
-    content: &str,
-    at: i64,
-) -> Result<()> {
-    write_blob(&shared.blobs_dir, body_ref, content).await?;
-    tx.execute_raw(statement(
-        "INSERT INTO call_bodies(body_ref,byte_length,created_at) VALUES(?,?,?)
-         ON CONFLICT(body_ref) DO NOTHING",
-        vec![
-            body_ref.into(),
-            i64::try_from(content.len())?.into(),
-            at.into(),
-        ],
-    ))
-    .await?;
-    Ok(())
-}
-
-/// 内容寻址写入：文件名就是摘要，重复写入直接复用已有文件。
-async fn write_blob(dir: &Path, body_ref: &str, content: &str) -> Result<()> {
-    write_blob_bytes(dir, body_ref, content.as_bytes()).await
-}
-
-/// 内容寻址写入的字节形式；migration 边界复制退役库正文时复用同一条落盘路径。
-async fn write_blob_bytes(dir: &Path, body_ref: &str, content: &[u8]) -> Result<()> {
-    let name = blob_file_name(body_ref).context("invalid call body reference")?;
-    let path = dir.join(name);
-    if tokio::fs::try_exists(&path).await? {
-        return Ok(());
-    }
-    let staging = dir.join(format!(".{name}.staging"));
-    tokio::fs::write(&staging, content).await?;
-    match tokio::fs::rename(&staging, &path).await {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            let _ = tokio::fs::remove_file(&staging).await;
-            if tokio::fs::try_exists(&path).await? {
-                Ok(())
-            } else {
-                Err(error.into())
-            }
-        }
-    }
-}
-
-/// 校验内容寻址引用并返回可安全拼接的文件名。
-fn blob_file_name(body_ref: &str) -> Option<&str> {
-    let hex = body_ref.strip_prefix("sha256:")?;
-    if hex.len() != 64
-        || !hex
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return None;
-    }
-    Some(hex)
 }
 
 fn attempt_status(outcome: &AttemptOutcome) -> CallStatus {
@@ -1665,36 +1215,6 @@ fn outcome_usage(outcome: &AttemptOutcome) -> Option<&ModelUsage> {
     }
 }
 
-#[allow(clippy::type_complexity)]
-fn usage_columns(
-    usage: Option<&ModelUsage>,
-) -> (
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-) {
-    let Some(usage) = usage else {
-        return (None, None, None, None, None, None);
-    };
-    let total = usage
-        .input_tokens
-        .zip(usage.output_tokens)
-        .and_then(|(input, output)| input.checked_add(output));
-    // `ModelUsage` marks an unmeasured token class as `None`: preserve that unknown distinction instead
-    // of collapsing it to zero.
-    (
-        usage.input_tokens.and_then(opt_i64),
-        usage.output_tokens.and_then(opt_i64),
-        usage.cache_read_tokens.and_then(opt_i64),
-        usage.cache_write_tokens.and_then(opt_i64),
-        usage.reasoning_tokens.and_then(opt_i64),
-        total.and_then(opt_i64),
-    )
-}
-
 fn opt_i64(value: u64) -> Option<i64> {
     i64::try_from(value).ok()
 }
@@ -1704,10 +1224,6 @@ fn required_u64(row: &QueryResult, column: &str) -> Result<u64> {
     Ok(value
         .and_then(|value| u64::try_from(value).ok())
         .unwrap_or(0))
-}
-
-fn body_ref(content: &str) -> String {
-    pl_core::context::content_hash(content.as_bytes())
 }
 
 fn statement(sql: &str, values: Vec<Value>) -> Statement {
@@ -1720,7 +1236,7 @@ fn integer(value: u64) -> Result<i64> {
         .map_err(|_| anyhow::anyhow!("call write sequence exceeds SQLite range"))
 }
 
-/// 只有忙/锁/IO 类错误允许自动重试；结构或约束错误必须显式回给调用方。
+/// 只有数据库忙/锁/IO 类错误允许自动重试；结构或约束错误必须显式回给调用方。
 fn is_retryable_write(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
     message.contains("database is locked")
@@ -1735,6 +1251,59 @@ fn is_retryable_write(message: &str) -> bool {
 #[cfg(test)]
 mod storage_fault_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn unwritable_diagnostics_do_not_starve_absolute_accounting() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        tokio::fs::write(temp.path().join("logs"), b"blocked directory").await?;
+        let store = CallsStore::open(&temp.path().join("calls.sqlite")).await?;
+        let record = CallLogRecord {
+            version: event::CALL_LOG_RECORD_VERSION,
+            kind: "billing".into(),
+            thread_id: "thread".into(),
+            call_id: "call".into(),
+            status: "committed".into(),
+            recorded_at: crate::studio::unix_seconds(),
+            ..Default::default()
+        };
+        let mutations = [
+            CallMutation::Billing(Box::new(record)),
+            CallMutation::Summary(SessionUsageProjection {
+                root_thread_id: "thread".into(),
+                thread_id: "thread".into(),
+                revision: 7,
+                has_unpriced_usage: false,
+                purpose_costs: vec![PurposeUsageProjection {
+                    purpose: None,
+                    estimated_costs: vec![RuntimeCostAmount {
+                        currency: "USD".into(),
+                        amount: 3.0,
+                    }],
+                }],
+            }),
+        ];
+        let pending = mutations
+            .into_iter()
+            .enumerate()
+            .map(|(index, mutation)| QueuedCallMutation {
+                ticket: index as u64 + 1,
+                accepted_at: tokio::time::Instant::now(),
+                bytes: mutation.estimated_bytes(),
+                mutation,
+            })
+            .collect();
+        let (completed, failures, deferred) = apply_batch(&store.writer, &pending).await?;
+        assert_eq!(completed, 2);
+        assert_eq!(failures.len(), 1);
+        assert!(deferred.is_none());
+        assert!(store.statistics_gap());
+        assert_eq!(
+            store.session_cost_rollups().await?[0].estimated_costs[0].amount,
+            3.0
+        );
+        store.stop_best_effort();
+        Ok(())
+    }
 
     #[tokio::test]
     async fn batch_savepoint_failure_preserves_other_calls_and_commits_before_receipts()
@@ -1753,16 +1322,15 @@ mod storage_fault_tests {
                  END;",
             )
             .await?;
-        let pending = ["first", "rejected", "last"]
+        let pending: VecDeque<QueuedCallMutation> = ["first", "rejected", "last"]
             .into_iter()
             .enumerate()
             .map(|(index, thread)| {
-                let mutation = CallMutation::Effect(Box::new(ThreadEffectBatch {
+                let mutation = CallMutation::Effect {
                     thread_id: thread.to_owned(),
                     sequence: 1,
-                    committed_at: 1,
-                    ..Default::default()
-                }));
+                    records: Vec::new(),
+                };
                 QueuedCallMutation {
                     ticket: index as u64 + 1,
                     accepted_at: tokio::time::Instant::now(),

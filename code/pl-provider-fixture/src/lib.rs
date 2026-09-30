@@ -34,8 +34,9 @@ pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
 /// The coordinator's ready-file check, the fixture CLI parser and the script
 /// selection all read this single list, so a scenario can no longer be accepted
 /// by one of them and rejected by another.
-pub const GUI_SCENARIOS: [&str; 10] = [
+pub const GUI_SCENARIOS: [&str; 11] = [
     "gui",
+    "storage-compaction",
     "stress",
     "stress-body",
     "stress-body-large",
@@ -1127,6 +1128,49 @@ impl Drop for FixtureServer {
             task.abort();
         }
     }
+}
+
+/// Native storage acceptance: later Turns compress before adding the new user input.
+/// The GUI keeps every original message and answer even after two replacements.
+pub fn gui_storage_compaction_script() -> Vec<Step> {
+    let mut script = RealtimeScript::new();
+    let title = session_title_prompt("Storage compaction first");
+    for (round, prompt) in [
+        (1, "Storage compaction first"),
+        (2, "Storage compaction second"),
+        (3, "Storage compaction third"),
+    ] {
+        script.optional_title(&title);
+        if round > 1 {
+            script.add(|step| {
+                Step::prompt(
+                    Protocol::ResponsesHttp,
+                    "请根据以上完整上下文生成压缩摘要。",
+                    step,
+                    Reply::Sse(responses_text(
+                        &format!("storage summary {round}"),
+                        &format!("storage-compact-{round}"),
+                        "fixture-model",
+                    )),
+                )
+            });
+            script.optional_title(&title);
+        }
+        script.add(|step| {
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                prompt,
+                step,
+                Reply::Sse(responses_text(
+                    &format!("storage answer {round}"),
+                    &format!("storage-answer-{round}"),
+                    "fixture-model",
+                )),
+            )
+        });
+        script.optional_title(&title);
+    }
+    script.finish()
 }
 
 pub fn gui_script() -> Vec<Step> {

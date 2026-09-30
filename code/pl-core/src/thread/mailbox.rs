@@ -68,6 +68,11 @@ pub(super) enum MailboxCommand {
         permissions::PermissionResolution,
         oneshot::Sender<Result<permissions::PermissionRecord, ThreadError>>,
     ),
+    RecordTaskObservation {
+        caller: String,
+        payload: OpaquePayload,
+        reply: oneshot::Sender<Result<(), ThreadError>>,
+    },
     ValidateExecution {
         caller: String,
         executor: crate::tool::opaque::ExecutionAuthority,
@@ -288,6 +293,33 @@ impl Owner {
             }
             MailboxCommand::ResolvePermission(resolution, reply) => {
                 let _ = reply.send(self.resolve_execution_permission(resolution));
+            }
+            MailboxCommand::RecordTaskObservation {
+                caller,
+                payload,
+                reply,
+            } => {
+                // Cancellation does not erase already incurred observations. The exact task must
+                // still be running; this operation never grants permission to execute a tool.
+                let result = if !self
+                    .state
+                    .tasks
+                    .get(&caller)
+                    .is_some_and(|task| task.status == task::TaskStatus::Running)
+                {
+                    Err(ThreadError::TaskAccessExpired)
+                } else {
+                    let id = format!("tool-observation:{}", payload.format());
+                    let expected_revision =
+                        self.state.extensions.get(&id).map(|record| record.revision);
+                    self.mutate_extensions(vec![extensions::ExtensionMutation::Put {
+                        id,
+                        expected_revision,
+                        payload,
+                    }])
+                    .map(|_| ())
+                };
+                let _ = reply.send(result);
             }
             MailboxCommand::ValidateExecution {
                 caller,

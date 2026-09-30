@@ -1,21 +1,20 @@
-//! Per-Thread ordered persistence owner: effects are written in order, checkpoints are coalesced.
+//! Per-Thread ordered persistence owner: each effect and its checkpoint commit in one transaction.
 //!
 //! Admission never blocks the executor. Effects are history facts, so every admitted batch is
 //! written to `history.sqlite`/`calls.sqlite` in sequence order, each against the effect-matched
-//! transfer state it arrived with; the writer never reads back a pruned `state.toml`. Checkpoints
-//! by contrast are merged: at most one publication is in flight and at most one newest revision is
-//! retained (`design/15` §15.4). A retained revision becomes dirty at the first admission and is
-//! published at the end of a fixed coalescing interval — no change, no write; a missed tick writes
-//! once instead of catching up — unless the admitting effect ends a Turn, changes lifecycle or the
-//! caller is waiting on `flush_through`, which publishes it immediately.
+//! transfer state it arrived with. The matching checkpoint is not scheduled on its own: the writer
+//! holds `write.checkpoint` as the candidate for exactly that effect and commits it together with
+//! the effect's history facts, the latest context increment and the history watermark in one
+//! `history.sqlite` transaction (`design/15` §15.5). There is no coalescing interval and no second
+//! in-flight checkpoint, so no revision can be observed as dirty without its effect, and the
+//! published revision always moves with the durable effect sequence.
 //!
-//! Publication order is fixed: the history watermark must already cover the checkpoint's
-//! `history_fence`, every blob the checkpoint names must be durable first, and only then is the
-//! counter-resolved TOML written atomically. The same file also carries the Thread's cumulative
-//! usage summary, which this writer folds from each effect exactly once, so hot reads, reconnects
-//! and cold restores observe one cumulative value instead of re-aggregating resident attempts.
-//! Each checkpoint publishes the summary of its own `state_revision`, bound when the fold reached
-//! that effect, so a candidate never carries a summary the state it saves does not include.
+//! Publication order is fixed: every blob the checkpoint names must be durable first, and only then
+//! is the transaction that writes the pruned checkpoint and advances the watermark committed. The
+//! writer folds each effect's cumulative usage accounting exactly once, sets it on that effect's
+//! checkpoint as `state.usage_summary`, and only publishes the running summary once the transaction
+//! succeeded — so hot reads, reconnects and cold restores observe one cumulative value and a saved
+//! checkpoint never carries a summary its own commit did not include.
 
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -26,7 +25,9 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result, ensure};
+#[cfg(test)]
+use anyhow::Context;
+use anyhow::{Result, ensure};
 use pl_core::thread::{
     ThreadCheckpoint, ThreadSnapshot, UsageSummary,
     cold::{ColdStore, ColdStoreError, StoragePressure, ThreadWrite},
@@ -39,9 +40,6 @@ use crate::studio::storage::history::{
     EffectCommit, InputIdentityWrite, MessageIdentityWrite, is_retryable_write,
 };
 use crate::studio::thread_projection::PreparedEffect;
-
-/// Fixed coalescing interval for dirty checkpoint revisions.
-const SNAPSHOT_COALESCE: Duration = Duration::from_secs(1);
 
 /// How long one writer incarnation may keep retrying a transient storage conflict before it must
 /// report it.
@@ -84,29 +82,6 @@ impl Drop for DetachGuard {
     }
 }
 
-/// One retained checkpoint awaiting publication.
-#[derive(Debug, Clone)]
-struct PendingCheckpoint {
-    /// Monotonic publication epoch of this sink.
-    ///
-    /// It orders retentions and lets a completed publication clear only the candidate that is still
-    /// in flight, so a cover frozen while an older candidate was being written is never swallowed.
-    epoch: u64,
-    /// Earliest instant the coalescing interval allows this revision to be published.
-    due: Instant,
-    /// Whether the admitting effect demanded immediate publication.
-    immediate: bool,
-    checkpoint: ThreadCheckpoint,
-    /// Cumulative usage folded exactly through `checkpoint.state_revision`.
-    ///
-    /// A published checkpoint must carry the summary of its own revision, never the writer's
-    /// running fold, which is allowed to be ahead of a retained candidate. The slot stays `None`
-    /// until the writer has folded that exact effect, so at most the in-flight candidate and the
-    /// newest pending one ever hold a summary — there is no per-revision map that grows with
-    /// history.
-    usage: Option<UsageSummary>,
-}
-
 /// One admitted effect waiting for its ordered durable write.
 #[derive(Debug)]
 struct QueuedEffect {
@@ -126,26 +101,13 @@ struct QueuedEffect {
 
 #[derive(Debug, Default)]
 struct Progress {
-    /// Highest effect sequence whose history/calls write completed.
+    /// Highest effect sequence whose history/checkpoint transaction completed.
     durable: u64,
-    /// Highest checkpoint revision already published to `state.toml`.
+    /// Highest checkpoint revision already committed with its effect.
     published_revision: u64,
-    /// Publication epoch already published.
-    published_epoch: u64,
-    /// Next publication epoch this sink will hand out.
-    next_epoch: u64,
-    /// Newest admitted checkpoint awaiting selection.
-    pending: Option<PendingCheckpoint>,
-    /// The checkpoint selected for publication.
-    ///
-    /// Once a revision is selected it is retained here across later admissions, so a fixed flush
-    /// target or an immediate publication is never pushed out of reach by the effects admitted
-    /// behind it. At most one selection is in flight, so the sink still holds one in-flight and
-    /// one newest pending checkpoint.
-    in_flight: Option<PendingCheckpoint>,
-    /// Checkpoint revision currently being serialized or synced.
+    /// Checkpoint revision of the effect whose atomic history+checkpoint write is in progress.
     saving_revision: u64,
-    /// Admitted effects awaiting their ordered history/calls write.
+    /// Admitted effects awaiting their ordered history/checkpoint transaction.
     ///
     /// An entry leaves the queue only once the durable store committed it *and* the Thread's single
     /// live projection owner took it over, so this queue is the one reliable handoff between a core
@@ -174,8 +136,6 @@ struct Progress {
     /// Thread — whose commits were already durable before this process started — never waits for a
     /// watermark that cannot move.
     handoff: u64,
-    /// Effect sequence a caller is waiting for; publication may not wait for the coalescing tick.
-    flush_target: u64,
     /// Highest effect sequence whose call write was admitted.
     calls_admitted: u64,
     /// Highest effect sequence whose call write completed.
@@ -184,10 +144,11 @@ struct Progress {
     in_flight_bytes: u64,
     /// Whether the newest admitted state paused inference admission under storage pressure.
     pressure_paused: bool,
-    /// Cumulative usage summary folded through the effects written so far.
+    /// Cumulative usage summary folded through the effects committed so far.
     ///
-    /// This is the running value hot reads see. A checkpoint publishes its own bound copy instead
-    /// of this one, because this fold may already be ahead of a retained candidate.
+    /// This is the running value hot reads see. Each effect folds its own absolute increment out of
+    /// a clone of this value and sets the result on its checkpoint, so the summary that becomes
+    /// durable with an effect is exactly the one this field advances to on that same commit.
     usage: UsageSummary,
     error: Option<String>,
     fault: Option<pl_protocol::studio::HistoryFault>,
@@ -229,123 +190,13 @@ pub(crate) struct HistoryStatus {
     pub(crate) queued_bytes: u64,
 }
 
-impl Progress {
-    /// Retains one checkpoint as the newest publication without moving an anchored deadline.
-    fn mark_checkpoint(&mut self, checkpoint: ThreadCheckpoint, immediate: bool) {
-        let epoch = self.next_epoch.saturating_add(1);
-        self.next_epoch = epoch;
-        // 合并窗口锚定在第一次 dirty 的时刻：连续提交只合并，不不断推迟或补写。
-        let due = match self.pending.as_ref() {
-            Some(pending) if !immediate => pending.due,
-            _ if immediate => Instant::now(),
-            _ => Instant::now() + SNAPSHOT_COALESCE,
-        };
-        let immediate = immediate
-            || self
-                .pending
-                .as_ref()
-                .is_some_and(|pending| pending.immediate);
-        self.pending = Some(PendingCheckpoint {
-            epoch,
-            due,
-            immediate,
-            checkpoint,
-            usage: None,
-        });
-        self.bind_usage();
-    }
-
-    /// Selects the newest pending checkpoint once it is demanded.
-    ///
-    /// A revision is demanded when it is immediate, when a caller is waiting on a fixed flush
-    /// target that it covers, or when its coalescing window expired. Selection only moves the
-    /// newest pending into the in-flight slot; later admissions keep filling `pending`.
-    fn select_in_flight(&mut self) {
-        if self.in_flight.is_some() {
-            return;
-        }
-        let Some(pending) = self.pending.as_ref() else {
-            return;
-        };
-        if pending.epoch <= self.published_epoch {
-            self.pending = None;
-            return;
-        }
-        let demanded = pending.immediate
-            || self.flush_target >= pending.checkpoint.state_revision
-            // A caller is still waiting on a fixed target: publish the next covering checkpoint as
-            // soon as its fence is durable instead of waiting for its coalescing window.
-            || self.flush_target > self.published_revision
-            || Instant::now() >= pending.due;
-        if demanded {
-            self.in_flight = self.pending.take();
-            self.bind_usage();
-        }
-    }
-
-    /// Freezes the candidate covering `flush_target` into the in-flight slot, under this lock.
-    ///
-    /// `flush_target` is already set when this runs, and moving the newest checkpoint admitted so
-    /// far into the in-flight slot inside the same critical section is what makes a fixed target
-    /// exact: an effect admitted after the call can only fill `pending` again, so it can never push
-    /// the target's fence out of reach. A checkpoint is a cumulative snapshot, so replacing an
-    /// in-flight candidate that does not cover the target yet coalesces it into the newer revision
-    /// instead of publishing both; the sink still retains one in-flight and one newest pending
-    /// checkpoint.
-    fn freeze_flush_cover(&mut self) {
-        let covered = self
-            .in_flight
-            .as_ref()
-            .is_some_and(|candidate| candidate.checkpoint.state_revision >= self.flush_target);
-        if covered {
-            return;
-        }
-        let Some(pending) = self.pending.take() else {
-            return;
-        };
-        // The fixed target may still be unadmitted: keep the newest pending and freeze the cover
-        // once the admission that reaches it arrives.
-        if pending.checkpoint.state_revision < self.flush_target {
-            self.pending = Some(pending);
-            return;
-        }
-        self.in_flight = Some(pending);
-        self.bind_usage();
-    }
-
-    /// Binds the running summary to every retained candidate whose own revision it now equals.
-    ///
-    /// The fold is absolute and advances one effect at a time, so exactly one moment exists at
-    /// which a candidate's revision is the fold point. Binding there — instead of reading the
-    /// writer's later fold at publication — is what keeps a published `state.toml` summary at its
-    /// own `commit_sequence`, so a cold restore never skips effects a newer fold already applied.
-    fn bind_usage(&mut self) {
-        let applied = self.usage.applied_sequence;
-        if !self
-            .pending
-            .iter()
-            .chain(self.in_flight.iter())
-            .any(|candidate| {
-                candidate.usage.is_none() && candidate.checkpoint.state_revision == applied
-            })
-        {
-            return;
-        }
-        let usage = self.usage.clone();
-        for candidate in self.pending.iter_mut().chain(self.in_flight.iter_mut()) {
-            if candidate.usage.is_none() && candidate.checkpoint.state_revision == applied {
-                candidate.usage = Some(usage.clone());
-            }
-        }
-    }
-}
-
 /// What the writer loop has to do next.
 enum Step {
     /// Progress was made; the loop runs another unit immediately.
     Progressed,
-    /// Nothing to do yet; the loop waits for this long, or forever when `None`.
-    Idle(Option<Duration>),
+    /// Nothing to do yet; every admitted effect already carries its own checkpoint, so the loop
+    /// just waits for the next admission or retry notification.
+    Idle,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -668,8 +519,7 @@ impl HistoryChannel {
             .progress
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if progress.effects.is_empty() && progress.pending.is_none() && progress.in_flight.is_none()
-        {
+        if progress.effects.is_empty() {
             return;
         }
         if progress.error.is_none() {
@@ -691,10 +541,7 @@ impl HistoryChannel {
             .progress
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        progress.effects.is_empty()
-            && progress.pending.is_none()
-            && progress.in_flight.is_none()
-            && progress.error.is_none()
+        progress.effects.is_empty() && progress.error.is_none()
     }
 
     fn detect_stall(&self) {
@@ -824,17 +671,8 @@ async fn history_store(inner: &Inner) -> Result<crate::studio::storage::history:
     Ok(opened.clone())
 }
 
-/// 结束 Turn、生命周期变化或显式保存点必须立即发布，不等待合并窗口。
-fn demands_immediate_publication(effect: &pl_core::thread::ThreadEffectBatch) -> bool {
-    effect.lifecycle.is_some()
-        || effect
-            .turn
-            .as_ref()
-            .is_some_and(|turn| turn.state != pl_core::thread::TurnState::Running)
-}
-
 /// Publishes the current queue state so `wait_for_drain` and the product snapshot never report a
-/// Thread as finished while a checkpoint is still unpublished.
+/// Thread as finished while an effect (and therefore its checkpoint) is still queued.
 fn report(inner: &Inner, progress: &Progress) {
     inner.channel.report(progress);
     // The call recorder is one global writer shared by every Thread, so any owning writer can
@@ -853,25 +691,14 @@ fn report(inner: &Inner, progress: &Progress) {
         .effects
         .iter()
         .fold(0_u64, |total, queued| total.saturating_add(queued.bytes));
-    // 进行中 + 最新待写的未发布 checkpoint 也是待处理操作；只保留 checkpoint dirty 时，最老
-    // 待写年龄仍来自它自己的 saved_at，而不是退化成 None。
-    let dirty = progress
-        .pending
-        .iter()
-        .chain(progress.in_flight.iter())
-        .filter(|checkpoint| checkpoint.epoch > progress.published_epoch)
-        .collect::<Vec<_>>();
-    let pending_operations = progress.effects.len() as u64 + dirty.len() as u64;
+    // 每个待写 effect 自带它的候选 checkpoint，并与其在同一个事务落盘：队列非空就意味着历史与
+    // checkpoint 都还 dirty，最老待写年龄因此只来自队列里每条 effect 自己的 saved_at。
+    let pending_operations = progress.effects.len() as u64;
     let now = crate::studio::unix_seconds();
     let oldest_pending_age_millis = progress
         .effects
         .iter()
         .map(|queued| queued.write.checkpoint.saved_at)
-        .chain(
-            dirty
-                .iter()
-                .map(|checkpoint| checkpoint.checkpoint.saved_at),
-        )
         .map(|saved_at| {
             u64::try_from(now.saturating_sub(saved_at))
                 .unwrap_or(0)
@@ -883,14 +710,16 @@ fn report(inner: &Inner, progress: &Progress) {
         .back()
         .map(|queued| queued.sequence)
         .unwrap_or(0);
+    let dirty_revision = progress
+        .effects
+        .iter()
+        .map(|queued| queued.write.checkpoint.state_revision)
+        .max()
+        .unwrap_or(progress.published_revision);
     let metrics = ThreadPersistenceMetrics {
         fault_generation: progress.fault_generation,
         fault: progress.fault,
-        state_dirty_revision: dirty
-            .iter()
-            .map(|checkpoint| checkpoint.checkpoint.state_revision)
-            .max()
-            .unwrap_or(progress.published_revision),
+        state_dirty_revision: dirty_revision,
         state_saving_revision: progress.saving_revision,
         state_durable_revision: progress.published_revision,
         history_admitted_sequence: max_admitted.max(progress.durable),
@@ -907,7 +736,7 @@ fn report(inner: &Inner, progress: &Progress) {
         &inner.thread.id,
         inner.owner,
         pending,
-        !dirty.is_empty(),
+        false,
         progress.error.clone(),
         metrics,
     );
@@ -973,6 +802,9 @@ impl ThreadStorageSink {
                 .max(restored_checkpoint.map_or(0, |checkpoint| checkpoint.state_revision));
             report(&inner, &progress);
         }
+        if let Ok(history) = history_store(&inner).await {
+            publish_accounting(&inner, &history).await;
+        }
         drop(writer_lease);
         let observer = Arc::downgrade(&inner);
         let calls = inner.store.calls().clone();
@@ -985,6 +817,12 @@ impl ThreadStorageSink {
                 }
                 tokio::select! {
                     Ok(()) = durable_tickets.changed() => {},
+                    _ = tokio::time::sleep(Duration::from_secs(15)) => {
+                        if let Some(inner) = observer.upgrade()
+                            && let Ok(history) = history_store(&inner).await {
+                            publish_accounting(&inner, &history).await;
+                        }
+                    },
                     _ = stop_observer.changed() => break,
                 }
             }
@@ -1013,11 +851,7 @@ impl ThreadStorageSink {
                 // last Thread or GUI handle is dropped. Once clean it may release the connection.
                 if Arc::strong_count(&inner) == 1 {
                     let progress = lock_progress(&inner);
-                    if progress.effects.is_empty()
-                        && progress.pending.is_none()
-                        && progress.in_flight.is_none()
-                        && progress.error.is_none()
-                    {
+                    if progress.effects.is_empty() && progress.error.is_none() {
                         return;
                     }
                 }
@@ -1044,21 +878,11 @@ impl ThreadStorageSink {
                         retrying_since = None;
                         continue;
                     }
-                    Ok(Step::Idle(wait)) => {
-                        match wait {
-                            // 错过 tick 只写一次：等待到期后直接推进下一步，不补写。
-                            Some(wait) => {
-                                tokio::select! {
-                                    () = tokio::time::sleep(wait) => {}
-                                    () = inner.changed.notified() => {}
-                                }
-                            }
-                            None => {
-                                tokio::select! {
-                                    () = tokio::time::sleep(Duration::from_secs(1)) => {}
-                                    () = inner.changed.notified() => {}
-                                }
-                            }
+                    Ok(Step::Idle) => {
+                        // 无合并窗口：空闲只等下一次受理或重试通知，周期性醒来只为检测停顿。
+                        tokio::select! {
+                            () = tokio::time::sleep(Duration::from_secs(1)) => {}
+                            () = inner.changed.notified() => {}
                         }
                     }
                     Err(error) => {
@@ -1123,24 +947,8 @@ async fn refresh_call_watermark(
 /// Performs one unit of durable work.
 async fn step(inner: &Inner) -> Result<Step> {
     let _single_writer = inner.channel.step_lock.lock().await;
-    // A demanded checkpoint publishes as soon as its own fence is durable, even while later effects
-    // are still queued: a fixed flush target or an immediate publication must not wait for the
-    // whole queue to drain. Selecting it into the in-flight slot also shields it from later
-    // admissions that keep updating the newest pending revision.
-    {
-        let mut progress = lock_progress(inner);
-        progress.select_in_flight();
-    }
-    let publishable = {
-        let progress = lock_progress(inner);
-        progress
-            .in_flight
-            .as_ref()
-            .is_some_and(|candidate| candidate.checkpoint.history_fence <= progress.durable)
-    };
-    if publishable {
-        return publish_checkpoint(inner).await;
-    }
+    // 每个 effect 与它自己的候选 checkpoint 在同一次事务落盘：队列顺序即提交顺序，不再有单独的
+    // checkpoint 选择、合并窗口或发布步骤。
     let next_effect = lock_progress(inner).effects.front().map(|queued| {
         (
             queued.sequence,
@@ -1148,46 +956,81 @@ async fn step(inner: &Inner) -> Result<Step> {
             queued.prepared.clone(),
         )
     });
-    if let Some((sequence, write, prepared)) = next_effect {
-        // The Thread's live projection owner consumed this fact before the durable store may write
-        // it: the writer commits the content that owner published instead of projecting the effect
-        // again, so live and durable history can never disagree and durability never advances past a
-        // commit the product has not published.
-        let Some(prepared) = prepared else {
-            return Ok(Step::Idle(None));
-        };
-        persist_effect(inner, sequence, &write, &prepared).await?;
-        let mut progress = lock_progress(inner);
-        if let Some(committed) = progress.effects.pop_front() {
-            let bytes = committed.bytes;
-            let prepared_bytes = committed.prepared_bytes;
-            ensure!(
-                committed.sequence == sequence,
-                "history queue head changed before acknowledgement"
-            );
-            progress.prepared_bytes = progress.prepared_bytes.saturating_sub(prepared_bytes);
-            inner
-                .channel
-                .process_bytes
-                .fetch_sub(bytes, Ordering::AcqRel);
-            progress.durable = progress.durable.max(sequence);
-            progress.last_progress_at = (!progress.effects.is_empty()).then(Instant::now);
-        }
-        clear_recovered_fault(&mut progress);
-        report(inner, &progress);
-        drop(progress);
-        inner.changed.notify_one();
-        return Ok(Step::Progressed);
+    let Some((sequence, write, prepared)) = next_effect else {
+        return Ok(Step::Idle);
+    };
+    // The Thread's live projection owner consumed this fact before the durable store may write it:
+    // the writer commits the content that owner published instead of projecting the effect again, so
+    // live and durable history can never disagree and durability never advances past a commit the
+    // product has not published.
+    let Some(prepared) = prepared else {
+        return Ok(Step::Idle);
+    };
+    persist_effect(inner, sequence, &write, &prepared).await?;
+    let mut progress = lock_progress(inner);
+    if let Some(committed) = progress.effects.pop_front() {
+        let bytes = committed.bytes;
+        let prepared_bytes = committed.prepared_bytes;
+        ensure!(
+            committed.sequence == sequence,
+            "history queue head changed before acknowledgement"
+        );
+        progress.prepared_bytes = progress.prepared_bytes.saturating_sub(prepared_bytes);
+        inner
+            .channel
+            .process_bytes
+            .fetch_sub(bytes, Ordering::AcqRel);
+        progress.durable = progress.durable.max(sequence);
+        progress.last_progress_at = (!progress.effects.is_empty()).then(Instant::now);
     }
-    publish_checkpoint(inner).await
+    clear_recovered_fault(&mut progress);
+    report(inner, &progress);
+    drop(progress);
+    inner.changed.notify_one();
+    Ok(Step::Progressed)
 }
 
-/// Writes one effect's history and call records, then folds its cumulative accounting.
+/// Atomically writes one effect's history, its latest context increment and its checkpoint.
 ///
 /// The committed content is the immutable batch the Thread's single live projection owner prepared
 /// for exactly this commit. The writer therefore never projects the effect a second time — the whole
 /// product body is projected once, published once and written once — and the identity/revision pair
-/// it confirms is the pair that owner handed over.
+/// it confirms is the pair that owner handed over. The candidate is the effect's own
+/// `write.checkpoint`; its cumulative usage is folded here, bound to the transaction and only
+/// published to hot readers once the transaction succeeded.
+async fn publish_accounting(
+    inner: &Inner,
+    history: &crate::studio::storage::history::HistoryStore,
+) {
+    match history.accounting().await {
+        Ok(Some(accounting)) => {
+            use super::calls::{PurposeUsageProjection, SessionUsageProjection};
+            let projection = SessionUsageProjection {
+                root_thread_id: inner.thread.root_thread_id.clone(),
+                thread_id: inner.thread.id.clone(),
+                revision: accounting.revision,
+                has_unpriced_usage: accounting.has_unpriced_usage,
+                purpose_costs: accounting
+                    .purpose_costs
+                    .into_iter()
+                    .map(|(purpose, estimated_costs)| PurposeUsageProjection {
+                        purpose,
+                        estimated_costs,
+                    })
+                    .collect(),
+            };
+            if let Err(error) = inner.store.calls().replace_session_usage(projection) {
+                inner.store.calls().mark_statistics_gap();
+                tracing::warn!(%error, "累计统计投影暂未更新，可靠会话累计值已保存");
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(%error, "读取累计统计投影失败");
+        }
+    }
+}
+
 async fn persist_effect(
     inner: &Inner,
     sequence: u64,
@@ -1199,18 +1042,38 @@ async fn persist_effect(
         "prepared history batch {sequence} was handed over as {}",
         projected.sequence
     );
+    // 累计摘要按 effect 顺序折叠一次：从 writer 的运行值 clone，折叠本 effect 的绝对增量，放进该
+    // effect 自己的 checkpoint，与它的历史事实在同一事务落盘。折叠只作用于 clone，事务失败时运行
+    // 值不变，因此热读看到的总量绝不领先于已落库的 checkpoint。
+    let summary = {
+        let progress = lock_progress(inner);
+        let mut summary = progress.usage.clone();
+        crate::studio::thread_projection::fold_effect_accounting(&mut summary, &write.effect)?;
+        summary
+    };
+    let mut checkpoint = write.checkpoint.clone();
+    checkpoint.state.usage_summary = summary.clone();
+    // 统一 blob fence：checkpoint 引用的附件 blob 必须已经 durable，才允许提交引用它们的事务。
+    let referenced = crate::studio::thread_projection::referenced_attachment_ids(&checkpoint.state);
     {
         let mut progress = lock_progress(inner);
         progress.in_flight_bytes = encoded_bytes(&write.effect);
+        progress.saving_revision = checkpoint.state_revision;
+        report(inner, &progress);
     }
+    inner
+        .store
+        .blob_fence(&inner.thread.id, &referenced)
+        .await
+        .map_err(|error| classified(pl_protocol::studio::HistoryFault::BlobFailed, error))?;
     let history = history_store(inner).await?;
-    // The durable identity indexes answer a repeated `submitPrompt` and a repeated message delivery
-    // after the input/message left core state. Only minimal identities are written, and they share
-    // this effect's transaction so an index can never be durable without the effect it describes; a
-    // mismatching digest fails the transaction instead of overwriting an accepted identity.
-    history
-        .commit_effect(
-            write.effect.sequence,
+    // 一个事务同时写：effect 的历史事实（含重放身份索引）、effect.context 增量对应的最新上下文、
+    // pruned checkpoint 以及 history watermark。任一步失败即整体回滚，绝不会出现"历史已推进但
+    // checkpoint 未落盘"或反过来的半提交状态。
+    let committed = history
+        .commit_checkpoint_effect(
+            &checkpoint,
+            &write.effect,
             EffectCommit {
                 items: &projected.items,
                 rolled_back_turns: &rolled_back_turns(&write.checkpoint.state),
@@ -1223,7 +1086,14 @@ async fn persist_effect(
                 attempt: write.effect.attempt.as_ref(),
             },
         )
-        .await?;
+        .await;
+    {
+        let mut progress = lock_progress(inner);
+        progress.saving_revision = 0;
+    }
+    committed?;
+    super::state::clear_checkpoint_recovery(&inner.thread.id);
+    publish_accounting(inner, &history).await;
     // The writer confirms exactly the identity and revision this transaction committed, which is the
     // same batch the Thread's live projection published into the shared session before the handoff
     // reached this queue. No body is read back and no second content cache exists, so the saved
@@ -1240,115 +1110,25 @@ async fn persist_effect(
             projected.items.iter().map(|item| item.id.as_str()),
         );
     }
+    // 调用统计始终是独立的 best-effort：它与历史/checkpoint 事务无关，失败只影响可丢诊断。
     let statistics_admitted = inner.store.calls().try_admit_effect(&write.effect);
-    // 累计摘要按 effect 顺序折叠一次：绝对累计值，重复折叠同一 effect 是 no-op。折叠发生在
-    // 本 effect 的 durable 事实之后，因此实时与冷恢复读到的都是同一条已落库事实的结果。
-    let summary = {
+    // 事务成功后才发布运行值、已落库 revision 和用量累计。
+    inner
+        .store
+        .thread_persistence()
+        .set_usage(&inner.thread.id, summary.clone());
+    {
         let mut progress = lock_progress(inner);
         if statistics_admitted {
             progress.calls_admitted = progress.calls_admitted.max(sequence);
         }
-        let mut summary = progress.usage.clone();
-        crate::studio::thread_projection::fold_effect_accounting(&mut summary, &write.effect)?;
-        progress.usage = summary.clone();
-        // 折叠点正好落在某个保留候选的 revision 上时，把候选自己的摘要绑定在这一刻；此后即使
-        // 继续折叠更晚的 effect，也不会改变该候选将来发布的累计值。
-        progress.bind_usage();
-        summary
-    };
-    inner
-        .store
-        .thread_persistence()
-        .set_usage(&inner.thread.id, summary);
-    {
-        let mut progress = lock_progress(inner);
+        progress.usage = summary;
+        progress.published_revision = progress.published_revision.max(checkpoint.state_revision);
         progress.in_flight_bytes = 0;
         progress.pressure_paused = write.checkpoint.state.persistence.pressure_paused;
         report(inner, &progress);
     }
     Ok(())
-}
-
-/// Publishes the in-flight checkpoint once its fences are durable.
-async fn publish_checkpoint(inner: &Inner) -> Result<Step> {
-    let (candidate, epoch, usage) = {
-        let progress = lock_progress(inner);
-        let Some(candidate) = progress.in_flight.as_ref() else {
-            // Nothing selected: the loop waits until the newest dirty revision is demanded.
-            return Ok(match progress.pending.as_ref() {
-                Some(pending) if pending.epoch > progress.published_epoch => {
-                    Step::Idle(Some(pending.due.saturating_duration_since(Instant::now())))
-                }
-                _ => Step::Idle(None),
-            });
-        };
-        // 历史固定水位：fence 未 durable 之前不发布 TOML。
-        if candidate.checkpoint.history_fence > progress.durable {
-            return Ok(Step::Idle(None));
-        }
-        // 该候选自己的累计摘要：绑定在折叠刚好到达它 revision 的那一刻。只有写者已经折叠到该
-        // revision 时才有值，绝不读取在此之后继续累加的 fold，否则 `state.commit_sequence=N`
-        // 会配上 `applied_sequence=M>N`，冷恢复会跳过 N+1..M。
-        let usage = candidate.usage.clone().or_else(|| {
-            (progress.usage.applied_sequence == candidate.checkpoint.state_revision)
-                .then(|| progress.usage.clone())
-        });
-        (candidate.checkpoint.clone(), candidate.epoch, usage)
-    };
-    let usage = usage
-        .context("checkpoint candidate has no cumulative summary folded to its own revision")?;
-    ensure!(
-        usage.applied_sequence == candidate.state_revision,
-        "checkpoint summary at {} does not match revision {}",
-        usage.applied_sequence,
-        candidate.state_revision
-    );
-    let watermark = history_store(inner).await?.watermark().await?;
-    ensure!(
-        watermark >= candidate.history_fence,
-        "history watermark {watermark} is behind checkpoint fence {}",
-        candidate.history_fence
-    );
-    // 统一 blob fence：checkpoint 引用的附件 blob 必须已经 durable，才允许发布引用它们的 TOML。
-    let referenced = crate::studio::thread_projection::referenced_attachment_ids(&candidate.state);
-    inner
-        .store
-        .blob_fence(&inner.thread.id, &referenced)
-        .await
-        .map_err(|error| classified(pl_protocol::studio::HistoryFault::BlobFailed, error))?;
-    let mut pruned = candidate.pruned();
-    // 累计摘要随 checkpoint 一起发布，冷恢复因此不需要重新聚合历史集合。
-    pruned.state.usage_summary = usage;
-    {
-        let mut progress = lock_progress(inner);
-        progress.saving_revision = pruned.state_revision;
-        report(inner, &progress);
-    }
-    inner
-        .store
-        .state(&inner.thread.id)
-        .publish(&pruned)
-        .await
-        .map_err(|error| classified(pl_protocol::studio::HistoryFault::CheckpointFailed, error))?;
-    {
-        let mut progress = lock_progress(inner);
-        progress.published_revision = progress.published_revision.max(pruned.state_revision);
-        progress.published_epoch = progress.published_epoch.max(epoch);
-        // 本候选写盘期间可能有覆盖更大固定目标的候选被冻结进 in-flight：只清除仍在原位的那
-        // 一份，绝不吞掉后来冻结的封面候选。
-        if progress
-            .in_flight
-            .as_ref()
-            .is_some_and(|candidate| candidate.epoch == epoch)
-        {
-            progress.in_flight = None;
-        }
-        progress.saving_revision = 0;
-        clear_recovered_fault(&mut progress);
-        report(inner, &progress);
-    }
-    inner.changed.notify_one();
-    Ok(Step::Progressed)
 }
 
 /// Minimal durable identities of the messages one effect admitted.
@@ -1517,7 +1297,7 @@ impl ColdStore for ThreadStorageSink {
             .fold(0_u64, |total, output| {
                 total.saturating_add(output.retained())
             });
-        let mut bytes = progress
+        let bytes = progress
             .effects
             .iter()
             .fold(progress.prepared_bytes, |total, queued| {
@@ -1525,17 +1305,6 @@ impl ColdStore for ThreadStorageSink {
             })
             .saturating_add(progress.projection_bytes)
             .saturating_add(reserved);
-        if progress
-            .pending
-            .as_ref()
-            .is_some_and(|candidate| candidate.epoch > progress.published_epoch)
-            || progress
-                .in_flight
-                .as_ref()
-                .is_some_and(|candidate| candidate.epoch > progress.published_epoch)
-        {
-            bytes = bytes.saturating_add(1);
-        }
         StoragePressure {
             thread_bytes: bytes,
             store_bytes: self.0.channel.process_bytes.load(Ordering::Acquire),
@@ -1635,8 +1404,6 @@ impl ColdStore for ThreadStorageSink {
             progress.usage = write.checkpoint.state.usage_summary.clone();
         }
         progress.pressure_paused = write.checkpoint.state.persistence.pressure_paused;
-        let immediate = demands_immediate_publication(&write.effect);
-        progress.mark_checkpoint(write.checkpoint, immediate);
         report(&self.0, &progress);
         drop(progress);
         self.0.changed.notify_one();
@@ -1649,14 +1416,8 @@ impl ColdStore for ThreadStorageSink {
                 source: Box::new(std::io::Error::other("Thread persistence owner mismatch")),
             });
         }
-        {
-            let mut progress = lock_progress(&self.0);
-            progress.flush_target = progress.flush_target.max(sequence);
-            // 固定目标与覆盖它的候选在同一个临界区里绑定：调用之后受理的 effect 只能重新填满
-            // `pending`，不会把 target 对应的 history fence 推到更晚的 admission 之后。
-            progress.freeze_flush_cover();
-        }
-        // 固定目标立即推动目标 checkpoint；等待只在协调器广播的持久化水位上，不依赖队列时序。
+        // 固定目标只需等待它自己的 effect durable：checkpoint 与该 effect 在同一事务落盘，所以
+        // durable 前进即意味着目标 checkpoint 也已提交，不再有独立的发布水位要等。
         self.0.changed.notify_one();
         let coordinator = self.0.store.thread_persistence().clone();
         let mut progress = coordinator.subscribe();
@@ -1667,9 +1428,9 @@ impl ColdStore for ThreadStorageSink {
         loop {
             {
                 let local = lock_progress(&self.0);
-                // The barrier covers both the ordered history write and the checkpoint publication,
-                // so a released owner never leaves an unpublished `state.toml` behind.
-                if local.durable >= sequence && local.published_revision >= sequence {
+                // The effect and its checkpoint commit atomically, so durable covers both: a released
+                // owner never leaves an effect whose checkpoint is not yet committed behind.
+                if local.durable >= sequence {
                     return Ok(());
                 }
                 if let Some(error) = local.error.clone() {
@@ -2577,18 +2338,12 @@ mod storage_fault_tests {
         };
         let tools: Arc<[pl_core::model::ModelToolDeclaration]> =
             Arc::from(Vec::<pl_core::model::ModelToolDeclaration>::new());
-        let attempt = pl_core::thread::RequestAttempt {
-            request_metadata: None,
-            usage_binding: None,
-            tool_projection: None,
-            turn_id: turn_id.to_owned(),
-            attempt_id: attempt_id.to_owned(),
-            retry_of: None,
-            input: pl_core::context::ContextSnapshot::default(),
-            tools: tools.clone(),
-            outcome: pl_core::thread::AttemptOutcome::Committed(output.clone()),
-            input_estimate: None,
-        };
+        let attempt = pl_core::thread::RequestAttempt::new(
+            turn_id.to_owned(),
+            attempt_id.to_owned(),
+            0,
+            pl_core::thread::AttemptStatus::Committed,
+        );
         let update = pl_core::thread::journal::AttemptUpdate {
             request_metadata: None,
             usage_binding: None,
@@ -2906,7 +2661,15 @@ mod storage_fault_tests {
                 .is_none()
         );
 
-        // Commit 2: the Turn finishes. The live projection of that same effect is the fact the frame
+        // Intervening commits advance the execution clock without changing the Turn item.
+        // A terminal frame must outrank running frames even when its item content version is small.
+        for sequence in 2..=10 {
+            let mut intermediate = ticket(thread_id, sequence);
+            intermediate.checkpoint.state.turns =
+                Arc::from([turn_record(turn_id, input_id, TurnState::Running)]);
+            drive_live_projection(&mut projection, &chat, &sink, thread_id, intermediate)?;
+        }
+        // Commit 11: the Turn finishes. The live projection of that same effect is the fact the frame
         // carried; the durable row the writer commits has to recover the identical Turn.
         let finished = || {
             turn_record(
@@ -2915,17 +2678,19 @@ mod storage_fault_tests {
                 TurnState::Finished(TurnOutcome::Completed),
             )
         };
-        let mut terminal = ticket(thread_id, 2);
+        let mut terminal = ticket(thread_id, 11);
         terminal.checkpoint.state.turns = Arc::from([finished()]);
         Arc::make_mut(&mut terminal.effect).turn = Some(finished());
-        let live = crate::studio::thread_projection::project_effect_terminal_turn(
-            thread_id,
-            &terminal.checkpoint.state,
+        let prepared = projection.project_committed(
+            &chat,
+            &pl_protocol::Thread::placeholder(thread_id),
             &terminal.effect,
-        )
-        .context("the live projection must carry the finished Turn")?;
+            &terminal.checkpoint.state,
+        )?;
+        let live = crate::studio::thread_projection::prepared_terminal_turn(&prepared)
+            .context("the live projection must carry the finished Turn")?;
         drive_live_projection(&mut projection, &chat, &sink, thread_id, terminal)?;
-        tokio::time::timeout(Duration::from_secs(30), sink.flush(thread_id, 2)).await??;
+        tokio::time::timeout(Duration::from_secs(30), sink.flush(thread_id, 11)).await??;
 
         let cold = store
             .history(thread_id)
@@ -2933,6 +2698,10 @@ mod storage_fault_tests {
             .newest_terminal_turn()
             .await?
             .context("the durable history must carry the finished Turn")?;
+        assert_eq!(
+            live.revision, 11,
+            "terminal frame must use the execution clock"
+        );
         assert_eq!(cold.id, live.id);
         assert_eq!(cold.revision, live.revision);
         assert_eq!(cold.state, live.state);
@@ -3495,20 +3264,28 @@ mod storage_fault_tests {
         Ok(())
     }
 
+    /// A rejected commit rolls back the effect's history, its latest context and its checkpoint
+    /// together, so the writer never advances the history watermark to a revision whose checkpoint
+    /// the very same transaction failed to store — the atomicity the old split write could not give.
     #[tokio::test]
-    async fn failed_checkpoint_publication_keeps_the_history_fence() -> Result<()> {
-        let (_temp, store, sink) = sink("checkpoint-failure").await?;
-        let state_path = store
-            .thread_storage_dir("checkpoint-failure")
-            .join("state.toml");
-        tokio::fs::create_dir_all(&state_path).await?;
+    async fn a_rejected_atomic_commit_never_advances_history_without_its_checkpoint() -> Result<()>
+    {
+        let (_temp, store, sink) = sink("atomic-failure").await?;
+        // Commit one effect first so the history database exists, then reject the second one's whole
+        // transaction from the watermark update that every atomic commit performs.
+        sink.admit("atomic-failure", ticket("atomic-failure", 1))?;
+        tokio::time::timeout(Duration::from_secs(5), sink.flush("atomic-failure", 1)).await??;
+        let path = store
+            .thread_storage_dir("atomic-failure")
+            .join("history.sqlite");
+        let db = Database::connect(crate::studio::paths::sqlite_url(&path)).await?;
+        db.execute_unprepared(
+            "CREATE TRIGGER reject_watermark BEFORE UPDATE OF applied_write_seq ON history_meta \
+             BEGIN SELECT RAISE(ABORT, 'controlled atomic rejection'); END",
+        )
+        .await?;
         let mut status = sink.0.channel.subscribe();
-        sink.admit("checkpoint-failure", ticket("checkpoint-failure", 1))?;
-        assert!(
-            tokio::time::timeout(Duration::from_secs(5), sink.flush("checkpoint-failure", 1))
-                .await?
-                .is_err()
-        );
+        sink.admit("atomic-failure", ticket("atomic-failure", 2))?;
         tokio::time::timeout(Duration::from_secs(5), async {
             while status.borrow_and_update().fault.is_none() {
                 status.changed().await?;
@@ -3519,34 +3296,24 @@ mod storage_fault_tests {
         let failed = status.borrow().clone();
         assert_eq!(
             failed.fault,
-            Some(pl_protocol::studio::HistoryFault::CheckpointFailed)
+            Some(pl_protocol::studio::HistoryFault::WriteFailed)
         );
+        // Nothing of the rejected revision is durable: the watermark stays on the previously
+        // committed effect and the effect is retained in order for retry.
         assert_eq!(failed.committed_sequence, 1);
-        assert_eq!(
-            store
-                .history("checkpoint-failure")
-                .await?
-                .watermark()
-                .await?,
-            1
-        );
-        tokio::fs::remove_dir(&state_path).await?;
+        assert_eq!(failed.queued_records, 1);
+        assert_eq!(store.history("atomic-failure").await?.watermark().await?, 1);
+        assert!(sink.flush("atomic-failure", 2).await.is_err());
+        db.execute_unprepared("DROP TRIGGER reject_watermark")
+            .await?;
         tokio::time::timeout(
             Duration::from_secs(5),
             store
                 .thread_persistence()
-                .retry_history("checkpoint-failure", failed.fault_generation),
+                .retry_history("atomic-failure", failed.fault_generation),
         )
         .await??;
-        assert!(tokio::fs::metadata(&state_path).await?.is_file());
-        assert_eq!(
-            store
-                .history("checkpoint-failure")
-                .await?
-                .watermark()
-                .await?,
-            1
-        );
+        assert_eq!(store.history("atomic-failure").await?.watermark().await?, 2);
         assert_eq!(sink.0.channel.subscribe().borrow().fault, None);
         Ok(())
     }
@@ -3586,7 +3353,10 @@ mod storage_fault_tests {
             failed.fault,
             Some(pl_protocol::studio::HistoryFault::BlobFailed)
         );
-        assert_eq!(failed.committed_sequence, 1);
+        // The blob fence runs before the atomic commit, so the missing blob blocks both the effect's
+        // history and its checkpoint: the watermark stays untouched until the blob is durable.
+        assert_eq!(failed.committed_sequence, 0);
+        assert_eq!(failed.queued_records, 1);
         assert!(sink.flush("blob-fence", 1).await.is_err());
         tokio::fs::create_dir_all(blob.parent().expect("blob has a parent")).await?;
         tokio::fs::write(&blob, b"restored").await?;
@@ -3598,10 +3368,7 @@ mod storage_fault_tests {
         )
         .await??;
         assert_eq!(store.history("blob-fence").await?.watermark().await?, 1);
-        assert!(
-            tokio::fs::try_exists(store.thread_storage_dir("blob-fence").join("state.toml"))
-                .await?
-        );
+        assert_eq!(sink.0.channel.subscribe().borrow().fault, None);
         Ok(())
     }
 
@@ -3870,6 +3637,19 @@ mod storage_fault_tests {
         // No test projection task here: the test hands the one fact over itself, exactly like the
         // Thread's observation worker, so the publish/hand-off/confirm order is deterministic.
         let mut projection = live_projection();
+        // Advance through real, contiguous empty commits; a large write sequence cannot be
+        // invented independently of the checkpoint's history fence.
+        for sequence in 1..9 {
+            let seed = ticket("revision-fence", sequence);
+            let prepared = projection.project_committed(
+                &chat,
+                &sink.0.thread,
+                &seed.effect,
+                &seed.checkpoint.state,
+            )?;
+            sink.admit("revision-fence", seed)?;
+            sink.0.channel.prepare(prepared);
+        }
         let prepared = projection.project_committed(
             &chat,
             &sink.0.thread,
@@ -4306,6 +4086,13 @@ mod storage_fault_tests {
         // durable commit path, then repaired by a fresh window that has to read it back.
         // The durable identity the single projection owner derives from the call id, kept identical to
         // `order::tool_id` so the owner's own history lookup finds exactly this committed row.
+        // This is a separate cold fixture, not an out-of-band mutation of the live writer's
+        // database: its artificial sequence must not invalidate the live recovery checkpoint.
+        let history = crate::studio::storage::history::HistoryStore::open(
+            &temp.path().join("off-window.sqlite"),
+            "archive-repair",
+        )
+        .await?;
         let off_window_id = format!("tool:{}:capture-2", "capture-2".len());
         let off_window_item = pl_protocol::ThreadItem::new(
             off_window_id.clone(),

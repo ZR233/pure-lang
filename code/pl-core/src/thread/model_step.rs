@@ -51,9 +51,9 @@ impl Owner {
             .filter(|previous| previous.attempt_id == source)
             .ok_or(ThreadError::InvalidIdentity)?;
         if !matches!(
-            previous.outcome,
-            AttemptOutcome::Failed(_) | AttemptOutcome::Cancelled { .. }
-        ) || previous.input != self.state.context
+            previous.status,
+            AttemptStatus::Failed | AttemptStatus::Cancelled
+        ) || previous.input_revision != self.state.context.revision
         {
             return Err(ThreadError::InvalidContext);
         }
@@ -119,8 +119,10 @@ impl Owner {
                 });
             }
             // Call identity is global to the Thread: a call already admitted by the current context,
-            // by a still-resident attempt or by the live ledger must never be re-declared. The
-            // current context is the bounded current fact set, not the whole history.
+            // or by the independent live ledger of the current Turn must never be re-declared. The
+            // ledger outlives any compaction of the attempts that declared those calls, so a long
+            // Turn keeps its duplicate-call protection after its finished attempts leave the
+            // resident set.
             if !ids.insert(&call.call_id)
                 || self.state.live_calls.contains_key(&call.call_id)
                 || self.state.context.records.iter().any(|record| {
@@ -128,13 +130,6 @@ impl Owner {
                         .tool_calls
                         .iter()
                         .any(|old| old.call_id == call.call_id)
-                })
-                || self.state.attempts.iter().any(|attempt| {
-                    matches!(
-                        &attempt.outcome,
-                        AttemptOutcome::Committed(previous)
-                            if previous.tool_calls.iter().any(|old| old.call_id == call.call_id)
-                    )
                 })
             {
                 return Some(ModelOutputViolation::DuplicateCallIdentity {
@@ -241,11 +236,7 @@ impl Owner {
                 record.id == format!("{}:input", input.attempt_id)
                     || record.id == format!("{}:output", input.attempt_id)
             })
-            || self
-                .state
-                .attempts
-                .iter()
-                .any(|attempt| attempt.attempt_id == input.attempt_id)
+            || self.state.attempt_ids.contains_key(&input.attempt_id)
         {
             return Err(ThreadError::InvalidIdentity);
         }
@@ -256,10 +247,9 @@ impl Owner {
             self.state.attempts.last().is_some_and(|previous| {
                 previous.attempt_id == *source
                     && matches!(
-                        previous.outcome,
-                        AttemptOutcome::Rejected {
+                        previous.status,
+                        AttemptStatus::Rejected {
                             reason: ModelOutputViolation::SoloBatch { .. },
-                            ..
                         }
                     )
             })
@@ -389,16 +379,20 @@ impl Owner {
         }
         let mut attempts = self.state.attempts.to_vec();
         attempts.push(RequestAttempt {
-            request_metadata,
-            usage_binding,
-            tool_projection: tool_projection.clone(),
             turn_id: input.turn_id.clone(),
             attempt_id: input.attempt_id.clone(),
-            input: context.clone(),
-            tools,
-            outcome: AttemptOutcome::Running,
             retry_of,
-            input_estimate,
+            input_revision,
+            status: AttemptStatus::Running,
+            usage: None,
+            facts: Some(AttemptFacts {
+                request_metadata,
+                usage_binding,
+                tool_projection: tool_projection.clone(),
+                tools,
+                outcome: AttemptOutcome::Running,
+                input_estimate,
+            }),
         });
         self.validate_steering(&steering_ids)?;
         self.consume_active_input(&input.turn_id, &input.attempt_id)?;
@@ -407,6 +401,9 @@ impl Owner {
         self.state.context = context;
         self.state.consumed_messages = consumed_messages;
         self.state.attempts = attempts.clone().into();
+        self.state
+            .attempt_ids
+            .insert(input.attempt_id.clone(), input.turn_id.clone());
         // The attempt is now running the prepared provider call; streaming output is observed
         // through the model progress sender.
         self.enter_model_execution(ModelExecutionPhase::Running);
@@ -499,7 +496,11 @@ impl Owner {
             }
         };
         if let Some(attempt) = attempts.last_mut() {
-            attempt.outcome = outcome;
+            attempt.status = AttemptStatus::from_outcome(&outcome);
+            attempt.usage = attempt_outcome_usage(&outcome).cloned();
+            if let Some(facts) = &mut attempt.facts {
+                facts.outcome = outcome;
+            }
         }
         self.state.attempts = attempts.into();
         // This commit carries the answer the attempt reserved its reliable output budget for, so the

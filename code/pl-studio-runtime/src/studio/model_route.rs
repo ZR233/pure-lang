@@ -75,22 +75,6 @@ pub(crate) fn profile_route(
     })
 }
 
-/// Reads the newest decodable admission receipt without consulting current provider settings.
-pub(crate) fn latest_request_route(state: &ThreadSnapshot) -> Option<ModelRouteConfig> {
-    state.attempts.iter().rev().find_map(|attempt| {
-        let receipt =
-            pl_model::runtime::model_request_receipt(attempt.request_metadata.as_ref()?).ok()?;
-        Some(ModelRouteConfig {
-            provider: ProviderId::new(receipt.binding.provider_instance_id).ok()?,
-            model: receipt.binding.requested_model,
-            effort: receipt
-                .reasoning
-                .and_then(|reasoning| reasoning.effort)
-                .map(ReasoningEffort::new),
-        })
-    })
-}
-
 pub(crate) fn route_record(
     state: &ThreadSnapshot,
     child: bool,

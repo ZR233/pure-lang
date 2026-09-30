@@ -1,4 +1,7 @@
 //! Product timeline projections read core facts and never drive models, tools or persistence reducers.
+mod billing;
+pub(crate) use billing::AuxiliaryBillingReceipt;
+pub(in crate::studio) use billing::billing_facts;
 mod activity;
 pub(in crate::studio) use activity::{ActivityDetailRead, ActivityProjection, project_activity};
 mod compactions;
@@ -32,33 +35,26 @@ mod tools;
 mod turns;
 pub(in crate::studio) use turns::project_active_turn;
 
-/// Canonical terminal Turn of one committed effect, when that effect finished a Turn.
-///
-/// The realtime stream broadcasts a terminal Turn exactly once and the authoritative subscription
-/// snapshot only ever carries the *active* Turn, so a subscriber that registers after the finishing
-/// commit has no frame left to read that fact from. The Thread's single projection owner retains the
-/// newest terminal Turn as its own typed fact (see `ThreadLiveFeed`) and derives it with this
-/// function — the same projection the live frame uses — so the retained value and the frame it
-/// stands in for are one fact instead of two drifting views. No SQL, no timeline body and no
-/// client-side guess is involved: a finished Turn record is the whole input.
-pub(in crate::studio) fn project_effect_terminal_turn(
-    thread_id: &str,
-    state: &pl_core::thread::ThreadSnapshot,
-    effect: &pl_core::thread::ThreadEffectBatch,
+/// The canonical terminal Turn already prepared for the reliable history transaction.
+pub(in crate::studio) fn prepared_terminal_turn(
+    prepared: &PreparedEffect,
 ) -> Option<pl_protocol::Turn> {
-    let record = effect.turn.as_ref()?;
-    if record.state == pl_core::thread::TurnState::Running {
-        return None;
-    }
-    turns::project_turn(
-        thread_id,
-        state,
-        record,
-        effect.committed_at,
-        effect.committed_at,
-        effect.sequence,
-    )
-    .ok()
+    prepared.items.iter().find_map(|item| {
+        let pl_protocol::ThreadItemState::Turn(turn) = item.state() else {
+            return None;
+        };
+        if !turn.state().is_terminal() {
+            return None;
+        }
+        Some(pl_protocol::Turn {
+            id: item.turn_id.clone(),
+            thread_id: item.thread_id.clone(),
+            input_id: turn.input_id().map(str::to_owned),
+            state: turn.state().clone(),
+            revision: prepared.sequence,
+            updated_at: item.updated_at,
+        })
+    })
 }
 
 /// Identity of one streaming channel item (`reasoning` or `text`) for an attempt.
@@ -93,8 +89,6 @@ pub(crate) enum ProjectionError {
     MissingToolResult(String),
     #[error("saved model receipt cannot be decoded")]
     Model(#[from] pl_core::model::ModelError),
-    #[error("missing committed metadata for model attempt {0}")]
-    MissingAttempt(String),
     #[error("unsupported saved model content: {0}")]
     UnsupportedOutput(String),
     #[error("missing committed metadata for input {0}")]

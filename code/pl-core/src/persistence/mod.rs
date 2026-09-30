@@ -12,10 +12,12 @@ mod writer;
 
 /// Current SQLite cold-history format. Unsupported formats are never automatically reset.
 ///
-/// Schema 9 backfills portable usage into schema-8 Thread checkpoints from saved effects.
-/// Older data is upgraded only through the explicit
-/// [`migration::migrate_to_current`] path; opening a database never converts or discards it.
-pub const SESSION_SCHEMA_VERSION: i64 = 9;
+/// Schema 9 backfills portable usage into schema-8 Thread checkpoints from saved effects; schema 10
+/// rewrites every stored checkpoint into the current lightweight-attempt schema, preserving the
+/// effect rows that are the durable history query contract. Older data is upgraded only through the
+/// explicit [`migration::migrate_to_current`] path; opening a database never converts or discards
+/// it.
+pub const SESSION_SCHEMA_VERSION: i64 = 10;
 
 use std::sync::Arc;
 

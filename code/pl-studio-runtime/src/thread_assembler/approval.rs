@@ -134,6 +134,9 @@ impl ExecutionPolicy for StudioExecutionPolicy {
                     ))
                 })?;
                 let decision = reviewer(ToolReviewRequest {
+                    task: context.tasks.clone().ok_or_else(|| {
+                        ToolError::new(pl_core::thread::ThreadError::TaskAccessDenied)
+                    })?,
                     tool: ToolApprovalRequest {
                         id: context.call_id.clone(),
                         name: self.tool_id.clone(),

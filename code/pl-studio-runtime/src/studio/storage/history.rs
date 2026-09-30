@@ -19,7 +19,9 @@ use sea_orm::{
     SqliteTransactionMode, Statement, TransactionOptions, TransactionTrait, Value,
 };
 
-const HISTORY_SCHEMA_VERSION: i64 = 4;
+const HISTORY_SCHEMA_VERSION: i64 = 5;
+
+mod checkpoint;
 /// 单页返回的总 payload 字节预算；达到预算即停止装入更多条目。
 const PAGE_BYTE_BUDGET: usize = 2 * 1024 * 1024;
 /// 单条预览预算必须小于整页预算，否则一条预览都无法落入一页。
@@ -319,10 +321,41 @@ impl HistoryStore {
     /// The minimal input/message identities and terminal receipts one effect produced are written in
     /// the same transaction as its items and Turn rows, so an index can never be durable without the
     /// effect it describes (or the other way round) after a crash between two commits.
+    #[cfg(test)]
     pub(crate) async fn commit_effect(
         &self,
         write_seq: u64,
         commit: EffectCommit<'_>,
+    ) -> Result<()> {
+        self.commit_inner(write_seq, commit, None).await
+    }
+
+    /// Publishes history and the matching latest recovery state in one transaction.
+    pub(crate) async fn commit_checkpoint_effect(
+        &self,
+        checkpoint: &pl_core::thread::ThreadCheckpoint,
+        effect: &pl_core::thread::ThreadEffectBatch,
+        commit: EffectCommit<'_>,
+    ) -> Result<()> {
+        ensure!(
+            checkpoint.thread_id == self.state.thread_id
+                && effect.thread_id == self.state.thread_id
+                && checkpoint.state_revision == effect.sequence
+                && checkpoint.history_fence == effect.sequence,
+            "checkpoint and history effect identities differ"
+        );
+        self.commit_inner(effect.sequence, commit, Some((checkpoint, effect)))
+            .await
+    }
+
+    async fn commit_inner(
+        &self,
+        write_seq: u64,
+        commit: EffectCommit<'_>,
+        checkpoint: Option<(
+            &pl_core::thread::ThreadCheckpoint,
+            &pl_core::thread::ThreadEffectBatch,
+        )>,
     ) -> Result<()> {
         let EffectCommit {
             items,
@@ -340,8 +373,17 @@ impl HistoryStore {
         let tx = begin_write(&self.writer().await?.db).await?;
         let current = applied_write_seq(&tx).await?;
         if write_seq <= current {
+            if let Some((checkpoint, _)) = checkpoint {
+                checkpoint::verify_committed(&tx, checkpoint, current).await?;
+            }
             tx.rollback().await?;
             return Ok(());
+        }
+        if checkpoint.is_some() {
+            ensure!(
+                write_seq == current + 1,
+                "history write sequence is not contiguous"
+            );
         }
         let mut turn_ids = std::collections::BTreeSet::new();
         for item in items {
@@ -353,7 +395,7 @@ impl HistoryStore {
         for turn_id in turn_ids {
             let Some(row) = tx
                 .query_one_raw(statement(
-                    "SELECT payload FROM history_items WHERE item_id=?",
+                    "SELECT payload,last_write_seq FROM history_items WHERE item_id=?",
                     vec![crate::studio::thread_projection::order::turn_id(&turn_id).into()],
                 ))
                 .await?
@@ -383,7 +425,7 @@ impl HistoryStore {
                         input_id: turn.input_id().map(str::to_owned),
                         id: turn_id.clone(),
                         thread_id: self.state.thread_id.clone(),
-                        revision: item.revision,
+                        revision: u64::try_from(row.try_get::<i64>("", "last_write_seq")?)?,
                         state: turn.state().clone(),
                         updated_at: item.updated_at,
                     },
@@ -443,6 +485,10 @@ impl HistoryStore {
                 vec![write_seq.into()],
             ))
             .await?;
+        }
+        if let Some((checkpoint, effect)) = checkpoint {
+            checkpoint::write(&tx, checkpoint, effect.context.as_ref()).await?;
+            checkpoint::fold_costs(&tx, effect).await?;
         }
         tx.commit().await?;
         Ok(())
@@ -2191,6 +2237,31 @@ async fn turns_for(
 
 /// Creates or validates the schema and returns the owning database identity.
 async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> {
+    // Refuse future layouts before performing even additive schema writes.
+    if db
+        .query_one_raw(statement(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='history_meta'",
+            vec![],
+        ))
+        .await?
+        .is_some()
+        && let Some(row) = db
+            .query_one_raw(statement(
+                "SELECT schema_version,thread_id FROM history_meta WHERE id=1",
+                vec![],
+            ))
+            .await?
+    {
+        let version: i64 = row.try_get("", "schema_version")?;
+        ensure!(
+            (1..=HISTORY_SCHEMA_VERSION).contains(&version),
+            "unsupported history schema {version}; existing data preserved"
+        );
+        ensure!(
+            row.try_get::<String>("", "thread_id")? == thread_id,
+            "history database belongs to another Thread"
+        );
+    }
     db.execute_unprepared(
         "CREATE TABLE IF NOT EXISTS history_meta (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -2261,6 +2332,27 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
             sequence INTEGER NOT NULL,
             digest TEXT,
             last_write_seq INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS session_checkpoint (
+            id INTEGER PRIMARY KEY CHECK(id=1),
+            revision INTEGER NOT NULL,
+            context_revision INTEGER NOT NULL,
+            context_count INTEGER NOT NULL,
+            payload TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            legacy_cleanup INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS session_costs (
+            purpose TEXT NOT NULL,
+            currency TEXT NOT NULL,
+            amount REAL NOT NULL,
+            PRIMARY KEY(purpose,currency)
+        );
+        CREATE TABLE IF NOT EXISTS current_context (
+            ordinal INTEGER PRIMARY KEY,
+            record_id TEXT NOT NULL UNIQUE,
+            payload TEXT NOT NULL,
+            payload_hash TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS history_tool_tasks (
             call_id TEXT PRIMARY KEY,
@@ -3403,6 +3495,352 @@ mod storage_fault_tests {
         assert_eq!(
             result.delivery.context("missing delivery")?.call_id,
             "call-1"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn checkpoint_context_and_watermark_roll_back_and_retry_together() -> Result<()> {
+        use pl_core::{
+            context::{ContextContent, ContextRecord, ContextSnapshot, ContextSource},
+            thread::{ThreadCheckpoint, ThreadEffectBatch, ThreadSnapshot, journal::ContextChange},
+        };
+        let directory = tempfile::tempdir()?;
+        let store = HistoryStore::open(&directory.path().join("history.sqlite"), "atomic").await?;
+        let record = |id: &str| ContextRecord {
+            id: id.into(),
+            turn_id: None,
+            source: ContextSource::User,
+            content: vec![ContextContent::Text {
+                text: std::sync::Arc::from(id),
+            }],
+            tool_calls: vec![],
+        };
+        let empty = std::collections::BTreeSet::new();
+        let commit = || EffectCommit {
+            items: &[],
+            rolled_back_turns: &empty,
+            identities: &[],
+            messages: &[],
+            receipts: &[],
+            tasks: &[],
+            deliveries: &[],
+            delivery_repairs: &[],
+            attempt: None,
+        };
+        let mut state = ThreadSnapshot {
+            commit_sequence: 1,
+            context: ContextSnapshot {
+                revision: 1,
+                records: vec![record("first")].into(),
+            },
+            ..Default::default()
+        };
+        state.usage_summary.inference_count = 1;
+        state.usage_summary.applied_sequence = 1;
+        let first = ThreadCheckpoint::capture("atomic".into(), 1, state.clone());
+        let effect = ThreadEffectBatch {
+            thread_id: "atomic".into(),
+            sequence: 1,
+            context: Some(ContextChange::Append {
+                revision: 1,
+                records: state.context.records.clone(),
+            }),
+            ..Default::default()
+        };
+        store
+            .commit_checkpoint_effect(&first, &effect, commit())
+            .await?;
+        // Reject any rewrite of the existing prefix: a normal append must only insert the suffix.
+        store.writer().await?.db.execute_unprepared(
+            "CREATE TRIGGER reject_context_update BEFORE UPDATE ON current_context BEGIN SELECT RAISE(FAIL, 'prefix rewritten'); END;
+             CREATE TRIGGER reject_context_delete BEFORE DELETE ON current_context BEGIN SELECT RAISE(FAIL, 'prefix deleted'); END;
+             CREATE TRIGGER fail_checkpoint BEFORE UPDATE ON session_checkpoint BEGIN SELECT RAISE(FAIL, 'injected checkpoint failure'); END;"
+        ).await?;
+        state.commit_sequence = 2;
+        state.usage_summary.inference_count = 2;
+        state.usage_summary.applied_sequence = 2;
+        state.context.revision = 2;
+        state.context.records = vec![record("first"), record("second")].into();
+        let second = ThreadCheckpoint::capture("atomic".into(), 2, state);
+        let effect = ThreadEffectBatch {
+            thread_id: "atomic".into(),
+            sequence: 2,
+            context: Some(ContextChange::Append {
+                revision: 2,
+                records: vec![record("second")].into(),
+            }),
+            ..Default::default()
+        };
+        assert!(
+            store
+                .commit_checkpoint_effect(&second, &effect, commit())
+                .await
+                .is_err()
+        );
+        assert_eq!(store.watermark().await?, 1);
+        assert_eq!(
+            store
+                .checkpoint()
+                .await?
+                .unwrap()
+                .state
+                .usage_summary
+                .inference_count,
+            1
+        );
+        assert_eq!(
+            store
+                .checkpoint()
+                .await?
+                .context("checkpoint")?
+                .state
+                .context,
+            first.state.context
+        );
+        store
+            .writer()
+            .await?
+            .db
+            .execute_unprepared("DROP TRIGGER fail_checkpoint")
+            .await?;
+        store
+            .commit_checkpoint_effect(&second, &effect, commit())
+            .await?;
+        // A lost acknowledgement retries the same transaction without duplicating the append.
+        store
+            .commit_checkpoint_effect(&second, &effect, commit())
+            .await?;
+        assert_eq!(store.watermark().await?, 2);
+        assert_eq!(
+            store
+                .checkpoint()
+                .await?
+                .unwrap()
+                .state
+                .usage_summary
+                .inference_count,
+            2
+        );
+        assert_eq!(
+            store
+                .checkpoint()
+                .await?
+                .context("checkpoint")?
+                .state
+                .context,
+            second.state.context
+        );
+        let before: i64 = store
+            .writer()
+            .await?
+            .db
+            .query_one_raw(statement("SELECT total_changes() AS changes", vec![]))
+            .await?
+            .unwrap()
+            .try_get("", "changes")?;
+        let mut state = second.state.clone();
+        let mut serialized_new_bytes = 0_usize;
+        for sequence in 3..=139 {
+            let added = record(&format!("context-{sequence}"));
+            serialized_new_bytes += serde_json::to_vec(&added)?.len();
+            let mut records = state.context.records.to_vec();
+            records.push(added.clone());
+            state.context.records = records.into();
+            state.context.revision = sequence;
+            state.commit_sequence = sequence;
+            let checkpoint = ThreadCheckpoint::capture("atomic".into(), sequence, state.clone());
+            let effect = ThreadEffectBatch {
+                thread_id: "atomic".into(),
+                sequence,
+                context: Some(ContextChange::Append {
+                    revision: sequence,
+                    records: vec![added].into(),
+                }),
+                ..Default::default()
+            };
+            store
+                .commit_checkpoint_effect(&checkpoint, &effect, commit())
+                .await?;
+        }
+        let after: i64 = store
+            .writer()
+            .await?
+            .db
+            .query_one_raw(statement("SELECT total_changes() AS changes", vec![]))
+            .await?
+            .unwrap()
+            .try_get("", "changes")?;
+        assert_eq!(
+            after - before,
+            137 * 3,
+            "each append only changes one context row, checkpoint, and watermark"
+        );
+        let database_bytes = tokio::fs::metadata(directory.path().join("history.sqlite"))
+            .await?
+            .len();
+        let wal_bytes = tokio::fs::metadata(directory.path().join("history.sqlite-wal"))
+            .await?
+            .len();
+        eprintln!(
+            "storage long-task: calls=137 records=139 new_context_serialized_bytes={serialized_new_bytes} sqlite_row_mutations={} database_bytes={database_bytes} wal_bytes={wal_bytes}",
+            after - before
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn legacy_auxiliary_costs_are_imported_once_without_summing_overlapping_totals()
+    -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = HistoryStore::open(&directory.path().join("history.sqlite"), "costs").await?;
+        let mut state = pl_core::thread::ThreadSnapshot::default();
+        state
+            .usage_summary
+            .estimated_costs
+            .push(pl_core::thread::UsageCost {
+                currency: "USD".into(),
+                amount: 2.0,
+            });
+        let checkpoint = pl_core::thread::ThreadCheckpoint::capture("costs".into(), 0, state);
+        let purposes = [("main", 2.0), ("title", 3.0), ("review", 4.0)]
+            .into_iter()
+            .map(
+                |(purpose, amount)| super::super::calls::PurposeUsageProjection {
+                    purpose: Some(purpose.into()),
+                    estimated_costs: vec![pl_protocol::RuntimeCostAmount {
+                        currency: "USD".into(),
+                        amount,
+                    }],
+                },
+            )
+            .collect::<Vec<_>>();
+        history.import_checkpoint(&checkpoint, &purposes).await?;
+        history.import_checkpoint(&checkpoint, &purposes).await?;
+        let restored = history.checkpoint().await?.unwrap();
+        assert_eq!(restored.state.usage_summary.estimated_costs[0].amount, 9.0);
+        let saved = history.accounting().await?.unwrap().purpose_costs;
+        assert_eq!(
+            saved
+                .iter()
+                .flat_map(|(_, costs)| costs)
+                .map(|cost| cost.amount)
+                .sum::<f64>(),
+            9.0
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn toml_checkpoint_import_cleans_only_replaced_files_and_reopens() -> Result<()> {
+        use pl_core::thread::{ThreadCheckpoint, ThreadSnapshot};
+        let directory = tempfile::tempdir()?;
+        let mut snapshot = ThreadSnapshot::default();
+        snapshot.context.records = vec![pl_core::context::ContextRecord {
+            id: "retained".into(),
+            turn_id: None,
+            source: pl_core::context::ContextSource::User,
+            content: vec![pl_core::context::ContextContent::Text {
+                text: std::sync::Arc::from("retained migration body"),
+            }],
+            tool_calls: vec![],
+        }]
+        .into();
+        let checkpoint = ThreadCheckpoint::capture("import".into(), 0, snapshot);
+        let (external, bodies) = checkpoint.externalize_bodies(1);
+        let mut legacy =
+            serde_json::to_value(toml::from_str::<toml::Value>(&toml::to_string(&external)?)?)?;
+        legacy["schemaVersion"] = serde_json::json!(2);
+        legacy["state"]["attempts"] = serde_json::json!([{
+            "turnId":"old", "attemptId":"old-attempt", "input":{"revision":0,"records":[]},
+            "tools":[], "outcome":{"kind":"running"}
+        }]);
+        let original = toml::to_string(&legacy)?;
+        tokio::fs::write(directory.path().join("state.toml"), original.as_bytes()).await?;
+        tokio::fs::write(
+            directory.path().join("state.prev.toml"),
+            original.as_bytes(),
+        )
+        .await?;
+        tokio::fs::create_dir_all(directory.path().join("blobs/checkpoint")).await?;
+        tokio::fs::write(
+            directory.path().join("blobs/checkpoint/orphan"),
+            b"obsolete",
+        )
+        .await?;
+        tokio::fs::write(directory.path().join("blobs/attachment"), b"keep").await?;
+        let state = super::super::state::StateStore::new(directory.path().to_owned(), "import");
+        assert!(
+            state.load().await.is_err(),
+            "missing migration body must preserve source"
+        );
+        assert!(tokio::fs::try_exists(directory.path().join("state.toml")).await?);
+        for body in bodies {
+            let hex = body
+                .entry
+                .reference
+                .digest()
+                .strip_prefix("sha256:")
+                .context("digest")?;
+            let directory = directory.path().join("blobs/checkpoint").join(&hex[..2]);
+            tokio::fs::create_dir_all(&directory).await?;
+            tokio::fs::write(directory.join(hex), &body.bytes).await?;
+        }
+        legacy["schemaVersion"] = serde_json::json!(999);
+        let future = toml::to_string(&legacy)?;
+        tokio::fs::write(directory.path().join("state.toml"), &future).await?;
+        assert!(
+            state.load().await.is_err(),
+            "a valid backup must not hide an unknown primary version"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(directory.path().join("state.toml")).await?,
+            future
+        );
+        tokio::fs::write(directory.path().join("state.toml"), &original).await?;
+        let history =
+            HistoryStore::open(&directory.path().join("history.sqlite"), "import").await?;
+        history.writer().await?.db.execute_unprepared("CREATE TRIGGER reject_import BEFORE INSERT ON session_checkpoint BEGIN SELECT RAISE(ABORT,'migration interrupted'); END;").await?;
+        assert!(state.load().await.is_err());
+        assert!(history.checkpoint().await?.is_none());
+        assert!(tokio::fs::try_exists(directory.path().join("state.toml")).await?);
+        history
+            .writer()
+            .await?
+            .db
+            .execute_unprepared("DROP TRIGGER reject_import")
+            .await?;
+        history
+            .writer()
+            .await?
+            .db
+            .execute_unprepared("UPDATE history_meta SET applied_write_seq=1")
+            .await?;
+        assert!(
+            state.load().await.is_err(),
+            "mismatched history fence must preserve source"
+        );
+        assert!(tokio::fs::try_exists(directory.path().join("state.toml")).await?);
+        history
+            .writer()
+            .await?
+            .db
+            .execute_unprepared("UPDATE history_meta SET applied_write_seq=0")
+            .await?;
+        let imported = state.load().await?.context("imported checkpoint")?;
+        assert_eq!(imported.state.context, checkpoint.state.context);
+        assert!(imported.state.attempt_ids.contains_key("old-attempt"));
+        assert_eq!(imported.state_revision, checkpoint.state_revision);
+        assert!(!tokio::fs::try_exists(directory.path().join("state.toml")).await?);
+        assert!(!tokio::fs::try_exists(directory.path().join("state.prev.toml")).await?);
+        assert!(!tokio::fs::try_exists(directory.path().join("blobs/checkpoint")).await?);
+        assert_eq!(
+            tokio::fs::read(directory.path().join("blobs/attachment")).await?,
+            b"keep"
+        );
+        assert_eq!(
+            state.load().await?.context("reopened")?.state_revision,
+            imported.state_revision
         );
         Ok(())
     }

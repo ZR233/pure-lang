@@ -1,12 +1,8 @@
 //! 模型性能/费用的产品投影。
 //!
-//! 每次推理事实以调用身份登记到全局 `calls.sqlite`（单一逻辑 writer 队列，冻结 binding、
-//! 用量、价格、时延），调用库的 `(thread_id, call_id)` 唯一约束是持久 idempotency 的权威来源。
-//! 性能历史、按模型汇总与会话费用都从调用库查询/聚合投影读取，不再从 studio.sqlite 的
-//! `ModelPerformanceState` 历史、无界 fingerprint 集合或内部回执恢复或持久化。
-//!
-//! 进程内只保留固定上限的缓存：单调 revision、更新时间与最近 inference 身份窗口（256 条，
-//! 且不持久化）。执行恢复（`load_cache`）只读取产品对象缓存，完全不读取调用库。
+//! 会话 history.sqlite 的原子提交拥有累计用量与费用；calls.sqlite 只保存带 revision 的
+//! 绝对统计投影和最多 3000 条性能摘要。调用正文位于有保留期限的 JSONL，日志淘汰不改变
+//! 会话统计。内存仅保留固定上限的最近身份窗口，执行恢复不依赖调用日志。
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -17,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::studio::storage::calls::{
-    CallRetention, PerformanceSampleRow, PerformanceSummaryRow, PurposeCostRollup,
+    CallRetention, CallStatus, PerformanceSampleRow, PerformanceSummaryRow, PurposeCostRollup,
     SessionCostRollup,
 };
 use crate::studio::store::object::{PersistedStudioObject, load_object, put_object};
@@ -219,20 +215,14 @@ impl ModelPerformanceOwner {
         root_thread_id: &str,
         thread_id: &str,
         billing: &InferenceBillingRecord,
-    ) -> Result<(), PureError> {
-        self.record(root_thread_id, thread_id, billing, BillingRetention::Turn)
-    }
-
-    pub(crate) async fn record_internal_inference(
-        &self,
-        root_thread_id: &str,
-        billing: &InferenceBillingRecord,
+        status: CallStatus,
     ) -> Result<(), PureError> {
         self.record(
             root_thread_id,
-            root_thread_id,
+            thread_id,
             billing,
-            BillingRetention::Internal,
+            status,
+            BillingRetention::Turn,
         )
     }
 
@@ -241,11 +231,13 @@ impl ModelPerformanceOwner {
         root_thread_id: &str,
         thread_id: &str,
         billing: &InferenceBillingRecord,
+        status: CallStatus,
     ) -> Result<(), PureError> {
         self.record(
             root_thread_id,
             thread_id,
             billing,
+            status,
             BillingRetention::Internal,
         )
     }
@@ -255,6 +247,7 @@ impl ModelPerformanceOwner {
         root_thread_id: &str,
         thread_id: &str,
         billing: &InferenceBillingRecord,
+        status: CallStatus,
         retention: BillingRetention,
     ) -> Result<(), PureError> {
         if root_thread_id.trim().is_empty() || thread_id.trim().is_empty() {
@@ -290,6 +283,7 @@ impl ModelPerformanceOwner {
                 root_thread_id,
                 thread_id,
                 billing,
+                status,
                 call_retention(retention),
             )
             .map_err(|error| {

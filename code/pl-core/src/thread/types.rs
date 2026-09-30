@@ -31,8 +31,8 @@ struct EffectWindowState {
 ///
 /// The owner and its handles read the newest committed interaction, permission or tool delivery
 /// from this window instead of keeping a checkpoint-visible payload ledger. It is the same buffer
-/// live observers consume, it is never serialized into `state.toml`, and its released entries are
-/// answered by the host's durable identity index and history/calls reader.
+/// live observers consume, it is never serialized into checkpoints, and its released entries are
+/// answered by the host's durable identity index and history reader.
 ///
 /// # Bound and release semantics
 /// The window retains exactly the write batches that are neither admitted-and-persisted nor
@@ -40,7 +40,7 @@ struct EffectWindowState {
 /// when a Thread accumulates too many not-yet-durable bytes the owner pauses further admission
 /// (see `refresh_storage_pressure`) instead of dropping an accepted fact here. As soon as a fixed
 /// durable watermark is confirmed the covered batches are released immediately, and a consumer that
-/// still needs them reads the durable history/calls store through the documented host contract.
+/// still needs them reads the durable history store through the documented host contract.
 ///
 /// The window therefore performs no serialization and no byte accounting of its own: a commit only
 /// clones an `Arc` into the deque, so publishing never blocks on encoding a full body.
@@ -98,7 +98,7 @@ impl EffectWindow {
     /// The handoff is the moment the facts become answerable from the durable store, so the live
     /// bodies are dropped immediately rather than cached as a second history (`design/15` §15.1).
     /// A consumer that has not consumed them yet observes an explicit gap and resynchronizes from
-    /// history/calls instead of reading a stale body or losing the fact.
+    /// history instead of reading a stale body or losing the fact.
     pub(super) fn release_through(&self, durable_sequence: u64) {
         let mut state = self.write();
         if durable_sequence > state.durable_through {
@@ -156,7 +156,7 @@ pub(super) enum WindowPage {
     /// Retained batches strictly after the requested sequence, oldest first.
     Page(Vec<Arc<ThreadEffectBatch>>),
     /// The requested sequence is behind the released durable frontier, so the caller must
-    /// resynchronize from durable history/calls.
+    /// resynchronize from durable history.
     Gap,
 }
 
@@ -176,7 +176,7 @@ impl EffectWindowState {
 /// cached inside the serialized snapshot. An identical repeated command or a read-only task
 /// inspection returns the exact committed body while that commit is still not durable; once the
 /// durable handoff has released it, the host answers from the durable identity index and
-/// history/calls store.
+/// history store.
 pub(crate) fn recent_effect_fact<T>(
     window: &EffectWindow,
     mut select: impl FnMut(&ThreadEffectBatch) -> Option<T>,
@@ -295,15 +295,24 @@ pub struct ThreadSnapshot {
     pub lifecycle: ThreadLifecycle,
     pub context: ContextSnapshot,
     /// Attempts of turns that are still unfinished; their identity and order are needed for
-    /// duplicate-call rejection, retry and correction inside the live Turn.
-    pub attempts: Arc<[RequestAttempt]>,
-    /// Tool call identity to owning Turn, retained only while that Turn is resident.
+    /// retry, correction and usage observation inside the live Turn.
     ///
-    /// Duplicate-call rejection reads this bounded ledger instead of the whole context history.
-    /// [`Self::retain_live_facts`] rebuilds it from resident attempts and context records every
-    /// commit, so it never outlives the Turn whose retry could still reuse the identity.
+    /// Each entry is the lightweight resident form: identity, `input_revision`, status and usage.
+    /// The complete terminal outcome, the frozen tool plan and the provider metadata are handed off
+    /// through the matching [`super::ThreadEffectBatch`] and never retained here.
+    pub attempts: Arc<[RequestAttempt]>,
+    /// Thread-wide tool call identity to original owning Turn.
+    ///
+    /// This lightweight identity ledger outlives context compaction and Turn completion. It holds
+    /// no arguments or results; reliable history remains the authority for those bodies.
     #[serde(default)]
     pub live_calls: std::collections::BTreeMap<String, String>,
+    /// Thread-wide admitted attempt identity to original owning Turn.
+    ///
+    /// Entries survive request release, compaction and restart, so an admitted identity cannot be
+    /// reused after its request body has left memory.
+    #[serde(default)]
+    pub attempt_ids: std::collections::BTreeMap<String, String>,
     /// Usage observed for the newest attempt, so the next Turn still sees the previous request.
     #[serde(default)]
     pub last_attempt_usage: Option<crate::model::ModelUsage>,
@@ -504,36 +513,22 @@ impl ThreadSnapshot {
             .find(|attempt| !running_turns.contains(attempt.turn_id.as_str()))
             .filter(|attempt| {
                 matches!(
-                    &attempt.outcome,
-                    AttemptOutcome::Failed(_) | AttemptOutcome::Cancelled { .. }
+                    attempt.status,
+                    AttemptStatus::Failed | AttemptStatus::Cancelled
                 )
             })
             .map(|attempt| attempt.attempt_id.clone());
         retain_arc_slice(&mut self.attempts, |attempt| {
             running_turns.contains(attempt.turn_id.as_str())
-                || matches!(&attempt.outcome, AttemptOutcome::Running)
+                || attempt.status == AttemptStatus::Running
                 || retry_seed.as_deref() == Some(attempt.attempt_id.as_str())
         });
-        // A call identity is only needed while its Turn can still retry or correct an attempt.
-        // Rebuild from resident facts so the ledger cannot outlive the Turn that owns it.
-        let mut live_calls = std::collections::BTreeMap::new();
-        for record in self.context.records.iter() {
-            if let Some(turn_id) = record.turn_id.as_ref()
-                && running_turns.contains(turn_id.as_str())
-            {
-                for call in record.tool_calls.iter() {
-                    live_calls.insert(call.call_id.clone(), turn_id.clone());
-                }
-            }
-        }
-        for attempt in self.attempts.iter() {
-            if let AttemptOutcome::Committed(output) = &attempt.outcome {
-                for call in output.tool_calls.iter() {
-                    live_calls.insert(call.call_id.clone(), attempt.turn_id.clone());
-                }
-            }
-        }
-        self.live_calls = live_calls;
+        // The complete request facts of an attempt are the effect batch's copy: the commit that
+        // exported them already owns them, so the resident attempt keeps only identity,
+        // `input_revision`, status and usage.
+        clear_attempt_facts(&mut self.attempts);
+        // Identities are Thread-wide: compaction and Turn completion must never make a model's
+        // previously admitted identity executable again. Only strings live in these ledgers.
 
         // A resolved or cancelled interaction is committed history: its complete record is already
         // in the matching effect batch inside the bounded live [`EffectWindow`], so the snapshot
@@ -682,6 +677,26 @@ fn retain_arc_slice<T: Clone>(slice: &mut Arc<[T]>, keep: impl Fn(&T) -> bool) {
         .into();
 }
 
+/// Drops the transient complete facts from every resident attempt.
+///
+/// The effect batch is the only copy of an attempt's terminal outcome and frozen request facts, so
+/// the resident snapshot keeps nothing but the lightweight identity, status and usage. The slice
+/// keeps its identity when no attempt carried facts, so commit diffing still sees an unchanged set.
+fn clear_attempt_facts(attempts: &mut Arc<[RequestAttempt]>) {
+    if attempts.iter().all(|attempt| attempt.facts.is_none()) {
+        return;
+    }
+    *attempts = attempts
+        .iter()
+        .cloned()
+        .map(|mut attempt| {
+            attempt.facts = None;
+            attempt
+        })
+        .collect::<Vec<_>>()
+        .into();
+}
+
 /// Complete current facts from a stable host source. Empty content explicitly invalidates it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -727,23 +742,119 @@ pub enum ThreadLifecycle {
     Closed,
 }
 
-/// An admitted model request and its terminal outcome, retained even after failure.
+/// An admitted model request and its lightweight resident status.
+///
+/// The complete terminal outcome and the frozen request facts are committed into the
+/// [`super::ThreadEffectBatch`] of the commit that produced them, which is their only durable copy.
+/// The resident attempt keeps only what live execution still needs: its identity, the context
+/// revision it was frozen at, its status and the usage observed for it. The frozen tool
+/// declarations, provider request metadata, tool projection and produced step are never retained
+/// here, so the snapshot never keeps a second copy of an attempt's bodies.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestAttempt {
+    pub turn_id: String,
+    pub attempt_id: String,
+    pub retry_of: Option<String>,
+    /// Context revision the request was frozen at; a retry requires the current revision to match.
+    pub input_revision: u64,
+    pub status: AttemptStatus,
+    /// Usage observed for this attempt, including cancelled and rejected responses.
+    ///
+    /// Kept as a plain resident value because execution and the next context preparation still read
+    /// the newest request's accounting after the matching effect has been handed off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::model::ModelUsage>,
+    /// Complete request facts, handed off by the commit that exports them and never persisted.
+    ///
+    /// [`ThreadSnapshot::retain_live_facts`] clears this on every commit, so it lives only for the
+    /// single commit that turns this attempt's status into an effect batch.
+    #[serde(skip)]
+    pub(crate) facts: Option<AttemptFacts>,
+}
+
+/// Complete, non-resident facts of one model attempt.
+///
+/// These are exactly the fields the durable [`super::ThreadEffectBatch`] must carry for history,
+/// calls and product observation. They are retained only until the commit that exports them and are
+/// dropped from the resident snapshot by [`ThreadSnapshot::retain_live_facts`], which is why they
+/// are not a second checkpoint-visible copy of an attempt's bodies.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AttemptFacts {
     #[serde(default)]
     pub request_metadata: Option<OpaquePayload>,
     #[serde(default)]
     pub usage_binding: Option<crate::model::ModelUsageBinding>,
     #[serde(default)]
     pub tool_projection: Option<OpaquePayload>,
-    pub turn_id: String,
-    pub attempt_id: String,
-    pub retry_of: Option<String>,
-    pub input: ContextSnapshot,
     pub tools: Arc<[ModelToolDeclaration]>,
     pub outcome: AttemptOutcome,
     pub input_estimate: Option<crate::model::TokenEstimate>,
+}
+
+/// Lightweight resident status of one attempt, without any provider body.
+///
+/// The status is what retry, correction, duplicate-call rejection and recovery read; the complete
+/// outcome it was derived from stays in the matching effect batch.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind", content = "value")]
+pub enum AttemptStatus {
+    /// The provider call is in flight.
+    Running,
+    /// The provider call was interrupted by a runtime restart.
+    Interrupted,
+    /// The provider returned a canonical step that was committed.
+    Committed,
+    /// The provider call failed before a canonical response; retryable.
+    Failed,
+    /// The request was cancelled; retryable.
+    Cancelled,
+    /// The provider response was rejected before any tool ran.
+    Rejected { reason: ModelOutputViolation },
+}
+
+impl AttemptStatus {
+    /// Derives the resident status of one complete attempt outcome.
+    pub fn from_outcome(outcome: &AttemptOutcome) -> Self {
+        match outcome {
+            AttemptOutcome::Running => Self::Running,
+            AttemptOutcome::Interrupted => Self::Interrupted,
+            AttemptOutcome::Committed(_) => Self::Committed,
+            AttemptOutcome::Failed(_) => Self::Failed,
+            AttemptOutcome::Cancelled { .. } => Self::Cancelled,
+            AttemptOutcome::Rejected { reason, .. } => Self::Rejected {
+                reason: reason.clone(),
+            },
+        }
+    }
+
+    /// The complete outcome an effect batch records for a status that carries no provider body.
+    ///
+    /// A terminal status always has its complete facts resident until its own commit exports them,
+    /// so only the body-less outcomes of live execution are ever reconstructed from status.
+    pub(crate) fn body_less_outcome(&self) -> Option<AttemptOutcome> {
+        match self {
+            Self::Running => Some(AttemptOutcome::Running),
+            Self::Interrupted => Some(AttemptOutcome::Interrupted),
+            Self::Committed | Self::Failed | Self::Cancelled | Self::Rejected { .. } => None,
+        }
+    }
+}
+
+/// Usage observed for one complete attempt outcome.
+pub(crate) fn attempt_outcome_usage(outcome: &AttemptOutcome) -> Option<&crate::model::ModelUsage> {
+    match outcome {
+        AttemptOutcome::Running | AttemptOutcome::Interrupted => None,
+        AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => {
+            Some(&output.usage)
+        }
+        AttemptOutcome::Failed(error) => Some(&error.usage),
+        AttemptOutcome::Cancelled { result } => Some(match result {
+            Ok(output) => &output.usage,
+            Err(error) => &error.usage,
+        }),
+    }
 }
 
 /// A provider result only becomes canonical through a Thread commit.
@@ -764,19 +875,26 @@ pub enum AttemptOutcome {
 }
 
 impl RequestAttempt {
+    /// Creates a body-free execution record for replay and checkpoint construction.
+    pub fn new(
+        turn_id: String,
+        attempt_id: String,
+        input_revision: u64,
+        status: AttemptStatus,
+    ) -> Self {
+        Self {
+            turn_id,
+            attempt_id,
+            input_revision,
+            status,
+            retry_of: None,
+            usage: None,
+            facts: None,
+        }
+    }
     /// Returns usage observed for this attempt, including cancelled and rejected responses.
     pub fn usage(&self) -> Option<&crate::model::ModelUsage> {
-        match &self.outcome {
-            AttemptOutcome::Running | AttemptOutcome::Interrupted => None,
-            AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => {
-                Some(&output.usage)
-            }
-            AttemptOutcome::Failed(error) => Some(&error.usage),
-            AttemptOutcome::Cancelled { result } => Some(match result {
-                Ok(output) => &output.usage,
-                Err(error) => &error.usage,
-            }),
-        }
+        self.usage.as_ref()
     }
 }
 

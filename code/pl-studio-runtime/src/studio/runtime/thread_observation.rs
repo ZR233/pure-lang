@@ -775,19 +775,10 @@ impl LiveOwner {
                 return Err(anyhow::anyhow!("live Thread projection failed: {error}"));
             }
         };
-        self.channel.prepare(prepared);
-        // The effects this owner installed *behind* never become live frames, but they can still be
-        // the newest finished Turn of the Thread (a Thread re-activated from its directory, or a
-        // subscription that opens after the terminal commit). The terminal Turn is re-derived with
-        // the same projection the live frame uses, so a resubscribing client starts from the
-        // authoritative terminal fact instead of an empty last-turn.
-        if let Some(turn) = crate::studio::thread_projection::project_effect_terminal_turn(
-            &self.thread.id,
-            &write.checkpoint.state,
-            &write.effect,
-        ) {
+        if let Some(turn) = crate::studio::thread_projection::prepared_terminal_turn(&prepared) {
             self.feed.publish_last_turn(Arc::new(turn));
         }
+        self.channel.prepare(prepared);
         self.publish_retained();
         Ok(())
     }

@@ -64,8 +64,9 @@ impl StudioThreadFactory {
             |profile| Ok(profile.config.clone()),
         )?;
         let role = AgentRoleId::new(thread.role.clone())?;
-        let receipt_route = crate::studio::model_route::latest_request_route(&restored)
-            .filter(|route| config.models.resolve_route(role.clone(), route).is_ok());
+        let receipt_route = crate::studio::model_route::saved(&restored)
+            .map_err(|error| resource_error("read migrated child model route", error))?
+            .map(|saved| saved.route);
         let profile = match saved_profile {
             Some((profile, _)) => profile,
             None => migrate_profile(

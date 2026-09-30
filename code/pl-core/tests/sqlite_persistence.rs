@@ -225,11 +225,17 @@ async fn sqlite_v8_migration_backfills_checkpoint_usage_from_saved_effects() {
     let envelope: String = row.try_get("", "envelope").unwrap();
     let mut checkpoint: ThreadCheckpoint = serde_json::from_str(&envelope).unwrap();
     checkpoint.state.usage_summary = Default::default();
-    let envelope = serde_json::to_string(&checkpoint).unwrap();
+    let mut legacy = serde_json::to_value(&checkpoint).unwrap();
+    legacy["schemaVersion"] = serde_json::json!(2);
+    legacy["state"]["attempts"] = serde_json::json!([{
+        "turnId":"legacy-turn", "attemptId":"legacy-attempt", "retryOf":null,
+        "input": {"revision":0,"records":[]}, "tools":[], "outcome":{"kind":"running"}
+    }]);
+    let envelope = serde_json::to_string(&legacy).unwrap();
     let hash = pl_core::context::content_hash(envelope.as_bytes());
     db.execute_raw(Statement::from_sql_and_values(
         DatabaseBackend::Sqlite,
-        "UPDATE thread_checkpoints SET envelope=?,payload_hash=? WHERE thread_id='old-usage'",
+        "UPDATE thread_checkpoints SET schema_version=2,envelope=?,payload_hash=? WHERE thread_id='old-usage'",
         vec![envelope.into(), hash.into()],
     ))
     .await

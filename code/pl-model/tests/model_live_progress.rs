@@ -826,10 +826,13 @@ async fn fixture_stream_past_the_reliable_output_quota_cancels_with_a_partial_re
         .expect("the cancelled call ends the Turn");
     let _ = fixture.shutdown().await;
 
-    let snapshot = thread.snapshot();
-    let error = snapshot
-        .attempts
+    let effects = thread
+        .effects()
+        .await
+        .expect("failure effects remain reliable");
+    let error = effects
         .iter()
+        .filter_map(|effect| effect.attempt.as_ref())
         .find_map(|attempt| match &attempt.outcome {
             pl_core::thread::AttemptOutcome::Failed(error) => Some(error.clone()),
             _ => None,
@@ -922,10 +925,13 @@ async fn fixture_stream_past_the_reliable_output_quota_on_tool_arguments_is_refu
         .expect("the refused call ends the Turn");
     let _ = fixture.shutdown().await;
 
-    let snapshot = thread.snapshot();
-    let error = snapshot
-        .attempts
+    let effects = thread
+        .effects()
+        .await
+        .expect("failure effects remain reliable");
+    let error = effects
         .iter()
+        .filter_map(|effect| effect.attempt.as_ref())
         .find_map(|attempt| match &attempt.outcome {
             pl_core::thread::AttemptOutcome::Failed(error) => Some(error.clone()),
             _ => None,

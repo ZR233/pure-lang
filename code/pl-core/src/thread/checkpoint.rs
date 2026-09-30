@@ -9,33 +9,19 @@ use super::input::InputRecord;
 use super::interactions::{InteractionRecord, InteractionResponse, InteractionState};
 use super::permissions::PermissionRecord;
 use super::{
-    AttemptOutcome, RequestAttempt, RuntimeFact, ThreadError, ThreadSnapshot, ToolDelivery,
-    recovery,
+    AttemptOutcome, AttemptStatus, RequestAttempt, RuntimeFact, ThreadError, ThreadSnapshot,
+    ToolDelivery, attempt_outcome_usage, recovery,
 };
-use crate::context::{ContextContent, ContextRecord, OpaquePayload};
-use crate::error_record::chain_source;
-use crate::model::{ModelError, ModelStepOutput, ModelToolDeclaration};
+use crate::context::{ContextContent, ContextRecord, ContextSnapshot, OpaquePayload};
+use crate::model::ModelToolDeclaration;
 use crate::tool::{ToolControl, ToolOutput};
 
 /// Bodies larger than this leave the checkpoint file and are named by a blob reference instead.
 ///
-/// The threshold is checkpoint-owner policy, not a context limit: it keeps the once-per-second
-/// `state.toml` replacement bounded while every normal record stays inline and directly readable.
-/// It never bounds what the live owner holds — the in-memory current state always keeps the exact
-/// bytes the next model request consumes — only how many of them are copied into the file.
+/// The threshold is checkpoint-owner policy, not a context limit. Hosts that store external
+/// checkpoint bodies can use this threshold; Studio stores current context records incrementally
+/// in its session database and only reads external bodies at the legacy migration boundary.
 pub const CHECKPOINT_BODY_THRESHOLD_BYTES: usize = 64 * 1024;
-
-/// Body format of one externalized diagnostic source chain.
-///
-/// A chain is the portable text form a persisted `ModelError` keeps; it is encoded as a JSON string
-/// array so it round-trips exactly, including embedded newlines and NUL characters.
-const ERROR_SOURCE_FORMAT: &str = "pl.core.error-source";
-
-/// Version of the diagnostic-chain body encoding above.
-const ERROR_SOURCE_VERSION: u32 = 1;
-
-/// Text a checkpoint writes in place of an externalized diagnostic chain.
-const ERROR_SOURCE_PLACEHOLDER: &str = "[pure-lang checkpoint error-source reference]";
 
 /// A versioned, integrity-checked reference to one body the session blob store owns.
 ///
@@ -180,43 +166,6 @@ pub enum CheckpointBodySlot {
     },
     /// The producer declaration of one discovered tool.
     ToolDeclaration { tool_index: usize },
-    /// The provider request metadata of one resident attempt.
-    AttemptMetadata { attempt_index: usize },
-    /// The frozen tool projection of one resident attempt.
-    AttemptToolProjection { attempt_index: usize },
-    /// The producer declaration of one tool offered to one resident attempt.
-    AttemptToolDeclaration {
-        attempt_index: usize,
-        tool_index: usize,
-    },
-    /// One content item of one resident attempt's frozen model input.
-    AttemptInputContent {
-        attempt_index: usize,
-        record_id: String,
-        content_index: usize,
-    },
-    /// One tool call argument of one resident attempt's frozen model input.
-    AttemptInputToolCall {
-        attempt_index: usize,
-        record_id: String,
-        call_index: usize,
-    },
-    /// One content item of one resident attempt's produced step.
-    AttemptOutputContent {
-        attempt_index: usize,
-        content_index: usize,
-    },
-    /// One tool call argument of one resident attempt's produced step.
-    AttemptOutputToolCall {
-        attempt_index: usize,
-        call_index: usize,
-    },
-    /// The private context proposed by one resident attempt.
-    AttemptOutputPrivateContext { attempt_index: usize },
-    /// The provider-owned failure details of one resident attempt's error outcome.
-    AttemptErrorDetails { attempt_index: usize },
-    /// The diagnostic source-chain text of one resident attempt's error outcome.
-    AttemptErrorSource { attempt_index: usize },
     /// The Thread's current private context.
     PrivateContext,
 }
@@ -268,6 +217,288 @@ pub enum CheckpointBodyError {
     InvalidBody,
 }
 
+/// A schema-1/2 checkpoint envelope could not be converted to the current resident form.
+#[derive(Debug, thiserror::Error)]
+pub enum CheckpointLegacyError {
+    #[error("legacy attempt body references an absent attempt")]
+    InvalidAttemptSlot,
+    #[error("checkpoint schema {0} is not a convertible legacy version")]
+    UnsupportedVersion(u32),
+    #[error("legacy checkpoint still names external bodies; materialize them before converting")]
+    ExternalBodiesPending,
+    #[error("invalid legacy checkpoint encoding: {0}")]
+    Encoding(#[from] serde_json::Error),
+}
+
+/// One body a schema-1/2 checkpoint externalized from a resident attempt.
+///
+/// Schema 3 no longer keeps an attempt's frozen request snapshot, but a legacy manifest still names
+/// the exact slots those bodies used. The slot — including its `attempt_index` — is decoded here
+/// before anything is dropped, so the old layout is reified with its original indices instead of
+/// being filtered positionally and losing which attempt a body belonged to.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    tag = "kind",
+    rename_all_fields = "camelCase"
+)]
+pub enum LegacyCheckpointBodySlot {
+    /// The provider request metadata of one resident attempt.
+    AttemptMetadata { attempt_index: usize },
+    /// The frozen tool projection of one resident attempt.
+    AttemptToolProjection { attempt_index: usize },
+    /// The producer declaration of one tool offered to one resident attempt.
+    AttemptToolDeclaration {
+        attempt_index: usize,
+        tool_index: usize,
+    },
+    /// One content item of one resident attempt's frozen model input.
+    AttemptInputContent {
+        attempt_index: usize,
+        record_id: String,
+        content_index: usize,
+    },
+    /// One tool call argument of one resident attempt's frozen model input.
+    AttemptInputToolCall {
+        attempt_index: usize,
+        record_id: String,
+        call_index: usize,
+    },
+    /// One content item of one resident attempt's produced step.
+    AttemptOutputContent {
+        attempt_index: usize,
+        content_index: usize,
+    },
+    /// One tool call argument of one resident attempt's produced step.
+    AttemptOutputToolCall {
+        attempt_index: usize,
+        call_index: usize,
+    },
+    /// The private context proposed by one resident attempt.
+    AttemptOutputPrivateContext { attempt_index: usize },
+    /// The provider-owned failure details of one resident attempt's error outcome.
+    AttemptErrorDetails { attempt_index: usize },
+    /// The diagnostic source-chain text of one resident attempt's error outcome.
+    AttemptErrorSource { attempt_index: usize },
+}
+
+impl LegacyCheckpointBodySlot {
+    /// Index of the resident attempt this externalized body belonged to.
+    pub fn attempt_index(&self) -> usize {
+        match self {
+            Self::AttemptMetadata { attempt_index }
+            | Self::AttemptToolProjection { attempt_index }
+            | Self::AttemptToolDeclaration { attempt_index, .. }
+            | Self::AttemptInputContent { attempt_index, .. }
+            | Self::AttemptInputToolCall { attempt_index, .. }
+            | Self::AttemptOutputContent { attempt_index, .. }
+            | Self::AttemptOutputToolCall { attempt_index, .. }
+            | Self::AttemptOutputPrivateContext { attempt_index }
+            | Self::AttemptErrorDetails { attempt_index }
+            | Self::AttemptErrorSource { attempt_index } => *attempt_index,
+        }
+    }
+}
+
+/// One externalized body a schema-1/2 checkpoint named for a resident attempt.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyCheckpointExternalBody {
+    pub slot: LegacyCheckpointBodySlot,
+    pub body: CheckpointBodyKind,
+    pub reference: CheckpointBodyReference,
+}
+
+/// One resident attempt exactly as schema-1/2 checkpoints stored it: identity, frozen input, tool
+/// plan and complete outcome.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyRequestAttempt {
+    #[serde(default)]
+    pub request_metadata: Option<OpaquePayload>,
+    #[serde(default)]
+    pub usage_binding: Option<crate::model::ModelUsageBinding>,
+    #[serde(default)]
+    pub tool_projection: Option<OpaquePayload>,
+    pub turn_id: String,
+    pub attempt_id: String,
+    #[serde(default)]
+    pub retry_of: Option<String>,
+    pub input: ContextSnapshot,
+    pub tools: Arc<[ModelToolDeclaration]>,
+    pub outcome: AttemptOutcome,
+    #[serde(default)]
+    pub input_estimate: Option<crate::model::TokenEstimate>,
+}
+
+impl LegacyRequestAttempt {
+    /// Reduces a complete legacy attempt to its lightweight resident form.
+    ///
+    /// Only identity, the frozen `input_revision`, the status derived from the outcome and the
+    /// observed usage survive: the frozen request snapshot is the matching effect batch's copy, so
+    /// it is intentionally dropped here.
+    fn into_current(self) -> RequestAttempt {
+        RequestAttempt {
+            turn_id: self.turn_id,
+            attempt_id: self.attempt_id,
+            retry_of: self.retry_of,
+            input_revision: self.input.revision,
+            status: AttemptStatus::from_outcome(&self.outcome),
+            usage: attempt_outcome_usage(&self.outcome).cloned(),
+            facts: None,
+        }
+    }
+}
+
+/// A schema-1/2 checkpoint reified in its original layout.
+///
+/// Decoding keeps the legacy attempt list and the attempt-slot manifest intact: an attempt body is
+/// never dropped by position, so the exact slot-to-body mapping the old checkpoint stored is
+/// preserved before anything is converted. A blob-owning caller materializes every body the live
+/// context still needs through [`Self::pending_body`]/[`Self::materialize_body`] and then converts
+/// with [`Self::into_current`]. An attempt's frozen request snapshot no longer has a resident slot,
+/// so it is dropped together with its manifest entry; the conversion still refuses a manifest that
+/// names a current-context body nobody materialized, so the live context can never lose its text.
+#[derive(Debug, Clone)]
+pub struct LegacyThreadCheckpoint {
+    checkpoint: ThreadCheckpoint,
+    attempts: Vec<LegacyRequestAttempt>,
+    attempt_bodies: Vec<LegacyCheckpointExternalBody>,
+}
+
+impl LegacyThreadCheckpoint {
+    /// Reifies one schema-1/2 JSON envelope without converting it.
+    ///
+    /// # Errors
+    /// Rejects a non-legacy schema version and malformed JSON.
+    pub fn decode_json(envelope: &str) -> Result<Self, CheckpointLegacyError> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Header {
+            schema_version: u32,
+        }
+        let header: Header = serde_json::from_str(envelope)?;
+        if !ThreadCheckpoint::is_legacy_schema(header.schema_version) {
+            return Err(CheckpointLegacyError::UnsupportedVersion(
+                header.schema_version,
+            ));
+        }
+        let mut root: serde_json::Value = serde_json::from_str(envelope)?;
+        let mut attempts = Vec::new();
+        let mut attempt_bodies = Vec::new();
+        if let Some(object) = root.as_object_mut() {
+            // Split the manifest by decoding each entry's slot into the legacy attempt vocabulary.
+            // An entry that is not one of those slots is left untouched and parsed as a current
+            // slot by the inner checkpoint, so a current-context body is never mistaken for a
+            // droppable attempt body.
+            let mut current_entries = Vec::new();
+            if let Some(serde_json::Value::Array(entries)) = object.remove("externalBodies") {
+                for entry in entries {
+                    match serde_json::from_value::<LegacyCheckpointExternalBody>(entry.clone()) {
+                        Ok(attempt_entry) => attempt_bodies.push(attempt_entry),
+                        Err(_) => current_entries.push(entry),
+                    }
+                }
+            }
+            if !current_entries.is_empty() {
+                object.insert(
+                    "externalBodies".to_owned(),
+                    serde_json::Value::Array(current_entries),
+                );
+            }
+            if let Some(serde_json::Value::Object(state)) = object.get_mut("state") {
+                let raw = state
+                    .remove("attempts")
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+                state.insert("attempts".to_owned(), serde_json::Value::Array(Vec::new()));
+                attempts = serde_json::from_value(raw)?;
+            }
+        }
+        if attempt_bodies
+            .iter()
+            .any(|entry: &LegacyCheckpointExternalBody| {
+                entry.slot.attempt_index() >= attempts.len()
+            })
+        {
+            return Err(CheckpointLegacyError::InvalidAttemptSlot);
+        }
+        let mut checkpoint: ThreadCheckpoint = serde_json::from_value(root)?;
+        checkpoint.schema_version = ThreadCheckpoint::SCHEMA_VERSION;
+        Ok(Self {
+            checkpoint,
+            attempts,
+            attempt_bodies,
+        })
+    }
+
+    /// Whether every current-context body the legacy checkpoint named has been materialized.
+    pub fn is_materialized(&self) -> bool {
+        self.checkpoint.is_materialized()
+    }
+
+    /// The first current-context body still pending materialization, in manifest order.
+    pub fn pending_body(&self) -> Option<&CheckpointExternalBody> {
+        self.checkpoint.pending_body()
+    }
+
+    /// Restores one current-context body from the exact bytes its owner read.
+    ///
+    /// # Errors
+    /// Fails closed exactly like [`ThreadCheckpoint::materialize_body`].
+    pub fn materialize_body(
+        &mut self,
+        reference: &CheckpointBodyReference,
+        bytes: &[u8],
+    ) -> Result<(), CheckpointBodyError> {
+        self.checkpoint.materialize_body(reference, bytes)
+    }
+
+    /// Frozen request snapshots the conversion drops, so a caller can inspect what a legacy
+    /// checkpoint carried beyond its current context.
+    pub fn dropped_attempt_bodies(&self) -> &[LegacyCheckpointExternalBody] {
+        &self.attempt_bodies
+    }
+
+    /// Converts the reified legacy checkpoint into the current schema-3 resident form.
+    ///
+    /// # Errors
+    /// Rejects a still-pending current-context body: converting would drop body text the live
+    /// context still needs. Attempt bodies are dropped without error because the committed effect
+    /// batch is their authoritative copy.
+    pub fn into_current(self) -> Result<ThreadCheckpoint, CheckpointLegacyError> {
+        let Self {
+            mut checkpoint,
+            attempts,
+            attempt_bodies: _,
+        } = self;
+        if !checkpoint.external_bodies.is_empty() {
+            return Err(CheckpointLegacyError::ExternalBodiesPending);
+        }
+        // The legacy envelope already stored `liveCalls`; attempt identity is rebuilt from the
+        // attempts it carried so a retry can never re-admit an already-observed identity.
+        for attempt in &attempts {
+            checkpoint
+                .state
+                .attempt_ids
+                .insert(attempt.attempt_id.clone(), attempt.turn_id.clone());
+            if let AttemptOutcome::Committed(output) = &attempt.outcome {
+                for call in output.tool_calls.iter() {
+                    checkpoint
+                        .state
+                        .live_calls
+                        .insert(call.call_id.clone(), attempt.turn_id.clone());
+                }
+            }
+        }
+        checkpoint.state.attempts = attempts
+            .into_iter()
+            .map(LegacyRequestAttempt::into_current)
+            .collect::<Vec<_>>()
+            .into();
+        Ok(checkpoint)
+    }
+}
+
 /// Versioned current-state checkpoint. History is referenced only by its durable fence.
 ///
 /// The restart form carries the facts needed to resume current logical execution and nothing else:
@@ -291,36 +522,61 @@ pub struct ThreadCheckpoint {
     pub saved_at: i64,
     /// Bodies that left `state` for the session blob store, in externalization order.
     ///
-    /// A schema-1 checkpoint written before externalization existed has no such field and keeps
-    /// every body inline; a loader treats the absent field as an empty manifest and reads the file
-    /// exactly as before, so no already published checkpoint has to be rewritten first.
+    /// The current schema only names bodies that still have a resident slot. A schema-1 checkpoint
+    /// written before externalization existed has no such field and keeps every body inline; a
+    /// schema-2 checkpoint could still name an attempt's frozen input or produced step. Both old
+    /// versions are converted one-way through [`ThreadCheckpoint::decode_legacy`]. A blob-owning
+    /// caller materializes the current-context bodies first through [`LegacyThreadCheckpoint`]; a
+    /// manifest that still names one is refused rather than silently dropping the body text, while
+    /// an attempt body is dropped because the committed effect batch is its authoritative copy.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub external_bodies: Vec<CheckpointExternalBody>,
     pub state: ThreadSnapshot,
 }
 
 impl ThreadCheckpoint {
-    /// Current checkpoint schema. Schema 2 may name external bodies instead of inlining them.
-    pub const SCHEMA_VERSION: u32 = 2;
+    /// Current checkpoint schema. Schema 3 keeps only the lightweight resident attempt shape: the
+    /// frozen input context and the complete attempt outcome are no longer part of a checkpoint,
+    /// because the matching [`super::ThreadEffectBatch`] is their only durable copy.
+    pub const SCHEMA_VERSION: u32 = 3;
 
-    /// Inline-only schema written before bodies were externalized.
+    /// Schema versions this build no longer interprets in its normal path, but can still convert
+    /// through [`Self::decode_legacy`].
     ///
-    /// It stays readable: every body is already in the file, so the loader only has to accept the
-    /// version. A future schema stays unreadable on purpose, because a reader that does not know a
-    /// newer layout cannot tell a real body from a reference.
-    pub const LEGACY_SCHEMA_VERSION: u32 = 1;
+    /// Schema 1 inlines every body; schema 2 may name external bodies instead of inlining them.
+    pub const LEGACY_SCHEMA_VERSIONS: [u32; 2] = [1, 2];
 
     /// Whether this build interprets `schema_version` without loss.
     pub fn supports_schema(schema_version: u32) -> bool {
-        matches!(
-            schema_version,
-            Self::SCHEMA_VERSION | Self::LEGACY_SCHEMA_VERSION
-        )
+        schema_version == Self::SCHEMA_VERSION
+    }
+
+    /// Whether this build can still convert `schema_version` through the explicit legacy path.
+    pub fn is_legacy_schema(schema_version: u32) -> bool {
+        Self::LEGACY_SCHEMA_VERSIONS.contains(&schema_version)
+    }
+
+    /// Converts a schema-1/2 checkpoint envelope into the current schema-3 resident form.
+    ///
+    /// The conversion is one-way and explicit: the normal reader ([`Self::supports_schema`]) rejects
+    /// the old versions so it can never mistake an unread layout for the current one. The caller is
+    /// the owning storage, which must have already materialized every body it still needs: a legacy
+    /// checkpoint whose `externalBodies` still names a *current-context* body is refused here rather
+    /// than silently dropping the slot-to-body mapping, because the exact bytes belong to a blob
+    /// store this crate does not own. A blob-owning caller materializes first through
+    /// [`LegacyThreadCheckpoint`] and then converts. The complete frozen request snapshots a legacy
+    /// checkpoint carried are dropped on purpose — the committed effect batch is their authoritative
+    /// copy and schema 3 no longer has a resident slot for them.
+    ///
+    /// # Errors
+    /// Rejects a non-legacy version, a non-empty current-context manifest, and malformed JSON.
+    pub fn decode_legacy(envelope: &str) -> Result<Self, CheckpointLegacyError> {
+        LegacyThreadCheckpoint::decode_json(envelope)?.into_current()
     }
 
     /// Captures the restart DTO: current facts only, with history referenced by its fence.
     ///
-    /// This is the value that is published as `state.toml`, so it is the pruned form of
+    /// This is the current recovery DTO, so it is the pruned form of
     /// [`Self::capture_transfer`].
     pub fn capture(thread_id: String, history_fence: u64, state: ThreadSnapshot) -> Self {
         Self::capture_transfer(thread_id, history_fence, state).pruned()
@@ -332,7 +588,7 @@ impl ThreadCheckpoint {
     /// just-consumed input, a just-finished Turn or attempt, a just-delivered result — so a writer
     /// projects the effect from the state that commit produced instead of reading back a pruned
     /// checkpoint. Only the current commit's facts are retained, so the write queue stays bounded.
-    /// Callers must publish [`Self::pruned`] as `state.toml`.
+    /// Callers persist [`Self::pruned`] in their atomic checkpoint transaction.
     pub fn capture_transfer(
         thread_id: String,
         history_fence: u64,
@@ -377,10 +633,11 @@ impl ThreadCheckpoint {
     /// Every payload-bearing body a saved state can carry is covered: current-context content and
     /// tool-call arguments, pending inputs and inbox messages, pending or resolved interactions and
     /// the mutations they propose, live permission prompts and decisions, undelivered tool results,
-    /// runtime facts, application records, tool declarations, and resident attempts together with
-    /// their frozen model input and produced step. A failed or cancelled attempt also externalizes
-    /// its provider-owned details and its recorded diagnostic chain text. No field keeps an
-    /// unbounded body just because it is nested.
+    /// runtime facts, application records, tool declarations and the current private context. A
+    /// resident attempt keeps only its identity, `input_revision`, status and usage, so it names no
+    /// body at all: an attempt's frozen input, tool plan and produced step are the matching
+    /// [`super::ThreadEffectBatch`]'s copy. No field keeps an unbounded body just because it is
+    /// nested.
     ///
     /// This is a pure transformation: the receiver keeps its complete bodies, so the live owner and
     /// the next model request are unaffected. Only bodies above `threshold` leave the file; a small
@@ -393,7 +650,6 @@ impl ThreadCheckpoint {
 
         let records = externalize_records(
             &externalized.state.context.records,
-            None,
             threshold,
             &mut extracted,
         );
@@ -481,17 +737,6 @@ impl ThreadCheckpoint {
             })
             .collect::<Vec<_>>();
         externalized.state.discovered_tools = discovered.into();
-
-        let attempts = externalized
-            .state
-            .attempts
-            .iter()
-            .enumerate()
-            .map(|(attempt_index, attempt)| {
-                externalize_attempt(attempt_index, attempt, threshold, &mut extracted)
-            })
-            .collect::<Vec<_>>();
-        externalized.state.attempts = attempts.into();
 
         if let Some(payload) = externalized.state.private_context.take() {
             externalized.state.private_context = Some(externalize_payload(
@@ -591,22 +836,6 @@ impl ThreadCheckpoint {
             }
             CheckpointBodySlot::ToolDeclaration { tool_index } => {
                 self.restore_discovered_tool(*tool_index, entry, bytes)
-            }
-            CheckpointBodySlot::AttemptMetadata { attempt_index }
-            | CheckpointBodySlot::AttemptToolProjection { attempt_index }
-            | CheckpointBodySlot::AttemptToolDeclaration { attempt_index, .. }
-            | CheckpointBodySlot::AttemptInputContent { attempt_index, .. }
-            | CheckpointBodySlot::AttemptInputToolCall { attempt_index, .. }
-            | CheckpointBodySlot::AttemptOutputContent { attempt_index, .. }
-            | CheckpointBodySlot::AttemptOutputToolCall { attempt_index, .. }
-            | CheckpointBodySlot::AttemptOutputPrivateContext { attempt_index } => {
-                self.restore_attempt(*attempt_index, entry, bytes)
-            }
-            CheckpointBodySlot::AttemptErrorDetails { attempt_index } => {
-                self.restore_attempt_error(*attempt_index, AttemptErrorBody::Details, entry, bytes)
-            }
-            CheckpointBodySlot::AttemptErrorSource { attempt_index } => {
-                self.restore_attempt_error(*attempt_index, AttemptErrorBody::Source, entry, bytes)
             }
             CheckpointBodySlot::DeliveryPayload { call_id } => {
                 let body = DeliveryBody::Payload(payload_from_body(&entry.body, bytes)?);
@@ -965,159 +1194,6 @@ impl ThreadCheckpoint {
         Ok(())
     }
 
-    /// Refills one body of the resident attempt at `attempt_index`.
-    fn restore_attempt(
-        &mut self,
-        attempt_index: usize,
-        entry: &CheckpointExternalBody,
-        bytes: &[u8],
-    ) -> Result<(), CheckpointBodyError> {
-        let mut attempts = self.state.attempts.iter().cloned().collect::<Vec<_>>();
-        let attempt = attempts
-            .get_mut(attempt_index)
-            .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-        match &entry.slot {
-            CheckpointBodySlot::AttemptMetadata { .. } => {
-                let metadata = attempt
-                    .request_metadata
-                    .as_mut()
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let restored = restore_payload(&entry.body, bytes, metadata, &entry.slot)?;
-                *metadata = restored;
-            }
-            CheckpointBodySlot::AttemptToolProjection { .. } => {
-                let projection = attempt
-                    .tool_projection
-                    .as_mut()
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let restored = restore_payload(&entry.body, bytes, projection, &entry.slot)?;
-                *projection = restored;
-            }
-            CheckpointBodySlot::AttemptToolDeclaration { tool_index, .. } => {
-                let mut tools = attempt.tools.to_vec();
-                let tool = tools
-                    .get_mut(*tool_index)
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let restored = restore_payload(&entry.body, bytes, &tool.declaration, &entry.slot)?;
-                tool.declaration = restored;
-                attempt.tools = tools.into();
-            }
-            CheckpointBodySlot::AttemptInputContent {
-                record_id,
-                content_index,
-                ..
-            } => {
-                let mut records = attempt.input.records.to_vec();
-                let record = records
-                    .iter_mut()
-                    .find(|record| &record.id == record_id)
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let slot = record
-                    .content
-                    .get_mut(*content_index)
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let restored = restore_content(&entry.body, bytes, slot, &entry.slot)?;
-                *slot = restored;
-                attempt.input.records = records.into();
-            }
-            CheckpointBodySlot::AttemptInputToolCall {
-                record_id,
-                call_index,
-                ..
-            } => {
-                let mut records = attempt.input.records.to_vec();
-                let record = records
-                    .iter_mut()
-                    .find(|record| &record.id == record_id)
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let call = record
-                    .tool_calls
-                    .get_mut(*call_index)
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let restored = restore_payload(&entry.body, bytes, &call.arguments, &entry.slot)?;
-                call.arguments = restored;
-                attempt.input.records = records.into();
-            }
-            CheckpointBodySlot::AttemptOutputContent { content_index, .. } => {
-                let output = step_output_mut(&mut attempt.outcome)
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let slot = output
-                    .content
-                    .get_mut(*content_index)
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let restored = restore_content(&entry.body, bytes, slot, &entry.slot)?;
-                *slot = restored;
-            }
-            CheckpointBodySlot::AttemptOutputToolCall { call_index, .. } => {
-                let output = step_output_mut(&mut attempt.outcome)
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let call = output
-                    .tool_calls
-                    .get_mut(*call_index)
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let restored = restore_payload(&entry.body, bytes, &call.arguments, &entry.slot)?;
-                call.arguments = restored;
-            }
-            CheckpointBodySlot::AttemptOutputPrivateContext { .. } => {
-                let output = step_output_mut(&mut attempt.outcome)
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let private = output
-                    .private_context
-                    .as_mut()
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let restored = restore_payload(&entry.body, bytes, private, &entry.slot)?;
-                *private = restored;
-            }
-            _ => return Err(CheckpointBodyError::SlotMismatch(slot_label(&entry.slot))),
-        }
-        self.state.attempts = attempts.into();
-        Ok(())
-    }
-
-    /// Refills one body of the failure outcome of the resident attempt at `attempt_index`.
-    ///
-    /// A failure is rebuilt rather than mutated in place: `ModelError` is not `Clone` because it owns
-    /// the provider error object, so the copy is assembled from the details payload and the recorded
-    /// chain text, which is exactly what the persisted form keeps.
-    fn restore_attempt_error(
-        &mut self,
-        attempt_index: usize,
-        body: AttemptErrorBody,
-        entry: &CheckpointExternalBody,
-        bytes: &[u8],
-    ) -> Result<(), CheckpointBodyError> {
-        let mut attempts = self.state.attempts.iter().cloned().collect::<Vec<_>>();
-        let attempt = attempts
-            .get_mut(attempt_index)
-            .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-        let error = attempt_error_mut(&mut attempt.outcome)
-            .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-        let current = error.clone();
-        let rebuilt = match body {
-            AttemptErrorBody::Details => {
-                let details = current
-                    .details
-                    .as_deref()
-                    .ok_or_else(|| CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)))?;
-                let restored = restore_payload(&entry.body, bytes, details, &entry.slot)?;
-                current.with_parts(
-                    Some(Box::new(restored)),
-                    chain_source(current.source_chain()),
-                )
-            }
-            AttemptErrorBody::Source => {
-                if current.source_chain() != vec![ERROR_SOURCE_PLACEHOLDER.to_owned()] {
-                    return Err(CheckpointBodyError::SlotMismatch(slot_label(&entry.slot)));
-                }
-                let chain = decode_error_chain(&entry.body, bytes)?;
-                current.with_parts(current.details.clone(), chain_source(chain))
-            }
-        };
-        *error = Arc::new(rebuilt);
-        self.state.attempts = attempts.into();
-        Ok(())
-    }
-
     /// Validates identity and consistency, then returns the persisted state and its restart
     /// settlement.
     ///
@@ -1146,56 +1222,37 @@ impl ThreadCheckpoint {
 }
 
 /// Replaces the oversized bodies of one record list with references.
-///
-/// The same record list appears as the current context and, frozen, as a resident attempt's model
-/// input; `attempt` selects which slot family the manifest uses so a body is never named twice.
 fn externalize_records(
     records: &[ContextRecord],
-    attempt: Option<usize>,
     threshold: usize,
     extracted: &mut Vec<ExtractedCheckpointBody>,
 ) -> Vec<ContextRecord> {
     records
         .iter()
-        .map(|record| externalize_record(record, attempt, threshold, extracted))
+        .map(|record| externalize_record(record, threshold, extracted))
         .collect()
 }
 
 /// Replaces one record's oversized content and tool-call arguments with placeholders.
 fn externalize_record(
     record: &ContextRecord,
-    attempt: Option<usize>,
     threshold: usize,
     extracted: &mut Vec<ExtractedCheckpointBody>,
 ) -> ContextRecord {
     let mut externalized = record.clone();
     let mut content = Vec::with_capacity(record.content.len());
     for (content_index, item) in record.content.iter().enumerate() {
-        let slot = match attempt {
-            Some(attempt_index) => CheckpointBodySlot::AttemptInputContent {
-                attempt_index,
-                record_id: record.id.clone(),
-                content_index,
-            },
-            None => CheckpointBodySlot::ContextContent {
-                record_id: record.id.clone(),
-                content_index,
-            },
+        let slot = CheckpointBodySlot::ContextContent {
+            record_id: record.id.clone(),
+            content_index,
         };
         content.push(externalize_content(item, slot, threshold, extracted));
     }
     let mut calls = Vec::with_capacity(record.tool_calls.len());
     for (call_index, call) in record.tool_calls.iter().enumerate() {
-        let slot = match attempt {
-            Some(attempt_index) => CheckpointBodySlot::AttemptInputToolCall {
-                attempt_index,
-                record_id: record.id.clone(),
-                call_index,
-            },
-            None => CheckpointBodySlot::ContextToolCall {
-                record_id: record.id.clone(),
-                call_index,
-            },
+        let slot = CheckpointBodySlot::ContextToolCall {
+            record_id: record.id.clone(),
+            call_index,
         };
         let mut rebuilt = call.clone();
         rebuilt.arguments = externalize_payload(&call.arguments, slot, threshold, extracted);
@@ -1381,210 +1438,6 @@ fn externalize_tool(
         tool_id: tool.tool_id.clone(),
         declaration: externalize_payload(&tool.declaration, slot, threshold, extracted),
     }
-}
-
-/// Replaces one resident attempt's oversized bodies with references.
-fn externalize_attempt(
-    attempt_index: usize,
-    attempt: &RequestAttempt,
-    threshold: usize,
-    extracted: &mut Vec<ExtractedCheckpointBody>,
-) -> RequestAttempt {
-    let mut externalized = attempt.clone();
-    if let Some(metadata) = &attempt.request_metadata {
-        externalized.request_metadata = Some(externalize_payload(
-            metadata,
-            CheckpointBodySlot::AttemptMetadata { attempt_index },
-            threshold,
-            extracted,
-        ));
-    }
-    if let Some(projection) = &attempt.tool_projection {
-        externalized.tool_projection = Some(externalize_payload(
-            projection,
-            CheckpointBodySlot::AttemptToolProjection { attempt_index },
-            threshold,
-            extracted,
-        ));
-    }
-    externalized.input.records = externalize_records(
-        &attempt.input.records,
-        Some(attempt_index),
-        threshold,
-        extracted,
-    )
-    .into();
-    let mut tools = Vec::with_capacity(attempt.tools.len());
-    for (tool_index, tool) in attempt.tools.iter().enumerate() {
-        tools.push(externalize_tool(
-            tool,
-            CheckpointBodySlot::AttemptToolDeclaration {
-                attempt_index,
-                tool_index,
-            },
-            threshold,
-            extracted,
-        ));
-    }
-    externalized.tools = tools.into();
-    externalized.outcome =
-        externalize_outcome(attempt_index, &attempt.outcome, threshold, extracted);
-    externalized
-}
-
-/// Replaces the oversized bodies of one attempt outcome with references.
-fn externalize_outcome(
-    attempt_index: usize,
-    outcome: &AttemptOutcome,
-    threshold: usize,
-    extracted: &mut Vec<ExtractedCheckpointBody>,
-) -> AttemptOutcome {
-    match outcome {
-        AttemptOutcome::Committed(output) => AttemptOutcome::Committed(externalize_step_output(
-            attempt_index,
-            output,
-            threshold,
-            extracted,
-        )),
-        AttemptOutcome::Cancelled { result } => AttemptOutcome::Cancelled {
-            result: match result {
-                Ok(output) => Ok(externalize_step_output(
-                    attempt_index,
-                    output,
-                    threshold,
-                    extracted,
-                )),
-                Err(error) => Err(Arc::new(externalize_error(
-                    attempt_index,
-                    error,
-                    threshold,
-                    extracted,
-                ))),
-            },
-        },
-        AttemptOutcome::Rejected { output, reason } => AttemptOutcome::Rejected {
-            output: externalize_step_output(attempt_index, output, threshold, extracted),
-            reason: reason.clone(),
-        },
-        // A failure keeps its provider-owned details and its diagnostic chain text; both can be as
-        // large as any other body, so the same manifest covers them.
-        AttemptOutcome::Failed(error) => AttemptOutcome::Failed(Arc::new(externalize_error(
-            attempt_index,
-            error,
-            threshold,
-            extracted,
-        ))),
-        AttemptOutcome::Running | AttemptOutcome::Interrupted => outcome.clone(),
-    }
-}
-
-/// Replaces the oversized bodies of one produced step with references.
-fn externalize_step_output(
-    attempt_index: usize,
-    output: &ModelStepOutput,
-    threshold: usize,
-    extracted: &mut Vec<ExtractedCheckpointBody>,
-) -> ModelStepOutput {
-    let mut externalized = output.clone();
-    let mut content = Vec::with_capacity(output.content.len());
-    for (content_index, item) in output.content.iter().enumerate() {
-        content.push(externalize_content(
-            item,
-            CheckpointBodySlot::AttemptOutputContent {
-                attempt_index,
-                content_index,
-            },
-            threshold,
-            extracted,
-        ));
-    }
-    let mut calls = Vec::with_capacity(output.tool_calls.len());
-    for (call_index, call) in output.tool_calls.iter().enumerate() {
-        let mut rebuilt = call.clone();
-        rebuilt.arguments = externalize_payload(
-            &call.arguments,
-            CheckpointBodySlot::AttemptOutputToolCall {
-                attempt_index,
-                call_index,
-            },
-            threshold,
-            extracted,
-        );
-        calls.push(rebuilt);
-    }
-    externalized.content = content;
-    externalized.tool_calls = calls;
-    if let Some(private) = &output.private_context {
-        externalized.private_context = Some(externalize_payload(
-            private,
-            CheckpointBodySlot::AttemptOutputPrivateContext { attempt_index },
-            threshold,
-            extracted,
-        ));
-    }
-    externalized
-}
-
-/// Replaces the oversized bodies of one resident failure with references.
-///
-/// A `ModelError` owns a `Box<dyn Error>` and is deliberately not `Clone`, so the copy is rebuilt
-/// from the two things the persisted form keeps: the provider-owned details payload and the
-/// diagnostic source-chain text. That text is exactly what serialization records, so the rebuilt
-/// failure persists and reports like the original while the live owner keeps the untouched value.
-fn externalize_error(
-    attempt_index: usize,
-    error: &ModelError,
-    threshold: usize,
-    extracted: &mut Vec<ExtractedCheckpointBody>,
-) -> ModelError {
-    let details = error.details.as_deref().map(|payload| {
-        Box::new(externalize_payload(
-            payload,
-            CheckpointBodySlot::AttemptErrorDetails { attempt_index },
-            threshold,
-            extracted,
-        ))
-    });
-    let chain = error.source_chain();
-    let source = if chain.is_empty() {
-        None
-    } else {
-        let external = encode_error_chain(&chain)
-            .filter(|encoded| encoded.len() > threshold)
-            .and_then(|encoded| {
-                record_body(
-                    CheckpointBodyKind::Opaque {
-                        format: ERROR_SOURCE_FORMAT.to_owned(),
-                        version: ERROR_SOURCE_VERSION,
-                    },
-                    CheckpointBodySlot::AttemptErrorSource { attempt_index },
-                    encoded,
-                    extracted,
-                    |_| chain_source(vec![ERROR_SOURCE_PLACEHOLDER.to_owned()]),
-                )
-            });
-        external.or_else(|| chain_source(chain))
-    };
-    error.with_parts(details, source)
-}
-
-/// Encodes one diagnostic chain as the exact bytes a checkpoint body holds.
-fn encode_error_chain(chain: &[String]) -> Option<Vec<u8>> {
-    serde_json::to_vec(chain).ok()
-}
-
-/// Decodes one externalized diagnostic chain, rejecting any other body shape.
-fn decode_error_chain(
-    kind: &CheckpointBodyKind,
-    bytes: &[u8],
-) -> Result<Vec<String>, CheckpointBodyError> {
-    let CheckpointBodyKind::Opaque { format, version } = kind else {
-        return Err(CheckpointBodyError::InvalidBody);
-    };
-    if format != ERROR_SOURCE_FORMAT || *version != ERROR_SOURCE_VERSION {
-        return Err(CheckpointBodyError::InvalidBody);
-    }
-    serde_json::from_slice(bytes).map_err(|_| CheckpointBodyError::InvalidBody)
 }
 
 /// Rebuilds one pending delivery with its oversized bodies replaced by references.
@@ -1815,31 +1668,6 @@ fn restore_payload(
         return Err(CheckpointBodyError::SlotMismatch(slot_label(slot)));
     }
     payload_from_body(kind, bytes)
-}
-
-/// The produced step of one attempt outcome, while that outcome still carries one.
-fn step_output_mut(outcome: &mut AttemptOutcome) -> Option<&mut ModelStepOutput> {
-    match outcome {
-        AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => Some(output),
-        AttemptOutcome::Cancelled { result } => result.as_mut().ok(),
-        AttemptOutcome::Running | AttemptOutcome::Interrupted | AttemptOutcome::Failed(_) => None,
-    }
-}
-
-/// The failure of one attempt outcome, while that outcome still carries one.
-fn attempt_error_mut(outcome: &mut AttemptOutcome) -> Option<&mut Arc<ModelError>> {
-    match outcome {
-        AttemptOutcome::Failed(error) => Some(error),
-        AttemptOutcome::Cancelled { result: Err(error) } => Some(error),
-        _ => None,
-    }
-}
-
-/// Which body of one resident failure a manifest entry refills.
-#[derive(Debug, Clone, Copy)]
-enum AttemptErrorBody {
-    Details,
-    Source,
 }
 
 /// Restores one context content body exactly as it was externalized.

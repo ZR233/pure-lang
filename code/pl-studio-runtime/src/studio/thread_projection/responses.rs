@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// be closed without emitting duplicate aggregate content. Provider part identities use the same
 /// function as terminal projection and the caller's durable item/reservation fact.
 pub(in crate::studio) fn started_channels(
-    attempt: &pl_core::thread::RequestAttempt,
+    attempt: &pl_core::thread::journal::AttemptUpdate,
     known_ids: impl IntoIterator<Item = String>,
     started: impl Fn(&str) -> bool,
 ) -> BTreeSet<String> {
@@ -79,7 +79,7 @@ pub(in crate::studio) fn keeps_bounded_preview(outcome: &AttemptOutcome) -> bool
 /// The previous item is required to preserve its channel and partially streamed content.
 pub(super) fn finalize_missing_presentation(
     thread_id: &str,
-    attempt: &pl_core::thread::RequestAttempt,
+    attempt: &pl_core::thread::journal::AttemptUpdate,
     revision: u64,
     updated_at: i64,
     finalize: &BTreeSet<String>,
@@ -161,7 +161,7 @@ pub(super) fn finalize_missing_presentation(
 pub(super) fn project_attempt(
     thread_id: &str,
     snapshot: &ThreadSnapshot,
-    attempt: &pl_core::thread::RequestAttempt,
+    attempt: &pl_core::thread::journal::AttemptUpdate,
     ordinal: u64,
     created_at: i64,
     revision: u64,
@@ -438,7 +438,7 @@ pub(super) fn project_attempt(
 #[allow(clippy::too_many_arguments)]
 fn project_presentation_items(
     thread_id: &str,
-    attempt: &pl_core::thread::RequestAttempt,
+    attempt: &pl_core::thread::journal::AttemptUpdate,
     ordinal: u64,
     created_at: i64,
     revision: u64,
@@ -535,7 +535,7 @@ fn project_presentation_items(
 
 fn inference_item(
     thread_id: &str,
-    attempt: &pl_core::thread::RequestAttempt,
+    attempt: &pl_core::thread::journal::AttemptUpdate,
     created_at: i64,
     updated_at: i64,
     revision: u64,

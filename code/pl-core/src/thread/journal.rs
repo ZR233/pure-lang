@@ -157,17 +157,24 @@ impl ThreadEffectBatch {
         let attempt = if Arc::ptr_eq(&previous.attempts, &current.attempts) {
             None
         } else {
-            current.attempts.last().map(|attempt| AttemptUpdate {
-                request_metadata: attempt.request_metadata.clone(),
-                usage_binding: attempt.usage_binding.clone(),
-                tool_projection: attempt.tool_projection.clone(),
-                turn_id: attempt.turn_id.clone(),
-                attempt_id: attempt.attempt_id.clone(),
-                retry_of: attempt.retry_of.clone(),
-                input_revision: attempt.input.revision,
-                tools: attempt.tools.clone(),
-                outcome: attempt.outcome.clone(),
-                input_estimate: attempt.input_estimate,
+            current.attempts.last().and_then(|attempt| {
+                let facts = attempt.facts.as_ref();
+                let outcome = match facts {
+                    Some(facts) => facts.outcome.clone(),
+                    None => attempt.status.body_less_outcome()?,
+                };
+                Some(AttemptUpdate {
+                    request_metadata: facts.and_then(|facts| facts.request_metadata.clone()),
+                    usage_binding: facts.and_then(|facts| facts.usage_binding.clone()),
+                    tool_projection: facts.and_then(|facts| facts.tool_projection.clone()),
+                    turn_id: attempt.turn_id.clone(),
+                    attempt_id: attempt.attempt_id.clone(),
+                    retry_of: attempt.retry_of.clone(),
+                    input_revision: attempt.input_revision,
+                    tools: facts.map(|facts| facts.tools.clone()).unwrap_or_default(),
+                    outcome,
+                    input_estimate: facts.and_then(|facts| facts.input_estimate),
+                })
             })
         };
         let inputs: Arc<[input::InputChange]> = current.input_changes
@@ -365,8 +372,7 @@ pub(crate) fn replay_legacy(
         if let Some(update) = &commit.attempt {
             let input = contexts
                 .get(&update.input_revision)
-                .ok_or(ThreadError::InvalidContext)?
-                .clone();
+                .ok_or(ThreadError::InvalidContext)?;
             input.validate_complete()?;
             if update.attempt_id.is_empty() || update.turn_id.is_empty() {
                 return Err(ThreadError::InvalidIdentity);
@@ -392,39 +398,34 @@ pub(crate) fn replay_legacy(
                     return Err(ThreadError::InvalidOutput);
                 }
             }
+            // Migration only needs the lightweight resident shape: the complete outcome already
+            // lives in this very commit, which is the effect batch handed to history.
+            let status = AttemptStatus::from_outcome(&update.outcome);
             let attempt = RequestAttempt {
-                request_metadata: update.request_metadata.clone(),
-                usage_binding: update.usage_binding.clone(),
-                tool_projection: update.tool_projection.clone(),
                 turn_id: update.turn_id.clone(),
                 attempt_id: update.attempt_id.clone(),
                 retry_of: update.retry_of.clone(),
-                input,
-                tools: update.tools.clone(),
-                outcome: update.outcome.clone(),
-                input_estimate: update.input_estimate,
+                input_revision: update.input_revision,
+                status,
+                usage: attempt_outcome_usage(&update.outcome).cloned(),
+                facts: None,
             };
             let mut attempts = state.attempts.to_vec();
             if let Some(previous) = attempts
                 .iter_mut()
                 .find(|previous| previous.attempt_id == update.attempt_id)
             {
-                if !matches!(previous.outcome, AttemptOutcome::Running)
-                    || matches!(attempt.outcome, AttemptOutcome::Running)
+                if previous.status != AttemptStatus::Running
+                    || attempt.status == AttemptStatus::Running
                     || previous.turn_id != attempt.turn_id
                     || previous.retry_of != attempt.retry_of
-                    || previous.input != attempt.input
-                    || previous.tools != attempt.tools
-                    || previous.tool_projection != attempt.tool_projection
-                    || previous.request_metadata != attempt.request_metadata
-                    || previous.usage_binding != attempt.usage_binding
-                    || previous.input_estimate != attempt.input_estimate
+                    || previous.input_revision != attempt.input_revision
                 {
                     return Err(ThreadError::InvalidOutput);
                 }
                 *previous = attempt;
             } else {
-                if !matches!(attempt.outcome, AttemptOutcome::Running) {
+                if attempt.status != AttemptStatus::Running {
                     return Err(ThreadError::InvalidOutput);
                 }
                 if let Some(source_id) = &attempt.retry_of {
@@ -433,20 +434,18 @@ pub(crate) fn replay_legacy(
                         .filter(|source| &source.attempt_id == source_id)
                         .ok_or(ThreadError::InvalidIdentity)?;
                     let correction = matches!(
-                        source.outcome,
-                        AttemptOutcome::Rejected {
+                        source.status,
+                        AttemptStatus::Rejected {
                             reason: ModelOutputViolation::SoloBatch { .. },
-                            ..
                         }
                     );
-                    if (!correction
-                        && !matches!(
-                            source.outcome,
-                            AttemptOutcome::Failed(_) | AttemptOutcome::Cancelled { .. }
-                        ))
+                    let retryable = matches!(
+                        source.status,
+                        AttemptStatus::Failed | AttemptStatus::Cancelled
+                    );
+                    if (!correction && !retryable)
                         || source.turn_id != attempt.turn_id
-                        || (!correction
-                            && (source.input != attempt.input || source.tools != attempt.tools))
+                        || (!correction && source.input_revision != attempt.input_revision)
                     {
                         return Err(ThreadError::InvalidContext);
                     }
@@ -454,6 +453,16 @@ pub(crate) fn replay_legacy(
                 attempts.push(attempt);
             }
             state.attempts = attempts.into();
+            state
+                .attempt_ids
+                .insert(update.attempt_id.clone(), update.turn_id.clone());
+            if let AttemptOutcome::Committed(output) = &update.outcome {
+                for call in output.tool_calls.iter() {
+                    state
+                        .live_calls
+                        .insert(call.call_id.clone(), update.turn_id.clone());
+                }
+            }
             let usage = state
                 .attempts
                 .last()
@@ -692,7 +701,7 @@ pub(crate) fn replay_legacy(
             }
             state.wake_messages_through = watermark;
         }
-        input::replay(&mut state, commit)?;
+        input::replay(&mut state, commit, &contexts)?;
         for record in commit.interactions.iter() {
             if let Some(input_id) = &record.continuation_id
                 && (!state.inputs.iter().any(|input| &input.input.id == input_id)

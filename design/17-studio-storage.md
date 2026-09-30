@@ -23,14 +23,11 @@ Studio home（`~/.anywork/`）的布局为：
 │   ├── workspaces.toml             # 本版本 Project/Workspace 定义
 │   ├── catalog.toml                # 本版本新会话目录摘要
 │   ├── sessions/<storage-key>/     # 每个新 Thread 一个目录（storage-key = id 的 sha256）
-│   │   ├── state.toml
-│   │   ├── state.prev.toml
-│   │   ├── history.sqlite
-│   │   └── blobs/                  # 附件正文与外置 checkpoint 正文
-│   │       └── checkpoint/<xx>/<sha256>
+│   │   ├── history.sqlite          # 历史、最新上下文与 checkpoint 同事务
+│   │   └── blobs/                  # 可靠附件正文，旧 checkpoint 子目录迁移后回收
 │   ├── calls/
-│   │   ├── calls.sqlite            # 本版本尽力而为调用统计
-│   │   └── blobs/
+│   │   ├── calls.sqlite            # 有界调试索引与轻量统计投影
+│   │   └── logs/                   # 版本化滚动 JSONL 调试日志
 │   └── migrations/                 # 仅本版本迁移状态
 ├── migrations/                     # 旧版本迁移状态，保留但不读取
 │   ├── session-migration.json
@@ -100,7 +97,7 @@ repo/path/branch/base/revision。目录展示与物理 ownership 是不同职责
 
 1. 校验 catalog 身份和祖先关系；
 2. 合并同 Thread 并发打开；
-3. 读取并验证一次 `state.toml`；
+3. 在短 SQLite 读事务读取并验证最新 checkpoint 与上下文；旧 v2 TOML 先按需迁移；
 4. 纯恢复内存 owner，不执行模型/工具；
 5. 建立增量订阅；
 6. ChatView 在同一订阅边界取得当前内存首帧（最近最多 32 条）；Session 的尾部缓存按需
@@ -126,12 +123,11 @@ repo/path/branch/base/revision。目录展示与物理 ownership 是不同职责
 
 每个会话由会话管理器持有可靠的未提交 effect 队列，history writer 借用队头并写入
 `history.sqlite`，事务确认后才释放；同一事务记录任务身份、终态工具交付和交互回执。
-全局 call recorder 独立、尽力而为地写 `calls.sqlite`；其积压和故障不阻塞执行或历史确认。
+全局 call recorder 独立、尽力而为地写滚动日志及有界索引；其积压和故障不阻塞执行或历史确认。
 旧调用库不进入本版本的历史库，旧用户数据原样留在旧数据根。writer 退出后原队列由会话
 管理器保留，待旧写任务结束后按历史水位重试。
-观察窗口错过实时 effect 后，调用事实的补投影必须校验并解码已保存的完整 attempt
-正文，从原始模型回执恢复身份、用量和计时；摘要列尚未写齐时不得据此制造缺失样本。
-队列已受理但尚未落库只标记待写入，不能直接锁存统计缺口。
+观察窗口错过实时 effect 后，累计统计从可靠 checkpoint 的绝对摘要恢复，不回读调试日志。
+队列已受理但尚未落盘只标记待写入，不能直接锁存统计缺口。
 
 子 Thread 的终态通知先按父 Thread 的持久身份索引裁决重复；若相同身份的通知已受理
 但仍在父 Thread 待消费队列中，实时通知须唤醒原消息对应的等待，不能因去重跳过
@@ -155,8 +151,8 @@ repo/path/branch/base/revision。目录展示与物理 ownership 是不同职责
 
 词元速率历史与性能汇总共用一个全局有界样本集合，按完成时间和调用身份稳定排序，只保留
 最近 3000 条成功调用。升级时原地裁剪已有样本，每批统计事务提交前清理更旧的样本成员；
-历史调用的费用、幂等身份和会话正文不随速率样本淘汰。样本成员索引是可裁剪的统计投影，
-字段仍读取调用事实，避免复制计费数据。统计 writer 每批共用一个 SQLite 事务，单条失败
+可靠累计费用、执行幂等身份和会话正文不随速率样本淘汰。样本自带模型、用量和计时摘要，
+不回读已经过期的日志正文。统计 writer 每批共用一个 SQLite 事务，单条失败
 通过保存点隔离，成功记录的完成水位不早于整批事务提交；可重试失败保持顺序重新排队，
 不可恢复失败显式记录统计缺口并结束对应 ticket。
 
@@ -213,31 +209,29 @@ history/checkpoint 水位，也不能让 GUI 自行合并 SQL 与实时 overlay�
 慢消费者基线过期由 core 给 Reset；普通滚动分页不经过执行 owner、不 flush writer、不
 激活冷会话。存储故障以独立 watch 发布，不排在可能积压的 GUI/历史增量之后。
 
-## 17.5 Snapshot scheduler 与保存诊断
+## 17.5 保存与诊断
 
-每个已加载 Thread 最多一个 snapshot scheduler。它维护正在写的一份和最新待写的一份，使用
-跳过错过 tick 的一秒 interval；序列化与文件 IO 在 owner 临界区外完成。scheduler 先等待
-checkpoint 的 history/blob fence，再原子发布 TOML。
+每个已加载 Thread 只有一个可靠 writer。历史、当前上下文、恢复 checkpoint 和累计统计
+同事务提交；固定 flush 水位只在事务确认后完成。不再运行独立 TOML snapshot scheduler。
+当前上下文只保留最新集合，普通追加增量写入，压缩替换不保留旧上下文快照。
 
-公共持久化状态至少暴露：
+公开保存诊断保留 dirty/saving/durable revision、历史和诊断的 admitted/durable 水位、
+待保存数量/字节、最老等待时间、故障代次及暂停状态。可靠保存失败保留批次并在安全点暂停
+新模型/工具准入，按现有显式重试和继续协议恢复。日志故障单独报告，不加入可靠屏障。
+关闭和 shutdown 等待相关 Thread 的固定可靠水位，不能将未保存事实报告为成功。
 
-- state dirty/saving/durable revision；
-- history/calls admitted/durable write sequence；
-- pending operations/bytes、oldest pending age、in-flight bytes；
-- 历史故障类型、代次、执行暂停相位，以及是否因压力暂停准入；
-- 统计投影的丢失情况，缺失值不得解释为零。
+调用日志容量、轮转和清理契约见 [15](./15-session-storage.md) §15.7。旧 v2 数据按职责
+迁移后才回收已替代文件；附件和工具归档按可靠历史引用保留，不适用调试日志过期策略。
+所有回收只作用于本版本已确认拥有的资源，不触及隔离的旧版本数据根。
 
-调用统计已受理但尚未落盘是正常的队列延迟，由 admitted/durable 水位和队列压力表达，
-不作为统计缺口告警；拒收、写入失败或无法恢复的投影丢失仍须显式报告缺口。
+旧 v2 费用迁移按 purpose 与币种核对 checkpoint 与调用库水位；模型与压缩费用已包含在
+checkpoint，标题和自动审批费用单独补入，绝不直接相加两套累计值。后续辅助计费通过可靠
+扩展事件与会话一起提交。当前压缩回执仅保留最新一份；历史压缩条目以独立调用身份保留。
 
-正常 Turn 不等待持久化。历史队列满、历史或 checkpoint/blob 保存失败时保留未确认事实，
-在下次发布、模型或工具启动安全点暂停；状态改变独立唤醒空闲的会话。人工按会话重试原队列，
-补入未受理批次并等待该次暂停的固定保存水位，再以故障代次核对后恢复原执行位置。
-无后续输出、关闭 GUI 页面、停止 Turn 均不得释放待保存历史。正常退出不能把未保存事实当作
-关机成功；强制退出必须明确告知未提交内存内容的风险。
-
-状态错误不回滚已提交内存事实。关闭、归档和 shutdown 只等待相关 Thread 的固定 ticket；其他
-Thread 持续写入不能阻塞当前操作。
+v2 checkpoint 在按需激活时迁移：验证版本、外置正文完整性及历史水位，在 SQLite 事务中
+发布精简状态，并重新读取校验。成功后才回收主备 TOML 与专属 checkpoint 正文；清理记录
+支持中断重试。旧调用库按批保全累计摘要和保留期诊断，发布迁移版本后回收旧正文目录，
+包括未登记的孤儿；旧运行中工具参数与终态交付在迁移边界分别解码。
 
 ## 17.6 worktree 与资源恢复
 

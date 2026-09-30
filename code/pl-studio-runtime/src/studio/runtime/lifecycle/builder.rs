@@ -128,7 +128,6 @@ impl StudioRuntime {
             crate::studio::thread_factory::StudioThreadServices {
                 store: store.clone(),
                 worktrees: worktrees.clone(),
-                model_performance: model_performance.clone(),
                 product_events: product_events.clone(),
                 config_runtime: config_runtime.clone(),
                 mcp_runtime: mcp.clone(),

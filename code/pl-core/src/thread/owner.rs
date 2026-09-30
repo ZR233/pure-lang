@@ -464,7 +464,7 @@ impl Owner {
             .as_ref()
             .filter(|(id, _)| {
                 snapshot.attempts.last().is_some_and(|attempt| {
-                    &attempt.attempt_id == id && matches!(attempt.outcome, AttemptOutcome::Running)
+                    &attempt.attempt_id == id && attempt.status == AttemptStatus::Running
                 })
             })
             .map(|(id, receiver)| crate::model::ActiveModelProgress {

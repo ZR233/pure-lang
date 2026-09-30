@@ -45,6 +45,27 @@ impl TaskAccess {
         }
     }
 
+    /// Publishes an opaque execution receipt through the reliable Thread effect queue.
+    /// Only the latest receipt per producer format remains in the checkpoint; the host folds
+    /// each committed receipt into durable accounting. It never changes the model context.
+    ///
+    /// # Errors
+    /// Rejects completed callers and closed owners. Cancellation or revoked execution permission does
+    /// not reject an already incurred receipt; this operation grants no execution permission.
+    pub async fn record_observation(&self, payload: OpaquePayload) -> Result<(), ThreadError> {
+        let commands = self.commands.upgrade().ok_or(ThreadError::Closed)?;
+        let (reply, response) = oneshot::channel();
+        commands
+            .send(mailbox::MailboxCommand::RecordTaskObservation {
+                caller: self.caller.clone(),
+                payload,
+                reply,
+            })
+            .await
+            .map_err(|_| ThreadError::Closed)?;
+        response.await.map_err(|_| ThreadError::Closed)?
+    }
+
     pub(crate) async fn validate_execution(&self) -> Result<(), ThreadError> {
         let commands = self.commands.upgrade().ok_or(ThreadError::Closed)?;
         let (reply, response) = oneshot::channel();

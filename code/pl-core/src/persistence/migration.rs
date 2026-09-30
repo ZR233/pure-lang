@@ -1,7 +1,5 @@
 //! Explicit offline migration. Normal store opening never resets or converts history.
-use super::{
-    SessionStoreError, SqliteSessionOptions, history, sqlite, thread_checkpoint, thread_history,
-};
+use super::{SessionStoreError, SqliteSessionOptions, history, sqlite, thread_history};
 use crate::{
     context::OpaquePayload,
     storage::{SessionEntry, SessionEntryChange},
@@ -9,6 +7,31 @@ use crate::{
 };
 use sea_orm::{ConnectionTrait, Database, TransactionTrait};
 use std::sync::Arc;
+
+/// Minimal view of a stored checkpoint the usage backfill needs.
+///
+/// It deliberately omits the resident attempts so a schema-1/2 envelope decodes without the current
+/// read path, which no longer interprets that layout; the attempt bodies stay byte-for-byte intact
+/// for the later conversion step.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UsageBackfillEnvelope {
+    thread_id: String,
+    state_revision: u64,
+    history_fence: u64,
+    #[serde(default)]
+    external_bodies: Vec<serde_json::Value>,
+    state: UsageBackfillState,
+}
+
+/// The two checkpoint state facts the usage backfill reads and rewrites.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UsageBackfillState {
+    commit_sequence: u64,
+    #[serde(default)]
+    usage_summary: crate::thread::UsageSummary,
+}
 
 /// Upgrades an existing session database through every supported schema step.
 ///
@@ -32,7 +55,8 @@ pub async fn migrate_to_current(
     let _lease = sqlite::acquire_database_lock(options.path.clone()).await?;
     migrate_v6(options.clone(), transform).await?;
     migrate_v7(options.clone()).await?;
-    migrate_v8(options).await
+    migrate_v8(options.clone()).await?;
+    migrate_v9(options).await
 }
 
 /// Migrates version 6 to 7 in one transaction, preserving entry identities and all history.
@@ -60,7 +84,7 @@ async fn migrate_v6(
         // A versioned step accepts only its own target or later steps this facade knows about.
         // Do not tie its no-op range to SESSION_SCHEMA_VERSION: a future schema bump must add a
         // new step to migrate_to_current, not silently redefine what this migration did.
-        if version == 7 || version == 8 || version == 9 { tx.commit().await?; return Ok(()); }
+        if version == 7 || version == 8 || version == 9 || version == 10 { tx.commit().await?; return Ok(()); }
         if version != 6 { return Err(SessionStoreError::UnsupportedSchema { found: version, supported: super::SESSION_SCHEMA_VERSION }); }
         let sessions = tx.query_all_raw(sqlite::statement("SELECT session_id FROM session_history_heads UNION SELECT session_id FROM session_entries UNION SELECT session_id FROM session_entry_history", vec![])).await?;
         for row in sessions {
@@ -145,7 +169,7 @@ async fn migrate_v7(options: SqliteSessionOptions) -> Result<(), SessionStoreErr
             .await?
             .ok_or_else(|| SessionStoreError::Invalid("missing version".into()))?
             .try_get::<i64>("", "user_version")?;
-        if version == 8 || version == 9 {
+        if version == 8 || version == 9 || version == 10 {
             tx.commit().await?;
             return Ok(());
         }
@@ -213,7 +237,7 @@ async fn migrate_v8(options: SqliteSessionOptions) -> Result<(), SessionStoreErr
             .await?
             .ok_or_else(|| SessionStoreError::Invalid("missing version".into()))?
             .try_get::<i64>("", "user_version")?;
-        if version == 9 {
+        if version == 9 || version == 10 {
             tx.commit().await?;
             return Ok(());
         }
@@ -247,13 +271,41 @@ async fn migrate_v8(options: SqliteSessionOptions) -> Result<(), SessionStoreErr
             for row in rows {
                 let thread_id: String = row.try_get("", "thread_id")?;
                 after = Some(thread_id.clone());
-                let mut checkpoint = thread_checkpoint::decode_checkpoint(row, &thread_id)?;
-                let mut expected = checkpoint.state.usage_summary.applied_sequence + 1;
-                let upper = format!(
-                    "pl.resource.thread-commit.{:020}",
-                    checkpoint.state_revision
-                );
-                while expected <= checkpoint.state_revision {
+                // A schema-8 database still stores checkpoints in the schema-1/2 attempt layout,
+                // which this build no longer interprets on its normal read path. The backfill only
+                // needs the usage summary and revision, so it reifies exactly those facts and writes
+                // the summary back into the original envelope: every other byte, including the
+                // resident attempt bodies, is preserved for the step that converts the layout.
+                let envelope: String = row.try_get("", "envelope")?;
+                let stored_hash: String = row.try_get("", "payload_hash")?;
+                let state_revision = row.try_get::<i64>("", "state_revision")?;
+                let state_revision = u64::try_from(state_revision)
+                    .map_err(|_| SessionStoreError::Invalid("negative revision".into()))?;
+                let history_fence = row.try_get::<i64>("", "history_fence")?;
+                let history_fence = u64::try_from(history_fence)
+                    .map_err(|_| SessionStoreError::Invalid("negative fence".into()))?;
+                if crate::context::content_hash(envelope.as_bytes()) != stored_hash {
+                    return Err(SessionStoreError::Invalid(format!(
+                        "Thread {thread_id} checkpoint integrity check failed"
+                    )));
+                }
+                let mut value: serde_json::Value = serde_json::from_str(&envelope)?;
+                let header: UsageBackfillEnvelope = serde_json::from_value(value.clone())?;
+                if header.thread_id != thread_id
+                    || header.state_revision != state_revision
+                    || header.history_fence != history_fence
+                    || header.state_revision != header.state.commit_sequence
+                    || !header.external_bodies.is_empty()
+                    || header.state.usage_summary.applied_sequence > header.state_revision
+                {
+                    return Err(SessionStoreError::Invalid(format!(
+                        "Thread {thread_id} checkpoint is inconsistent with its fence"
+                    )));
+                }
+                let mut summary = header.state.usage_summary;
+                let mut expected = summary.applied_sequence + 1;
+                let upper = format!("pl.resource.thread-commit.{:020}", header.state_revision);
+                while expected <= header.state_revision {
                     let lower = format!("pl.resource.thread-commit.{expected:020}");
                     let effects = tx
                         .query_all_raw(sqlite::statement(
@@ -266,21 +318,19 @@ async fn migrate_v8(options: SqliteSessionOptions) -> Result<(), SessionStoreErr
                             "Thread {thread_id} usage history has a sequence gap at {expected}"
                         )));
                     }
-                    for row in effects {
-                        let effect = thread_history::decode_effect(row, &thread_id)?;
+                    for effect_row in effects {
+                        let effect = thread_history::decode_effect(effect_row, &thread_id)?;
                         if effect.sequence != expected {
                             return Err(SessionStoreError::Invalid(format!(
                                 "Thread {thread_id} usage history has a sequence gap at {expected}"
                             )));
                         }
-                        crate::thread::usage::fold_effect(
-                            &mut checkpoint.state.usage_summary,
-                            &effect,
-                        );
+                        crate::thread::usage::fold_effect(&mut summary, &effect);
                         expected += 1;
                     }
                 }
-                let envelope = serde_json::to_string(&checkpoint)?;
+                value["state"]["usageSummary"] = serde_json::to_value(&summary)?;
+                let envelope = serde_json::to_string(&value)?;
                 let hash = crate::context::content_hash(envelope.as_bytes());
                 tx.execute_raw(sqlite::statement(
                     "UPDATE thread_checkpoints SET envelope=?,payload_hash=? WHERE thread_id=?",
@@ -290,6 +340,154 @@ async fn migrate_v8(options: SqliteSessionOptions) -> Result<(), SessionStoreErr
             }
         }
         tx.execute_unprepared("PRAGMA user_version=9").await?;
+        tx.commit().await?;
+        Ok(())
+    }
+    .await;
+    match (result, db.close().await) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(error)) => Err(error.into()),
+        (Err(initialization), Err(cleanup)) => Err(SessionStoreError::InitializationCleanup {
+            initialization: Box::new(initialization),
+            cleanup: Box::new(cleanup),
+        }),
+    }
+}
+
+/// Rewrites every stored Thread checkpoint into the current lightweight-attempt schema.
+///
+/// The effect rows are the durable history query contract and are never touched: this step only
+/// re-encodes the per-Thread current-state checkpoint rows. A schema-1/2 envelope is converted
+/// through the explicit [`crate::thread::ThreadCheckpoint::decode_legacy`] path, and an
+/// already-current envelope is re-encoded from its parsed state so the stored schema marker matches
+/// the bytes. A legacy checkpoint whose external body manifest is not empty fails the whole step,
+/// because the exact bytes belong to the owning blob store and must be materialized before the
+/// checkpoint can be converted; nothing is rewritten or version-bumped on failure.
+///
+/// # Errors
+/// Rejects an unsupported version, a damaged envelope hash, a row whose thread identity disagrees
+/// with its envelope, an unmaterialized legacy body manifest, and storage failures.
+async fn migrate_v9(options: SqliteSessionOptions) -> Result<(), SessionStoreError> {
+    let mut url =
+        url::Url::parse("sqlite:///").map_err(|e| SessionStoreError::Invalid(e.to_string()))?;
+    url.set_path(
+        options
+            .path
+            .to_str()
+            .ok_or_else(|| SessionStoreError::Invalid("non-UTF8 database path".into()))?,
+    );
+    url.set_query(Some("mode=rw"));
+    let db = Database::connect(url.to_string()).await?;
+    let result = async {
+        let tx = db.begin().await?;
+        let version = tx
+            .query_one_raw(sqlite::statement("PRAGMA user_version", vec![]))
+            .await?
+            .ok_or_else(|| SessionStoreError::Invalid("missing version".into()))?
+            .try_get::<i64>("", "user_version")?;
+        if version == 10 {
+            tx.commit().await?;
+            return Ok(());
+        }
+        if version != 9 {
+            return Err(SessionStoreError::UnsupportedSchema {
+                found: version,
+                supported: super::SESSION_SCHEMA_VERSION,
+            });
+        }
+        let current = i64::from(crate::thread::ThreadCheckpoint::SCHEMA_VERSION);
+        let mut after = String::new();
+        loop {
+        let rows = tx
+            .query_all_raw(sqlite::statement(
+                "SELECT * FROM thread_checkpoints WHERE thread_id>? ORDER BY thread_id LIMIT 128",
+                vec![after.clone().into()],
+            ))
+            .await?;
+        if rows.is_empty() { break; }
+        for row in rows {
+            let thread_id: String = row.try_get("", "thread_id")?;
+            after.clone_from(&thread_id);
+            let stored_schema: i64 = row.try_get("", "schema_version")?;
+            let envelope: String = row.try_get("", "envelope")?;
+            let hash: String = row.try_get("", "payload_hash")?;
+            if crate::context::content_hash(envelope.as_bytes()) != hash {
+                return Err(SessionStoreError::Invalid(format!(
+                    "Thread {thread_id} checkpoint integrity check failed"
+                )));
+            }
+            let header: serde_json::Value = serde_json::from_str(&envelope)?;
+            if header.get("schemaVersion").and_then(serde_json::Value::as_i64) != Some(stored_schema) {
+                return Err(SessionStoreError::Invalid("checkpoint schema index/envelope mismatch".into()));
+            }
+            let mut checkpoint = if stored_schema == current {
+                serde_json::from_str(&envelope)?
+            } else {
+                crate::thread::ThreadCheckpoint::decode_legacy(&envelope).map_err(|error| {
+                    SessionStoreError::Invalid(format!(
+                        "Thread {thread_id} legacy checkpoint conversion failed: {error}"
+                    ))
+                })?
+            };
+            if checkpoint.thread_id != thread_id {
+                return Err(SessionStoreError::Invalid(
+                    "Thread checkpoint ownership mismatch".into(),
+                ));
+            }
+            if checkpoint.state_revision != u64::try_from(row.try_get::<i64>("", "state_revision")?).map_err(|_| SessionStoreError::Invalid("negative revision".into()))?
+                || checkpoint.history_fence != u64::try_from(row.try_get::<i64>("", "history_fence")?).map_err(|_| SessionStoreError::Invalid("negative fence".into()))?
+                || checkpoint.state_revision != checkpoint.state.commit_sequence
+                || checkpoint.history_fence > checkpoint.state_revision
+                || !checkpoint.external_bodies.is_empty() {
+                return Err(SessionStoreError::Invalid("checkpoint index/envelope fence mismatch".into()));
+            }
+            // Compaction may have removed every old call from the current context. Rebuild
+            // identities from the reliable history, without retaining its request/result bodies.
+            let mut expected = 1;
+            let upper = format!("pl.resource.thread-commit.{:020}", checkpoint.history_fence);
+            while expected <= checkpoint.history_fence {
+                let lower = format!("pl.resource.thread-commit.{expected:020}");
+                let effects = tx.query_all_raw(sqlite::statement(
+                    "SELECT * FROM session_entries WHERE session_id=? AND id>=? AND id<=? ORDER BY id LIMIT 256",
+                    vec![thread_id.clone().into(), lower.into(), upper.clone().into()],
+                )).await?;
+                if effects.is_empty() {
+                    return Err(SessionStoreError::Invalid(format!("Thread {thread_id} identity history has a sequence gap at {expected}")));
+                }
+                for row in effects {
+                    let effect = thread_history::decode_effect(row, &thread_id)?;
+                    if effect.sequence != expected {
+                        return Err(SessionStoreError::Invalid(format!("Thread {thread_id} identity history has a sequence gap at {expected}")));
+                    }
+                    if let Some(attempt) = &effect.attempt {
+                        checkpoint.state.attempt_ids.insert(attempt.attempt_id.clone(), attempt.turn_id.clone());
+                        if let crate::thread::AttemptOutcome::Committed(output) = &attempt.outcome {
+                            for call in output.tool_calls.iter() {
+                                checkpoint.state.live_calls.insert(call.call_id.clone(), attempt.turn_id.clone());
+                            }
+                        }
+                    }
+                    expected += 1;
+                }
+            }
+            checkpoint.schema_version = crate::thread::ThreadCheckpoint::SCHEMA_VERSION;
+            checkpoint.external_bodies = Vec::new();
+            let encoded = serde_json::to_string(&checkpoint)?;
+            let encoded_hash = crate::context::content_hash(encoded.as_bytes());
+            tx.execute_raw(sqlite::statement(
+                "UPDATE thread_checkpoints SET schema_version=?,envelope=?,payload_hash=? WHERE thread_id=?",
+                vec![
+                    current.into(),
+                    encoded.into(),
+                    encoded_hash.into(),
+                    thread_id.into(),
+                ],
+            ))
+            .await?;
+        }
+        }
+        tx.execute_unprepared("PRAGMA user_version=10").await?;
         tx.commit().await?;
         Ok(())
     }

@@ -20,11 +20,11 @@ use std::collections::BTreeSet;
 
 use pl_core::context::ContextContent;
 use pl_core::model::{
-    AggregateChannel, ModelProgress, ModelStepOutput, ObservedItemKind, ObservedPart,
-    ObservedPartIdentity, ObservedPartKind,
+    AggregateChannel, ModelProgress, ObservedItemKind, ObservedPart, ObservedPartIdentity,
+    ObservedPartKind,
 };
 use pl_core::thread::{
-    AttemptOutcome, ModelExecutionPhase, RequestAttempt, ThreadSnapshot, TurnRecord, TurnState,
+    AttemptStatus, ModelExecutionPhase, RequestAttempt, ThreadSnapshot, TurnRecord, TurnState,
     input::InputExecution,
     interactions::InteractionState,
     permissions::PermissionState,
@@ -176,8 +176,8 @@ fn active_tasks(state: &ThreadSnapshot) -> Vec<&TaskRecord> {
 fn associated_attempt(attempt: Option<&RequestAttempt>) -> Option<&RequestAttempt> {
     attempt.filter(|attempt| {
         matches!(
-            attempt.outcome,
-            AttemptOutcome::Running | AttemptOutcome::Committed(_)
+            attempt.status,
+            AttemptStatus::Running | AttemptStatus::Committed
         )
     })
 }
@@ -221,7 +221,7 @@ fn kind(
         return ThreadActivityKind::AwaitingInput;
     }
     if let Some(attempt) = attempt
-        && matches!(attempt.outcome, AttemptOutcome::Running)
+        && matches!(attempt.status, AttemptStatus::Running)
     {
         let (response, reasoning) = has_stream_facts(state, attempt);
         return if response {
@@ -243,7 +243,7 @@ fn kind(
     let Some(attempt) = attempt else {
         return ThreadActivityKind::Preparing;
     };
-    match committed_output(attempt) {
+    match committed_output(state, attempt) {
         Some(output) if !output.tool_calls.is_empty() => ThreadActivityKind::Planning,
         Some(_) => ThreadActivityKind::Responding,
         None => ThreadActivityKind::Preparing,
@@ -413,46 +413,35 @@ fn tool_arguments(state: &ThreadSnapshot, task: &TaskRecord) -> (ThreadActivityA
 /// 某次工具调用在内存里的完整参数；调用尚未提交或已经离开内存事实时为 `None`。
 fn call_arguments(state: &ThreadSnapshot, call_id: &str) -> Option<String> {
     state
-        .attempts
+        .context
+        .records
         .iter()
-        .filter_map(committed_output)
-        .find_map(|output| {
-            output
-                .tool_calls
-                .iter()
-                .find(|call| call.call_id == call_id)
-                .map(|call| call.arguments.content().to_owned())
-        })
+        .flat_map(|record| &record.tool_calls)
+        .find(|call| call.call_id == call_id)
+        .map(|call| call.arguments.content().to_owned())
 }
 
-/// 工具调用在模型输出里的稳定次序：`(尝试序号, 该 attempt 内的调用序号)`。
 fn call_rank(state: &ThreadSnapshot, call_id: &str) -> Option<(usize, usize)> {
     state
-        .attempts
+        .context
+        .records
         .iter()
         .enumerate()
-        .find_map(|(attempt_index, attempt)| {
-            committed_output(attempt).and_then(|output| {
-                output
-                    .tool_calls
-                    .iter()
-                    .position(|call| call.call_id == call_id)
-                    .map(|call_index| (attempt_index, call_index))
-            })
+        .find_map(|(index, record)| {
+            record
+                .tool_calls
+                .iter()
+                .position(|call| call.call_id == call_id)
+                .map(|rank| (index, rank))
         })
 }
 
-fn committed_output(attempt: &RequestAttempt) -> Option<&ModelStepOutput> {
-    match &attempt.outcome {
-        AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => Some(output),
-        AttemptOutcome::Cancelled {
-            result: Ok(output), ..
-        } => Some(output),
-        AttemptOutcome::Running
-        | AttemptOutcome::Interrupted
-        | AttemptOutcome::Failed(_)
-        | AttemptOutcome::Cancelled { result: Err(_), .. } => None,
-    }
+fn committed_output<'a>(
+    state: &'a ThreadSnapshot,
+    attempt: &RequestAttempt,
+) -> Option<&'a pl_core::context::ContextRecord> {
+    let id = format!("{}:output", attempt.attempt_id);
+    state.context.records.iter().find(|record| record.id == id)
 }
 
 /// 工具约定的命令行字段：参数是 JSON 对象且含非空字符串 `command`。
@@ -540,7 +529,7 @@ fn latest_stream_line(
         .as_ref()
         .filter(|progress| progress.attempt_id == attempt.attempt_id)
     else {
-        return committed_stream_line(attempt, stream);
+        return committed_stream_line(state, attempt, stream);
     };
     for part in progress.progress.parts().iter().rev() {
         if part.is_empty() || observed_stream(part) != Some(stream) {
@@ -594,11 +583,15 @@ fn observed_tail(part: &ObservedPart) -> Option<TailWindow> {
 }
 
 /// 已提交输出的最新非空逻辑行；提交输出只承载正文，没有 reasoning 事实。
-fn committed_stream_line(attempt: &RequestAttempt, stream: ObservedStream) -> Option<TailLine> {
+fn committed_stream_line(
+    state: &ThreadSnapshot,
+    attempt: &RequestAttempt,
+    stream: ObservedStream,
+) -> Option<TailLine> {
     if stream != ObservedStream::Response {
         return None;
     }
-    let output = committed_output(attempt)?;
+    let output = committed_output(state, attempt)?;
     tail_line(committed_tail(&output.content)?)
 }
 
@@ -810,7 +803,7 @@ struct ActivityDetailOwner {
     /// 该 attempt 当前观察的**共享句柄**（只追加内容块的前缀链），克隆不复制正文。
     progress: Option<ModelProgress>,
     /// 该 attempt 的已提交输出事实；只在提交事实出现时捕获一次。
-    committed: Option<ModelStepOutput>,
+    committed: Option<pl_core::context::ContextRecord>,
     /// 活跃工具条目的键；只有它变化时才重建工具来源。
     tool_key: Vec<ThreadActivityToolEntry>,
     tools: Vec<ToolDetailSource>,
@@ -1072,7 +1065,7 @@ impl ActivityProjection {
         };
         let attempt = activity_attempt(state, activity);
         let progress = attempt.and_then(|attempt| shared_progress(state, attempt));
-        let committed = attempt.and_then(committed_output);
+        let committed = attempt.and_then(|attempt| committed_output(state, attempt));
         let source = ActivitySourceKey {
             identity: activity.identity.clone(),
             attempt_id: attempt.map(|attempt| attempt.attempt_id.clone()),

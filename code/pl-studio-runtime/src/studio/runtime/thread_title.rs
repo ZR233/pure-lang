@@ -269,6 +269,7 @@ async fn generate_title(
     prompt: &str,
     cancellation: &mut ThreadTitleCancellation,
 ) -> Result<String> {
+    let owner = runtime.ensure_thread_owner(thread_id).await?;
     let config = runtime.config_runtime.read()?;
     let mut route = config.config.resolve_role(StudioRole::Explorer)?;
     if let pl_model::model::ModelProtocolOptions::Responses(options) =
@@ -356,9 +357,27 @@ async fn generate_title(
         timing: None,
         recorded_at: crate::studio::unix_seconds(),
     };
-    runtime
-        .model_performance
-        .record_internal_inference(thread_id, &billing)
+    let key = "studio.auxiliary-billing.title";
+    let previous = owner
+        .snapshot()
+        .extensions
+        .get(key)
+        .map(|record| record.revision);
+    owner
+        .mutate_extensions(vec![pl_core::thread::extensions::ExtensionMutation::Put {
+            id: key.into(),
+            expected_revision: previous,
+            payload: pl_core::context::OpaquePayload::new(
+                "pl.studio.auxiliary-billing",
+                1,
+                serde_json::to_string(
+                    &crate::studio::thread_projection::AuxiliaryBillingReceipt {
+                        billing,
+                        succeeded: result.is_ok(),
+                    },
+                )?,
+            )?,
+        }])
         .await?;
     let response = result?;
     let text = response

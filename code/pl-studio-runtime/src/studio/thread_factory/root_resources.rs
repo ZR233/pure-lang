@@ -48,20 +48,9 @@ impl StudioThreadFactory {
             .map_err(|error| resource_error("decode saved model route", error))?;
         let has_saved_route = saved_route.is_some();
         let default_route = config.mode_model_route(&selected_mode)?.clone();
-        let route_selector = saved_route.map(|saved| saved.route).unwrap_or_else(|| {
-            crate::studio::model_route::latest_request_route(&saved)
-                .filter(|route| {
-                    config
-                        .models
-                        .resolve_route(crate::config::StudioRole::Planner.id(), route)
-                        .and_then(|resolved| {
-                            crate::mode::validate_thread_mode_model(Some(&mode), &resolved.model)?;
-                            Ok(resolved)
-                        })
-                        .is_ok()
-                })
-                .unwrap_or_else(|| default_route.clone())
-        });
+        let route_selector = saved_route
+            .map(|saved| saved.route)
+            .unwrap_or_else(|| default_route.clone());
         let resolved_route = config
             .models
             .resolve_route(crate::config::StudioRole::Planner.id(), &route_selector)

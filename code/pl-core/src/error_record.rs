@@ -42,11 +42,6 @@ fn capture(source: &(dyn Error + 'static)) -> Vec<String> {
     }
     chain
 }
-/// Diagnostic chain text of one source, exactly as serialization records it.
-pub(crate) fn chain_text(source: &(dyn Error + 'static)) -> Vec<String> {
-    capture(source)
-}
-
 /// Rebuilds the recorded chain a persisted diagnostic decodes to; an empty chain has no source.
 ///
 /// The persisted form keeps only the chain text, so a rebuilt chain serializes and reports exactly

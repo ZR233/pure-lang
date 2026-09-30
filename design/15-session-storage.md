@@ -14,16 +14,16 @@
 
 | 数据 | 活动事实源 | 持久化 | 读取路径 |
 | --- | --- | --- | --- |
-| 当前执行状态、当前上下文、待处理输入与交互 | Thread owner | `state.toml` | Thread 激活时完整读取一次 |
+| 当前执行状态、当前上下文、待处理输入与交互 | Thread owner | 会话 SQLite checkpoint | Thread 激活时完整读取一次 |
 | 已提交 Turn、Item、任务身份与完整工具交付 | history writer | `history.sqlite` | core ChatView 合并历史存储适配、内存尾部和未保存事实；任务按身份读取 |
-| 模型/工具调用统计、用量、耗时和诊断 | 可丢观察投影 | 全局 `calls.sqlite` | CallReader 独立分页与统计；缺失不代表零 |
+| 模型/工具调试诊断 | 可丢观察投影 | 滚动 JSONL 与有界索引 | 独立分页；缺失不代表零 |
 
-Thread 的 `usage_summary` 是当前状态的一份绝对累计摘要，随 checkpoint 保存；它不替代
+Thread 的 `usage_summary` 是当前状态的一份绝对累计摘要，与历史及 checkpoint 同事务保存；它不替代
 可丢的逐调用诊断库。通用 SQLite `ColdStore` 在提交 effect 后、捕获 checkpoint 前折叠
 core 已知的模型用量；Studio 的可靠 writer 继续按已保存回执补充价格、耗时和辅助调用。
 折叠以 effect 序号幂等推进；部分缺失或溢出的 token 不伪造完整总量，也不覆盖最近一次
 已知的上下文用量，并显式标记统计不完整。
-通用 SQLite schema 9 的显式升级会在独占数据库租约下按序重读 schema 8 已保存的 effect，
+通用 SQLite 的显式升级会在独占数据库租约下按序重读旧版本已保存的 effect，
 把缺失的用量累计补入每条 Thread 的 checkpoint，并与版本标记在同一事务提交。旧 effect
 没有模型绑定时保留未知模型和容量；迁移遇到序号缺口或损坏的 effect 须失败并保留原库。
 
@@ -64,7 +64,7 @@ Session 统一给条目分配稳定 `item_id` 与顺序键；输入被该 Thread
 显示（受理路径本身不投影、不发布会话内容，`admit` 只把不可变批次放进可靠通道），`send` 的成功只
 表示受理，不表示磁盘提交或执行完成。相同 `request_id` 重复提交命中同一受理结果。内容生成、
 输入执行和保存状态分别表达；保存确认只更新同一条目的保存状态，不再做“删除实时行、查询 SQL、
-重新插入历史行”。history/calls writer 只按它本次事务提交的 **identity 与 revision** 回执确认，
+重新插入历史行”。history writer 只按它本次事务提交的 **identity 与 revision** 回执确认，
 不回读正文再发布：正文的唯一权威发布者是该 Thread 的实时投影 owner，writer 只写投影 owner
 已交回的那一份不可变批次，因此投影发布必然先于保存确认成立，不存在“保存先于投影”的交错，
 会话里也不需要隐藏身份表去桥接迟到的确认。多个展示条目可以共用 `turn_id`，但不得把整个 Turn 当成一条无限增长的
@@ -144,7 +144,7 @@ checkpoint 不保存：
 
 owner 用一个瞬态 effect window 向活动观察者提供"最近提交但尚未 durable"的 `ThreadEffectBatch`。
 窗口只保留尚未被固定写入水位确认的批次：任一 commit 一旦 durable 就立即释放，不再作为第二份
-历史缓存。窗口不序列化进 `state.toml`，也不自带字节计量——一次提交只是克隆一个 `Arc`，发布不
+历史缓存。窗口不序列化进 会话 SQLite checkpoint，也不自带字节计量——一次提交只是克隆一个 `Arc`，发布不
 阻塞在编码完整正文上，窗口也没有任何按批次数的淘汰。
 
 窗口释放不会丢掉仍要投影的事实，因为 durable 水位只能越过**已被该 Thread 唯一实时投影 owner
@@ -163,7 +163,7 @@ identity/revision/保存水位。writer 不自行投影：队首事实尚未被�
 Thread 会拿到一个全新的可靠通道，其早先提交在上一进程里已经 durable，用绝对水位等待只会等一个
 再也不会移动的值。票据为 0 即"本通道没有需要等待的交接"。
 
-因此 `state.toml` 不含历史正文：已结束 Turn、工具交付正文与已完成交互只存在于 history，
+因此 会话 SQLite checkpoint 不含历史正文：已结束 Turn、工具交付正文与已完成交互只存在于 history，
 checkpoint 只引用其水位。
 
 产品观察直接消费这些内存 effect 投影计费、目录与终态事实，**不逐批 flush，也不回读历史**：
@@ -344,54 +344,24 @@ owner 的串行提交边界同时产出可持久化的幂等回执，使重复�
 窗口，同一查询改由上述 history 身份索引 / 终端事实回执与任务 by-id 读取回答，两者语义一致，
 不因释放窗口而改写终态或重放副作用。
 
-## 15.4 `state.toml` 保存
+## 15.4 当前状态的原子保存
 
-每个已加载 Thread 维护 dirty revision。正常情况下每秒捕获一次最新 checkpoint；状态未改变时
-不写。单 Thread 最多存在一份正在保存和一份最新待保存 checkpoint，中间 revision 可合并，旧
-写入不能覆盖新 revision。Turn 终态、停止、关闭、应用退出、重要 ownership 变化和显式恢复
-检查点请求提前保存。
+每会话唯一 writer 将一次提交的历史条目、幂等身份、工具交付、累计统计、最新上下文和
+checkpoint 在同一 SQLite 事务提交。提交成功后才确认固定水位并释放可靠队列；失败保留
+原批次供重试。不存在历史已提交而 checkpoint 尚未发布的跨文件窗口。
 
-捕获不可变 checkpoint 后立即退出 owner 临界区；TOML 编码、文件同步和原子替换在持久化任务中
-完成。统一原子写入流程为：
+checkpoint 只保存最新恢复状态。当前上下文以记录身份和顺序保存；追加只写新增记录，
+压缩或替换在同事务更新当前集合并删除失效成员。轻量 checkpoint 元数据不重复嵌入上下文。
+外部附件先完成 blob fence 再提交引用；未知格式、缺失或损坏正文失败关闭。
 
-```text
-编码完整对象
-→ 写同目录临时文件
-→ sync 临时文件
-→ 原子替换 state.toml
-→ sync 目录
-```
+常驻 attempt 只保留当前执行、最新可重试身份、上下文 revision 和必要计量。完整请求由
+当前调用持有，终态正文通过可靠 effect 交接后释放。当前 Turn 的工具调用身份账本独立于
+请求正文与上下文压缩，防止释放旧快照后重复执行。重试仍要求最新失败/取消请求、上下文
+未变且工具计划兼容；恢复不会自动执行模型或工具。
 
-`history_fence` 只能指向已由唯一 history writer 固定确认的 effect 水位；未终态正文没有
-history 事实，也不能成为 checkpoint fence。发布新 checkpoint 前必须先：
-
-1. `history.flush_through(checkpoint.history_fence)`；
-2. 等待 checkpoint 引用的新 blob 已持久化；
-3. 原子替换 `state.toml`，并将上一份有效文件保留为 `state.prev.toml`。
-
-因此磁盘上可见的 checkpoint 不会引用尚未保存的历史事实或 blob。owner 不持锁等待保存屏障。
-中间快照可合并；保存故障保留候选并暂停新模型/工具，不能把恢复所需状态视为可丢统计。
-冷恢复装配 Studio writer 时，从同一 Thread 的 `history.sqlite` 读取已提交 effect 水位，并要求它
-恰好等于已加载 checkpoint 的 `history_fence`（无 checkpoint 时为 0）；历史落后或领先都显式
-拒绝激活，不能将更旧的 Thread 状态接到更靠前的历史后跳过新的 effect。新 writer 分别从该水位
-和已加载的 checkpoint revision 初始化 durable 与 published 水位，使恢复后的 `flush` 无需等待
-本次进程不会再发布的旧 checkpoint。
-
-### checkpoint schema 2：外置正文
-
-`state.toml` 的当前 schema 是 `ThreadCheckpoint.schema_version = 2`。当单条正文超过
-`CHECKPOINT_BODY_THRESHOLD_BYTES = 64 KiB` 时，它离开 TOML，改以一条
-`CheckpointExternalBody`（`slot` + `body` + 版本化引用）记入 `externalBodies`；引用是
-`reference_version + digest("sha256:<64 hex>") + byte_len`，物理文件落在
-`sessions/<storage-key>/blobs/checkpoint/<前两位十六进制>/<sha256>`。可外置的 slot 覆盖当前
-上下文内容与工具调用参数、未消费输入/message、pending interaction/permission、未交付
-delivery、扩展与运行事实、以及未结束 attempt 的诊断正文。
-
-发布顺序被强制为：外置 → 写 blob（内容寻址、幂等、不覆盖已存在文件）→ 逐个校验 blob
-字节与引用一致并 fsync 文件与目录 → 才原子替换 `state.toml`（并保留 `state.prev.toml`）。
-激活时在把 checkpoint 交给任何调用方之前，按引用回读每个 blob 并校验 digest/length；缺失、
-损坏或身份不符一律 fail closed，绝不当作空正文或截断正文。schema-1（全内联）文件仍按原样
-可读；未知未来 schema 显式拒绝。checkpoint 恢复不依赖 `calls.sqlite`，且不重放旧 journal。
+旧 v2 TOML checkpoint 只在按需迁移边界读取。校验 Thread、schema、正文及历史水位后，
+在事务中导入最新状态；重新读取验证成功才删除已替代的主备文件及无引用 checkpoint 正文。
+迁移可重试，异常保留源数据。正常路径不再读取或写入 TOML checkpoint，也不保留完整上一版。
 
 ## 15.5 会话历史数据库
 
@@ -419,11 +389,10 @@ core writer 重开时从已校验的 Thread commit 资源恢复各 Thread 的 du
 owner 的 admitted/durable 水位。不能把已恢复状态接到缺少其历史的存储，也不为已持久化的旧
 effect 再次等待写入。
 
-当前 core 会话 schema 为 8。宿主在取得独占运行时所有权并完成一致备份后，使用
-`migration::migrate_to_current` 持有数据库独占锁，按版本顺序完成 6→7→8 的显式升级；7→8
-只新增 checkpoint 表并移动版本标记，不重写、不裁剪任何已有 effect/entry/history。每步事务
-独立提交，若在两步之间中断，下次从已提交版本继续。`open` 不会自动转换或重建。
-版本步骤只由这一统一入口调用，不向宿主开放绕过独占锁的单步迁移接口。
+宿主在取得独占运行时所有权并完成一致备份后，通过统一迁移入口持有数据库独占锁，
+按版本顺序完成升级。新增 checkpoint 表不改变已有 effect；后续升级按连续历史补齐累计用量，
+将旧请求快照转换为轻量执行记录，并从完整历史补齐模型与工具身份账本。每步事务独立提交，
+中断后从已提交版本继续；普通打开不自动转换或重建，不开放绕过独占锁的单步迁移入口。
 
 通用 SQLite 后端删除已停止的会话时，通过 `delete_session` 在独占数据库锁下同事务删除该会话
 的 checkpoint、当前资源和历史记录；活跃 writer 拒绝删除，其他会话不受影响。产品目录、
@@ -581,27 +550,24 @@ Turn 页同样是有界 keyset：按 `history_turns.last_ordinal` 倒序（`hist
 不能靠反复 `read_item` 物化整段历史。
 
 `history_turns` 只服务展示，不参与运行恢复。当前 Turn 的权威是 owner；恢复依据是
-`state.toml`；历史 Turn 的展示依据是 `history.sqlite`。
+会话 SQLite checkpoint；历史 Turn 的展示依据是 `history.sqlite`。
 
-## 15.7 调用记录
+## 15.7 调用调试日志与统计
 
-全局调用库位于应用 home 下的 `~/.anywork/v2/calls/calls.sqlite`（正文 blob 在
-`~/.anywork/v2/calls/blobs/`，见 [17](./17-studio-storage.md) §17.1），按调用身份保存模型/工具
-调用的冻结 binding、开始/结束时间、结果类别、用量、价格、请求/响应诊断和关联 Thread/Turn/Item
-ID。大正文使用内容寻址 blob 引用。另有一张 `call_watermarks(thread_id, admitted_write_seq,
-durable_write_seq)` 记录每个 Thread 的调用队列水位，供 `flush_through` 固定目标与续跑对齐。
-调用记录不参与 Thread 恢复或 Timeline 排序；Thread 关闭不等待可丢调用队列，更不等待
-其他 Thread 的统计。统计行缺失必须明确标记，不能显示为零。
+调用诊断使用版本化 JSONL 滚动日志，不参与恢复、上下文压缩或累计计费。队列只接收
+调用身份、模型、上下文 revision、重试关联、计量、计时、错误及当次结果，不接收完整
+Thread effect、历史输入或重复工具声明。单条最大 1 MiB，超出时明确标记诊断截断，不改变
+可靠聊天正文。日志写入或清理失败只报告诊断缺口，不阻塞可靠会话提交。
 
-逐 Thread 的调用已接纳/已落库水位均使用该 Thread 的 effect 序号，不混用全局调用队列
-ticket；已落库水位只在调用库事务成功后推进，并在重新激活时从调用库恢复。队列明确
-拒绝的 ticket 不是已落库事实。调用库提交后独立通知诊断观察者，不能依赖后续 history
-effect 才刷新最后一次调用的水位。
+日志单段最大 16 MiB，跨日轮转；启动后、每 15 分钟及轮转时清理，保留 7 天且正文总量
+最多 256 MiB。唯一 writer 串行协调轮转和清理，删除失败保留可重试责任，达到容量后拒绝
+新增诊断而不无限增长。半条尾记录不作为完整事件读取。索引仅覆盖存活日志，可重建并随
+日志淘汰；日志缺失、过期、截断和写入失败必须可区分。
 
-同一调用身份重试写入幂等，冲突明确失败；未结束调用可以更新为终态，但终态不可被较旧观察
-覆盖。计费和性能统计从调用库或其明确产品投影读取，不扫描会话历史。
-effect 窗口缺口恢复计费时先等待已受理写入的固定 ticket，再只查询缺少 `billing_ref` 的
-调用事实；已有计费正文不可从摘要列重构后再次投递，否则同身份的有损正文会触发冲突。
+模型、压缩、标题与自动审批的累计用量和费用均从可靠 effect 幂等折叠，与会话 checkpoint 同事务保存；全局汇总只保存
+带 revision 的轻量投影。速度统计最多 3000 条摘要，调用明细遵守日志保留期。禁止为计费
+回读调试正文或从缺失记录制造零值。旧调用库迁移先保全累计摘要，再转换仍在保留期内的
+诊断，最后回收旧正文和无引用文件；迁移不得把两套累计值直接相加。
 
 ## 15.8 SQLite 与关闭
 
@@ -617,8 +583,7 @@ PRAGMA busy_timeout = 5000;
 单库单逻辑 writer 批量执行短事务；分页不跨用户滚动持有事务。`flush_through(ticket)` 只等待
 调用时固定目标，不等待整个系统空闲。
 
-Thread 关闭先封闭准入并收束当前工作，再保存实际终态 effect；history 达到固定水位后
-保存最终 checkpoint。全部成功才释放 owner。保存失败保持 `Closing`、owner、未保存事实和重试
+Thread 关闭先封闭准入并收束当前工作，再保存实际终态 effect；历史和最终 checkpoint 在同一事务达到固定水位。全部成功才释放 owner。保存失败保持 `Closing`、owner、未保存事实和重试
 入口。会话数据库连接与 writer 按需创建，空闲且无订阅、无执行、无待保存数据时释放。
 
 关闭与显式保存的控制命令对"owner 正在运行或暂停在 Turn 里"同样可达。`close` 先在发送关闭命令
@@ -630,8 +595,8 @@ admitted 水位，之后的新准入不会把屏障推远；它不启动新工�
 
 ## 15.9 恢复与格式演进
 
-激活 Thread 时只读取并验证当前 `state.toml`；无效时可验证 `state.prev.toml` 并发布显式恢复
-诊断。恢复将遗留 Running 状态收束为 Interrupted，不重建模型、工具、外部进程或取消令牌，
+激活 Thread 时在同一读事务验证最新 checkpoint、上下文与历史水位；损坏时明确失败。
+旧 v2 TOML 迁移可验证上一份文件并发布显式诊断，但不得接到不匹配的历史水位。恢复将遗留 Running 状态收束为 Interrupted，不重建模型、工具、外部进程或取消令牌，
 不执行历史副作用。需要继续执行时由 Studio 装配当前服务实例。
 
 已提交的 Pending Interaction 是可恢复的逻辑状态，不是必须随进程取消的运行资源。
@@ -649,3 +614,6 @@ admitted 水位，之后的新准入不会把屏障推远；它不启动新工�
 仅影响历史展示的载荷以 raw 历史条目保存。迁移不能用清空、默认状态或只有备份没有转换来替代。
 core 会话 schema 从 7 升到 8 时，唯一变化是新增 checkpoint 表；已有 effect、entry 与
 history 行原样保留，尚未写过 checkpoint 的旧 Thread 读取为空，等下一次写入时才落盘。
+
+轻量 checkpoint 的迁移保留公开 effect 历史查询。模型与工具身份账本只保存身份和原 Turn，
+不保存正文；压缩、Turn 完成和重启均不释放去重身份。

@@ -1,14 +1,5 @@
-//! Atomic per-Thread current-state checkpoints.
-//!
-//! Publication order is fixed by `design/15` §15.4: the caller must have made the checkpoint's
-//! history fence durable, every oversized body is written to the session's content-addressed blob
-//! root and fenced, and only then is `state.toml` replaced atomically while the previous valid file
-//! is retained as `state.prev.toml`. A failed publish keeps the old snapshot and the caller's
-//! latest pending checkpoint, so a retry never observes a torn file.
-//!
-//! Loading is the inverse: each reference is read, verified and refilled before the checkpoint
-//! leaves this module, so an owner never resumes from a body it cannot resolve and a missing or
-//! corrupt blob is a hard error instead of an empty body.
+//! Current SQLite checkpoint loading and the isolated v2 TOML migration boundary.
+//! Legacy files are removed only after the imported transaction can be read and verified.
 
 use std::{
     collections::BTreeMap,
@@ -16,8 +7,8 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use anyhow::{Context, Result, bail, ensure};
-use pl_core::thread::{CHECKPOINT_BODY_THRESHOLD_BYTES, ExtractedCheckpointBody, ThreadCheckpoint};
+use anyhow::{Context, Result, ensure};
+use pl_core::thread::ThreadCheckpoint;
 
 /// 显式的 `state.prev.toml` 回退诊断。
 ///
@@ -91,10 +82,11 @@ impl InputIdentityEntry {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct StateStore {
     directory: PathBuf,
     thread_id: String,
+    legacy_calls: Option<super::calls::CallsStore>,
 }
 
 impl StateStore {
@@ -102,10 +94,122 @@ impl StateStore {
         Self {
             directory,
             thread_id: thread_id.to_owned(),
+            legacy_calls: None,
         }
     }
 
+    pub(crate) fn with_legacy_calls(mut self, calls: super::calls::CallsStore) -> Self {
+        self.legacy_calls = Some(calls);
+        self
+    }
+
     pub(crate) async fn load(&self) -> Result<Option<ThreadCheckpoint>> {
+        let history = super::history::HistoryStore::open(
+            &self.directory.join("history.sqlite"),
+            &self.thread_id,
+        )
+        .await?;
+        if let Some(checkpoint) = history.checkpoint().await? {
+            self.cleanup_legacy(&history).await?;
+            return Ok(Some(checkpoint));
+        }
+        let Some(mut checkpoint) = self.load_legacy().await? else {
+            ensure!(
+                history.watermark().await? == 0,
+                "history exists without a recovery checkpoint"
+            );
+            return Ok(None);
+        };
+        // Old compaction receipts used one extension key per request. History owns the old
+        // reductions and accounting is already cumulative; only the newest receipt is current.
+        let latest_compaction = checkpoint
+            .state
+            .extensions
+            .values()
+            .filter(|record| record.payload.format() == "pl.studio.compaction")
+            .max_by_key(|record| record.revision)
+            .cloned();
+        checkpoint
+            .state
+            .extensions
+            .retain(|_, record| record.payload.format() != "pl.studio.compaction");
+        if let Some(record) = latest_compaction {
+            checkpoint
+                .state
+                .extensions
+                .insert(crate::compaction::LATEST_RECEIPT.into(), record);
+        }
+        let legacy_costs = match &self.legacy_calls {
+            Some(calls) => {
+                calls
+                    .legacy_session_costs(&self.thread_id, checkpoint.history_fence)
+                    .await?
+            }
+            None => Vec::new(),
+        };
+        if let Some(calls) = &self.legacy_calls {
+            let auxiliary = calls.legacy_auxiliary_usage(&self.thread_id).await?;
+            let summary = &mut checkpoint.state.usage_summary;
+            for (target, value) in [
+                (&mut summary.inference_count, auxiliary.inference_count),
+                (&mut summary.prompt_tokens, auxiliary.prompt_tokens),
+                (&mut summary.completion_tokens, auxiliary.completion_tokens),
+                (
+                    &mut summary.cached_prompt_tokens,
+                    auxiliary.cached_prompt_tokens,
+                ),
+                (
+                    &mut summary.cache_write_tokens,
+                    auxiliary.cache_write_tokens,
+                ),
+                (&mut summary.reasoning_tokens, auxiliary.reasoning_tokens),
+                (&mut summary.total_tokens, auxiliary.total_tokens),
+            ] {
+                *target = target
+                    .checked_add(value)
+                    .context("legacy auxiliary accounting overflow")?;
+            }
+            summary.has_incomplete_usage |= auxiliary.has_incomplete_usage;
+            summary.cache_incomplete |= auxiliary.cache_incomplete;
+            summary.has_unpriced_usage |= auxiliary.has_unpriced_usage;
+        }
+        history
+            .import_checkpoint(&checkpoint, &legacy_costs)
+            .await?;
+        let restored = history
+            .checkpoint()
+            .await?
+            .context("imported checkpoint is absent")?;
+        self.cleanup_legacy(&history).await?;
+        Ok(Some(restored))
+    }
+
+    async fn cleanup_legacy(&self, history: &super::history::HistoryStore) -> Result<()> {
+        if !history.legacy_cleanup_pending().await? {
+            return Ok(());
+        }
+        for path in [self.path(), self.previous_path()] {
+            match tokio::fs::remove_file(&path).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("remove migrated checkpoint {}", path.display()));
+                }
+            }
+        }
+        // This dedicated namespace belongs only to the replaced TOML manifests. Attachment
+        // and command-output blobs are siblings and must never enter this cleanup.
+        match tokio::fs::remove_dir_all(self.checkpoint_blobs_dir()).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("remove migrated checkpoint bodies"),
+        }
+        history.finish_legacy_cleanup().await?;
+        Ok(())
+    }
+
+    async fn load_legacy(&self) -> Result<Option<ThreadCheckpoint>> {
         let mut primary_error = None;
         for path in [self.path(), self.previous_path()] {
             let content = match tokio::fs::read_to_string(&path).await {
@@ -113,6 +217,14 @@ impl StateStore {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error.into()),
             };
+            if let Ok(value) = toml::from_str::<toml::Value>(&content)
+                && let Some(version) = value.get("schemaVersion").and_then(toml::Value::as_integer)
+            {
+                ensure!(
+                    (1..=i64::from(ThreadCheckpoint::SCHEMA_VERSION)).contains(&version),
+                    "unsupported checkpoint schema {version}; source files preserved"
+                );
+            }
             let checkpoint = match self.read_checkpoint(&content, &path).await {
                 Ok(checkpoint) => checkpoint,
                 Err(error) if path == self.path() => {
@@ -151,51 +263,6 @@ impl StateStore {
         }
     }
 
-    /// Atomically publishes `checkpoint` as `state.toml`.
-    ///
-    /// The caller must have already made `checkpoint.history_fence` durable. Oversized bodies leave
-    /// the file first: each one is written to the per-Thread content-addressed blob root, and every
-    /// reference the file will name is then fenced (present plus synced) — only then is the TOML
-    /// replaced. The previous valid file is copied to `state.prev.toml` before the new one is
-    /// written, so a crash between the two writes still leaves one loadable snapshot, and the
-    /// failure keeps the caller's latest pending checkpoint.
-    ///
-    /// The transformation is applied to a copy: the caller's checkpoint, the live owner and the
-    /// next model request keep the complete inline bodies.
-    pub(crate) async fn publish(&self, checkpoint: &ThreadCheckpoint) -> Result<()> {
-        ensure!(
-            checkpoint.thread_id == self.thread_id,
-            "Thread checkpoint belongs to another Thread"
-        );
-        ensure!(
-            checkpoint.history_fence <= checkpoint.state_revision
-                && checkpoint.state_revision == checkpoint.state.commit_sequence,
-            "Thread checkpoint fence is inconsistent with its state revision"
-        );
-        let (externalized, bodies) = checkpoint.externalize_bodies(CHECKPOINT_BODY_THRESHOLD_BYTES);
-        for body in &bodies {
-            self.persist_body(body).await?;
-        }
-        self.fence_bodies(&externalized).await?;
-        let contents = toml::to_string(&externalized)?.into_bytes();
-        let path = self.path();
-        let previous = self.previous_path();
-        tokio::fs::create_dir_all(&self.directory).await?;
-        if let Ok(current) = tokio::fs::read(&path).await {
-            tokio::task::spawn_blocking(move || {
-                pl_tool::workspace::write_file_atomically(&previous, &current)
-            })
-            .await??;
-        }
-        tokio::task::spawn_blocking(move || {
-            pl_tool::workspace::write_file_atomically(&path, &contents)
-        })
-        .await??;
-        // 成功保存后 `state.prev.toml` 回退不再是最新事实，清除它的显式诊断。
-        clear_checkpoint_recovery(&self.thread_id);
-        Ok(())
-    }
-
     /// Parses one checkpoint file and materializes every body it references.
     ///
     /// Externalized bodies are restored here, before the checkpoint is handed to any caller, so
@@ -203,6 +270,48 @@ impl StateStore {
     /// missing, corrupt or mismatchingly-targeted blob fails closed; it is never read as an empty
     /// body, and it never silently becomes a truncated model context.
     async fn read_checkpoint(&self, content: &str, path: &Path) -> Result<ThreadCheckpoint> {
+        let value: toml::Value = toml::from_str(content)
+            .with_context(|| format!("invalid Thread checkpoint {}", path.display()))?;
+        let version = value
+            .get("schemaVersion")
+            .and_then(toml::Value::as_integer)
+            .context("checkpoint schemaVersion is missing")?;
+        if ThreadCheckpoint::is_legacy_schema(u32::try_from(version)?) {
+            let mut legacy = pl_core::thread::LegacyThreadCheckpoint::decode_json(
+                &serde_json::to_string(&value)?,
+            )?;
+            // Even bodies discarded by the new layout are checked before deleting the old manifest.
+            for entry in legacy.dropped_attempt_bodies() {
+                let bytes = tokio::fs::read(self.blob_path(entry.reference.digest())?).await?;
+                entry.reference.verify(&bytes)?;
+            }
+            while let Some(entry) = legacy.pending_body().cloned() {
+                let bytes = tokio::fs::read(self.blob_path(entry.reference.digest())?).await?;
+                legacy.materialize_body(&entry.reference, &bytes)?;
+            }
+            let route = self.legacy_route(&value).await?;
+            let mut checkpoint = legacy.into_current()?;
+            if !checkpoint
+                .state
+                .extensions
+                .contains_key(crate::studio::model_route::MODEL_ROUTE_EXTENSION)
+                && let Some(route) = route
+            {
+                checkpoint.state.extension_sequence = checkpoint
+                    .state
+                    .extension_sequence
+                    .checked_add(1)
+                    .context("legacy extension sequence exhausted")?;
+                checkpoint.state.extensions.insert(
+                    crate::studio::model_route::MODEL_ROUTE_EXTENSION.into(),
+                    pl_core::thread::extensions::ExtensionRecord {
+                        revision: checkpoint.state.extension_sequence,
+                        payload: crate::studio::model_route::encode(&route)?,
+                    },
+                );
+            }
+            return Ok(checkpoint);
+        }
         let mut checkpoint = parse_checkpoint(content, path)?;
         while let Some(entry) = checkpoint.pending_body().cloned() {
             let blob = self.blob_path(entry.reference.digest())?;
@@ -226,6 +335,65 @@ impl StateStore {
         Ok(checkpoint)
     }
 
+    /// Preserve the selected model at the migration boundary without retaining tool schemas.
+    async fn legacy_route(
+        &self,
+        value: &toml::Value,
+    ) -> Result<Option<pl_model::config::ModelRouteConfig>> {
+        let root = serde_json::to_value(value)?;
+        let Some(attempts) = root
+            .get("state")
+            .and_then(|state| state.get("attempts"))
+            .and_then(serde_json::Value::as_array)
+        else {
+            return Ok(None);
+        };
+        for (index, attempt) in attempts.iter().enumerate().rev() {
+            let Some(metadata) = attempt
+                .get("requestMetadata")
+                .filter(|value| !value.is_null())
+            else {
+                continue;
+            };
+            let mut payload: pl_core::context::OpaquePayload =
+                serde_json::from_value(metadata.clone())?;
+            if payload.format() != "pl.model.prepared-request" {
+                continue;
+            }
+            if let Some(entries) = root
+                .get("externalBodies")
+                .and_then(serde_json::Value::as_array)
+            {
+                for entry in entries {
+                    if let Ok(entry) = serde_json::from_value::<
+                        pl_core::thread::LegacyCheckpointExternalBody,
+                    >(entry.clone())
+                        && matches!(entry.slot, pl_core::thread::LegacyCheckpointBodySlot::AttemptMetadata { attempt_index } if attempt_index == index)
+                    {
+                        let bytes =
+                            tokio::fs::read(self.blob_path(entry.reference.digest())?).await?;
+                        entry.reference.verify(&bytes)?;
+                        payload = pl_core::context::OpaquePayload::new(
+                            payload.format(),
+                            payload.version(),
+                            String::from_utf8(bytes)?,
+                        )?;
+                    }
+                }
+            }
+            let receipt = pl_model::runtime::model_request_receipt(&payload)?;
+            return Ok(Some(pl_model::config::ModelRouteConfig {
+                provider: pl_model::config::ProviderId::new(receipt.binding.provider_instance_id)?,
+                model: receipt.binding.requested_model,
+                effort: receipt
+                    .reasoning
+                    .and_then(|reasoning| reasoning.effort)
+                    .map(pl_model::config::ReasoningEffort::new),
+            }));
+        }
+        Ok(None)
+    }
+
     /// Root of the checkpoint's own content-addressed blob store inside the session directory.
     ///
     /// It lives beside the attachment blobs, under the same session `blobs` root, so relocating a
@@ -244,62 +412,6 @@ impl StateStore {
             "checkpoint body digest {digest} is not a SHA-256 address"
         );
         Ok(self.checkpoint_blobs_dir().join(&hex[..2]).join(hex))
-    }
-
-    /// Writes one extracted body to its content-addressed path.
-    ///
-    /// The write is idempotent: identical bytes share one file, so a repeated save or a re-published
-    /// digest never writes a second copy, and an abandoned body is left in place instead of being
-    /// deleted. A file that is already there is never rewritten here — even when its bytes may be
-    /// wrong — because it can still be the only copy of bytes another `state.prev.toml` references;
-    /// whether it really holds the declared body is decided by [`Self::fence_bodies`] before any new
-    /// TOML may name it.
-    async fn persist_body(&self, body: &ExtractedCheckpointBody) -> Result<()> {
-        let path = self.blob_path(body.entry.reference.digest())?;
-        if tokio::fs::try_exists(&path).await? {
-            return Ok(());
-        }
-        let directory = path
-            .parent()
-            .context("checkpoint body has no parent directory")?
-            .to_path_buf();
-        tokio::fs::create_dir_all(&directory).await?;
-        let contents = body.bytes.clone();
-        tokio::task::spawn_blocking(move || {
-            pl_tool::workspace::write_file_atomically(&path, &contents)
-        })
-        .await??;
-        Ok(())
-    }
-
-    /// Fences every body the checkpoint names: present, byte-exact, with its file and directory
-    /// entry synced.
-    ///
-    /// A published `state.toml` must never name a blob whose bytes are not provably durable and
-    /// provably equal to the body the reference declares. Existing a content-addressed path is not
-    /// proof: a truncated, replaced or corrupted file under a valid digest path fails publication
-    /// instead of being published as if it were durable, and it is never overwritten in place.
-    async fn fence_bodies(&self, checkpoint: &ThreadCheckpoint) -> Result<()> {
-        for entry in &checkpoint.external_bodies {
-            let path = self.blob_path(entry.reference.digest())?;
-            let bytes = tokio::fs::read(&path).await.with_context(|| {
-                format!(
-                    "checkpoint names an unreadable body blob {} for Thread {}",
-                    path.display(),
-                    self.thread_id
-                )
-            })?;
-            if let Err(error) = entry.reference.verify(&bytes) {
-                bail!(
-                    "checkpoint body blob {} does not hold {} for Thread {}: {error}",
-                    path.display(),
-                    entry.reference.digest(),
-                    self.thread_id
-                );
-            }
-            sync_checkpoint_blob(&path).await?;
-        }
-        Ok(())
     }
 
     fn path(&self) -> PathBuf {
@@ -328,27 +440,4 @@ fn parse_checkpoint(content: &str, path: &Path) -> Result<ThreadCheckpoint> {
         ThreadCheckpoint::SCHEMA_VERSION
     );
     Ok(checkpoint)
-}
-
-/// Makes one checkpoint body blob and its directory entry durable.
-///
-/// Directory sync is skipped on Windows, which has no equivalent operation.
-async fn sync_checkpoint_blob(path: &Path) -> Result<()> {
-    let file = path.to_path_buf();
-    // Windows backs `sync_all` with `FlushFileBuffers`, which requires a writable handle;
-    // opening the blob read-only returns `ERROR_ACCESS_DENIED` there.
-    tokio::task::spawn_blocking(move || {
-        let handle = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(file)?;
-        handle.sync_all()
-    })
-    .await??;
-    #[cfg(unix)]
-    if let Some(directory) = path.parent() {
-        let directory = directory.to_path_buf();
-        tokio::task::spawn_blocking(move || std::fs::File::open(directory)?.sync_all()).await??;
-    }
-    Ok(())
 }

@@ -71,9 +71,14 @@ pub(super) fn settle(mut state: ThreadSnapshot) -> Result<ThreadSnapshot, Thread
     }
     let mut attempts = state.attempts.to_vec();
     if let Some(attempt) = attempts.last_mut()
-        && matches!(attempt.outcome, AttemptOutcome::Running)
+        && attempt.status == AttemptStatus::Running
     {
-        attempt.outcome = AttemptOutcome::Interrupted;
+        // The complete running outcome is not retained: the settlement is body-less, so the
+        // lightweight status is the whole fact. Dropping any stale facts keeps the settlement from
+        // re-exporting the pre-restart running outcome instead of the interruption.
+        attempt.status = AttemptStatus::Interrupted;
+        attempt.facts = None;
+        attempt.usage = None;
         state.attempts = attempts.into();
     }
     let mut turns = state.turns.to_vec();

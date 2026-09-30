@@ -10,7 +10,7 @@ Studio 使用 Command Query Separation。查询只读取 owner 已发布的 cano
 初始化、激活、扫描 Skill/Profile、修复、重连和关闭只能由明确 typed command 触发。
 Widget rebuild、stream resync 与 `read*` 查询不得写 SQLite/配置、访问网络或创建 runtime
 owner。进程运行期间 Project、Thread、Agent、Workflow、Recovery 和服务目录的内存 owner
-是活动事实源；`state.toml` 仅提供 activation 基线，SQLite 只承担历史/调用查询与异步持久化。
+是活动事实源；会话 SQLite 的最新 checkpoint 提供 activation 基线，历史与累计计量同事务保存，调用日志独立用于调试。
 
 ## 18.2 公共 snapshot
 

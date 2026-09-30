@@ -292,13 +292,7 @@ impl StudioThreadFactory {
         }
         let reviewer =
             if config.runtime.permission_mode == crate::approval::PermissionMode::AutoReview {
-                let performance = self.services.model_performance.clone();
-                let root_thread_id = root_thread_id.to_owned();
-                let thread_id = thread_id.to_owned();
-                let usage = Arc::new(move |billing: pl_protocol::InferenceBillingRecord| {
-                    performance.record_auxiliary_inference(&root_thread_id, &thread_id, &billing)
-                });
-                Some(crate::tool_review::reviewer(route, usage)?)
+                Some(crate::tool_review::reviewer(route)?)
             } else {
                 None
             };

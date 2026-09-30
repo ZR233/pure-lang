@@ -34,9 +34,9 @@ HTTP → pl-studio-server ───┘                                  ↓
 运行时事实支持完整替换与按 source 原子 patch：独立生产者只 patch 自己的 source，空内容清除该
 source，遗漏 source 保持不变；两者都在 owner 串行边界执行，存在待交付工具调用时拒绝修改。
 
-活动 Thread 的内存快照是唯一可写执行事实源。当前可恢复状态按 Thread 保存到 `state.toml`；
+活动 Thread 的内存快照是唯一可写执行事实源。当前可恢复状态、最新上下文和累计计量与历史在每 Thread 的 SQLite 中原子保存；
 会话时间线由 pl-core 的有界 ChatView 协调内存尾部、当前活动、可靠待保存事实及该 Thread 的
-`history.sqlite`；模型/工具统计独立写入 `calls.sqlite`。UI 不持有完整会话历史，只观察当前
+`history.sqlite`；模型/工具诊断写滚动日志，`calls.sqlite` 仅保存有界索引、速度摘要和累计统计投影。UI 不持有完整会话历史，只观察当前
 阅读窗口的快照与批量增量；长历史使用消息锚点和 keyset cursor 查询。历史模型正文使用提交
 时冻结的投影，不调用当前工具或当前配置重建。
 

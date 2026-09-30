@@ -635,6 +635,7 @@ impl Owner {
 pub(super) fn replay(
     state: &mut ThreadSnapshot,
     commit: &ThreadEffectBatch,
+    contexts: &std::collections::BTreeMap<u64, ContextSnapshot>,
 ) -> Result<(), ThreadError> {
     let mut inputs = state.inputs.to_vec();
     let mut changes = state.input_changes.to_vec();
@@ -713,8 +714,13 @@ pub(super) fn replay(
                 .find(|item| item.attempt_id == attempt.attempt_id)
                 .ok_or(ThreadError::InvalidOutput)?;
             if steering && !record.input.context.is_empty() {
-                let user = admitted
-                    .input
+                // The frozen input is no longer resident; the migration reducer still holds every
+                // context revision this journal committed, so the steering record is validated
+                // against the exact revision the attempt was admitted at.
+                let frozen = contexts
+                    .get(&admitted.input_revision)
+                    .ok_or(ThreadError::InvalidOutput)?;
+                let user = frozen
                     .records
                     .iter()
                     .find(|item| record.context_record_id().as_deref() == Some(item.id.as_str()))
@@ -741,8 +747,10 @@ pub(super) fn replay(
             .iter()
             .find(|attempt| attempt.attempt_id == attempt_id)
             .ok_or(ThreadError::InvalidOutput)?;
-        let user = admitted
-            .input
+        let frozen = contexts
+            .get(&admitted.input_revision)
+            .ok_or(ThreadError::InvalidOutput)?;
+        let user = frozen
             .records
             .iter()
             .find(|record| record.id == format!("{attempt_id}:input"));

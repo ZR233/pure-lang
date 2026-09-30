@@ -1,7 +1,7 @@
 //! Turn lifecycle and diagnostics projected from saved commit metadata.
 use super::ProjectionError;
 use pl_core::thread::{
-    AttemptOutcome, ThreadSnapshot, TurnOutcome as CoreTurnOutcome, TurnRecord,
+    AttemptStatus, ThreadSnapshot, TurnOutcome as CoreTurnOutcome, TurnRecord,
     TurnState as CoreTurnState,
 };
 use pl_protocol::{Turn, TurnPhase, TurnState};
@@ -157,19 +157,30 @@ pub(super) fn phase(snapshot: &ThreadSnapshot, turn_id: &str) -> TurnPhase {
         .iter()
         .rev()
         .find(|attempt| attempt.turn_id == turn_id)
-        .map(|attempt| &attempt.outcome)
+        .map(|attempt| &attempt.status)
     {
         None => TurnPhase::Preparing,
-        Some(AttemptOutcome::Committed(output)) if !output.tool_calls.is_empty() => {
+        Some(AttemptStatus::Committed)
+            if snapshot
+                .context
+                .records
+                .iter()
+                .rev()
+                .find(|record| {
+                    record.turn_id.as_deref() == Some(turn_id)
+                        && matches!(record.source, pl_core::context::ContextSource::Assistant)
+                })
+                .is_some_and(|record| !record.tool_calls.is_empty()) =>
+        {
             TurnPhase::Planning
         }
-        Some(AttemptOutcome::Committed(_)) => TurnPhase::Responding,
+        Some(AttemptStatus::Committed) => TurnPhase::Responding,
         Some(
-            AttemptOutcome::Running
-            | AttemptOutcome::Interrupted
-            | AttemptOutcome::Cancelled { .. }
-            | AttemptOutcome::Failed(_)
-            | AttemptOutcome::Rejected { .. },
+            AttemptStatus::Running
+            | AttemptStatus::Interrupted
+            | AttemptStatus::Cancelled
+            | AttemptStatus::Failed
+            | AttemptStatus::Rejected { .. },
         ) => TurnPhase::Thinking,
     }
 }
@@ -179,25 +190,20 @@ fn failure(
     turn_id: &str,
     description: &str,
 ) -> pl_protocol::TurnFailure {
-    let Some(error) = snapshot
+    let category = if snapshot
         .attempts
         .iter()
-        .rev()
-        .filter(|attempt| attempt.turn_id == turn_id)
-        .find_map(|attempt| match &attempt.outcome {
-            AttemptOutcome::Failed(error) => Some(error),
-            AttemptOutcome::Running
-            | AttemptOutcome::Interrupted
-            | AttemptOutcome::Committed(_)
-            | AttemptOutcome::Cancelled { .. }
-            | AttemptOutcome::Rejected { .. } => None,
-        })
-    else {
-        return pl_protocol::TurnFailure::permanent(
-            pl_protocol::TurnFailureCategory::Internal,
-            description,
-        );
+        .any(|attempt| attempt.turn_id == turn_id && attempt.status == AttemptStatus::Failed)
+    {
+        pl_protocol::TurnFailureCategory::Provider
+    } else {
+        pl_protocol::TurnFailureCategory::Internal
     };
+    pl_protocol::TurnFailure::permanent(category, description)
+}
+
+pub(super) fn model_failure(error: &pl_core::model::ModelError) -> pl_protocol::TurnFailure {
+    let description = error.to_string();
     match pl_model::runtime::model_failure_receipt(error) {
         Ok(Some(receipt)) => match receipt.provider_failure {
             Some(failure) => pl_protocol::TurnFailure {
@@ -223,7 +229,7 @@ fn failure(
         },
         Ok(None) => pl_protocol::TurnFailure::permanent(
             pl_protocol::TurnFailureCategory::Provider,
-            description,
+            &description,
         ),
         Err(error) => pl_protocol::TurnFailure::permanent(
             pl_protocol::TurnFailureCategory::Protocol,

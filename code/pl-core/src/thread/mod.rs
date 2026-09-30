@@ -26,8 +26,9 @@ mod turn;
 pub(crate) mod usage;
 pub use checkpoint::{
     CHECKPOINT_BODY_THRESHOLD_BYTES, CheckpointBodyError, CheckpointBodyKind,
-    CheckpointBodyReference, CheckpointBodySlot, CheckpointExternalBody, ExtractedCheckpointBody,
-    ThreadCheckpoint,
+    CheckpointBodyReference, CheckpointBodySlot, CheckpointExternalBody, CheckpointLegacyError,
+    ExtractedCheckpointBody, LegacyCheckpointBodySlot, LegacyCheckpointExternalBody,
+    LegacyRequestAttempt, LegacyThreadCheckpoint, ThreadCheckpoint,
 };
 pub use journal::ThreadEffectBatch;
 use owner::{Owner, PendingCall};

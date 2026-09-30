@@ -173,11 +173,7 @@ pub(in crate::studio) fn project_effect_items(
 
     if let Some(attempt) = &effect.attempt {
         turn_ids.insert(attempt.turn_id.as_str());
-        let current = state
-            .attempts
-            .iter()
-            .find(|current| current.attempt_id == attempt.attempt_id)
-            .ok_or_else(|| ProjectionError::MissingAttempt(attempt.attempt_id.clone()))?;
+        let current = attempt;
         let inference_id = order::response_id(&attempt.attempt_id, "inference");
         let (ordinal, created_at) = stamp(existing, reserved, &inference_id, effect.committed_at);
         // 收束集合来自同一份 durable 事实：已存在的 item 或已预留的 identity。writer 与 live 都
@@ -238,17 +234,14 @@ pub(in crate::studio) fn project_effect_items(
             .filter(|repair| repair.call_id == call_id)
             .map(|repair| repair.reference.clone())
             .collect();
-        let saved_call = state
-            .attempts
-            .iter()
-            .find_map(|attempt| match &attempt.outcome {
-                AttemptOutcome::Committed(output) => output
+        let saved_call = state.context.records.iter().find_map(|record| {
+            record.turn_id.as_deref().zip(
+                record
                     .tool_calls
                     .iter()
-                    .find(|call| call.call_id == call_id)
-                    .map(|call| (attempt.turn_id.as_str(), call)),
-                _ => None,
-            });
+                    .find(|call| call.call_id == call_id),
+            )
+        });
         let tool_id = order::tool_id(call_id);
         // A repair lands after its result was committed, so the delivery that carried the original
         // projection has already left resident state and cannot describe the terminal result here.
@@ -329,7 +322,7 @@ pub(in crate::studio) fn project_effect_items(
         replacement.reason == pl_core::thread::ContextReplacementReason::Compaction
     }) {
         for change in effect.extensions.iter() {
-            let pl_core::thread::extensions::ExtensionChange::Put { id, record } = change else {
+            let pl_core::thread::extensions::ExtensionChange::Put { record, .. } = change else {
                 continue;
             };
             let Some(receipt) = super::compactions::receipt(&record.payload)? else {
@@ -338,7 +331,7 @@ pub(in crate::studio) fn project_effect_items(
             if receipt.implementation.is_none() {
                 continue;
             }
-            let item_id = order::compaction_id(id);
+            let item_id = order::compaction_id(&receipt.inference_id);
             let (ordinal, created_at) = stamp(existing, reserved, &item_id, effect.committed_at);
             items.push(ThreadItem::new(
                 item_id,

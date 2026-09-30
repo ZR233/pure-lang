@@ -215,6 +215,19 @@ fn fold_effect_accounting_in_place(
         let pl_core::thread::extensions::ExtensionChange::Put { record, .. } = change else {
             continue;
         };
+        if record.payload.format() == "pl.studio.auxiliary-billing" {
+            if record.payload.version() != 1 {
+                return Err(ProjectionError::UnsupportedOutput(
+                    "unsupported auxiliary billing version".into(),
+                ));
+            }
+            let receipt: super::AuxiliaryBillingReceipt =
+                serde_json::from_str(record.payload.content())?;
+            let latest = summary.latest_context_tokens;
+            add_accounting(summary, &receipt.billing.accounting)?;
+            summary.latest_context_tokens = latest;
+            continue;
+        }
         if record.payload.format() != "pl.studio.compaction" {
             continue;
         }

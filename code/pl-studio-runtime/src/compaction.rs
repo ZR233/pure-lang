@@ -1,4 +1,6 @@
 //! Studio wording for model-owned context compaction.
+pub(crate) const LATEST_RECEIPT: &str = "studio.compaction.latest";
+
 use pl_model::{
     completion::OpenAiCompactionMode,
     runtime::{ThreadCompactionOptions, ThreadCompactionStrategy},
@@ -85,6 +87,10 @@ impl ContextPreparationHook for StudioCompaction {
             "studio.compaction:{}:{}",
             request.model.attempt_id, request.extension_sequence
         );
+        let previous = request
+            .extensions
+            .get(LATEST_RECEIPT)
+            .map(|record| record.revision);
         let mut model_request = request.model;
         model_request.attempt_id = id.clone();
         match self
@@ -110,7 +116,7 @@ impl ContextPreparationHook for StudioCompaction {
                     ),
                     error: None,
                 };
-                match receipt_mutation(id, receipt) {
+                match receipt_mutation(previous, receipt) {
                     Ok(mutation) => ContextPreparation::Replaced {
                         replacement: result.replacement,
                         mutations: vec![mutation],
@@ -137,7 +143,7 @@ impl ContextPreparationHook for StudioCompaction {
                         error: Some(receipt.message),
                     });
                 let mutations = receipt
-                    .and_then(|receipt| receipt_mutation(id, receipt).ok())
+                    .and_then(|receipt| receipt_mutation(previous, receipt).ok())
                     .into_iter()
                     .collect();
                 ContextPreparation::Failed { error, mutations }
@@ -162,15 +168,15 @@ pub(crate) struct CompactionReceipt {
     pub error: Option<String>,
 }
 fn receipt_mutation(
-    id: String,
+    expected_revision: Option<u64>,
     receipt: CompactionReceipt,
 ) -> Result<ExtensionMutation, pl_core::model::ModelError> {
     let payload = serde_json::to_string(&receipt).map_err(receipt_error)?;
     let payload = pl_core::context::OpaquePayload::new("pl.studio.compaction", 1, payload)
         .map_err(receipt_error)?;
     Ok(ExtensionMutation::Put {
-        id,
-        expected_revision: None,
+        id: LATEST_RECEIPT.into(),
+        expected_revision,
         payload,
     })
 }

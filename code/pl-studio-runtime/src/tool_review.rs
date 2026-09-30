@@ -7,21 +7,14 @@ use pl_protocol::{Message, MessageContent, MessageRole};
 use serde::Deserialize;
 use std::sync::Arc;
 
-pub(crate) type ReviewUsageSink =
-    Arc<dyn Fn(pl_protocol::InferenceBillingRecord) -> crate::Result<()> + Send + Sync>;
-
 #[derive(Clone)]
 struct ReviewBinding {
     runtime: ModelRuntime,
     route: Arc<ResolvedModelRoute>,
     reasoning: Option<ReasoningConfig>,
-    usage: ReviewUsageSink,
 }
 
-pub(crate) fn reviewer(
-    route: &ResolvedModelRoute,
-    usage: ReviewUsageSink,
-) -> crate::Result<ToolReviewCallback> {
+pub(crate) fn reviewer(route: &ResolvedModelRoute) -> crate::Result<ToolReviewCallback> {
     let runtime = ModelRuntime::new_with_provider_id(
         route.provider_id.as_str(),
         route.endpoint.clone(),
@@ -36,7 +29,6 @@ pub(crate) fn reviewer(
         runtime,
         reasoning,
         route: Arc::new(route.clone()),
-        usage,
     };
     Ok(Arc::new(move |request| {
         let binding = binding.clone();
@@ -114,7 +106,21 @@ async fn review(binding: ReviewBinding, request: ToolReviewRequest) -> ToolAppro
         timing: result.as_ref().ok().and_then(|response| response.timing),
         recorded_at: crate::studio::unix_seconds(),
     };
-    if let Err(error) = (binding.usage)(billing) {
+    let receipt = crate::studio::thread_projection::AuxiliaryBillingReceipt {
+        billing,
+        succeeded: result.is_ok(),
+    };
+    let saved = async {
+        let payload = pl_core::context::OpaquePayload::new(
+            "pl.studio.auxiliary-billing",
+            1,
+            serde_json::to_string(&receipt)?,
+        )?;
+        request.task.record_observation(payload).await?;
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    if let Err(error) = saved {
         return ToolApprovalDecision::Denied {
             reason: format!("review accounting could not be admitted: {error}"),
         };

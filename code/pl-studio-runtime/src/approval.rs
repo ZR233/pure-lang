@@ -66,6 +66,8 @@ pub enum ToolApprovalDecision {
 /// Immutable inputs supplied to a host-owned automatic reviewer.
 #[derive(Debug, Clone)]
 pub struct ToolReviewRequest {
+    /// Reliable receipt capability of the exact running tool invocation.
+    pub task: pl_core::thread::TaskAccess,
     pub tool: ToolApprovalRequest,
     pub permission_mode: PermissionMode,
     pub workspace_access: pl_tool::approval::WorkspaceAccess,

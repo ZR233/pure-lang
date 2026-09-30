@@ -36,6 +36,7 @@ async fn main() -> Result<()> {
     );
     let steps = match scenario {
         "gui" => gui_script(),
+        "storage-compaction" => pl_provider_fixture::gui_storage_compaction_script(),
         "tool-scroll" => gui_tool_scroll_script(),
         "stress" => gui_stress_script(),
         "stress-body" => gui_stress_body_script(),
