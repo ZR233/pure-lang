@@ -138,8 +138,6 @@ class _SessionOpenWorkspaceMenuState
     extends ConsumerState<_SessionOpenWorkspaceMenu> {
   final MenuController _menuController = MenuController();
 
-  static const double _menuItemWidth = 320;
-
   @override
   Widget build(BuildContext context) {
     final project = widget.state.selectedProject;
@@ -222,8 +220,7 @@ class _SessionOpenWorkspaceMenuState
     );
   }
 
-  /// 平台无关的入口条目：可用时点击启动，不可用时禁用并给出具体原因；
-  /// 悬停与读屏可获取完整打开目标说明。
+  /// 单行条目按内容自然收紧；完整目标与不可用原因由提示和读屏说明承载。
   Widget _menuItem({
     required Key key,
     required Widget icon,
@@ -233,38 +230,22 @@ class _SessionOpenWorkspaceMenuState
     required String unavailableReason,
     required VoidCallback onPressed,
   }) {
-    final subtitle = available ? targetDescription : unavailableReason;
-    return MenuItemButton(
-      key: key,
-      leadingIcon: icon,
-      onPressed: available
-          ? () {
-              _menuController.close();
-              onPressed();
-            }
-          : null,
-      child: Tooltip(
-        message: '$label\n$targetDescription',
-        child: SizedBox(
-          width: _menuItemWidth,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-              Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.text.labelSmall?.copyWith(
-                  color: available
-                      ? context.colors.onSurfaceVariant
-                      : context.colors.error,
-                ),
-              ),
-            ],
-          ),
-        ),
+    // 覆盖整个按钮（包括禁用项），并保留 Tooltip 默认的读屏说明。
+    final tooltipMessage = available
+        ? '$label\n$targetDescription'
+        : '$label\n$targetDescription\n$unavailableReason';
+    return Tooltip(
+      message: tooltipMessage,
+      child: MenuItemButton(
+        key: key,
+        leadingIcon: icon,
+        onPressed: available
+            ? () {
+                _menuController.close();
+                onPressed();
+              }
+            : null,
+        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
   }
