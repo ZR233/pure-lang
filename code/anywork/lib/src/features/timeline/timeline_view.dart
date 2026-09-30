@@ -31,6 +31,7 @@ part 'timeline_remote_image_blocks.dart';
 part 'timeline_tool_blocks.dart';
 part 'timeline_paging.dart';
 part 'timeline_scroll_position.dart';
+part 'timeline_layout_changes.dart';
 
 typedef TimelineRemoteImageProviderFactory = ImageProvider Function(String url);
 
@@ -137,8 +138,12 @@ class _TimelineViewState extends State<TimelineView> {
   final Set<String> _expandedReasoningGroups = {};
   final Set<String> _expandedToolGroups = {};
   final _ThreadImageLoader _imageLoader = _ThreadImageLoader();
-  bool _followingBottom = true;
-  bool _detachedByUser = false;
+  TimelineReadingIntent _readingIntent = TimelineReadingIntent.followLatest;
+  bool get _followingBottom =>
+      _readingIntent == TimelineReadingIntent.followLatest;
+  bool get _detachedByUser => !_followingBottom;
+  int _readingGeneration = 0;
+  TimelineAnchor? _settledAnchor;
   bool _programmaticScroll = false;
   bool _pointerHeld = false;
   bool _keyboardScrolling = false;
@@ -272,6 +277,8 @@ class _TimelineViewState extends State<TimelineView> {
     final threadChanged = widget.threadId != oldWidget.threadId;
     if (threadChanged) {
       _saveThreadState(oldWidget.threadId);
+      _cancelLayoutRestore();
+      _settledAnchor = null;
       _expandedReasoningGroups.clear();
       _expandedToolGroups.clear();
       _rowWidgets.clear();
@@ -295,6 +302,14 @@ class _TimelineViewState extends State<TimelineView> {
         }
       });
       return;
+    }
+    final inspection = _pendingRestore.anchor ?? _settledAnchor;
+    if (oldWidget.windowEpoch != widget.windowEpoch) _cancelLayoutRestore();
+    if (_readingIntent == TimelineReadingIntent.inspectItem &&
+        inspection != null &&
+        _anchorRowId(inspection.itemId) == null) {
+      _readingIntent = TimelineReadingIntent.followLatest;
+      _cancelLayoutRestore();
     }
     _retainExpandedGroups(oldWidget.rows);
     if ((oldWidget.isLoadingOlder && !widget.isLoadingOlder) ||
@@ -362,8 +377,6 @@ class _TimelineViewState extends State<TimelineView> {
       _pendingNewEvents = 0;
       // ScrollPosition applies the new bottom during layout.
     } else {
-      _followingBottom = false;
-      _detachedByUser = true;
       if (hasNewEvent || widget.hasNewer) _pendingNewEvents += 1;
       if (anchor != null &&
           _anchorRowId(anchor.itemId) != null &&
@@ -416,10 +429,13 @@ class _TimelineViewState extends State<TimelineView> {
     final rows = widget.rows;
     final planSummary = widget.planConfirmation == null
         ? null
-        : TimelinePlanSummaryCard(
-            plan: widget.planConfirmation!,
-            expanded: widget.planExpanded,
-            onPressed: widget.onPlanToggle ?? () {},
+        : _layoutItem(
+            'plan:${widget.planConfirmation!.interactionId}',
+            TimelinePlanSummaryCard(
+              plan: widget.planConfirmation!,
+              expanded: widget.planExpanded,
+              onPressed: widget.onPlanToggle ?? () {},
+            ),
           );
     final activeIds = rows.map((row) => row.id).toSet();
     _rowKeys.removeWhere((id, _) => !activeIds.contains(id));
@@ -517,7 +533,7 @@ class _TimelineViewState extends State<TimelineView> {
             onPointerDown: (_) {
               // 按下即暂停跟随，给滚动条与内容手势相同的优先级。
               _pointerHeld = true;
-              _restoreClamped = false;
+              _cancelLayoutRestore();
               _deferStreamingDuringScroll();
             },
             onPointerUp: (_) => _releasePointer(),
@@ -651,7 +667,7 @@ class _TimelineViewState extends State<TimelineView> {
     // register first, so they retain ownership of any event they can consume.
     GestureBinding.instance.pointerSignalResolver.register(event, (_) {
       if (!mounted) return;
-      _restoreClamped = false;
+      _cancelLayoutRestore();
       _handleScrollPositionChanged(
         direction: older ? ScrollDirection.forward : ScrollDirection.reverse,
       );
@@ -663,7 +679,7 @@ class _TimelineViewState extends State<TimelineView> {
     _deferStreamingDuringScroll();
     _resumeStreamingAfterIdle();
     _keyboardScrolling = true;
-    _restoreClamped = false;
+    _cancelLayoutRestore();
     _programmaticScroll = false;
     _handleScrollPositionChanged(direction: direction);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -692,7 +708,7 @@ class _TimelineViewState extends State<TimelineView> {
       _deferStreamingDuringScroll();
       _resumeStreamingAfterIdle();
       // 不足一屏时 pixels 不会变化，但用户仍能选择向旧/向新补页。
-      _restoreClamped = false;
+      _cancelLayoutRestore();
       _handleScrollPositionChanged(direction: notification.direction);
     }
     return false;
@@ -707,12 +723,12 @@ class _TimelineViewState extends State<TimelineView> {
     if (notification.dragDetails != null) {
       _userDragUpdates += 1;
       // 读者主动接管位置：放弃尚未被布局表达的恢复意图（不再回落到原锚点）。
-      _restoreClamped = false;
+      _cancelLayoutRestore();
     } else if (!_programmaticScroll &&
         _controller.hasClients &&
         _controller.position.userScrollDirection != ScrollDirection.idle) {
       // 滚轮 / 触控板等非拖动滚动同样是读者接管。
-      _restoreClamped = false;
+      _cancelLayoutRestore();
     }
     final delta = notification.scrollDelta;
     if (!_programmaticScroll &&
@@ -723,7 +739,7 @@ class _TimelineViewState extends State<TimelineView> {
         _controller.position.userScrollDirection == ScrollDirection.idle) {
       // 键盘和滚动条也能移动位置，但不一定设置 userScrollDirection。
       // 只在真实指针/键盘操作期间采纳，排除布局修正触发的空闲位移。
-      _restoreClamped = false;
+      _cancelLayoutRestore();
       _handleScrollPositionChanged(
         direction: delta < 0
             ? ScrollDirection.forward
@@ -770,10 +786,9 @@ class _TimelineViewState extends State<TimelineView> {
         widget.onJumpToLatest?.call();
       }
     } else if (direction != ScrollDirection.idle &&
-        (_followingBottom || !_detachedByUser)) {
+        _readingIntent != TimelineReadingIntent.browseHistory) {
       setState(() {
-        _followingBottom = false;
-        _detachedByUser = true;
+        _readingIntent = TimelineReadingIntent.browseHistory;
       });
     }
     _saveThreadState(widget.threadId);
@@ -812,27 +827,11 @@ class _TimelineViewState extends State<TimelineView> {
     }
     if (!_followingBottom || _detachedByUser || _pendingNewEvents != 0) {
       setState(() {
-        _followingBottom = true;
-        _detachedByUser = false;
+        _readingIntent = TimelineReadingIntent.followLatest;
         _pendingNewEvents = 0;
       });
       _saveThreadState(widget.threadId);
     }
-  }
-
-  /// Keep a tool image visible when its inline preview changes the timeline height.
-  void _revealExpandedToolImage(BuildContext entryContext) {
-    if (_followingBottom || !_detachedByUser) {
-      setState(() {
-        _followingBottom = false;
-        _detachedByUser = true;
-      });
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !entryContext.mounted) return;
-      Scrollable.ensureVisible(entryContext, alignment: 0.12);
-      _saveThreadState(widget.threadId);
-    });
   }
 
   void _jumpToLatest() {
@@ -843,12 +842,15 @@ class _TimelineViewState extends State<TimelineView> {
     _scheduleBottomScroll();
   }
 
+  void _beginItemInspection() {
+    setState(() => _readingIntent = TimelineReadingIntent.inspectItem);
+  }
+
   void _followLatestBottom() {
     setState(() {
-      _followingBottom = true;
-      _detachedByUser = false;
+      _readingIntent = TimelineReadingIntent.followLatest;
       _pendingNewEvents = 0;
-      _restoreClamped = false;
+      _cancelLayoutRestore();
       _resumeAfterNewerPage = false;
       _deferStreamingUpdates = false;
     });
@@ -895,10 +897,6 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _toggleReasoning(String groupId) {
-    if (_detachedByUser && !_restoreClamped) {
-      final anchor = _captureAnchor();
-      if (anchor != null) _prepareAnchorRestore(anchor);
-    }
     setState(() {
       if (!_expandedReasoningGroups.remove(groupId)) {
         _expandedReasoningGroups.add(groupId);
@@ -937,23 +935,11 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _toggleToolGroup(String groupId) {
-    if (_detachedByUser && !_restoreClamped) {
-      final anchor = _captureAnchor();
-      if (anchor != null) _prepareAnchorRestore(anchor);
-    }
     setState(() {
       if (!_expandedToolGroups.remove(groupId)) {
         _expandedToolGroups.add(groupId);
       }
     });
-  }
-
-  void _handleToolDetailsChanged() {
-    if (!_detachedByUser || _restoreClamped) return;
-    final anchor = _captureAnchor();
-    if (anchor == null) return;
-    // Capture the visible item before the detail changes its height.
-    setState(() => _prepareAnchorRestore(anchor));
   }
 
   /// 记录 [_BottomAlignedSliver] 在**布局期**算出的贴底留白。
@@ -1002,6 +988,7 @@ class _TimelineViewState extends State<TimelineView> {
     }
     _publishVisibleItemBodies();
     _publishScrollDiagnostic();
+    if (!_restoreClamped) _settledAnchor = _captureAnchor();
   }
 
   /// 上报当前视口内的文本条目身份；身份与正文状态都没变化时不上报，避免无谓的重建。
@@ -1059,7 +1046,7 @@ class _TimelineViewState extends State<TimelineView> {
             .where((key) => key.currentContext != null)
             .length,
         rowCount: widget.rows.length,
-        followingBottom: _followingBottom,
+        readingIntent: _readingIntent,
         detachedByUser: _detachedByUser,
         pendingNewEvents: _pendingNewEvents,
         pixels: position?.pixels,
@@ -1085,7 +1072,10 @@ class _TimelineViewState extends State<TimelineView> {
 
   void _prepareAnchorRestore(TimelineAnchor anchor) {
     if (_pointerHeld || _keyboardScrolling || _userScrollActive) return;
-    _pendingRestore = _TimelineRestore.anchor(anchor);
+    _pendingRestore = _TimelineRestore.anchor(
+      anchor,
+      target: _validLayoutTarget,
+    );
     _restoreClamped = true;
     _restoreAttempts = 0;
     _scheduleGeometrySync();
@@ -1100,9 +1090,9 @@ class _TimelineViewState extends State<TimelineView> {
     _scrollingOlder = true;
     final snapshot = _threadScroll[widget.threadId];
     final anchor = widget.anchor ?? snapshot?.anchor;
-    final detached = anchor != null && !anchor.followingBottom;
-    _followingBottom = !detached;
-    _detachedByUser = detached;
+    _readingIntent =
+        anchor?.readingIntent ?? TimelineReadingIntent.followLatest;
+    final detached = !_followingBottom;
     _pendingNewEvents = detached ? snapshot?.pendingNewEvents ?? 0 : 0;
     _pendingRestore = detached
         ? _TimelineRestore.anchor(anchor)
@@ -1133,15 +1123,19 @@ class _TimelineViewState extends State<TimelineView> {
       return;
     }
     final anchor = _pendingRestore.anchor;
-    if (anchor == null) return;
-    final rowId = _anchorRowId(anchor.itemId);
+    final layoutTarget = _validLayoutTarget;
+    if (anchor == null && layoutTarget == null) return;
+    final rowId = anchor == null ? null : _anchorRowId(anchor.itemId);
     final index = widget.rows.indexWhere((row) => row.id == rowId);
-    if (index < 0) return;
+    if (index < 0 && layoutTarget == null) return;
     _restoreAttempts++;
     _programmaticScroll = true;
     try {
-      final target = _restoreTargetPixels(anchor);
+      final target =
+          (layoutTarget == null ? null : _layoutTargetPixels(layoutTarget)) ??
+          (anchor == null ? null : _restoreTargetPixels(anchor));
       if (target == null) {
+        if (index < 0) return;
         _listController.jumpToItem(
           index: index,
           scrollController: _controller,
@@ -1182,8 +1176,19 @@ class _TimelineViewState extends State<TimelineView> {
   bool _refreshRestorePending() {
     if (!_restoreClamped || _pointerHeld) return false;
     final anchor = _pendingRestore.anchor;
-    if (anchor == null || !_controller.hasClients) return false;
-    final target = _restoreTargetPixels(anchor);
+    if (!_controller.hasClients) return false;
+    final layoutTarget = _validLayoutTarget;
+    final rawTarget =
+        (layoutTarget == null ? null : _layoutTargetPixels(layoutTarget)) ??
+        (anchor == null ? null : _restoreTargetPixels(anchor));
+    final target = layoutTarget != null
+        ? rawTarget
+              ?.clamp(
+                _controller.position.minScrollExtent,
+                _controller.position.maxScrollExtent,
+              )
+              .toDouble()
+        : rawTarget;
     if (target == null || (_controller.position.pixels - target).abs() > 0.5) {
       return false;
     }
@@ -1238,9 +1243,10 @@ class _TimelineScrollAction extends ScrollAction {
 }
 
 class _TimelineRestore {
-  const _TimelineRestore.bottom() : anchor = null;
-  const _TimelineRestore.anchor(this.anchor);
+  const _TimelineRestore.bottom() : anchor = null, target = null;
+  const _TimelineRestore.anchor(this.anchor, {this.target});
   final TimelineAnchor? anchor;
+  final _TimelineLayoutTarget? target;
 }
 
 class _TimelineScrollSnapshot {

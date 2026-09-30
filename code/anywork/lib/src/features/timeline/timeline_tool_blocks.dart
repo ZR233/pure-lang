@@ -9,7 +9,6 @@ class _ToolGroupPart extends StatelessWidget {
     required this.group,
     required this.expanded,
     required this.onToggle,
-    required this.onDetailsChanged,
     super.key,
   });
 
@@ -17,10 +16,19 @@ class _ToolGroupPart extends StatelessWidget {
   final TimelineToolGroup group;
   final bool expanded;
   final VoidCallback onToggle;
-  final VoidCallback onDetailsChanged;
 
   @override
   Widget build(BuildContext context) {
+    void toggle() {
+      _TimelineItemLayoutScope.report(
+        context,
+        expanded
+            ? _TimelineLayoutChangeKind.collapse
+            : _TimelineLayoutChangeKind.expand,
+      );
+      onToggle();
+    }
+
     final imageEntries = _toolImageEntries(group.items);
     final activityLabel = _toolGroupActivityLabel(context, group);
     return Column(
@@ -32,14 +40,14 @@ class _ToolGroupPart extends StatelessWidget {
           button: true,
           expanded: expanded,
           label: activityLabel,
-          onTap: onToggle,
+          onTap: toggle,
           excludeSemantics: true,
           child: Material(
             key: const ValueKey('timeline-tool-group-summary'),
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(StudioRadii.xs),
-              onTap: onToggle,
+              onTap: toggle,
               excludeFromSemantics: true,
               child: _TimelineActivitySummary(
                 icon: _toolGroupIcon(group),
@@ -75,10 +83,7 @@ class _ToolGroupPart extends StatelessWidget {
                   for (final item in group.items)
                     _isWebSearch(item)
                         ? _WebSearchToolCard(item: item, embedded: true)
-                        : _ToolGroupItemRow(
-                            item: item,
-                            onDetailsChanged: onDetailsChanged,
-                          ),
+                        : _ToolGroupItemRow(item: item),
                 ],
               ),
             ),
@@ -386,10 +391,9 @@ void _collectWebLinks(Object? value, Set<String> links) {
 }
 
 class _ToolGroupItemRow extends StatelessWidget {
-  const _ToolGroupItemRow({required this.item, required this.onDetailsChanged});
+  const _ToolGroupItemRow({required this.item});
 
   final TimelineToolGroupItem item;
-  final VoidCallback onDetailsChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -426,7 +430,12 @@ class _ToolGroupItemRow extends StatelessWidget {
       padding: const EdgeInsets.only(top: 6),
       child: ExpansionTile(
         key: ValueKey('timeline-tool-details:${item.id}'),
-        onExpansionChanged: (_) => onDetailsChanged(),
+        onExpansionChanged: (expanded) => _TimelineItemLayoutScope.report(
+          context,
+          expanded
+              ? _TimelineLayoutChangeKind.expand
+              : _TimelineLayoutChangeKind.collapse,
+        ),
         tilePadding: const EdgeInsets.symmetric(horizontal: 8),
         childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
         shape: const Border(),

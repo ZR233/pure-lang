@@ -257,6 +257,13 @@ StudioState applyChatWindowSnapshot(
   final items = [for (final entry in snapshot.items) entry.item];
   final next = workspace.copyWith(items: items);
   final ui = syncItemBodyState(_workspaceUi(current, threadId), next);
+  final savedAnchor = ui.history.anchor;
+  final inspectionAnchor =
+      savedAnchor != null &&
+          savedAnchor.readingIntent == TimelineReadingIntent.inspectItem &&
+          items.any((item) => item.id == savedAnchor.itemId)
+      ? savedAnchor
+      : null;
   final history = ui.history.copyWith(
     hasOlder: snapshot.hasOlder,
     hasNewer: snapshot.hasNewer,
@@ -275,10 +282,11 @@ StudioState applyChatWindowSnapshot(
     },
     detached: snapshot.focusedItemId != null,
     anchor: snapshot.focusedItemId == null
-        ? null
+        ? inspectionAnchor
         : TimelineAnchor(
             snapshot.focusedItemId!,
             ui.history.anchor?.offset ?? 0,
+            readingIntent: TimelineReadingIntent.browseHistory,
           ),
   );
   return current.copyWith(

@@ -2,7 +2,7 @@ part of 'timeline_view.dart';
 
 class _ThreadImageLoader {
   final Map<String, Future<Uint8List>> _images = {};
-  final Set<String> expandedEntries = {};
+  final Set<String> expandedCalls = {};
 
   void retainWindow(String? threadId, List<TimelineRow> rows) {
     final attachments = <String>{};
@@ -15,10 +15,10 @@ class _ThreadImageLoader {
       if (group == null) continue;
       for (final entry in _toolImageEntries(group.items)) {
         attachments.add(entry.attachment.id);
-        entries.add(entry.entryId);
+        entries.add(_toolImageCallId(entry));
       }
     }
-    expandedEntries.retainAll(entries);
+    expandedCalls.retainAll(entries);
     _images.removeWhere(
       (key, _) => !attachments.any((id) => key == '$threadId\u0000$id'),
     );
@@ -36,7 +36,7 @@ class _ThreadImageLoader {
 
   void clear() {
     _images.clear();
-    expandedEntries.clear();
+    expandedCalls.clear();
   }
 }
 
@@ -216,236 +216,241 @@ List<_ToolImageEntryRef> _toolImageEntries(List<TimelineToolGroupItem> items) {
   return entries;
 }
 
-/// 工具读取图片的默认入口。
-///
-/// 默认只显示可点击的文字标签（例如「已读取图片」与文件名/调用路径），不预加载
-/// 图片字节；点击文字在该条目内展开归档图片，再次点击收起，多图彼此独立。第一次
-/// 展开才通过 Thread 附件读取接口加载字节，折叠与重开复用当前 Thread 的附件缓存。
+String _toolImageCallId(_ToolImageEntryRef entry) =>
+    entry.item.tool!.callId ?? entry.item.tool!.toolCallId;
+
+/// A call owns expansion; each attachment keeps its own stable presentation ID.
 class _ThreadImageGallery extends StatelessWidget {
   const _ThreadImageGallery({
     required this.threadId,
     required this.entries,
     required this.groupId,
   });
-
   final String threadId;
   final List<_ToolImageEntryRef> entries;
   final String groupId;
 
   @override
   Widget build(BuildContext context) {
-    if (entries.isEmpty) return const SizedBox.shrink();
+    final calls = <String, List<_ToolImageEntryRef>>{};
+    for (final entry in entries) {
+      calls.putIfAbsent(_toolImageCallId(entry), () => []).add(entry);
+    }
     return Column(
       key: StudioDriverKeys.toolImageGallery(groupId),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final entry in entries)
-          _ThreadToolImageEntry(
-            key: ValueKey('tool-image:${entry.entryId}'),
+        for (final call in calls.entries)
+          _ThreadToolImageCall(
+            key: ValueKey('tool-image-call:${call.key}'),
             threadId: threadId,
-            item: entry.item,
-            attachment: entry.attachment,
-            entryId: entry.entryId,
+            callId: call.key,
+            entries: call.value,
           ),
       ],
     );
   }
 }
 
-class _ThreadToolImageEntry extends ConsumerStatefulWidget {
-  const _ThreadToolImageEntry({
+class _ThreadToolImageCall extends StatefulWidget {
+  const _ThreadToolImageCall({
     required this.threadId,
-    required this.item,
-    required this.attachment,
-    required this.entryId,
+    required this.callId,
+    required this.entries,
     super.key,
   });
-
   final String threadId;
-  final TimelineToolGroupItem item;
-  final ThreadAttachmentView attachment;
-  final String entryId;
-
+  final String callId;
+  final List<_ToolImageEntryRef> entries;
   @override
-  ConsumerState<_ThreadToolImageEntry> createState() =>
-      _ThreadToolImageEntryState();
+  State<_ThreadToolImageCall> createState() => _ThreadToolImageCallState();
 }
 
-class _ThreadToolImageEntryState extends ConsumerState<_ThreadToolImageEntry> {
-  bool get _expanded =>
-      _ThreadImageCacheScope.of(context).expandedEntries
-          .contains(widget.entryId);
-  Future<Uint8List>? _image;
-
-  @override
-  void didUpdateWidget(covariant _ThreadToolImageEntry oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.threadId != oldWidget.threadId ||
-        widget.entryId != oldWidget.entryId ||
-        widget.attachment.id != oldWidget.attachment.id) {
-      _image = null;
-    }
-  }
-
-  Future<Uint8List> _loadImage() => _ThreadImageCacheScope.of(context).load(
-    widget.threadId,
-    widget.attachment.id,
-    () => ref
-        .read(studioApiProvider)
-        .readThreadAttachment(widget.threadId, widget.attachment.id),
-  );
-
-  void _toggle() {
-    final loader = _ThreadImageCacheScope.of(context);
-    context
-        .findAncestorStateOfType<_TimelineViewState>()
-        ?._handleToolDetailsChanged();
-    setState(() {
-      if (!loader.expandedEntries.remove(widget.entryId)) {
-        loader.expandedEntries.add(widget.entryId);
-      }
-    });
-    if (_expanded) {
-      context
-          .findAncestorStateOfType<_TimelineViewState>()
-          ?._revealExpandedToolImage(context);
-    }
-  }
-
+class _ThreadToolImageCallState extends State<_ThreadToolImageCall> {
   @override
   Widget build(BuildContext context) {
-    final attachment = widget.attachment;
-    final label = _threadImageEntryLabel(context, widget.item, attachment);
-    final size = _toolImagePreviewSize(attachment, false);
-    if (_expanded) {
-      // 在 build 内创建 future，确保同一帧内交给 FutureBuilder 订阅，避免失败
-      // 读取在订阅前完成而被视为未处理异步错误。
-      _image ??= _loadImage();
+    final loader = _ThreadImageCacheScope.of(context);
+    final expanded = loader.expandedCalls.contains(widget.callId);
+    final first = widget.entries.first;
+    final item = first.item;
+    final count = widget.entries.length;
+    final label = item.name == 'view_image'
+        ? item.part.status == 'succeeded'
+              ? context.l10n.timelineImagesViewed(count)
+              : _toolTitle(context, item)
+        : context.l10n.timelineImagesProduced(count);
+    void toggle() {
+      _TimelineItemLayoutScope.report(
+        context,
+        expanded
+            ? _TimelineLayoutChangeKind.collapse
+            : _TimelineLayoutChangeKind.expand,
+      );
+      setState(() {
+        if (!loader.expandedCalls.remove(widget.callId)) {
+          loader.expandedCalls.add(widget.callId);
+        }
+      });
     }
+
     return Padding(
       padding: const EdgeInsets.only(top: 3),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
-            key: StudioDriverKeys.viewImageToggle(widget.entryId),
-            borderRadius: BorderRadius.circular(StudioRadii.xs),
-            onTap: _toggle,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
-              child: Row(
-                children: [
-                  Icon(
-                    _expanded
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.keyboard_arrow_down_rounded,
-                    size: 17,
-                    color: context.colors.onSurfaceVariant,
+          Tooltip(
+            message:
+                _toolTarget(item) ??
+                _attachmentDescription(context, first.attachment),
+            child: Semantics(
+              button: true,
+              expanded: expanded,
+              child: InkWell(
+                key: StudioDriverKeys.viewImageToggle(first.entryId),
+                borderRadius: BorderRadius.circular(StudioRadii.xs),
+                onTap: toggle,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 5,
                   ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.image_outlined,
-                    size: 16,
-                    color: context.colors.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: context.text.bodySmall?.copyWith(
-                        color: context.colors.onSurface,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.collections_outlined,
+                        size: 17,
+                        color: context.colors.onSurfaceVariant,
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.text.bodySmall?.copyWith(
+                            color: expanded
+                                ? context.colors.onSurface
+                                : context.colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        expanded
+                            ? Icons.keyboard_arrow_down_rounded
+                            : Icons.chevron_right_rounded,
+                        size: 17,
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
-          if (_expanded)
+          if (expanded)
             Padding(
               padding: const EdgeInsets.only(left: 4, top: 6, bottom: 4),
-              child: Tooltip(
-                message: _attachmentDescription(context, attachment),
-                child: Container(
-                  width: size.width,
-                  height: size.height,
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                    color: context.colors.surface,
-                    border: Border.all(color: context.colors.outlineVariant),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: _ThreadImageFuture(
-                    presentationId: widget.entryId,
-                    image: _image!,
-                    fit: BoxFit.scaleDown,
-                    onRetry: _retry,
-                    // 成功加载后才挂载 key 与点击放大，使 Driver 的
-                    // `view-image-thumbnail` 等待真正证明图片字节已读取。
-                    loadedKey: StudioDriverKeys.viewImageThumbnail(
-                      widget.entryId,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final entry in widget.entries)
+                    _ThreadToolImageThumbnail(
+                      key: ValueKey('tool-image:${entry.entryId}'),
+                      threadId: widget.threadId,
+                      entry: entry,
                     ),
-                    onTap: _showImage,
-                  ),
-                ),
+                ],
               ),
             ),
         ],
       ),
     );
   }
+}
+
+class _ThreadToolImageThumbnail extends ConsumerStatefulWidget {
+  const _ThreadToolImageThumbnail({
+    required this.threadId,
+    required this.entry,
+    super.key,
+  });
+  final String threadId;
+  final _ToolImageEntryRef entry;
+  @override
+  ConsumerState<_ThreadToolImageThumbnail> createState() =>
+      _ThreadToolImageThumbnailState();
+}
+
+class _ThreadToolImageThumbnailState
+    extends ConsumerState<_ThreadToolImageThumbnail> {
+  Future<Uint8List>? _image;
+  @override
+  void didUpdateWidget(covariant _ThreadToolImageThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.threadId != oldWidget.threadId ||
+        widget.entry.attachment.id != oldWidget.entry.attachment.id) {
+      _image = null;
+    }
+  }
+
+  Future<Uint8List> _loadImage() => _ThreadImageCacheScope.of(context).load(
+    widget.threadId,
+    widget.entry.attachment.id,
+    () => ref
+        .read(studioApiProvider)
+        .readThreadAttachment(widget.threadId, widget.entry.attachment.id),
+  );
+  @override
+  Widget build(BuildContext context) {
+    // Subscribe in the same frame, including when a cached read already failed.
+    _image ??= _loadImage();
+    return Tooltip(
+      message: _attachmentDescription(context, widget.entry.attachment),
+      child: Container(
+        width: 120,
+        height: 120,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: context.colors.surface,
+          border: Border.all(color: context.colors.outlineVariant),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: _ThreadImageFuture(
+          presentationId: widget.entry.entryId,
+          image: _image!,
+          fit: BoxFit.contain,
+          onRetry: _retry,
+          loadedKey: StudioDriverKeys.viewImageThumbnail(widget.entry.entryId),
+          onTap: _showImage,
+        ),
+      ),
+    );
+  }
 
   void _retry() {
     _ThreadImageCacheScope.of(context)
-        .invalidate(widget.threadId, widget.attachment.id);
-    final image = _loadImage();
-    setState(() {
-      _image = image;
-    });
+        .invalidate(widget.threadId, widget.entry.attachment.id);
+    setState(() => _image = _loadImage());
   }
 
   Future<void> _showImage() async {
-    final image = _image;
-    if (image == null) return;
-    Uint8List bytes;
+    Uint8List image;
     try {
-      bytes = await image;
+      image = await _image!;
     } on Object {
       return;
     }
     if (!mounted) return;
     await _showStudioImageDialog(
       context,
-      MemoryImage(bytes),
-      dialogKey: StudioDriverKeys.viewImageDialog(widget.entryId),
-      label: widget.attachment.filename,
+      MemoryImage(image),
+      dialogKey: StudioDriverKeys.viewImageDialog(widget.entry.entryId),
+      label: widget.entry.attachment.filename,
     );
   }
-}
-
-/// 工具图片文字入口的默认文案。
-///
-/// `view_image` 复用与工具状态一致的成功/读取中/失败标签，并附带文件名或调用路径，
-/// 读取中或失败不得冒充已读取成功；其余产出图片的工具直接展示文件名。
-String _threadImageEntryLabel(
-  BuildContext context,
-  TimelineToolGroupItem item,
-  ThreadAttachmentView attachment,
-) {
-  if (item.name == 'view_image') {
-    final label = _toolTitle(context, item);
-    final filename = attachment.filename?.trim();
-    final detail = filename != null && filename.isNotEmpty
-        ? filename
-        : _toolTarget(item);
-    return detail == null || detail.isEmpty ? label : '$label · $detail';
-  }
-  final filename = attachment.filename?.trim();
-  return filename != null && filename.isNotEmpty
-      ? filename
-      : context.l10n.timelineAttachment;
 }
 
 class _ThreadImageFuture extends StatelessWidget {
@@ -513,17 +518,6 @@ class _ThreadImageFuture extends StatelessWidget {
       },
     );
   }
-}
-
-Size _toolImagePreviewSize(ThreadAttachmentView attachment, bool compact) {
-  if (compact) return const Size.square(64);
-  final width = attachment.width?.toDouble() ?? 240;
-  final height = attachment.height?.toDouble() ?? 180;
-  final ratio = (width / math.max(height, 1)).clamp(0.25, 4.0);
-  if (ratio >= 1) {
-    return Size(240, math.max(64, 240 / ratio));
-  }
-  return Size(math.max(64, 240 * ratio), 240);
 }
 
 String _attachmentDescription(

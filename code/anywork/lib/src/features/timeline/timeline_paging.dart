@@ -72,7 +72,6 @@ extension on _TimelineViewState {
           onToggleReasoning: _toggleReasoning,
           isToolGroupExpanded: toolExpanded,
           onToggleToolGroup: _toggleToolGroup,
-          onToolDetailsChanged: _handleToolDetailsChanged,
           body: bodyStates,
         ),
       );
@@ -84,7 +83,10 @@ extension on _TimelineViewState {
         child: RepaintBoundary(
           child: SizedBox(
             key: _rowKeys.putIfAbsent(row.id, GlobalKey.new),
-            child: _rowWidgets[row.id]!.child,
+            child: _layoutItem(
+              _anchorItemId(row.id, widget.rows),
+              _rowWidgets[row.id]!.child,
+            ),
           ),
         ),
       ),
@@ -251,8 +253,7 @@ extension on _TimelineViewState {
         : TimelineAnchor(
             _anchorItemId(id, rows ?? widget.rows),
             offset! - _bottomSlack,
-            followingBottom:
-                _followingBottom && !_detachedByUser && !widget.hasNewer,
+            readingIntent: _readingIntent,
           );
   }
 
@@ -268,6 +269,8 @@ extension on _TimelineViewState {
         return;
       }
       final position = _controller.hasClients ? _controller.position : null;
+      // Inspecting presentation is not permission to move the canonical window.
+      if (_readingIntent == TimelineReadingIntent.inspectItem) return;
       // Use actual layout: raw item counts do not predict the height after grouping.
       final underfull = position == null
           ? widget.rows.isEmpty

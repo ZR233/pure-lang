@@ -113,7 +113,6 @@ class _TimelineRowBlock extends StatelessWidget {
     required this.onToggleReasoning,
     required this.isToolGroupExpanded,
     required this.onToggleToolGroup,
-    required this.onToolDetailsChanged,
     this.body = const [],
     super.key,
   });
@@ -123,7 +122,6 @@ class _TimelineRowBlock extends StatelessWidget {
   final ValueChanged<String> onToggleReasoning;
   final bool isToolGroupExpanded;
   final ValueChanged<String> onToggleToolGroup;
-  final VoidCallback onToolDetailsChanged;
 
   /// 该行底层超大条目的完整正文状态；空列表表示该行不需要回源。
   ///
@@ -214,7 +212,6 @@ class _TimelineRowBlock extends StatelessWidget {
                       onToggleReasoning: onToggleReasoning,
                       isToolGroupExpanded: isToolGroupExpanded,
                       onToggleToolGroup: onToggleToolGroup,
-                      onToolDetailsChanged: onToolDetailsChanged,
                     ),
                   ),
                   if (!row.saved)
@@ -399,7 +396,6 @@ class _RowCard extends StatelessWidget {
     required this.onToggleReasoning,
     required this.isToolGroupExpanded,
     required this.onToggleToolGroup,
-    required this.onToolDetailsChanged,
     super.key,
   });
 
@@ -408,7 +404,6 @@ class _RowCard extends StatelessWidget {
   final ValueChanged<String> onToggleReasoning;
   final bool isToolGroupExpanded;
   final ValueChanged<String> onToggleToolGroup;
-  final VoidCallback onToolDetailsChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -465,7 +460,6 @@ class _RowCard extends StatelessWidget {
         group: row.toolGroup!,
         expanded: isToolGroupExpanded,
         onToggle: () => onToggleToolGroup(row.toolGroup!.id),
-        onDetailsChanged: onToolDetailsChanged,
       ),
       TimelineRowType.skillActivation => _SkillActivationPart(
         key: StudioDriverKeys.timelineSkillActivation(row.part!.id),
@@ -656,6 +650,16 @@ class _ReasoningPart extends StatelessWidget {
   Widget build(BuildContext context) {
     // 历史上发生过的推理只描述“曾经思考了什么”，展开态按 group 身份保存在 Timeline
     // 状态里；当前活动由输入框上方的固定活动条单独呈现。
+    void toggle() {
+      _TimelineItemLayoutScope.report(
+        context,
+        expanded
+            ? _TimelineLayoutChangeKind.collapse
+            : _TimelineLayoutChangeKind.expand,
+      );
+      onToggle();
+    }
+
     final label = _reasoningGroupLabel(context, group);
     final details = expanded ? group.details : '';
 
@@ -667,14 +671,14 @@ class _ReasoningPart extends StatelessWidget {
           button: true,
           expanded: expanded,
           label: label,
-          onTap: onToggle,
+          onTap: toggle,
           excludeSemantics: true,
           child: Material(
             key: ValueKey('reasoning:$threadId:${group.id}:$expanded'),
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(StudioRadii.xs),
-              onTap: onToggle,
+              onTap: toggle,
               excludeFromSemantics: true,
               child: _TimelineActivitySummary(
                 icon: Icons.psychology_alt_outlined,

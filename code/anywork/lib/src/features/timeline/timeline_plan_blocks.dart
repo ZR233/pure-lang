@@ -14,6 +14,16 @@ class TimelinePlanSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    void toggle() {
+      _TimelineItemLayoutScope.report(
+        context,
+        expanded
+            ? _TimelineLayoutChangeKind.collapse
+            : _TimelineLayoutChangeKind.expand,
+      );
+      onPressed();
+    }
+
     final summary = plan.summary;
     final title = plan.title.isEmpty
         ? context.l10n.interactionPlanReadyTitle
@@ -30,7 +40,7 @@ class TimelinePlanSummaryCard extends StatelessWidget {
         radius: StudioRadii.lg,
         shadow: false,
         child: InkWell(
-          onTap: onPressed,
+          onTap: toggle,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 11, 12, 10),
             child: Row(

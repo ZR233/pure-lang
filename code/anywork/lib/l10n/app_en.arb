@@ -548,6 +548,14 @@
   },
   "timelineAgentFallback": "Agent",
   "timelineViewImageRead": "Image read",
+  "timelineImagesViewed": "{count, plural, =1{Viewed 1 image} other{Viewed {count} images}}",
+  "@timelineImagesViewed": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "timelineImagesProduced": "{count, plural, =1{1 image} other{{count} images}}",
+  "@timelineImagesProduced": {
+    "placeholders": {"count": {"type": "int"}}
+  },
   "timelineViewImageReading": "Reading image",
   "timelineViewImageFailed": "Failed to read image",
   "timelineToolCompleted": "{name} completed",

@@ -230,7 +230,10 @@ abstract final class StudioDriverState {
             : {
                 'itemId': _history.anchor!.itemId,
                 'offset': _history.anchor!.offset,
-                'followingBottom': _history.anchor!.followingBottom,
+                'followingBottom':
+                    _history.anchor!.readingIntent ==
+                    TimelineReadingIntent.followLatest,
+                'readingIntent': _history.anchor!.readingIntent.name,
               },
       },
       // 只读滚动几何：判断“末尾是否贴底、内容是否填满视口、上翻历史是否还在原锚点”
@@ -674,7 +677,7 @@ class TimelineScrollDiagnostic {
     required this.threadId,
     required this.mountedRowCount,
     required this.rowCount,
-    required this.followingBottom,
+    required this.readingIntent,
     required this.detachedByUser,
     required this.pendingNewEvents,
     required this.pixels,
@@ -698,7 +701,7 @@ class TimelineScrollDiagnostic {
   final int mountedRowCount;
 
   final int rowCount;
-  final bool followingBottom;
+  final TimelineReadingIntent readingIntent;
   final bool detachedByUser;
   final int pendingNewEvents;
   final double? pixels;
@@ -744,7 +747,8 @@ class TimelineScrollDiagnostic {
     'threadId': threadId,
     'mountedRowCount': mountedRowCount,
     'rowCount': rowCount,
-    'followingBottom': followingBottom,
+    'followingBottom': readingIntent == TimelineReadingIntent.followLatest,
+    'readingIntent': readingIntent.name,
     'detachedByUser': detachedByUser,
     'pendingNewEvents': pendingNewEvents,
     'pixels': pixels,
@@ -763,14 +767,19 @@ class TimelineScrollDiagnostic {
         : {
             'itemId': restoreAnchor!.itemId,
             'offset': restoreAnchor!.offset,
-            'followingBottom': restoreAnchor!.followingBottom,
+            'followingBottom':
+                restoreAnchor!.readingIntent ==
+                TimelineReadingIntent.followLatest,
+            'readingIntent': restoreAnchor!.readingIntent.name,
           },
     'anchor': anchor == null
         ? null
         : {
             'itemId': anchor!.itemId,
             'offset': anchor!.offset,
-            'followingBottom': anchor!.followingBottom,
+            'followingBottom':
+                anchor!.readingIntent == TimelineReadingIntent.followLatest,
+            'readingIntent': anchor!.readingIntent.name,
           },
   };
 }

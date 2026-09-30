@@ -334,6 +334,14 @@
   "timelineSkillUserActivated": "用户激活技能 · {name}",
   "timelineAgentFallback": "智能体",
   "timelineViewImageRead": "已读取图片",
+  "timelineImagesViewed": "已查看 {count} 张图像",
+  "@timelineImagesViewed": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "timelineImagesProduced": "{count} 张图像",
+  "@timelineImagesProduced": {
+    "placeholders": {"count": {"type": "int"}}
+  },
   "timelineViewImageReading": "正在读取图片",
   "timelineViewImageFailed": "读取图片失败",
   "timelineToolCompleted": "{name} 已完成",

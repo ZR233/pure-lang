@@ -605,7 +605,8 @@ class StudioController extends _$StudioController {
       window = await reader.openChatWindow(threadId);
       var initial = await window.initial();
       final anchor = state.value?.workspaceUiByThread[threadId]?.history.anchor;
-      if (anchor != null && !anchor.followingBottom) {
+      if (anchor != null &&
+          anchor.readingIntent == TimelineReadingIntent.browseHistory) {
         initial = await window.focus(anchor.itemId);
       }
       if (!_acceptChatWindow(threadId, operation)) return;
@@ -833,14 +834,15 @@ class StudioController extends _$StudioController {
         (ui) => ui.copyWith(
           history: ui.history.copyWith(
             anchor: anchor,
-            detached: !anchor.followingBottom,
+            detached:
+                anchor.readingIntent == TimelineReadingIntent.browseHistory,
           ),
         ),
       ),
     );
-    // 滚动/定位是显式交互：未打开的会话在此激活。
+    // 保存位置不等于授权历史聚焦：查看条目仍保留 canonical Latest 窗口。
     unawaited(_ensureThreadOpen(threadId));
-    if (!anchor.followingBottom &&
+    if (anchor.readingIntent == TimelineReadingIntent.browseHistory &&
         _chatWindowThreadId == threadId &&
         _chatWindow != null &&
         _chatFocusedItemId == null) {
@@ -890,7 +892,9 @@ class StudioController extends _$StudioController {
       return;
     }
     final anchor = _workspaceUi(current, threadId).history.anchor;
-    final loaded = anchor != null && !anchor.followingBottom
+    final loaded =
+        anchor != null &&
+            anchor.readingIntent == TimelineReadingIntent.browseHistory
         ? await _loadTimelinePage(
             threadId,
             TimelineDirection.older,

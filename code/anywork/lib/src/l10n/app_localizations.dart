@@ -1859,6 +1859,18 @@ abstract class AppLocalizations {
   /// **'Image read'**
   String get timelineViewImageRead;
 
+  /// No description provided for @timelineImagesViewed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Viewed 1 image} other{Viewed {count} images}}'**
+  String timelineImagesViewed(int count);
+
+  /// No description provided for @timelineImagesProduced.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 image} other{{count} images}}'**
+  String timelineImagesProduced(int count);
+
   /// No description provided for @timelineViewImageReading.
   ///
   /// In en, this message translates to:

@@ -1191,15 +1191,18 @@ class TimelineTurnView {
   final ThreadContextDisposition disposition;
 }
 
+/// Reading position and permission to move the canonical window are distinct.
+enum TimelineReadingIntent { followLatest, inspectItem, browseHistory }
+
 class TimelineAnchor {
   const TimelineAnchor(
     this.itemId,
     this.offset, {
-    this.followingBottom = false,
+    this.readingIntent = TimelineReadingIntent.browseHistory,
   });
   final String itemId;
   final double offset;
-  final bool followingBottom;
+  final TimelineReadingIntent readingIntent;
 }
 
 /// Reading-window ownership is independent from subscription ownership.

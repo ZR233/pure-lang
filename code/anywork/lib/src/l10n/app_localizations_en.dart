@@ -1022,6 +1022,28 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelineViewImageRead => 'Image read';
 
   @override
+  String timelineImagesViewed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Viewed $count images',
+      one: 'Viewed 1 image',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String timelineImagesProduced(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count images',
+      one: '1 image',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get timelineViewImageReading => 'Reading image';
 
   @override

@@ -166,6 +166,10 @@ class _RemoteMarkdownImageCardState
                     errorBuilder: (context, error, stackTrace) {
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         if (mounted && _image != null) {
+                          _TimelineItemLayoutScope.report(
+                            context,
+                            _TimelineLayoutChangeKind.content,
+                          );
                           setState(() {
                             _image = null;
                             _failed = true;
@@ -185,6 +189,7 @@ class _RemoteMarkdownImageCardState
   }
 
   Future<void> _loadAndOpen() async {
+    _TimelineItemLayoutScope.report(context, _TimelineLayoutChangeKind.expand);
     final provider = ref.read(timelineRemoteImageProviderFactoryProvider)(
       widget.url,
     );
@@ -204,6 +209,7 @@ class _RemoteMarkdownImageCardState
       });
       return;
     }
+    _TimelineItemLayoutScope.report(context, _TimelineLayoutChangeKind.content);
     setState(() {
       _image = provider;
       _failed = false;

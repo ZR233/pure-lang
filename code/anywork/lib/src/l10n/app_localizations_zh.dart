@@ -972,6 +972,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineViewImageRead => '已读取图片';
 
   @override
+  String timelineImagesViewed(int count) {
+    return '已查看 $count 张图像';
+  }
+
+  @override
+  String timelineImagesProduced(int count) {
+    return '$count 张图像';
+  }
+
+  @override
   String get timelineViewImageReading => '正在读取图片';
 
   @override
