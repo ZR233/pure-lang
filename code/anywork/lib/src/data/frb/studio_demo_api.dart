@@ -481,6 +481,7 @@ class DemoStudioApi
       role: 'planner',
       createdAt: now.subtract(const Duration(minutes: 10)),
       updatedAt: now,
+      lastUserMessageAt: now,
       agentPath: 'root',
       workspacePath: project.path,
     );
@@ -594,19 +595,15 @@ class DemoStudioApi
     }
   }
 
-  /// 目录完整排序视图（updatedAt 倒序、id 倒序），分页窗口的模拟数据源。
+  /// 目录完整排序视图（最近用户消息时间倒序、id 倒序），分页窗口的模拟数据源。
   List<StudioThread> _sortedDirectoryThreads() {
     final fixture = _ensureWorkspaceFixture();
-    final threads =
-        [
-          ...fixture.threads,
-          ..._pageFillThreads.where(
-            (thread) => !_archivedThreadIds.contains(thread.id),
-          ),
-        ]..sort((a, b) {
-          final byUpdated = b.updatedAt.compareTo(a.updatedAt);
-          return byUpdated != 0 ? byUpdated : b.id.compareTo(a.id);
-        });
+    final threads = [
+      ...fixture.threads,
+      ..._pageFillThreads.where(
+        (thread) => !_archivedThreadIds.contains(thread.id),
+      ),
+    ]..sort(StudioThread.compareDirectoryOrder);
     return threads;
   }
 
@@ -631,10 +628,7 @@ class DemoStudioApi
         all.values
             .where((thread) => query.matches(thread, state.projects))
             .toList()
-          ..sort((a, b) {
-            final date = b.updatedAt.compareTo(a.updatedAt);
-            return date != 0 ? date : b.id.compareTo(a.id);
-          });
+          ..sort(StudioThread.compareDirectoryOrder);
     final offset = cursor == null ? 0 : int.parse(cursor);
     return ThreadDirectoryPage(
       threads: rows.skip(offset).take(limit).toList(),
@@ -1191,6 +1185,37 @@ class DemoStudioApi
     _emitThreadDirectoryUpdate(renamed);
   }
 
+  /// 记录一次已受理的模拟用户消息：推进目录的最近用户消息时间并广播增量。
+  void _advanceDemoLastUserMessage(String threadId, DateTime acceptedAt) {
+    StudioThread? updated;
+    for (var index = 0; index < _createdRootThreads.length; index++) {
+      if (_createdRootThreads[index].id == threadId) {
+        updated = _createdRootThreads[index] = _createdRootThreads[index]
+            .copyWith(lastUserMessageAt: acceptedAt, updatedAt: acceptedAt);
+      }
+    }
+    for (var index = 0; index < _pageFillThreads.length; index++) {
+      if (_pageFillThreads[index].id == threadId) {
+        updated = _pageFillThreads[index] = _pageFillThreads[index].copyWith(
+          lastUserMessageAt: acceptedAt,
+          updatedAt: acceptedAt,
+        );
+      }
+    }
+    final workspace = _workspaces[threadId];
+    if (workspace != null && workspace.thread.id == threadId) {
+      final thread = workspace.thread.copyWith(
+        lastUserMessageAt: acceptedAt,
+        updatedAt: acceptedAt,
+      );
+      _workspaces[threadId] = workspace.copyWith(thread: thread);
+      updated = thread;
+    }
+    if (updated != null) {
+      _emitThreadDirectoryUpdate(updated);
+    }
+  }
+
   void _emitThreadDirectoryUpdate(StudioThread thread) {
     _productEvents.add(
       StudioBridgeEvent(
@@ -1688,6 +1713,8 @@ class DemoStudioApi
       inputId: input.inputId,
       cursor: workspace.revision + 1,
     );
+    // 模拟服务同样只在成功受理后推进最近用户消息时间；拒绝路径在上方抛出、不推进。
+    _advanceDemoLastUserMessage(threadId, now);
     _upsertChatItem(
       threadId,
       _messageItem(
@@ -2122,6 +2149,11 @@ class DemoStudioApi
       threadId,
       ThreadInteractionUpdate(interaction: resolved, pending: false),
     );
+    // 模拟服务与真实受理语义一致：只有用户回答推进最近用户消息时间，工具审批
+    // 决议不是用户消息，不推进。
+    if (resolved.kind == InteractionKind.userInput) {
+      _advanceDemoLastUserMessage(threadId, DateTime.now());
+    }
     return resolved;
   }
 

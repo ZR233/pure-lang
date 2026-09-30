@@ -39,6 +39,8 @@ pub mod thread {
         pub workspace_mode: String,
         /// 会话对外唯一 canonical 工作区地址，创建会话时写定、之后只读。
         pub workspace_path: String,
+        /// 服务端最近一次成功受理用户消息的时间；NULL 表示尚未有已受理用户消息。
+        pub last_user_message_at: Option<i64>,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

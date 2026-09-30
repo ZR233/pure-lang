@@ -16,13 +16,13 @@ use crate::studio::store::StudioStore;
 use crate::studio::store::directory::{DirectoryDelta, ThreadDirectoryCursor};
 
 impl StudioStore {
-    /// 未归档 root 会话的冷分页（`(updated_at, id)` 降序 keyset）。
+    /// 未归档 root 会话的冷分页（`(last_user_message_at ?? created_at, id)` 降序 keyset）。
     pub(in crate::studio) async fn catalog_page_active(
         &self,
         cursor: Option<&ThreadDirectoryCursor>,
         limit: usize,
     ) -> Result<Vec<Thread>> {
-        let key = cursor.map(|cursor| (cursor.updated_at, cursor.id.clone()));
+        let key = cursor.map(|cursor| (cursor.sort_time, cursor.id.clone()));
         Ok(self.catalog().page_active(key.as_ref(), limit))
     }
 
@@ -34,7 +34,7 @@ impl StudioStore {
         cursor: Option<&ThreadDirectoryCursor>,
         limit: usize,
     ) -> Result<Vec<Thread>> {
-        let key = cursor.map(|cursor| (cursor.updated_at, cursor.id.clone()));
+        let key = cursor.map(|cursor| (cursor.sort_time, cursor.id.clone()));
         Ok(self
             .catalog()
             .page(query, project_matches, key.as_ref(), limit))

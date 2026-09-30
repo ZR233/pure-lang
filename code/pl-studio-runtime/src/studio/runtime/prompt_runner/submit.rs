@@ -229,6 +229,11 @@ impl StudioRuntime {
                 },
             )
             .await?;
+        // 用户消息已成功受理（含排队输入）：目录立即记录最近用户消息时间；后续模型、
+        // 工具或保存失败都不回退该事实，拒绝的提交在上方 `?` 处直接返回、不记录。
+        self.agent_facility
+            .product_events
+            .record_user_message(&thread_id, crate::studio::unix_seconds());
         self.attachment_drafts.commit(&attachment_draft_ids).await;
         self.residency.touch(&thread_id).await;
         Ok(StudioSubmitPromptResponse {

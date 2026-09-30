@@ -367,8 +367,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
               (general.pinnedThreadIds.contains(b.id) ? 1 : 0) -
               (general.pinnedThreadIds.contains(a.id) ? 1 : 0);
           if (pin != 0) return pin;
-          final date = b.updatedAt.compareTo(a.updatedAt);
-          return date != 0 ? date : b.id.compareTo(a.id);
+          return StudioThread.compareDirectoryOrder(a, b);
         });
     return [
       for (final thread in rows)

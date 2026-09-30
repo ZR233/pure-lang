@@ -6,7 +6,7 @@ use sea_orm::{ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 22;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 23;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_thread_lifecycle_tables(db).await?;
@@ -55,6 +55,7 @@ async fn create_thread_lifecycle_tables(db: &DatabaseConnection) -> Result<()> {
             archived INTEGER NOT NULL,
             workspace_mode TEXT NOT NULL DEFAULT 'local',
             workspace_path TEXT NOT NULL DEFAULT '',
+            last_user_message_at INTEGER,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 

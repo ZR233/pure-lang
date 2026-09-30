@@ -14,6 +14,12 @@ owner。进程运行期间 Project、Thread、Agent、Workflow、Recovery 和服
 
 ## 18.2 公共 snapshot
 
+Thread 目录 DTO 的 `lastUserMessageAt` 是可空的 Unix 秒时间，仅由成功受理用户输入推进，
+与普通 `updatedAt` 分离。Rust protocol、FRB DTO、Dart domain 与目录增量均传递同一事实；
+运行观察、标题和配置变更保留该值，不因迟到快照回退。已接受排队输入计入，系统/代理输入、
+失败提交和恢复重放不计入。目录排序和版本化游标只消费会话元信息，不从历史回填；
+字段缺失与保存语义遵循 [17](./17-studio-storage.md)。
+
 StudioState 聚合 projectDirectory、threadDirectory、agentDirectory、modeCatalog、settings、
 recovery、MCP/LSP、provider usage、model performance 与 updater。Thread workspace 单独包含当前
 状态、pending Interaction、ThreadRuntimeView、workflow 投影和有界 Timeline 窗口；不存在

@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail, ensure};
 use sea_orm::sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};
 use sea_orm::{
     ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement,
+    TransactionTrait,
 };
 
 use crate::studio::catalog::CatalogStore;
@@ -15,9 +16,14 @@ use crate::studio::store::workspaces::WorkspaceStore;
 use crate::studio::store::{StudioDatabaseError, StudioStore};
 use crate::studio::store_support::{STUDIO_DATABASE_SCHEMA_VERSION, initialize_studio_schema};
 
+/// 可原地升级到当前 schema 的上一版本；模式匹配需要 const 模式。
+const UPGRADEABLE_STUDIO_DATABASE_SCHEMA_VERSION: i64 = STUDIO_DATABASE_SCHEMA_VERSION - 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingDatabaseState {
     Current,
+    /// 上一个大版本的 v2 产品库：打开后按事务原地升级到当前 schema，保留全部数据。
+    UpgradeRequired,
 }
 
 /// Whether a resolved Studio home already owns persistent state from an earlier run.
@@ -111,6 +117,10 @@ impl StudioStore {
         let initialization = async {
             if created {
                 initialize_studio_schema(&db).await?;
+            } else if existing_state == Some(ExistingDatabaseState::UpgradeRequired) {
+                // v2 内的结构升级在打开可写连接后原地完成：事务内加列并推进
+                // user_version，保留全部已有数据（design/17 §17.1）。
+                upgrade_product_schema(&db).await?;
             }
             // ExistingDatabaseState::Current was already verified before opening writable.
             // Old session storage remains isolated outside v2.
@@ -349,6 +359,10 @@ async fn inspect_database(path: &Path) -> Result<ExistingDatabaseState> {
         Ok(STUDIO_DATABASE_SCHEMA_VERSION) => validate_database(&database)
             .await
             .map(|()| ExistingDatabaseState::Current),
+        // 上一个大版本的 v2 库可以在打开后原地升级；更早的 dev 版本仍交给启动入口。
+        Ok(UPGRADEABLE_STUDIO_DATABASE_SCHEMA_VERSION) => {
+            Ok(ExistingDatabaseState::UpgradeRequired)
+        }
         Ok(19..=21) => Err(StudioDatabaseError::StorageMigrationRequired.into()),
         Ok(found) => Err(StudioDatabaseError::UnsupportedSchema {
             found,
@@ -366,6 +380,34 @@ async fn inspect_database(path: &Path) -> Result<ExistingDatabaseState> {
             "Studio schema probe failed; closing its connection also failed: {close_error}"
         )),
     }
+}
+
+/// Applies the v22 → v23 product schema upgrade in one transaction.
+///
+/// The only structural change is the nullable `threads.last_user_message_at` column: existing
+/// rows keep `NULL` (no accepted user message is fabricated), and the added column lands in the
+/// same position as canonical creation so the schema fingerprint keeps matching. Idempotent for a
+/// database that already reached the current version.
+async fn upgrade_product_schema(db: &DatabaseConnection) -> Result<()> {
+    let tx = db.begin().await?;
+    let version = database_schema_version(&tx).await?;
+    if version == STUDIO_DATABASE_SCHEMA_VERSION {
+        tx.commit().await?;
+        return Ok(());
+    }
+    anyhow::ensure!(
+        version == STUDIO_DATABASE_SCHEMA_VERSION - 1,
+        "Studio database upgrade requires schema version {}, found {version}",
+        STUDIO_DATABASE_SCHEMA_VERSION - 1
+    );
+    tx.execute_unprepared("ALTER TABLE threads ADD COLUMN last_user_message_at INTEGER")
+        .await?;
+    tx.execute_unprepared(&format!(
+        "PRAGMA user_version = {STUDIO_DATABASE_SCHEMA_VERSION}"
+    ))
+    .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 async fn validate_database(db: &DatabaseConnection) -> Result<()> {
@@ -408,7 +450,7 @@ async fn validate_database_version(db: &DatabaseConnection, expected_version: i6
     Ok(())
 }
 
-async fn database_schema_version(db: &DatabaseConnection) -> Result<i64> {
+async fn database_schema_version(db: &impl sea_orm::ConnectionTrait) -> Result<i64> {
     let row = db
         .query_one_raw(Statement::from_string(
             DatabaseBackend::Sqlite,
@@ -594,6 +636,87 @@ mod major_version_storage_tests {
         };
         assert!(error.to_string().contains("catalog.toml is missing"));
         assert_eq!(tokio::fs::read(old_catalog).await?, b"old catalog");
+        Ok(())
+    }
+}
+
+/// v2 内产品库结构升级（22 → 23）：原地加列、保留全部数据，不伪造用户消息时间。
+#[cfg(test)]
+mod v2_schema_upgrade_tests {
+    use super::super::directory::{DirectoryDelta, ProjectDirectoryRecord, apply_directory_delta};
+    use super::*;
+
+    #[tokio::test]
+    async fn schema_22_to_23_preserves_threads_and_keeps_last_user_message_null() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let paths = StudioPaths::resolve(Some(temp.path().to_path_buf()))?;
+        let database = paths.database();
+        tokio::fs::create_dir_all(database.parent().expect("database parent")).await?;
+        let store = StudioStore::open(&database).await?;
+        let mut delta = DirectoryDelta::upsert_project(ProjectDirectoryRecord {
+            id: "project-1".into(),
+            name: "Project".into(),
+            path: "/tmp/project".into(),
+            ssh_alias: None,
+            created_at: 1,
+            updated_at: 1,
+            last_opened_at: None,
+            closed: false,
+        });
+        let (thread_delta, thread) = DirectoryDelta::register_root_thread(
+            "thread-old".into(),
+            "project-1",
+            "旧会话",
+            pl_protocol::ThreadModeId::simple(),
+            pl_protocol::ThreadWorkspaceMode::Local,
+            "/tmp/project".into(),
+        );
+        delta.thread_upserts = thread_delta.thread_upserts;
+        let tx = store.database().begin().await?;
+        apply_directory_delta(&store, &tx, &delta).await?;
+        tx.commit().await?;
+        // 把刚初始化的当前库降回上一版本：删除新列即得到与 v22 逐字一致的表结构。
+        store
+            .database()
+            .execute_unprepared("ALTER TABLE threads DROP COLUMN last_user_message_at")
+            .await?;
+        store
+            .database()
+            .execute_unprepared("PRAGMA user_version = 22")
+            .await?;
+        assert_eq!(
+            database_schema_version(store.database()).await?,
+            UPGRADEABLE_STUDIO_DATABASE_SCHEMA_VERSION
+        );
+        drop(store);
+
+        // 重新打开：只读探测识别 22 → 打开可写连接后事务内原地升级并校验指纹。
+        let upgraded = StudioStore::open(&database).await?;
+        assert_eq!(
+            database_schema_version(upgraded.database()).await?,
+            STUDIO_DATABASE_SCHEMA_VERSION
+        );
+        let record = upgraded
+            .read_thread("thread-old")
+            .await?
+            .expect("upgraded store kept the v22 thread row");
+        assert_eq!(record.id, thread.id);
+        assert_eq!(record.title, "旧会话");
+        // 旧目录缺失最近用户消息时间：迁移为缺失值，不以普通更新时间伪造。
+        assert_eq!(record.updated_at, thread.updated_at);
+        assert_eq!(record.last_user_message_at, None);
+        assert_eq!(
+            upgraded
+                .catalog()
+                .get("thread-old")
+                .map(|entry| entry.last_user_message_at),
+            Some(None),
+        );
+
+        // 升级幂等：再次打开不需要任何迁移步骤。
+        drop(upgraded);
+        let reopened = StudioStore::open(&database).await?;
+        assert!(reopened.read_thread("thread-old").await?.is_some());
         Ok(())
     }
 }

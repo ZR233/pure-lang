@@ -489,6 +489,9 @@ StudioThread _threadFromFrb(frb.BridgeThread value) {
     workspacePath: value.workspacePath,
     createdAt: _dateFromUnix(value.createdAt),
     updatedAt: _dateFromUnix(value.updatedAt),
+    lastUserMessageAt: value.lastUserMessageAt == null
+        ? null
+        : _dateFromUnix(value.lastUserMessageAt!),
     parentThreadId: value.parentThreadId,
     rootThreadId: value.rootThreadId,
     agentPath: value.agentPath,

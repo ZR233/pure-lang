@@ -32,6 +32,7 @@ impl TryFrom<thread::Model> for ThreadRecord {
             status: state.kind,
             created_at: model.created_at,
             updated_at: model.updated_at,
+            last_user_message_at: model.last_user_message_at,
             archived: model.archived != 0,
         })
     }

@@ -22,7 +22,7 @@ impl HotColdEntry for Thread {
     type Key = (i64, String);
 
     fn page_key(&self) -> Self::Key {
-        (self.updated_at, self.id.clone())
+        (self.directory_sort_time(), self.id.clone())
     }
 
     fn entry_id(&self) -> &str {
@@ -63,7 +63,7 @@ impl ProductEventBus {
         let decoded = cursor.and_then(ThreadDirectoryCursor::decode);
         let cursor_key = decoded
             .as_ref()
-            .map(|cursor| (cursor.updated_at, cursor.id.clone()));
+            .map(|cursor| (cursor.sort_time, cursor.id.clone()));
         let cold = self
             .store
             .list_thread_directory_page(decoded.as_ref(), limit.saturating_add(1))
@@ -84,7 +84,7 @@ impl ProductEventBus {
         let next_cursor = has_more
             .then(|| {
                 merged.last().map(|thread| ThreadDirectoryCursor {
-                    updated_at: thread.updated_at,
+                    sort_time: thread.directory_sort_time(),
                     id: thread.id.clone(),
                 })
             })
@@ -115,7 +115,7 @@ impl ProductEventBus {
                     .ok_or_else(|| anyhow::anyhow!("invalid directory cursor"))
             })
             .transpose()?;
-        let key = decoded.as_ref().map(|c| (c.updated_at, c.id.clone()));
+        let key = decoded.as_ref().map(|c| (c.sort_time, c.id.clone()));
         let projects = self.project_snapshot().await;
         let matching_projects = projects
             .iter()
@@ -157,7 +157,7 @@ impl ProductEventBus {
                 .catalog_query(query, &matching_projects, cold_cursor.as_ref(), 100)
                 .await?;
             let end = cold.last().map(|thread| ThreadDirectoryCursor {
-                updated_at: thread.updated_at,
+                sort_time: thread.directory_sort_time(),
                 id: thread.id.clone(),
             });
             let exhausted = cold.len() < 100;
@@ -172,7 +172,7 @@ impl ProductEventBus {
             matches.truncate(limit + 1);
             let enough = matches.len() > limit
                 && end.as_ref().is_some_and(|end| {
-                    (end.updated_at, end.id.clone()) <= matches[limit].page_key()
+                    (end.sort_time, end.id.clone()) <= matches[limit].page_key()
                 });
             if exhausted || enough {
                 break;
@@ -185,7 +185,7 @@ impl ProductEventBus {
             .then(|| {
                 matches.last().map(|thread| {
                     ThreadDirectoryCursor {
-                        updated_at: thread.updated_at,
+                        sort_time: thread.directory_sort_time(),
                         id: thread.id.clone(),
                     }
                     .encode()
@@ -223,7 +223,7 @@ impl ProductEventBus {
 
     fn publish_thread_delta(
         &self,
-        upserted: Vec<Thread>,
+        mut upserted: Vec<Thread>,
         removed: Vec<String>,
         archived: Vec<Thread>,
     ) -> Result<StudioProductEventEnvelope> {
@@ -232,7 +232,14 @@ impl ProductEventBus {
                 .thread_index
                 .lock()
                 .expect("thread index lock poisoned");
-            for thread in &upserted {
+            for thread in &mut upserted {
+                // 迟到快照不得使最近用户消息时间回退：目录命令携带的完整 Thread 可能
+                // 早于一次已受理的用户输入，进入热集合前保留较新值。
+                if let Some(existing) = index.get(&thread.id) {
+                    thread.last_user_message_at = existing
+                        .last_user_message_at
+                        .max(thread.last_user_message_at);
+                }
                 index.insert(thread.id.clone(), thread.clone());
             }
             for id in &removed {
@@ -295,6 +302,48 @@ impl ProductEventBus {
             },
         ));
         Some(thread)
+    }
+
+    /// Records the acceptance of a user message as a directory fact.
+    ///
+    /// Called only after the runtime successfully admitted a user input (queued inputs count;
+    /// rejected submissions never reach this point). The timestamp never regresses, and a missing
+    /// or archived entry is not reinserted. Persistence rides the same write-behind directory
+    /// queue as runtime patches; a later model/storage failure cannot undo the recorded fact.
+    pub(in crate::studio) fn record_user_message(&self, thread_id: &str, accepted_at: i64) {
+        let thread = {
+            let mut index = self
+                .thread_index
+                .lock()
+                .expect("thread index lock poisoned");
+            let Some(thread) = index.get_mut(thread_id) else {
+                return;
+            };
+            if thread.archived {
+                return;
+            }
+            thread.last_user_message_at = Some(
+                thread
+                    .last_user_message_at
+                    .map_or(accepted_at, |existing| existing.max(accepted_at)),
+            );
+            thread.updated_at = thread.updated_at.max(accepted_at);
+            thread.clone()
+        };
+        self.writer.record_directory(DirectoryDelta {
+            thread_upserts: vec![thread.clone()],
+            ..Default::default()
+        });
+        self.bump(&self.revisions.thread);
+        let (revision, updated_at) = self.revision(&self.revisions.thread);
+        self.emit(StudioProductEventKind::ThreadDirectoryChanged(
+            StudioThreadDirectoryDelta {
+                revision,
+                updated_at,
+                upserted: vec![thread],
+                removed: Vec::new(),
+            },
+        ));
     }
 
     /// 将已从持久化层加载的目录条目加入热集合，但不改变 revision 或广播事件。
@@ -412,8 +461,8 @@ impl ProductEventBus {
             .collect::<Vec<_>>();
         threads.sort_by(|left, right| {
             right
-                .updated_at
-                .cmp(&left.updated_at)
+                .directory_sort_time()
+                .cmp(&left.directory_sort_time())
                 .then_with(|| right.id.cmp(&left.id))
         });
         threads

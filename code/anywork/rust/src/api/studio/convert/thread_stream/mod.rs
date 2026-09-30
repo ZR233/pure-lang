@@ -133,6 +133,7 @@ pub(crate) fn bridge_thread(value: Thread) -> BridgeThread {
         },
         created_at: value.created_at,
         updated_at: value.updated_at,
+        last_user_message_at: value.last_user_message_at,
         archived: value.archived,
     }
 }

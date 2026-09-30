@@ -32,10 +32,19 @@ impl StudioRuntime {
             });
         }
         self.ensure_thread_owner(&current.scope.thread_id).await?;
+        // 到达这里的决议一定来自 Pending 交互，真实受理路径只有 UserInput 决议：
+        // 权限决议（ToolApproval）不是用户消息，重复决议在上方已终结短路或持久回执
+        // 路径返回，不产生新的受理事实（design/17 §17.1）。
+        let user_answered = matches!(resolution, InteractionResolution::UserInput(_));
         let interaction = self
             .threads
             .resolve_product_interaction(&interaction_id, resolution)
             .await?;
+        if user_answered {
+            self.agent_facility
+                .product_events
+                .record_user_message(&interaction.scope.thread_id, crate::studio::unix_seconds());
+        }
         Ok(StudioResolveInteractionResponse {
             thread_id: interaction.scope.thread_id.clone(),
             interaction,

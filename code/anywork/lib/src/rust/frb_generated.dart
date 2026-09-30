@@ -7664,8 +7664,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeThread dco_decode_bridge_thread(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return BridgeThread(
       id: dco_decode_String(arr[0]),
       projectId: dco_decode_String(arr[1]),
@@ -7680,7 +7680,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       status: dco_decode_bridge_thread_status(arr[10]),
       createdAt: dco_decode_i_64(arr[11]),
       updatedAt: dco_decode_i_64(arr[12]),
-      archived: dco_decode_bool(arr[13]),
+      lastUserMessageAt: dco_decode_opt_box_autoadd_i_64(arr[13]),
+      archived: dco_decode_bool(arr[14]),
     );
   }
 
@@ -15092,6 +15093,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_status = sse_decode_bridge_thread_status(deserializer);
     var var_createdAt = sse_decode_i_64(deserializer);
     var var_updatedAt = sse_decode_i_64(deserializer);
+    var var_lastUserMessageAt = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_archived = sse_decode_bool(deserializer);
     return BridgeThread(
       id: var_id,
@@ -15107,6 +15109,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       status: var_status,
       createdAt: var_createdAt,
       updatedAt: var_updatedAt,
+      lastUserMessageAt: var_lastUserMessageAt,
       archived: var_archived,
     );
   }
@@ -23048,6 +23051,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bridge_thread_status(self.status, serializer);
     sse_encode_i_64(self.createdAt, serializer);
     sse_encode_i_64(self.updatedAt, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.lastUserMessageAt, serializer);
     sse_encode_bool(self.archived, serializer);
   }
 

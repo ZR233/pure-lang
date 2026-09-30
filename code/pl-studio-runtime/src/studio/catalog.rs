@@ -18,7 +18,7 @@ use pl_protocol::{Thread, ThreadModeId, ThreadStatus, ThreadWorkspaceMode};
 
 use super::toml_store::{self, RevisionedDocument};
 
-pub(in crate::studio) const CATALOG_SCHEMA_VERSION: u32 = 1;
+pub(in crate::studio) const CATALOG_SCHEMA_VERSION: u32 = 2;
 
 /// 一个会话的轻量目录摘要。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -38,10 +38,18 @@ pub(in crate::studio) struct CatalogEntry {
     pub(in crate::studio) status: ThreadStatus,
     pub(in crate::studio) created_at: i64,
     pub(in crate::studio) updated_at: i64,
+    /// 服务端最近一次成功受理用户消息的时间；缺失即尚未有已受理用户消息（含 v1 目录）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::studio) last_user_message_at: Option<i64>,
     pub(in crate::studio) archived: bool,
 }
 
 impl CatalogEntry {
+    /// 与 `Thread::directory_sort_time` 相同的目录排序键，避免排序时构造完整 `Thread`。
+    fn directory_sort_time(&self) -> i64 {
+        self.last_user_message_at.unwrap_or(self.created_at)
+    }
+
     pub(in crate::studio) fn from_thread(thread: &Thread) -> Self {
         Self {
             id: thread.id.clone(),
@@ -57,6 +65,7 @@ impl CatalogEntry {
             status: thread.status,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
+            last_user_message_at: thread.last_user_message_at,
             archived: thread.archived,
         }
     }
@@ -76,6 +85,7 @@ impl CatalogEntry {
             status: self.status,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            last_user_message_at: self.last_user_message_at,
             archived: self.archived,
         }
     }
@@ -126,7 +136,7 @@ impl CatalogStore {
         })
     }
 
-    /// 全部条目的稳定快照（按 `(updated_at, id)` 降序）。
+    /// 全部条目的稳定快照（按 `(last_user_message_at ?? created_at, id)` 降序）。
     pub(in crate::studio) fn entries(&self) -> Vec<CatalogEntry> {
         let mut entries = self.lock().entries.clone();
         sort_desc(&mut entries);
@@ -141,7 +151,8 @@ impl CatalogStore {
             .cloned()
     }
 
-    /// 冷目录分页：`(updated_at, id)` 降序 keyset；查询命中后才应用 cursor，保证搜索语义。
+    /// 冷目录分页：`(last_user_message_at ?? created_at, id)` 降序 keyset；
+    /// 查询命中后才应用 cursor，保证搜索语义。
     pub(in crate::studio) fn page(
         &self,
         query: &ThreadDirectoryQuery,
@@ -187,6 +198,9 @@ impl CatalogStore {
     }
 
     /// 幂等写入/替换一个条目；内容不变时不推进 revision，也不落盘。
+    ///
+    /// 迟到快照不得使最近用户消息时间回退：写回时与既有条目取较新值，其余目录列
+    /// 以命令顺序为准（design/17 §17.1）。
     pub(in crate::studio) async fn upsert(&self, entry: CatalogEntry) -> Result<()> {
         self.mutate(move |document| {
             match document
@@ -196,7 +210,11 @@ impl CatalogStore {
             {
                 Some(existing) if *existing == entry => false,
                 Some(existing) => {
+                    let last_user_message_at = existing
+                        .last_user_message_at
+                        .max(entry.last_user_message_at);
                     *existing = entry;
+                    existing.last_user_message_at = last_user_message_at;
                     true
                 }
                 None => {
@@ -275,13 +293,16 @@ impl CatalogStore {
 }
 
 fn decode(path: &Path, content: &str) -> Result<CatalogDocument> {
-    let document: CatalogDocument = toml::from_str(content)
+    let mut document: CatalogDocument = toml::from_str(content)
         .with_context(|| format!("invalid Studio catalog {}", path.display()))?;
+    // v1 目录缺少最近用户消息时间：按缺失值读取并保留全部数据，内存归一为当前
+    // 版本，下一次写入即持久化为 v2（design/17 §17.1）。
     ensure!(
-        document.schema_version == CATALOG_SCHEMA_VERSION,
+        (1..=CATALOG_SCHEMA_VERSION).contains(&document.schema_version),
         "unsupported Studio catalog schema in {}",
         path.display()
     );
+    document.schema_version = CATALOG_SCHEMA_VERSION;
     ensure!(document.revision >= 1, "Studio catalog revision is invalid");
     let mut seen = std::collections::BTreeSet::new();
     for entry in &document.entries {
@@ -320,8 +341,8 @@ fn page_threads(
     entries
         .into_iter()
         .filter(|entry| {
-            cursor.is_none_or(|(updated_at, id)| {
-                (entry.updated_at, entry.id.as_str()) < (*updated_at, id.as_str())
+            cursor.is_none_or(|(sort_time, id)| {
+                (entry.directory_sort_time(), entry.id.as_str()) < (*sort_time, id.as_str())
             })
         })
         .take(limit)
@@ -332,8 +353,8 @@ fn page_threads(
 fn sort_desc(entries: &mut [CatalogEntry]) {
     entries.sort_by(|left, right| {
         right
-            .updated_at
-            .cmp(&left.updated_at)
+            .directory_sort_time()
+            .cmp(&left.directory_sort_time())
             .then_with(|| right.id.cmp(&left.id))
     });
 }

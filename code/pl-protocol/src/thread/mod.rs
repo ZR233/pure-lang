@@ -75,6 +75,14 @@ pub struct Thread {
     pub status: ThreadStatus,
     pub created_at: i64,
     pub updated_at: i64,
+    /// 服务端最近一次成功受理用户消息的时间（Unix 秒）。
+    ///
+    /// 仅由用户输入的成功受理推进：已接受的排队输入计入，拒绝的输入、代理通知、
+    /// 系统注入、工具结果及恢复重放均不计入。缺失表示尚无已受理的用户消息（例如
+    /// 旧目录迁移后的未回填会话），列表排序按 `created_at` 回落；`updated_at` 保持
+    /// 普通更新语义，不能替代该字段排序。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_user_message_at: Option<i64>,
     #[serde(default)]
     pub archived: bool,
 }
@@ -95,9 +103,17 @@ impl Thread {
             status: ThreadStatus::Idle,
             created_at: 0,
             updated_at: 0,
+            last_user_message_at: None,
             archived: false,
             id,
         }
+    }
+
+    /// 会话目录排序键：最近用户消息时间，缺失时回落到创建时间。
+    ///
+    /// 目录冷分页、搜索与 GUI 会话列表共用同一降序键；同秒由调用方以 ID 破平。
+    pub fn directory_sort_time(&self) -> i64 {
+        self.last_user_message_at.unwrap_or(self.created_at)
     }
 }
 

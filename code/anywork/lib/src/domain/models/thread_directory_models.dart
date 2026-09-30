@@ -43,6 +43,7 @@ class StudioThread {
     required this.mode,
     required this.updatedAt,
     this.createdAt,
+    this.lastUserMessageAt,
     this.parentThreadId,
     this.rootThreadId = '',
     this.agentPath = '',
@@ -59,6 +60,11 @@ class StudioThread {
   final ThreadModeId mode;
   final DateTime? createdAt;
   final DateTime updatedAt;
+
+  /// 服务端最近一次成功受理用户消息的时间；null 表示尚未有已受理用户消息。
+  ///
+  /// 只由成功受理推进；模型回复、工具、运行状态、标题与配置更新不改变它。
+  final DateTime? lastUserMessageAt;
   final String? parentThreadId;
   final String rootThreadId;
   final String agentPath;
@@ -86,10 +92,20 @@ class StudioThread {
 
   DateTime get effectiveCreatedAt => createdAt ?? updatedAt;
 
+  /// 会话目录排序键：最近用户消息时间，缺失时回落到创建时间（design/19 §19.1）。
+  DateTime get directorySortTime => lastUserMessageAt ?? effectiveCreatedAt;
+
+  /// 会话目录的 canonical 降序比较器：目录排序键降序，同秒按 ID 降序破平。
+  static int compareDirectoryOrder(StudioThread a, StudioThread b) {
+    final time = b.directorySortTime.compareTo(a.directorySortTime);
+    return time != 0 ? time : b.id.compareTo(a.id);
+  }
+
   StudioThread copyWith({
     String? title,
     ThreadModeId? mode,
     DateTime? createdAt,
+    DateTime? lastUserMessageAt,
     DateTime? updatedAt,
     String? parentThreadId,
     String? rootThreadId,
@@ -106,6 +122,7 @@ class StudioThread {
       title: title ?? this.title,
       mode: mode ?? this.mode,
       createdAt: createdAt ?? this.createdAt,
+      lastUserMessageAt: lastUserMessageAt ?? this.lastUserMessageAt,
       updatedAt: updatedAt ?? this.updatedAt,
       parentThreadId: parentThreadId ?? this.parentThreadId,
       rootThreadId: rootThreadId ?? this.rootThreadId,
@@ -180,12 +197,13 @@ class ThreadDirectoryWindow {
     ];
     final newThreads =
         upsertedById.values.where((thread) => !thread.archived).toList()
-          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+          ..sort(StudioThread.compareDirectoryOrder);
     final prependable = newThreads.where((thread) {
       if (retained.isEmpty) return true;
-      return thread.updatedAt.isAfter(retained.first.updatedAt) ||
-          (thread.updatedAt.isAtSameMomentAs(retained.first.updatedAt) &&
-              thread.id.compareTo(retained.first.id) > 0);
+      final first = retained.first;
+      return thread.directorySortTime.isAfter(first.directorySortTime) ||
+          (thread.directorySortTime.isAtSameMomentAs(first.directorySortTime) &&
+              thread.id.compareTo(first.id) > 0);
     }).toList();
     return copyWith(threads: [...prependable, ...retained]);
   }

@@ -69,6 +69,7 @@ impl DirectoryDelta {
             status: pl_protocol::ThreadStatus::Idle,
             created_at: now,
             updated_at: now,
+            last_user_message_at: None,
             archived: false,
         };
         (
@@ -98,6 +99,7 @@ impl DirectoryDelta {
                 status: pl_protocol::ThreadStatus::Idle,
                 created_at: now,
                 updated_at: now,
+                last_user_message_at: None,
                 archived: false,
             }],
             ..Default::default()
@@ -255,6 +257,7 @@ async fn upsert_thread_directory_row(
             trace_sequence: Set(0),
             created_at: Set(thread.created_at),
             updated_at: Set(thread.updated_at),
+            last_user_message_at: Set(thread.last_user_message_at),
             archived: Set(i32::from(thread.archived)),
             ..Default::default()
         };
@@ -288,11 +291,16 @@ async fn upsert_thread_directory_row(
             )
         );
     }
+    // 迟到快照不得使最近用户消息时间回退：镜像写回保留较新值，其余目录列按提交顺序。
+    let last_user_message_at = existing
+        .last_user_message_at
+        .max(thread.last_user_message_at);
     let mut active: thread::ActiveModel = existing.into();
     active.title = Set(thread.title.clone());
     active.mode = Set(thread.mode.label().to_string());
     active.role = Set(thread.role.clone());
     active.updated_at = Set(thread.updated_at);
+    active.last_user_message_at = Set(last_user_message_at);
     active.archived = Set(i32::from(thread.archived));
     active.update(tx).await?;
     Ok(())
@@ -376,31 +384,35 @@ async fn close_project_row(
     Ok(())
 }
 
-/// Thread 目录 keyset 分页游标：`v1:{updated_at}:{id}`。
+/// Thread 目录 keyset 分页游标：`v2:{sort_time}:{id}`。
+///
+/// `sort_time` 是 `(last_user_message_at ?? created_at)` 目录排序键。排序键语义与
+/// v1（普通更新时间）不同，因此使用独立版本：旧 `v1:` 游标解码为 `None` 并回到
+/// 首页重新读取，不会被解释成新排序键。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::studio) struct ThreadDirectoryCursor {
-    pub(in crate::studio) updated_at: i64,
+    pub(in crate::studio) sort_time: i64,
     pub(in crate::studio) id: String,
 }
 
 impl ThreadDirectoryCursor {
     pub(in crate::studio) fn encode(&self) -> String {
-        format!("v1:{}:{}", self.updated_at, self.id)
+        format!("v2:{}:{}", self.sort_time, self.id)
     }
 
     pub(in crate::studio) fn decode(raw: &str) -> Option<Self> {
-        let rest = raw.strip_prefix("v1:")?;
-        let (updated_at, id) = rest.split_once(':')?;
+        let rest = raw.strip_prefix("v2:")?;
+        let (sort_time, id) = rest.split_once(':')?;
         Some(Self {
-            updated_at: updated_at.parse().ok()?,
+            sort_time: sort_time.parse().ok()?,
             id: id.to_string(),
         })
     }
 }
 
 impl StudioStore {
-    /// 未归档 Thread 的冷分页：按 `(updated_at, id)` 倒序 keyset，
-    /// cursor 为闭区间锚点（下一页取严格小于该键的条目）。
+    /// 未归档 Thread 的冷分页：按 `(last_user_message_at ?? created_at, id)` 倒序
+    /// keyset，cursor 为闭区间锚点（下一页取严格小于该键的条目）。
     pub(in crate::studio) async fn list_thread_directory_page(
         &self,
         cursor: Option<&ThreadDirectoryCursor>,

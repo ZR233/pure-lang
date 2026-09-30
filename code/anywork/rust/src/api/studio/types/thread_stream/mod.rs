@@ -104,6 +104,8 @@ pub struct BridgeThread {
     pub status: BridgeThreadStatus,
     pub created_at: i64,
     pub updated_at: i64,
+    /// 服务端最近一次成功受理用户消息的时间；`None` 表示尚未有已受理用户消息。
+    pub last_user_message_at: Option<i64>,
     pub archived: bool,
 }
 

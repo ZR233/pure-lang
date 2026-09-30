@@ -301,10 +301,7 @@ class StudioController extends _$StudioController {
         .toList();
     if (missing.isEmpty) return;
     final directory = [...current.threadDirectory.threads, ...missing]
-      ..sort((a, b) {
-        final date = b.updatedAt.compareTo(a.updatedAt);
-        return date != 0 ? date : b.id.compareTo(a.id);
-      });
+      ..sort(StudioThread.compareDirectoryOrder);
     state = AsyncData(
       current.copyWith(
         threadDirectory: current.threadDirectory.copyWith(threads: directory),
@@ -2736,10 +2733,7 @@ StudioState _applyArchiveResult(
   if (nextRoot != null &&
       !next.threadDirectory.threads.any((thread) => thread.id == nextRoot.id)) {
     final threads = [...next.threadDirectory.threads, nextRoot]
-      ..sort((left, right) {
-        final updated = right.updatedAt.compareTo(left.updatedAt);
-        return updated != 0 ? updated : right.id.compareTo(left.id);
-      });
+      ..sort(StudioThread.compareDirectoryOrder);
     next = next.copyWith(
       threadDirectory: next.threadDirectory.copyWith(threads: threads),
     );

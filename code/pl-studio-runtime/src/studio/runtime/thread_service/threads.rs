@@ -658,10 +658,12 @@ impl StudioRuntime {
                 }
             }
         }
+        // 归档后的候选会话选择与目录排序使用同一顺序键（design/19）：
+        // 最近用户消息时间（缺失回退创建时间）降序，同秒以 ID 稳定破平。
         roots.sort_by(|a, b| {
-            b.updated_at
-                .cmp(&a.updated_at)
-                .then_with(|| b.id.cmp(&a.id))
+            let left = a.last_user_message_at.unwrap_or(a.created_at);
+            let right = b.last_user_message_at.unwrap_or(b.created_at);
+            right.cmp(&left).then_with(|| b.id.cmp(&a.id))
         });
         let mut entries = roots
             .iter()

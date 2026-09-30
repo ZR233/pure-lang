@@ -36,6 +36,9 @@ pub struct ThreadRecord {
     pub workspace_path: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// 服务端最近一次成功受理用户消息的时间；缺失表示尚未回填或没有已受理用户消息。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_user_message_at: Option<i64>,
     pub visibility: ThreadVisibility,
     pub parent_thread_id: Option<String>,
     pub root_thread_id: String,
@@ -71,6 +74,7 @@ impl ThreadRecord {
             workspace_path: thread.workspace_path,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
+            last_user_message_at: thread.last_user_message_at,
             parent_thread_id: thread.parent_thread_id,
             root_thread_id: thread.root_thread_id,
             agent_path: thread.agent_path,
@@ -99,6 +103,7 @@ impl From<ThreadRecord> for pl_protocol::Thread {
             status: value.status,
             created_at: value.created_at,
             updated_at: value.updated_at,
+            last_user_message_at: value.last_user_message_at,
             archived: value.visibility == ThreadVisibility::Archived,
         }
     }

@@ -208,6 +208,9 @@ class BridgeThread {
   final BridgeThreadStatus status;
   final PlatformInt64 createdAt;
   final PlatformInt64 updatedAt;
+
+  /// 服务端最近一次成功受理用户消息的时间；`None` 表示尚未有已受理用户消息。
+  final PlatformInt64? lastUserMessageAt;
   final bool archived;
 
   const BridgeThread({
@@ -224,6 +227,7 @@ class BridgeThread {
     required this.status,
     required this.createdAt,
     required this.updatedAt,
+    this.lastUserMessageAt,
     required this.archived,
   });
 
@@ -242,6 +246,7 @@ class BridgeThread {
       status.hashCode ^
       createdAt.hashCode ^
       updatedAt.hashCode ^
+      lastUserMessageAt.hashCode ^
       archived.hashCode;
 
   @override
@@ -262,6 +267,7 @@ class BridgeThread {
           status == other.status &&
           createdAt == other.createdAt &&
           updatedAt == other.updatedAt &&
+          lastUserMessageAt == other.lastUserMessageAt &&
           archived == other.archived;
 }
 

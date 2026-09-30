@@ -7930,6 +7930,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThread {
             );
         let mut var_createdAt = <i64>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
+        let mut var_lastUserMessageAt = <Option<i64>>::sse_decode(deserializer);
         let mut var_archived = <bool>::sse_decode(deserializer);
         return crate::api::studio::types::thread_stream::BridgeThread {
             id: var_id,
@@ -7945,6 +7946,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThread {
             status: var_status,
             created_at: var_createdAt,
             updated_at: var_updatedAt,
+            last_user_message_at: var_lastUserMessageAt,
             archived: var_archived,
         };
     }
@@ -16691,6 +16693,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::thread_stream:
             self.status.into_into_dart().into_dart(),
             self.created_at.into_into_dart().into_dart(),
             self.updated_at.into_into_dart().into_dart(),
+            self.last_user_message_at.into_into_dart().into_dart(),
             self.archived.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -23411,6 +23414,7 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeThread {
         );
         <i64>::sse_encode(self.created_at, serializer);
         <i64>::sse_encode(self.updated_at, serializer);
+        <Option<i64>>::sse_encode(self.last_user_message_at, serializer);
         <bool>::sse_encode(self.archived, serializer);
     }
 }

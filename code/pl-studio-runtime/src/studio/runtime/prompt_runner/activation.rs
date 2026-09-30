@@ -52,6 +52,7 @@ impl StudioRuntime {
             workspace_path: thread.workspace_path,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
+            last_user_message_at: thread.last_user_message_at,
             visibility: if thread.archived {
                 ThreadVisibility::Archived
             } else {
