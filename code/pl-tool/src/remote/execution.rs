@@ -67,8 +67,8 @@ impl ExecutionBackend for RemoteExecutionBackend {
             Some(timeout) => match tokio::time::timeout(timeout, &mut wait).await {
                 Ok(result) => result,
                 Err(_) => {
-                    let termination = self.client.terminate_process(&process_id).await;
-                    let settled = wait.await;
+                    let (termination, settled) =
+                        tokio::join!(self.client.terminate_process(&process_id), wait,);
                     return Err(match (termination, settled) {
                         (Ok(()), Ok(_)) => {
                             "remote command timed out; process exit and output drain completed"

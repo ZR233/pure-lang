@@ -32,6 +32,10 @@ enum Request {
         id: String,
         reply: Reply,
     },
+    OutputConsumed {
+        id: String,
+        reply: Reply,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +126,12 @@ impl ProcessRegistry {
                 "physical registry lost its completion observer",
             )),
         }
+    }
+
+    pub(super) async fn output_consumed(&self, id: String) -> Result<(), RemoteError> {
+        let (reply, received) = oneshot::channel();
+        self.send(Request::OutputConsumed { id, reply }).await?;
+        received.await.map_err(|_| closed())?
     }
 
     async fn send(&self, request: Request) -> Result<(), RemoteError> {

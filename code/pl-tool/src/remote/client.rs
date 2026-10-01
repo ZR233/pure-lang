@@ -2,16 +2,20 @@ use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use std::collections::HashMap;
 use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::task::{Context, Poll};
 
 use pl_protocol::remote::{
-    RemoteError, RemoteEvent, RemoteMessage, RemoteOutputStream, RemoteProcessExit, RemoteRequest,
-    RemoteResponse, RemoteSpawnRequest,
+    REMOTE_OUTPUT_CHUNK_BYTES, REMOTE_OUTPUT_WINDOW, RemoteError, RemoteEvent, RemoteMessage,
+    RemoteOutputStream, RemoteProcessExit, RemoteRequest, RemoteResponse, RemoteSpawnRequest,
 };
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream};
-use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use super::codec::{EncodedFrame, encode_frame, read_frame};
 
@@ -79,8 +83,7 @@ pub struct RemoteReply {
 }
 
 struct RemoteProcessChannels {
-    stdout: DuplexStream,
-    stderr: DuplexStream,
+    output: mpsc::Sender<(RemoteOutputStream, Vec<u8>)>,
     exit: Option<oneshot::Sender<Result<RemoteProcessExit, RemoteClientError>>>,
 }
 
@@ -96,12 +99,15 @@ struct RemoteClientInner {
     writer: mpsc::Sender<EncodedFrame>,
     control_writer: mpsc::Sender<ControlFrame>,
     capacity: Arc<Semaphore>,
+    control_capacity: Arc<Semaphore>,
     pending: Mutex<HashMap<u64, PendingRequest>>,
     processes: Mutex<HashMap<String, RemoteProcessChannels>>,
     next_request_id: AtomicU64,
     last_output_sequence: AtomicU64,
     disconnected: CancellationToken,
     disconnect_reason: std::sync::Mutex<Option<String>>,
+    streams: TaskTracker,
+    progress: watch::Sender<Instant>,
 }
 
 impl std::fmt::Debug for RemoteClientInner {
@@ -147,19 +153,33 @@ impl RemoteClient {
             writer: sender,
             control_writer,
             capacity: Arc::new(Semaphore::new(REQUEST_CAPACITY)),
+            control_capacity: Arc::new(Semaphore::new(REQUEST_CAPACITY)),
             pending: Mutex::new(HashMap::new()),
             processes: Mutex::new(HashMap::new()),
             next_request_id: AtomicU64::new(0),
             last_output_sequence: AtomicU64::new(0),
             disconnected: CancellationToken::new(),
             disconnect_reason: Default::default(),
+            streams: TaskTracker::new(),
+            progress: watch::channel(Instant::now()).0,
         });
+        let reader = ProgressIo {
+            io: reader,
+            progress: inner.progress.clone(),
+        };
+        let writer = ProgressIo {
+            io: writer,
+            progress: inner.progress.clone(),
+        };
         let read = tokio::spawn(read_loop(reader, inner.clone()));
         let write = tokio::spawn(write_loop(writer, receiver, control_frames, inner.clone()));
+        let streams = inner.streams.clone();
         let transport = Arc::new(TransportLifetime {
             cancellation: inner.disconnected.clone(),
             completion: async move {
                 let (read, write) = tokio::join!(read, write);
+                streams.close();
+                streams.wait().await;
                 read.and(write).map_err(Arc::new)
             }
             .boxed()
@@ -185,12 +205,18 @@ impl RemoteClient {
         if self.is_disconnected() {
             return Err(RemoteClientError::Disconnected);
         }
-        let capacity = self
-            .inner
-            .capacity
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| RemoteClientError::Backpressure)?;
+        let control = matches!(
+            request,
+            RemoteRequest::Terminate { .. } | RemoteRequest::Heartbeat
+        );
+        let capacity = if control {
+            &self.inner.control_capacity
+        } else {
+            &self.inner.capacity
+        }
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| RemoteClientError::Backpressure)?;
         let request_id = self
             .inner
             .next_request_id
@@ -203,7 +229,13 @@ impl RemoteClient {
         let admission = tokio::select! {
             biased;
             _ = self.inner.disconnected.cancelled() => return Err(RemoteClientError::Disconnected),
-            permit = self.inner.writer.reserve() => permit.map_err(|_| RemoteClientError::Disconnected)?,
+            permit = async {
+                if control {
+                    self.inner.control_writer.reserve().await.map(RequestAdmission::Control)
+                } else {
+                    self.inner.writer.reserve().await.map(RequestAdmission::Ordinary)
+                }
+            } => permit.map_err(|_| RemoteClientError::Disconnected)?,
         };
         let (sender, receiver) = oneshot::channel();
         {
@@ -221,7 +253,15 @@ impl RemoteClient {
             );
         }
         // No cancellation point between pending registration and frame admission.
-        admission.send(frame);
+        match admission {
+            RequestAdmission::Ordinary(permit) => {
+                permit.send(frame);
+            }
+            RequestAdmission::Control(permit) => {
+                let (written, _) = oneshot::channel();
+                permit.send(ControlFrame { frame, written });
+            }
+        }
         receiver
             .await
             .unwrap_or(Err(RemoteClientError::Disconnected))
@@ -236,14 +276,31 @@ impl RemoteClient {
         let (stdout, event_stdout) = tokio::io::duplex(64 * 1024);
         let (stderr, event_stderr) = tokio::io::duplex(64 * 1024);
         let (exit_sender, exit) = oneshot::channel();
-        self.inner.processes.lock().await.insert(
+        let (output, incoming) = mpsc::channel(REMOTE_OUTPUT_WINDOW);
+        let mut processes = self.inner.processes.lock().await;
+        if self.is_disconnected() {
+            return Err(RemoteClientError::Disconnected);
+        }
+        if processes.contains_key(&process_id) {
+            return Err(RemoteClientError::Protocol(
+                "process identity already registered".into(),
+            ));
+        }
+        processes.insert(
             process_id.clone(),
             RemoteProcessChannels {
-                stdout: event_stdout,
-                stderr: event_stderr,
+                output,
                 exit: Some(exit_sender),
             },
         );
+        self.inner.streams.spawn(forward_output(
+            self.inner.clone(),
+            process_id.clone(),
+            incoming,
+            event_stdout,
+            event_stderr,
+        ));
+        drop(processes);
         match self.request(RemoteRequest::Spawn(request), &[]).await {
             Ok(RemoteReply {
                 response:
@@ -264,10 +321,14 @@ impl RemoteClient {
                 return Err(error);
             }
         }
-        let client = self.clone();
         let stdin_process_id = process_id.clone();
-        tokio::spawn(async move {
-            forward_stdin(client, stdin_process_id, stdin_reader).await;
+        let client = self.clone();
+        self.inner.streams.spawn(async move {
+            tokio::select! {
+                biased;
+                () = client.inner.disconnected.cancelled() => {},
+                () = forward_stdin(&client, stdin_process_id, stdin_reader) => {},
+            }
         });
         Ok(RemoteProcessTransport {
             stdin,
@@ -309,9 +370,28 @@ impl RemoteClient {
         })
     }
 
-    /// Writes a one-way lease heartbeat without consuming ordinary request capacity.
+    /// Completes an application-level heartbeat without ordinary request capacity.
     pub(crate) async fn heartbeat(&self) -> Result<(), RemoteClientError> {
-        self.send_control(RemoteRequest::Heartbeat).await
+        let timeout = std::time::Duration::from_secs(15);
+        let request = self.request(RemoteRequest::Heartbeat, &[]);
+        tokio::pin!(request);
+        let mut deadline = Instant::now() + timeout;
+        loop {
+            if let Ok(reply) = tokio::time::timeout_at(deadline, &mut request).await {
+                return expect_ack(reply?);
+            }
+            // Control cannot overtake a partially transferred file frame. Actual
+            // byte progress extends this wait; merely enqueueing work does not.
+            deadline = *self.inner.progress.borrow() + timeout;
+            if deadline <= Instant::now() {
+                retain_disconnect_reason(
+                    &self.inner,
+                    "helper heartbeat response timed out without transport progress".into(),
+                );
+                self.inner.disconnected.cancel();
+                return Err(RemoteClientError::Disconnected);
+            }
+        }
     }
 
     /// Flushes the one-way shutdown frame locally; remote cleanup is not acknowledged.
@@ -320,22 +400,7 @@ impl RemoteClient {
     }
 
     async fn send_control(&self, request: RemoteRequest) -> Result<(), RemoteClientError> {
-        if self.is_disconnected() {
-            return Err(RemoteClientError::Disconnected);
-        }
-        let frame = encode_frame(None, RemoteMessage::Request(request), &[])?;
-        let (written, completed) = oneshot::channel();
-        tokio::select! {
-            biased;
-            () = self.inner.disconnected.cancelled() => return Err(RemoteClientError::Disconnected),
-            result = self.inner.control_writer.send(ControlFrame { frame, written }) => {
-                result.map_err(|_| RemoteClientError::Disconnected)?;
-            }
-        }
-        completed
-            .await
-            .map_err(|_| RemoteClientError::Disconnected)??;
-        Ok(())
+        send_control(&self.inner, request).await
     }
 
     /// First transport failure, excluding request contents and credentials.
@@ -352,7 +417,112 @@ impl RemoteClient {
     }
 }
 
-async fn forward_stdin(client: RemoteClient, process_id: String, mut reader: DuplexStream) {
+enum RequestAdmission<'a> {
+    Ordinary(mpsc::Permit<'a, EncodedFrame>),
+    Control(mpsc::Permit<'a, ControlFrame>),
+}
+
+struct ProgressIo<T> {
+    io: T,
+    progress: watch::Sender<Instant>,
+}
+
+impl<T: AsyncRead + Unpin> AsyncRead for ProgressIo<T> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let before = buffer.filled().len();
+        let result = Pin::new(&mut self.io).poll_read(cx, buffer);
+        if buffer.filled().len() > before {
+            self.progress.send_replace(Instant::now());
+        }
+        result
+    }
+}
+
+impl<T: AsyncWrite + Unpin> AsyncWrite for ProgressIo<T> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bytes: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let result = Pin::new(&mut self.io).poll_write(cx, bytes);
+        if let Poll::Ready(Ok(count)) = &result
+            && *count > 0
+        {
+            self.progress.send_replace(Instant::now());
+        }
+        result
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.io).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.io).poll_shutdown(cx)
+    }
+}
+
+async fn forward_output(
+    inner: Arc<RemoteClientInner>,
+    process_id: String,
+    mut incoming: mpsc::Receiver<(RemoteOutputStream, Vec<u8>)>,
+    mut stdout: DuplexStream,
+    mut stderr: DuplexStream,
+) {
+    // This task alone may wait for a consumer. The frame reader never does.
+    let result: Result<(), RemoteClientError> = tokio::select! {
+        biased;
+        () = inner.disconnected.cancelled() => return,
+        result = async {
+            while let Some((stream, body)) = incoming.recv().await {
+                let writer = match stream {
+                    RemoteOutputStream::Stdout => &mut stdout,
+                    RemoteOutputStream::Stderr => &mut stderr,
+                };
+                if let Err(error) = writer.write_all(&body).await
+                    && error.kind() != io::ErrorKind::BrokenPipe {
+                    return Err(RemoteClientError::from(error));
+                }
+                send_control(&inner, RemoteRequest::OutputConsumed {
+                    process_id: process_id.clone(),
+                }).await?;
+            }
+            Ok(())
+        } => result,
+    };
+    if let Err(error) = result {
+        retain_disconnect_reason(&inner, format!("forward process output: {error}"));
+        inner.disconnected.cancel();
+    }
+}
+
+async fn send_control(
+    inner: &RemoteClientInner,
+    request: RemoteRequest,
+) -> Result<(), RemoteClientError> {
+    if inner.disconnected.is_cancelled() {
+        return Err(RemoteClientError::Disconnected);
+    }
+    let frame = encode_frame(None, RemoteMessage::Request(request), &[])?;
+    let (written, completed) = oneshot::channel();
+    tokio::select! {
+        biased;
+        () = inner.disconnected.cancelled() => return Err(RemoteClientError::Disconnected),
+        result = inner.control_writer.send(ControlFrame { frame, written }) => {
+            result.map_err(|_| RemoteClientError::Disconnected)?;
+        }
+    }
+    completed
+        .await
+        .map_err(|_| RemoteClientError::Disconnected)??;
+    Ok(())
+}
+
+async fn forward_stdin(client: &RemoteClient, process_id: String, mut reader: DuplexStream) {
     let mut buffer = [0_u8; 8192];
     loop {
         match reader.read(&mut buffer).await {
@@ -529,18 +699,25 @@ async fn handle_event(
             inner
                 .last_output_sequence
                 .store(output.sequence, Ordering::Relaxed);
-            let mut processes = inner.processes.lock().await;
-            let Some(channels) = processes.get_mut(&output.process_id) else {
+            if body.len() > REMOTE_OUTPUT_CHUNK_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "oversized process output",
+                ));
+            }
+            let processes = inner.processes.lock().await;
+            let Some(channels) = processes.get(&output.process_id) else {
                 return Ok(());
             };
-            let writer = match output.stream {
-                RemoteOutputStream::Stdout => &mut channels.stdout,
-                RemoteOutputStream::Stderr => &mut channels.stderr,
-            };
-            match writer.write_all(&body).await {
-                Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
-                result => result,
-            }
+            channels
+                .output
+                .try_send((output.stream, body))
+                .map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "process output exceeded its negotiated window",
+                    )
+                })
         }
         RemoteEvent::ProcessExit(exit) => {
             if let Some(mut channels) = inner.processes.lock().await.remove(&exit.process_id)

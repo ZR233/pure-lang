@@ -174,11 +174,26 @@ where
             return Ok(RequestEnd::Shutdown);
         }
         if matches!(request, RemoteRequest::Heartbeat) {
-            if request_id.is_some() || !frame.body.is_empty() {
+            if request_id.is_none() || !frame.body.is_empty() {
                 return Err(
                     io::Error::new(io::ErrorKind::InvalidData, "invalid heartbeat frame").into(),
                 );
             }
+            write_response(writer, request_id, RemoteResponse::Ack, &[]).await?;
+            continue;
+        }
+        if let RemoteRequest::OutputConsumed { process_id } = request {
+            if request_id.is_some() || !frame.body.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid output acknowledgement",
+                )
+                .into());
+            }
+            processes
+                .output_consumed(process_id)
+                .await
+                .map_err(ServerError::Cleanup)?;
             continue;
         }
         // Control remains reachable even when all ordinary request slots are occupied.
@@ -282,7 +297,9 @@ async fn handle_request(
             processes.terminate(&process_id).await?;
             Ok(ack())
         }
-        RemoteRequest::Heartbeat | RemoteRequest::Shutdown => Err(remote_error(
+        RemoteRequest::Heartbeat
+        | RemoteRequest::OutputConsumed { .. }
+        | RemoteRequest::Shutdown => Err(remote_error(
             RemoteErrorCode::InvalidRequest,
             "connection control must use the control lane",
         )),

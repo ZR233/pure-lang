@@ -670,8 +670,7 @@ impl SshManager {
                     biased;
                     () = closing.cancelled() => break,
                     () = cancelled.cancelled() => break,
-                    // A large frame can occupy the writer for longer than one tick.
-                    // Its inbound bytes renew the helper lease until control can flush.
+                    // Require a helper response, not merely a successful local pipe write.
                     result = client.heartbeat() => result,
                 };
                 if result.is_err() {

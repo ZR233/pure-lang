@@ -11,7 +11,9 @@ typed Studio 功能并展示 canonical snapshot；SSH 服务器管理、连接�
 远端 helper 是随 SSH stdio channel 生存的能力代理，只维护 workspace handle 与进程 handle。
 它不包含 Thread/Turn、Tool schema、权限、Git/worktree、Skills、LSP 协议、模型、数据库、
 Timeline、重试或会话持久化；不监听端口、不 daemonize，也不支持断线后的进程重附着。SSH
-连接每 5 秒发送单向心跳；helper 连续 30 秒没有收到心跳或其他入站数据（包括帧体读取
+连接每 5 秒发送有应答的心跳，等待应答期间连续 15 秒无实际字节传输进展即关闭该代通信
+并进入既有自动重连；大文件帧仍在传输时不把控制帧的排队时间误判为失联。
+心跳与终止请求不占普通请求配额。helper 连续 30 秒没有收到心跳或其他入站数据（包括帧体读取
 进度）时封闭新请求并回收全部命令监督器及其后代。EOF、单向 shutdown、写入失败和租约
 过期走同一清理路径。正常 GUI 退出只尝试写入关闭帧，不等待远端确认或 SSH 失联。每个
 命令监督器先发 SIGTERM，2 秒后升级为 SIGKILL，并等待后代退出；helper 完成清理后退出。
@@ -37,7 +39,7 @@ Timeline、重试或会话持久化；不监听端口、不 daemonize，也不�
 尊重远端配置，不额外补入固定目录；同一连接不重复加载配置，重连重新采集。本地 process
 worker 的环境策略不受影响。
 
-协议版本为 v6，客户端与 helper 必须同步更新。控制面只提供 `hello`、单向 `heartbeat`、GUI 专用的 `browseDirectories`、
+协议版本为 v7，客户端与 helper 必须同步更新。控制面提供 `hello`、有应答的 `heartbeat`、单向 `outputConsumed`、GUI 专用的 `browseDirectories`、
 `openWorkspace`、`closeWorkspace` 和单向 `shutdown`。文件面只提供远端事实所必需的 `stat`、`readBytes`、`writeAtomic`、
 `listDirectory`、`createDirectory`、`removePath`、`renamePath` 与 `copyPath`；文本解码、
 glob、patch/diff、工具 JSON、图片识别和 Skill 解析留在本地 core。helper 必须用远端文件
@@ -50,9 +52,17 @@ record、Timeline、artifact 与最终 JSON。不提供 PTY、终端面板、端
 
 `processId` 是 opaque token，不允许调用方解析其局部序号。core 进程内所有命令进程管理器
 共用一个原子单调分配序列，因此 manager 重建或多个 Agent 共享同一 helper 连接时也不会
-复用 id；在单个 helper 连接生命周期内同一 id 最多成功 spawn 一次。helper 在任何异步进程
+复用 id；调用方不得重新发送已使用的 id 或重放 spawn。helper 在任何异步进程
 准备前把 id 原子登记为 Starting reservation，成功后转换为 live handle，所有失败路径都
-释放 reservation；并发同 id 请求不得通过检查后相互覆盖，关闭连接仍回收全部 live 进程组。
+释放 reservation；并发同 id 请求不得通过检查后相互覆盖。登记容量只计算仍在准备、执行或
+回收的进程，资源任务结束后立即释放条目，不为已结束进程保留登记或不断增长的墓碑。
+关闭连接仍回收全部 live 进程组。
+
+每个进程的实时输出采用固定帧窗口：最多 8 个未消费帧，每帧最多 8192 字节。客户端独立
+排空该进程的输出，消费或接收端关闭后发送 `outputConsumed` 归还一个窗口额度；共用
+读取任务只做有界投递，不等待业务输出流。窗口耗尽只暂停对应进程的输出读取，不阻塞
+启动回复、文件请求、终止或心跳。显式取消停止等待窗口并继续排空到完整 capture；断线
+关闭所有输出任务并等待回收。超时终止请求与输出排空并行，不先等待终止回复再读取输出。
 
 ## 22.3 本地工具与 SSH 管理
 

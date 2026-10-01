@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use pl_protocol::remote::REMOTE_OUTPUT_WINDOW;
 use pl_protocol::remote::{RemoteError, RemoteErrorCode, RemoteShellDescriptor};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{Semaphore, mpsc, watch};
 use tokio::task::JoinSet;
 
 use super::super::outbound::Outbound;
@@ -11,6 +13,7 @@ use crate::path::remote_error;
 struct Entry {
     cancel: watch::Sender<bool>,
     input: mpsc::Sender<Input>,
+    output_credit: Arc<Semaphore>,
 }
 
 pub(super) async fn run(
@@ -31,9 +34,13 @@ pub(super) async fn run(
                 break;
             }
             result = jobs.join_next(), if !jobs.is_empty() => {
-                if let Some(Err(error)) = result {
-                    failure = Some(remote_error(RemoteErrorCode::Io, format!("resource observation failed: {error}")));
-                    break;
+                match result {
+                    Some(Ok(id)) => { entries.remove(&id); }
+                    Some(Err(error)) => {
+                        failure = Some(remote_error(RemoteErrorCode::Io, format!("resource observation failed: {error}")));
+                        break;
+                    }
+                    None => {}
                 }
                 continue;
             }
@@ -55,25 +62,35 @@ pub(super) async fn run(
                 }
                 let (cancel, cancelled) = watch::channel(false);
                 let (input, incoming) = mpsc::channel(8);
+                let output_credit = Arc::new(Semaphore::new(REMOTE_OUTPUT_WINDOW));
                 entries.insert(
                     request.process_id.clone(),
                     Entry {
                         cancel: cancel.clone(),
                         input,
+                        output_credit: output_credit.clone(),
                     },
                 );
                 // Admission and job ownership are established without awaiting external code.
-                jobs.spawn(resource::run(resource::Launch {
-                    request,
-                    cwd,
-                    capture,
-                    shell: shell.clone(),
-                    writer: writer.clone(),
-                    cancel,
-                    cancelled,
-                    incoming,
-                    reply,
-                }));
+                let id = request.process_id.clone();
+                let shell = shell.clone();
+                let writer = writer.clone();
+                jobs.spawn(async move {
+                    resource::run(resource::Launch {
+                        request,
+                        cwd,
+                        capture,
+                        shell,
+                        writer,
+                        cancel,
+                        cancelled,
+                        incoming,
+                        reply,
+                        output_credit,
+                    })
+                    .await;
+                    id
+                });
             }
             Request::Input { id, body, reply } => match entries.get(&id) {
                 Some(entry) => {
@@ -98,6 +115,25 @@ pub(super) async fn run(
                 };
                 let _ = reply.send(result);
             }
+            Request::OutputConsumed { id, reply } => {
+                let result = match entries.get(&id) {
+                    Some(entry)
+                        if entry.output_credit.available_permits() >= REMOTE_OUTPUT_WINDOW =>
+                    {
+                        Err(remote_error(
+                            RemoteErrorCode::InvalidRequest,
+                            "output window over-acknowledged",
+                        ))
+                    }
+                    Some(entry) => {
+                        entry.output_credit.add_permits(1);
+                        Ok(())
+                    }
+                    // The terminal frame can precede the last consumption acknowledgement.
+                    None => Ok(()),
+                };
+                let _ = reply.send(result);
+            }
         }
     }
     requests.close();
@@ -108,7 +144,8 @@ pub(super) async fn run(
         let reply = match request {
             Request::Spawn { reply, .. }
             | Request::Input { reply, .. }
-            | Request::Cancel { reply, .. } => reply,
+            | Request::Cancel { reply, .. }
+            | Request::OutputConsumed { reply, .. } => reply,
         };
         let _ = reply.send(Err(closed()));
     }

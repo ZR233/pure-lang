@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-pub const REMOTE_PROTOCOL_VERSION: u32 = 6;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 7;
+pub const REMOTE_OUTPUT_WINDOW: usize = 8;
+pub const REMOTE_OUTPUT_CHUNK_BYTES: usize = 8192;
 pub const REMOTE_MAX_HEADER_BYTES: usize = 64 * 1024;
 pub const REMOTE_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 
@@ -39,6 +41,7 @@ pub enum RemoteMessage {
 pub enum RemoteRequest {
     Hello { protocol_version: u32 },
     Heartbeat,
+    OutputConsumed { process_id: String },
     BrowseDirectories { path: Option<String> },
     OpenWorkspace { path: String },
     CloseWorkspace { workspace_id: String },

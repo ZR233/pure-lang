@@ -1,11 +1,12 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use pl_protocol::remote::{
     RemoteError, RemoteErrorCode, RemoteEvent, RemoteMessage, RemoteProcessExit,
     RemoteShellDescriptor, RemoteShellDialect, RemoteSpawnRequest,
 };
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{Semaphore, mpsc, watch};
 
 use super::super::outbound::Outbound;
 use super::{
@@ -25,6 +26,7 @@ pub(super) struct Launch {
     pub cancelled: watch::Receiver<bool>,
     pub incoming: mpsc::Receiver<Input>,
     pub reply: Reply,
+    pub output_credit: Arc<Semaphore>,
 }
 
 pub(super) async fn run(mut launch: Launch) {
@@ -63,6 +65,7 @@ pub(super) async fn run(mut launch: Launch) {
             capture,
             writer: &launch.writer,
             cancel: &launch.cancel,
+            credit: &launch.output_credit,
         }),
         streams::input(stdin, launch.incoming, stopped),
     );

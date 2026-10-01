@@ -1,9 +1,9 @@
 use pl_protocol::remote::{
-    RemoteError, RemoteErrorCode, RemoteEvent, RemoteMessage, RemoteOutputStream,
-    RemoteProcessOutput,
+    REMOTE_OUTPUT_CHUNK_BYTES, RemoteError, RemoteErrorCode, RemoteEvent, RemoteMessage,
+    RemoteOutputStream, RemoteProcessOutput,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{Semaphore, mpsc, watch};
 
 use super::super::outbound::Outbound;
 use super::Reply;
@@ -57,15 +57,31 @@ pub(super) struct Output<'a> {
     pub capture: tokio::fs::File,
     pub writer: &'a Outbound,
     pub cancel: &'a watch::Sender<bool>,
+    pub credit: &'a Semaphore,
 }
 
 pub(super) async fn output(mut output: Output<'_>) -> Option<RemoteError> {
-    let mut stdout_buffer = [0; 8192];
-    let mut stderr_buffer = [0; 8192];
+    let mut stdout_buffer = [0; REMOTE_OUTPUT_CHUNK_BYTES];
+    let mut stderr_buffer = [0; REMOTE_OUTPUT_CHUNK_BYTES];
+    let mut cancelled = output.cancel.subscribe();
     let mut failure = None;
     let mut capture_open = true;
     let mut wire_open = true;
     while output.stdout.is_some() || output.stderr.is_some() {
+        // Reserve before reading: only this process is backpressured. Cancellation
+        // keeps the complete capture draining without waiting on an absent consumer.
+        let permit = if wire_open {
+            tokio::select! {
+                biased;
+                _ = cancelled.wait_for(|cancelled| *cancelled) => {
+                    wire_open = false;
+                    None
+                }
+                permit = output.credit.acquire() => permit.ok(),
+            }
+        } else {
+            None
+        };
         let (stream, result) = tokio::select! {
             result = read_stdout(&mut output.stdout, &mut stdout_buffer), if output.stdout.is_some() => (RemoteOutputStream::Stdout, result),
             result = read_stderr(&mut output.stderr, &mut stderr_buffer), if output.stderr.is_some() => (RemoteOutputStream::Stderr, result),
@@ -104,6 +120,9 @@ pub(super) async fn output(mut output: Output<'_>) -> Option<RemoteError> {
                 capture_open = false;
                 output.cancel.send_replace(true);
             }
+        }
+        if wire_open && let Some(permit) = permit {
+            permit.forget();
         }
         if wire_open
             && let Err(error) = output
