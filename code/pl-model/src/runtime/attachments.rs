@@ -5,7 +5,11 @@ use pl_protocol::{PureError, Result};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, sync::Arc};
 
-use super::{ModelSession, provider_error::reqwest_error_to_pure, transport};
+use super::{
+    ModelSession,
+    provider_error::{reqwest_body_error_to_pure, reqwest_error_to_pure},
+    transport,
+};
 use crate::completion::{
     AttachmentInput, AttachmentRepresentation, AttachmentSource, CompletionRequest,
     ResolvedAttachment,
@@ -216,7 +220,7 @@ impl AttachmentBackend<'_> {
                 let mut stream = response.bytes_stream();
                 let mut bytes = Vec::new();
                 while let Some(chunk) = stream.next().await {
-                    let chunk = chunk.map_err(reqwest_error_to_pure)?;
+                    let chunk = chunk.map_err(reqwest_body_error_to_pure)?;
                     if (bytes.len() as u64).saturating_add(chunk.len() as u64) > maximum {
                         return Err(PureError::ConfigError(
                             "downloaded attachment exceeds model limits".into(),

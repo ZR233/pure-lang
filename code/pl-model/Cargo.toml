@@ -25,6 +25,7 @@ tokio-util = { workspace = true }
 tokio-tungstenite = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true, features = ["multipart"] }
+hyper = { workspace = true }
 eventsource-stream = { workspace = true }
 
 [dev-dependencies]

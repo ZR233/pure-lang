@@ -2749,6 +2749,7 @@ dependencies = [
  "eventsource-stream",
  "futures",
  "hex",
+ "hyper",
  "image",
  "pl-core",
  "pl-protocol",

@@ -9,8 +9,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 use super::openai::sse::SseStreamEvent;
-use super::provider_error::provider_stream_failure;
 pub(crate) use super::provider_error::reqwest_error_to_pure;
+use super::provider_error::{provider_stream_failure, reqwest_body_error_to_pure};
 
 pub(crate) fn headers(
     token: Option<&str>,
@@ -54,20 +54,33 @@ pub(crate) async fn checked(response: reqwest::Response) -> Result<reqwest::Resp
     let headers = response.headers().clone();
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
+    let mut body_failure = None;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(reqwest_error_to_pure)?;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                body_failure = Some(reqwest_body_error_to_pure(error));
+                break;
+            }
+        };
         let remaining = 16_384_usize.saturating_sub(body.len());
         body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
         if body.len() == 16_384 {
             break;
         }
     }
-    Err(response_error(
+    let mut error = response_error(
         status,
         &headers,
         &body,
         pl_protocol::ProviderFailureStage::Request,
-    ))
+    );
+    // The status and retry headers already describe the failed request. A
+    // damaged error body must not turn authentication failures into retries.
+    if let (Some(body_failure), PureError::Provider(failure)) = (body_failure, &mut error) {
+        failure.message.push_str(&format!("; {body_failure}"));
+    }
+    Err(error)
 }
 
 pub(crate) fn response_error(
@@ -76,11 +89,7 @@ pub(crate) fn response_error(
     body: &[u8],
     stage: pl_protocol::ProviderFailureStage,
 ) -> PureError {
-    let request_id = headers
-        .get("x-request-id")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("unknown")
-        .to_owned();
+    let request_id = response_request_id(headers);
     let retry_after = headers
         .get("retry-after-ms")
         .and_then(|value| value.to_str().ok())
@@ -104,12 +113,13 @@ pub(crate) fn response_error(
         code,
         Some(status),
         retry_after,
-        format!("HTTP {status}, request_id={request_id}: {message}"),
+        format!(
+            "HTTP {status}, request_id={}: {message}",
+            request_id.as_deref().unwrap_or("unknown")
+        ),
     );
     if let PureError::Provider(failure) = &mut error {
-        failure.context.request_id = Some(super::provider_error::redact_secret_like_values(
-            &request_id,
-        ));
+        failure.context.request_id = request_id;
         if matches!(status, 400 | 404) && matches!(code, Some("file_not_found" | "file_expired")) {
             failure.context.recovery = pl_protocol::ProviderRecovery::RefreshAttachments;
         }
@@ -120,11 +130,49 @@ pub(crate) fn response_error(
     error
 }
 
+fn response_request_id(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get("x-request-id")?.to_str().ok()?;
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_.:".contains(&byte))
+    {
+        return None;
+    }
+    Some(super::provider_error::redact_secret_like_values(value))
+}
+
 pub(crate) async fn sse(
     request: reqwest::RequestBuilder,
 ) -> Result<BoxStream<'static, Result<SseStreamEvent>>> {
     let response = checked(request.send().await.map_err(reqwest_error_to_pure)?).await?;
-    let stream = sse_lines::complete_lines(response.bytes_stream()).eventsource();
+    let version = response.version();
+    let status = response.status().as_u16();
+    let request_id = response_request_id(response.headers());
+    let started = std::time::Instant::now();
+    let mut received_bytes = 0_u64;
+    let body = response.bytes_stream().map(move |chunk| match chunk {
+        Ok(chunk) => {
+            received_bytes = received_bytes.saturating_add(chunk.len() as u64);
+            Ok(chunk)
+        }
+        Err(error) => {
+            let mut error = reqwest_body_error_to_pure(error);
+            if let PureError::Provider(failure) = &mut error {
+                failure.context.stage = pl_protocol::ProviderFailureStage::Stream;
+                failure.context.request_id = request_id.clone();
+                failure.http_status = Some(status);
+                failure.message.push_str(&format!(
+                    "; version={version:?}; received_bytes={received_bytes}; read_elapsed_ms={}; request_id={}",
+                    started.elapsed().as_millis(),
+                    request_id.as_deref().unwrap_or("unknown"),
+                ));
+            }
+            Err(error)
+        }
+    });
+    let stream = sse_lines::complete_lines(body).eventsource();
     Ok(stream
         .take_while(|event| {
             futures::future::ready(
@@ -140,9 +188,7 @@ pub(crate) async fn sse(
                     serde_json::from_str(&event.data)
                         .map_err(|error| PureError::Protocol(format!("invalid SSE JSON: {error}"))),
                 ),
-                Err(eventsource_stream::EventStreamError::Transport(error)) => {
-                    Some(Err(reqwest_error_to_pure(error)))
-                }
+                Err(eventsource_stream::EventStreamError::Transport(error)) => Some(Err(error)),
                 Err(error) => Some(Err(PureError::Protocol(format!(
                     "invalid SSE framing: {error}"
                 )))),

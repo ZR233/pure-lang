@@ -63,7 +63,7 @@ pub(crate) fn provider_stream_failure(
 
 pub(crate) fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
     let error = error.without_url();
-    let detail = redact_secret_like_values(&error.to_string());
+    let detail = reqwest_error_detail(&error);
     if error.is_timeout() || error.is_connect() || response_start_connection_closed(&error) {
         return PureError::transient_model_failure(
             detail,
@@ -75,18 +75,9 @@ pub(crate) fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
     if error.is_builder() || error.is_redirect() {
         configuration_failure(detail)
     } else if error.is_decode() || error.is_body() {
-        // 响应体解码失败多由连接中途断开引起（与 ConnectionReset 同性质），
-        // 只有确认无传输层根因时才视为协议错误。
-        if response_start_connection_closed(&error) {
-            PureError::transient_model_failure(
-                detail,
-                None,
-                None,
-                error.status().map(|status| status.as_u16()),
-            )
-        } else {
-            protocol_failure(detail)
-        }
+        // This general boundary also handles Response::json(). Raw byte-stream
+        // failures use reqwest_body_error_to_pure before any model decoding.
+        protocol_failure(detail)
     } else {
         PureError::provider_failure(ProviderFailure {
             context: Default::default(),
@@ -97,6 +88,46 @@ pub(crate) fn reqwest_error_to_pure(error: reqwest::Error) -> PureError {
             retry: RetryDisposition::Permanent,
         })
     }
+}
+
+pub(crate) fn reqwest_body_error_to_pure(error: reqwest::Error) -> PureError {
+    // At bytes_stream(), Decode refers to HTTP framing/content decoding, not
+    // model JSON. Do not depend on a nested io::Error or library error wording.
+    let error = error.without_url();
+    PureError::transient_model_failure(
+        format!(
+            "response body read failed: {}",
+            reqwest_error_detail(&error)
+        ),
+        None,
+        None,
+        error.status().map(|status| status.as_u16()),
+    )
+}
+
+fn reqwest_error_detail(error: &reqwest::Error) -> String {
+    use std::{error::Error, fmt::Write};
+
+    let mut detail = redact_secret_like_values(&error.to_string());
+    if error.is_timeout() {
+        detail.push_str("; timeout=true");
+    }
+    let mut source = error.source();
+    for _ in 0..8 {
+        let Some(cause) = source else { break };
+        // Hyper's Display is a fixed category, never its source/body. Do not
+        // format arbitrary sources: they may contain URLs or provider content.
+        if let Some(error) = cause.downcast_ref::<hyper::Error>() {
+            let _ = write!(detail, "; hyper={error}");
+        } else if let Some(error) = cause.downcast_ref::<std::io::Error>() {
+            let _ = write!(detail, "; io={:?}", error.kind());
+            if let Some(code) = error.raw_os_error() {
+                let _ = write!(detail, "; os_code={code}");
+            }
+        }
+        source = cause.source();
+    }
+    detail
 }
 
 fn configuration_failure(message: impl Into<String>) -> PureError {
@@ -127,7 +158,8 @@ fn response_start_connection_closed(error: &reqwest::Error) -> bool {
     }
     // decode/body 错误需要保留：它们可能根源于连接中断，逐层检查 source。
     let mut source: Option<&dyn std::error::Error> = Some(error);
-    while let Some(cause) = source {
+    for _ in 0..8 {
+        let Some(cause) = source else { break };
         if cause.downcast_ref::<std::io::Error>().is_some_and(|error| {
             matches!(
                 error.kind(),
@@ -138,9 +170,8 @@ fn response_start_connection_closed(error: &reqwest::Error) -> bool {
                     | std::io::ErrorKind::TimedOut
             )
         }) || cause
-            .to_string()
-            .to_ascii_lowercase()
-            .contains("connection closed before message completed")
+            .downcast_ref::<hyper::Error>()
+            .is_some_and(|error| error.is_incomplete_message() || error.is_closed())
         {
             return true;
         }

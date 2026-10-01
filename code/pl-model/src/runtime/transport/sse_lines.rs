@@ -1,10 +1,11 @@
 //! Feed complete lines to the SSE parser, which otherwise rescans an incomplete
 //! line from its beginning on every network chunk (quadratic for large deltas).
 use futures::{Stream, StreamExt, TryStreamExt, stream};
+use pl_protocol::Result;
 
 pub(super) fn complete_lines<B>(
-    stream: impl Stream<Item = Result<B, reqwest::Error>> + Send + 'static,
-) -> impl Stream<Item = Result<Vec<u8>, reqwest::Error>> + Send
+    stream: impl Stream<Item = Result<B>> + Send + 'static,
+) -> impl Stream<Item = Result<Vec<u8>>> + Send
 where
     B: AsRef<[u8]> + Send + 'static,
 {
@@ -33,10 +34,10 @@ struct LineReader<S, B> {
 
 impl<S, B> LineReader<S, B>
 where
-    S: Stream<Item = Result<B, reqwest::Error>> + Unpin,
+    S: Stream<Item = Result<B>> + Unpin,
     B: AsRef<[u8]>,
 {
-    async fn next_line(&mut self) -> Result<Option<Vec<u8>>, reqwest::Error> {
+    async fn next_line(&mut self) -> Result<Option<Vec<u8>>> {
         loop {
             if let Some(chunk) = &self.chunk {
                 let bytes = &chunk.as_ref()[self.offset..];

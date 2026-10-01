@@ -643,14 +643,12 @@ impl InvocationRunner {
         std::result::Result<CompletionResponse, CompletionFailure>,
         bool,
     ) {
-        let has_hosted_tools = self.purpose == InvocationPurpose::RemoteCompaction
-            || request.tools.iter().any(|tool| match tool {
-                pl_protocol::ToolSpec::Function { .. } | pl_protocol::ToolSpec::Custom { .. } => {
-                    false
-                }
-                pl_protocol::ToolSpec::ProgrammaticToolCalling
-                | pl_protocol::ToolSpec::WebSearch { .. } => true,
-            });
+        let has_hosted_tools = request.tools.iter().any(|tool| match tool {
+            pl_protocol::ToolSpec::Function { .. } | pl_protocol::ToolSpec::Custom { .. } => false,
+            pl_protocol::ToolSpec::ProgrammaticToolCalling
+            | pl_protocol::ToolSpec::WebSearch { .. } => true,
+        });
+        let is_compaction = self.purpose == InvocationPurpose::RemoteCompaction;
         let (body, mut model_observation) =
             match self.prepare_request_body(request, context.prompt_cache_key.as_deref()) {
                 Ok(prepared) => prepared,
@@ -680,7 +678,10 @@ impl InvocationRunner {
                         let mut progress = super::thread_model::progress::ProgressProjection::new(context.progress.clone());
                         move |event| {
                             if let Ok(event) = &event
-                                && (has_hosted_tools || matches!(event,
+                                && (has_hosted_tools
+                                    || (is_compaction && matches!(event,
+                                        crate::completion::stream::event::ModelStreamEvent::ResponsesContextItem { .. }))
+                                    || matches!(event,
                                     crate::completion::stream::event::ModelStreamEvent::Usage(_)
                                     | crate::completion::stream::event::ModelStreamEvent::Completed { .. }
                                     | crate::completion::stream::event::ModelStreamEvent::PresentationItem { .. }))
