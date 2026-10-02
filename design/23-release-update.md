@@ -9,10 +9,17 @@
 
 Studio 使用 Release Please 的单一根组件管理版本：根版本文件、release manifest 与带版本
 注解的 Flutter pubspec 由同一个 Release PR 同步更新；Flutter 版本只允许规范的稳定
-`x.y.z`，不使用 `+build`。版本从整个仓库的 Conventional Commits 收集：`fix:` 递增
-patch，`feat:` 递增 minor，带 `!` 或 `BREAKING CHANGE:` 的提交递增 major；`ci:`、
-`docs:` 与 `chore:` 等非产品修改不单独触发版本。人工审查并合并 Release PR 即批准发版，
-不从 Actions 输入或推算版本。
+`x.y.z`，不使用 `+build`。版本从整个仓库的 Conventional Commits 收集，自动计算采用
+`always-bump-minor`：可发布的产品修改统一递增 minor 并将 patch 归零，`fix:` 也不自动
+递增 patch；带 `!` 或 `BREAKING CHANGE:` 的提交不自动递增 major。破坏性变更标记与
+发行说明仍须保留；此处采用产品发布节奏，不以 minor 表示不存在破坏性变更。普通 `ci:`、
+`docs:` 与 `chore:` 等非产品修改不单独触发版本。
+
+major 升级必须由维护者明确决定，在进入主分支的提交正文中使用 `Release-As: x.y.z`
+指定目标稳定版本，再人工审查并合并生成的 Release PR；不能仅凭破坏性变更标记决定升级。
+显式指定只影响相应发布，之后仍采用自动 minor 策略，不保留长期固定的版本覆盖配置。
+所有版本仍以人工审查并合并 Release PR 为发版批准，不新增自动合并，也不从 Actions 输入
+或另行推算版本。策略只影响后续版本计算，不改写已生成的历史版本或既有 draft。
 
 PR Quality Gate 对 PR head 分支运行 Release Please dry run，验证该分支的发布配置；
 仅在 GitHub GraphQL 返回已识别的瞬时错误时有限重试，其他错误直接失败。

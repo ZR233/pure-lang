@@ -30,6 +30,18 @@
 - 用户可见缺陷优先使用 `fix`，新能力优先使用 `feat`；破坏性变更使用 `!` 或 `BREAKING CHANGE` footer。
 - squash 合并前同时检查 PR 标题和实际 commit subject，确保最终提交可被 Release Please 解析。
 
+### Studio 发版决策
+
+- 自动版本计算统一递增 minor，`fix:` 也不自动递增 patch；`!` / `BREAKING CHANGE:`
+  不自动递增 major，但必须保留真实的破坏性变更标记和发行说明。发布契约见
+  [发布与更新](design/23-release-update.md#231-版本与发布流)。
+- major 只能在维护者明确决定后，用最终落入 `main` 的提交正文 `Release-As: x.y.z`
+  指定目标稳定版本。例如 subject 为 `chore(studio): release 7.0.0`，正文为
+  `Release-As: 7.0.0`；这只是操作示例，不授权 agent 自行提交或选择大版本。
+- 使用 squash 合并时确认最终 commit body 保留 `Release-As`；仅修改 PR 标题或描述不够。
+  等待 Release Please 同步生成版本文件和 CHANGELOG 后，再审查并合并 Release PR；不直接
+  手改版本文件或 tag，也不在配置中长期保留 `release-as`。现有构建、签名和故障恢复流程不变。
+
 ## 项目目录与命令入口
 
 ### 基本目录
