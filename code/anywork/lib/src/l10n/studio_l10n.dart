@@ -230,12 +230,13 @@ extension StudioLocalizationsX on BuildContext {
 
   /// Maps a canonical provider status to its localized display label.
   ///
+  /// `ready` only describes configured credentials, not verified connectivity.
   /// `ready` and `missingCredential` are the only canonical statuses today;
   /// any other value is returned unchanged so unknown or future statuses are
   /// never mislabeled as a configuration state.
   String providerStatusLabel(String status) {
     return switch (status.trim()) {
-      'ready' => l10n.settingsReadyBadge,
+      'ready' => l10n.settingsConfigured,
       'missingCredential' => l10n.settingsProviderMissingCredential,
       _ => status,
     };

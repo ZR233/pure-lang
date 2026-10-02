@@ -80,10 +80,7 @@ class ProviderDetails extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            SettingsInfoPill(
-              icon: Icons.key_outlined,
-              label: context.providerStatusLabel(provider.status),
-            ),
+            SettingsProviderStatusChip(provider: provider, usage: usage),
             SettingsInfoPill(
               icon: Icons.hub_outlined,
               label: provider.allModels

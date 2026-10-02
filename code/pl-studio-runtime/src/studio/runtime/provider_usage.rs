@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::config::StudioConfig;
 use crate::studio::ids::unix_seconds;
-use crate::{ProviderUsageRecord, ProviderUsageState, StudioStore};
+use crate::{ProviderUsageRecord, StudioStore};
 
 const CACHE_KEY: &str = "observed:providerUsage:v2";
 
@@ -82,41 +82,9 @@ impl ProviderUsageRuntime {
             .unwrap_or_default();
         let usages = crate::provider_usage_records(config, prior_usages, &operation_id).await?;
         let checked_at = unix_seconds();
-        let failures = usages
-            .iter()
-            .filter_map(|usage| match usage.state() {
-                ProviderUsageState::Failed(state) => Some(format!(
-                    "{}: {}",
-                    usage.provider_id(),
-                    state.error().message
-                )),
-                ProviderUsageState::Unsupported(_)
-                | ProviderUsageState::MissingCredential(_)
-                | ProviderUsageState::Ready(_) => None,
-            })
-            .collect::<Vec<_>>();
-        if !failures.is_empty() {
-            let failed = ProviderUsageStateSnapshot {
-                state: running
-                    .state
-                    .decide(ObservedResourceCommand::Fail {
-                        expected_revision: running.state.revision(),
-                        failed_at: checked_at,
-                        error: StateError {
-                            code: "providerUsageCheckFailed".to_string(),
-                            message: failures.join("; "),
-                            retryable: true,
-                        },
-                    })
-                    .map_err(|error| anyhow::anyhow!(error.to_string()))?
-                    .next_state,
-            };
-            self.store
-                .save_setting(CACHE_KEY, &serde_json::to_string(&failed)?)
-                .await?;
-            self.publish(failed).await;
-            anyhow::bail!("provider usage check failed: {}", failures.join("; "));
-        }
+        // A failed provider query is an observed per-provider result. Publish it
+        // alongside successful and unsupported providers instead of discarding
+        // this refresh and turning one failure into an error on every card.
         let next = ProviderUsageStateSnapshot {
             state: running
                 .state

@@ -34,7 +34,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
   String _query = '';
   String? _selectedProviderId;
   ProviderDraft? _draft;
-  final GlobalKey<FormState> _draftFormKey = GlobalKey<FormState>();
+  GlobalKey<FormState> _draftFormKey = GlobalKey<FormState>();
   bool _showDetails = false;
   bool _saving = false;
   String? _draftError;
@@ -205,6 +205,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       _selectedProviderId = id;
       _showDetails = false;
       _draft = draft;
+      _draftFormKey = GlobalKey<FormState>();
       _draftError = null;
     });
   }
@@ -214,6 +215,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       _selectedProviderId = provider.id;
       _showDetails = false;
       _draft = ProviderDraft.edit(provider);
+      _draftFormKey = GlobalKey<FormState>();
       _draftError = null;
     });
   }
@@ -225,7 +227,9 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         ?.value
         .providerCatalog;
     final current = _draft;
-    if (catalog == null || current == null) {
+    if (catalog == null ||
+        current == null ||
+        current.provider.templateKind == templateId) {
       return;
     }
     final id = current.mode == ProviderDraftMode.create && templateId.isNotEmpty
@@ -240,7 +244,12 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
     if (next == null) {
       return;
     }
-    setState(() => _draft = next);
+    setState(() {
+      _draft = next;
+      // A retained GlobalKey would reparent the old Form under the new
+      // ProviderEditor and preserve its text, validation and secret fields.
+      _draftFormKey = GlobalKey<FormState>();
+    });
   }
 
   void _updateDraft(

@@ -14,6 +14,10 @@ owner。进程运行期间 Project、Thread、Agent、Workflow、Recovery 和服
 
 ## 18.2 公共 snapshot
 
+服务商用量刷新按 provider 发布独立的成功、失败、缺少凭据或不支持状态。单个服务商
+查询失败仍是本次观察的有效结果，不丢弃其他服务商的新结果，也不升级成所有卡片共享的
+命令错误；只有观察协调或持久化失败才使整个刷新命令失败。
+
 Thread 目录 DTO 的 `lastUserMessageAt` 是可空的 Unix 秒时间，仅由成功受理用户输入推进，
 与普通 `updatedAt` 分离。Rust protocol、FRB DTO、Dart domain 与目录增量均传递同一事实；
 运行观察、标题和配置变更保留该值，不因迟到快照回退。已接受排队输入计入，系统/代理输入、

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/studio_tokens.dart';
 
-class SettingsTextEdit extends StatelessWidget {
+class SettingsTextEdit extends StatefulWidget {
   const SettingsTextEdit({
     super.key,
     required this.label,
@@ -19,14 +19,42 @@ class SettingsTextEdit extends StatelessWidget {
   final bool obscureText;
 
   @override
+  State<SettingsTextEdit> createState() => _SettingsTextEditState();
+}
+
+class _SettingsTextEditState extends State<SettingsTextEdit> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.value,
+  );
+
+  @override
+  void didUpdateWidget(covariant SettingsTextEdit oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Programmatic draft changes must update retained form fields. An echoed
+    // keystroke must keep its selection and IME composing range intact.
+    if (oldWidget.value != widget.value && _controller.text != widget.value) {
+      _controller.value = TextEditingValue(
+        text: widget.value,
+        selection: TextSelection.collapsed(offset: widget.value.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return TextFormField(
-      initialValue: value,
-      enabled: enabled,
-      obscureText: obscureText,
+      controller: _controller,
+      enabled: widget.enabled,
+      obscureText: widget.obscureText,
       style: context.text.bodyMedium?.copyWith(color: context.colors.onSurface),
-      decoration: InputDecoration(labelText: label),
-      onChanged: onChanged,
+      decoration: InputDecoration(labelText: widget.label),
+      onChanged: widget.onChanged,
     );
   }
 }
@@ -105,6 +133,7 @@ class SettingsReadonlyField extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: TextFormField(
+        key: ValueKey(value),
         initialValue: value,
         readOnly: true,
         decoration: InputDecoration(labelText: label),

@@ -139,7 +139,8 @@ profile 错误（携带 slug 与涉事模态/wire 上下文），消费方并入
 
 内建矩阵固定为：全部 GPT 使用 Responses，支持 WS/HTTP 且默认 WS——选择 HTTP 时仍调用
 `/responses` 并消费 SSE，绝不切换到 Chat Completions；DeepSeek V4.1 Flash 与 V4 Pro 使用
-Responses/HTTP；全部 GLM 和全部 MiMo 使用 Chat Completions/HTTP。runtime 按当前模型选择对应
+Responses/HTTP；通用 GLM 目录和全部 MiMo 使用 Chat Completions/HTTP，Coding Plan 的 GLM
+Responses 目录使用 Responses/HTTP。runtime 按当前模型选择对应
 endpoint path，同一 provider 实例可以路由不同协议的模型。
 
 Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并固定 `store: false`。连接
@@ -154,6 +155,10 @@ Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并固
 退避和稳定抖动，优先采用供应商等待提示；等待和建连均可取消。WS 完整重试一次仍失败后，同一模型
 会话切换 HTTP，后续请求保持 HTTP；切换也计入剩余重试预算，不重置次数。认证、配置、协议等永久
 错误立即返回。
+
+HTTP 流式请求先校验响应媒体类型。非 `text/event-stream` 的响应不能作为空 SSE 流消费；
+即使 HTTP 状态为 2xx，也须从有界响应体提取供应商结构化错误，保留业务错误码与消息。
+认证失败等永久错误立即返回，不转成断流重试；未识别的非流式响应明确报告协议不匹配。
 
 HTTP 响应原始字节流的读取或传输解码失败归为瞬态传输故障，不能因底层库称其为
 “响应体解码错误”而判为永久模型协议错误，也不依赖底层错误的英文文本识别断流。

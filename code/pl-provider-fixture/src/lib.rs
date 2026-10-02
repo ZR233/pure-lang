@@ -2320,7 +2320,8 @@ async fn handle(State(state): State<AppState>, request: axum::extract::Request) 
             Json(json!({"error":{"code":code,"message":message}})),
         )
             .into_response(),
-        Ok(Reply::WebSocket(_) | Reply::Json(_)) | Err(()) => (
+        Ok(Reply::Json(body)) => Json(body).into_response(),
+        Ok(Reply::WebSocket(_)) | Err(()) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"error":{"code":"fixture_mismatch","message":"unexpected request"}})),
         )
@@ -2463,6 +2464,7 @@ fn match_step(state: &AppState, method: &str, path: &str, body: &Value) -> Resul
                             | Reply::PacedSse { .. }
                             | Reply::PacedBody { .. }
                             | Reply::HangingSse(_)
+                            | Reply::Json(_)
                             | Reply::HttpError { .. }
                     )
                     | (Protocol::Files, Reply::Json(_) | Reply::HttpError { .. })

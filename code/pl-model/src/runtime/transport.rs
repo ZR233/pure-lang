@@ -4,7 +4,7 @@ mod sse_lines;
 use eventsource_stream::Eventsource;
 use futures::{StreamExt, stream::BoxStream};
 use pl_protocol::{PureError, Result};
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -36,8 +36,16 @@ pub(crate) fn headers(
 }
 
 #[derive(Deserialize)]
-struct ErrorEnvelope {
-    error: ErrorDetail,
+#[serde(untagged)]
+enum ErrorEnvelope {
+    OpenAi {
+        error: ErrorDetail,
+    },
+    Business {
+        code: i64,
+        msg: String,
+        success: bool,
+    },
 }
 
 #[derive(Deserialize)]
@@ -50,6 +58,10 @@ pub(crate) async fn checked(response: reqwest::Response) -> Result<reqwest::Resp
     if response.status().is_success() {
         return Ok(response);
     }
+    Err(read_response_error(response).await)
+}
+
+async fn read_response_error(response: reqwest::Response) -> PureError {
     let status = response.status().as_u16();
     let headers = response.headers().clone();
     let mut body = Vec::new();
@@ -80,7 +92,7 @@ pub(crate) async fn checked(response: reqwest::Response) -> Result<reqwest::Resp
     if let (Some(body_failure), PureError::Provider(failure)) = (body_failure, &mut error) {
         failure.message.push_str(&format!("; {body_failure}"));
     }
-    Err(error)
+    error
 }
 
 pub(crate) fn response_error(
@@ -102,12 +114,35 @@ pub(crate) fn response_error(
                 .map(|seconds| seconds.saturating_mul(1000))
         });
     let parsed = serde_json::from_slice::<ErrorEnvelope>(body).ok();
-    let code = parsed
+    let business_authentication_failure = matches!(
+        parsed,
+        Some(ErrorEnvelope::Business {
+            code: 1000,
+            success: false,
+            ..
+        })
+    );
+    let detail = match parsed {
+        Some(ErrorEnvelope::OpenAi { error }) => Some(error),
+        Some(ErrorEnvelope::Business {
+            code,
+            msg,
+            success: false,
+        }) => Some(ErrorDetail {
+            code: Some(code.to_string()),
+            message: Some(msg),
+        }),
+        Some(ErrorEnvelope::Business { success: true, .. }) | None => None,
+    };
+    if (200..300).contains(&status) && detail.is_none() {
+        return PureError::Protocol(format!(
+            "provider returned a non-SSE response (HTTP {status}); expected text/event-stream"
+        ));
+    }
+    let code = detail.as_ref().and_then(|detail| detail.code.as_deref());
+    let message = detail
         .as_ref()
-        .and_then(|value| value.error.code.as_deref());
-    let message = parsed
-        .as_ref()
-        .and_then(|value| value.error.message.as_deref())
+        .and_then(|detail| detail.message.as_deref())
         .unwrap_or("provider returned an unstructured error response");
     let mut error = provider_stream_failure(
         code,
@@ -119,6 +154,12 @@ pub(crate) fn response_error(
         ),
     );
     if let PureError::Provider(failure) = &mut error {
+        // This business envelope reports authentication failure with HTTP 200.
+        // Keep its actual status/code while preventing transport retries.
+        if business_authentication_failure {
+            failure.kind = pl_protocol::ProviderFailureKind::Authentication;
+            failure.retry = pl_protocol::RetryDisposition::Permanent;
+        }
         failure.context.request_id = request_id;
         if matches!(status, 400 | 404) && matches!(code, Some("file_not_found" | "file_expired")) {
             failure.context.recovery = pl_protocol::ProviderRecovery::RefreshAttachments;
@@ -147,6 +188,15 @@ pub(crate) async fn sse(
     request: reqwest::RequestBuilder,
 ) -> Result<BoxStream<'static, Result<SseStreamEvent>>> {
     let response = checked(request.send().await.map_err(reqwest_error_to_pure)?).await?;
+    let is_sse = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"));
+    if !is_sse {
+        return Err(read_response_error(response).await);
+    }
     let version = response.version();
     let status = response.status().as_u16();
     let request_id = response_request_id(response.headers());

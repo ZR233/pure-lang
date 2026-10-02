@@ -36,17 +36,29 @@ class SettingsReadout extends StatelessWidget {
 }
 
 class SettingsProviderStatusChip extends StatelessWidget {
-  const SettingsProviderStatusChip({super.key, required this.provider});
+  const SettingsProviderStatusChip({
+    super.key,
+    required this.provider,
+    this.usage,
+  });
 
   final ProviderSettingsView provider;
+  final ProviderUsageView? usage;
 
   @override
   Widget build(BuildContext context) {
-    final ready = provider.status == 'ready';
+    if (usage?.state is FailedProviderUsageView) {
+      return StudioPill(
+        icon: Icons.error_outline,
+        label: context.l10n.settingsUsageFailed,
+        tone: StudioTone.error,
+      );
+    }
+    final configured = provider.status == 'ready';
     return StudioPill(
-      icon: ready ? Icons.check_circle_outline : Icons.error_outline,
+      icon: configured ? Icons.key_outlined : Icons.error_outline,
       label: context.providerStatusLabel(provider.status),
-      tone: ready ? StudioTone.success : StudioTone.warning,
+      tone: configured ? StudioTone.neutral : StudioTone.warning,
     );
   }
 }

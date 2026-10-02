@@ -987,34 +987,66 @@ async fn failed_stream_retains_every_received_item_beyond_the_live_window() {
 
 #[tokio::test]
 async fn provider_error_is_permanent_and_unknown_prompt_is_rejected() {
-    let fixture = FixtureServer::start(vec![Step::prompt(
-        Protocol::Chat,
-        "bad request",
-        0,
-        Reply::HttpError {
-            status: 400,
-            code: "invalid_request_error".into(),
-            message: "bad field".into(),
-        },
-    )])
-    .await
-    .unwrap();
-    let runtime = ModelRuntime::new(
-        ProviderEndpoint::compatible("fixture", fixture.base_url()),
-        model(
-            "error-fixture",
-            ModelTransportProfile::chat_completions_http(),
+    // Business failures may use HTTP 200 and JSON even for stream requests.
+    // They must retain the reason and stop after one request, not masquerade
+    // as an empty SSE stream and exhaust the transport retry budget.
+    for (reply, code, status, kind, message) in [
+        (
+            Reply::Json(json!({"code":1000,"msg":"身份验证失败。","success":false})),
+            "1000",
+            200,
+            pl_protocol::ProviderFailureKind::Authentication,
+            "身份验证失败。",
         ),
-    )
-    .unwrap();
-    let failure = runtime
-        .complete(request("bad request"), ModelInvocationContext::default())
-        .await
-        .unwrap_err();
-    assert!(!failure.is_cancelled());
-    assert!(failure.to_string().contains("bad field"), "{failure}");
-    let records = fixture.finish().await.unwrap();
-    assert_eq!(records.len(), 1);
+        (
+            Reply::Json(
+                json!({"error":{"code":"invalid_api_key","message":"credential rejected"}}),
+            ),
+            "invalid_api_key",
+            200,
+            pl_protocol::ProviderFailureKind::Authentication,
+            "credential rejected",
+        ),
+        (
+            Reply::HttpError {
+                status: 400,
+                code: "invalid_request_error".into(),
+                message: "bad field".into(),
+            },
+            "invalid_request_error",
+            400,
+            pl_protocol::ProviderFailureKind::Configuration,
+            "bad field",
+        ),
+    ] {
+        let fixture =
+            FixtureServer::start(vec![Step::prompt(Protocol::Chat, "bad request", 0, reply)])
+                .await
+                .unwrap();
+        let runtime = ModelRuntime::new(
+            ProviderEndpoint::compatible("fixture", fixture.base_url()),
+            model(
+                "error-fixture",
+                ModelTransportProfile::chat_completions_http(),
+            ),
+        )
+        .unwrap();
+        let failure = runtime
+            .complete(request("bad request"), ModelInvocationContext::default())
+            .await
+            .unwrap_err();
+        assert!(!failure.is_cancelled());
+        assert!(failure.to_string().contains(message), "{failure}");
+        let pl_protocol::PureError::Provider(error) = failure.source.as_ref() else {
+            panic!("expected a classified provider failure: {failure}");
+        };
+        assert_eq!(error.code.as_deref(), Some(code));
+        assert_eq!(error.http_status, Some(status));
+        assert_eq!(error.kind, kind);
+        assert_eq!(error.retry, pl_protocol::RetryDisposition::Permanent);
+        let records = fixture.finish().await.unwrap();
+        assert_eq!(records.len(), 1);
+    }
 
     let fixture = FixtureServer::start(vec![Step::prompt(
         Protocol::Chat,

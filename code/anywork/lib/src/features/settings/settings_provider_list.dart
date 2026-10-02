@@ -179,7 +179,10 @@ class ProviderListRow extends StatelessWidget {
                           icon: Icons.key_outlined,
                           label: provider.id,
                         ),
-                        SettingsProviderStatusChip(provider: provider),
+                        SettingsProviderStatusChip(
+                          provider: provider,
+                          usage: usage,
+                        ),
                       ],
                     ),
                     if (provider.allModels.isNotEmpty) ...[
@@ -342,7 +345,7 @@ class ProviderListUsage extends StatelessWidget {
     if (usage == null || usage.state is! ReadyProviderUsageView) {
       final message = usage == null
           ? providerUsageSummary(context, provider, null, loading)
-          : providerUsageSummary(context, provider, usage, loading);
+          : providerUsageMessage(context, provider, usage);
       final tone = switch (usage?.state) {
         FailedProviderUsageView() => UsageTone.failed,
         MissingCredentialProviderUsageView() => UsageTone.warning,

@@ -122,8 +122,11 @@ async fn http_body_failures_retry_but_invalid_sse_json_does_not() {
                     let provider = failure.source.provider_failure_ref().unwrap();
                     assert_eq!(provider.http_status, Some(200));
                     assert_eq!(provider.context.request_id.as_deref(), Some("fixture-body"));
+                    // Hyper may report malformed chunk framing as InvalidInput
+                    // or UnexpectedEof; both must retain the underlying IO cause.
                     assert!(
-                        provider.message.contains("io=InvalidInput"),
+                        provider.message.contains("io=InvalidInput")
+                            || provider.message.contains("io=UnexpectedEof"),
                         "{}",
                         provider.message
                     );
@@ -226,7 +229,12 @@ async fn native_compaction_retries_frozen_history_only_before_receiving_checkpoi
                 let failure = result.unwrap_err();
                 let provider = failure.source.provider_failure_ref().unwrap();
                 assert_eq!(provider.http_status, Some(200));
-                assert!(provider.message.contains("io=InvalidInput"));
+                assert!(
+                    provider.message.contains("io=InvalidInput")
+                        || provider.message.contains("io=UnexpectedEof"),
+                    "{}",
+                    provider.message
+                );
                 assert!(failure.accounting.usage.input_tokens.is_none());
                 return;
             }
