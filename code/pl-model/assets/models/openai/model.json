@@ -230,6 +230,167 @@
       },
       "context_window": 1050000,
       "default_temperature": null,
+      "description": "Near-Astra performance for complex coding, computer use, and professional work.",
+      "display_name": "GPT-6.1 Sol",
+      "max_context_window": 1050000,
+      "max_output_tokens": 128000,
+      "parameters": [
+        {
+          "candidates": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "name": "effort",
+          "wire": {
+            "high": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "high"
+                }
+              ]
+            },
+            "low": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "low"
+                }
+              ]
+            },
+            "max": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "max"
+                }
+              ]
+            },
+            "medium": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "medium"
+                }
+              ]
+            },
+            "xhigh": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "xhigh"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "pricing": {
+        "currency": "USD",
+        "kind": "rates",
+        "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+        "tiers": [
+          {
+            "cacheReadPerMtok": 0.1,
+            "cacheWritePerMtok": 2.5,
+            "inputFrom": 0,
+            "inputPerMtok": 2.0,
+            "inputUntil": 272001,
+            "outputFrom": 0,
+            "outputPerMtok": 10.0,
+            "outputUntil": null
+          },
+          {
+            "cacheReadPerMtok": 0.2,
+            "cacheWritePerMtok": 5.0,
+            "inputFrom": 272001,
+            "inputPerMtok": 4.0,
+            "inputUntil": null,
+            "outputFrom": 0,
+            "outputPerMtok": 15.0,
+            "outputUntil": null
+          }
+        ],
+        "verifiedAt": 1790985600,
+        "weeklyAdjustment": null
+      },
+      "slug": "gpt-6.1-sol",
+      "truncation_policy": {
+        "limit": 10000,
+        "mode": "tokens"
+      }
+    },
+    {
+      "auto_compact_token_limit": null,
+      "base_instructions": "",
+      "binding": {
+        "request": {
+          "media": [
+            {
+              "first_send": [
+                "remote_url",
+                "data_url"
+              ],
+              "modality": "image",
+              "replay": [
+                "data_url"
+              ],
+              "wire": "responses_input_image"
+            }
+          ],
+          "protocol": {
+            "api": "responses",
+            "maxTokensField": "omit",
+            "programmaticToolCalling": true
+          }
+        },
+        "transport": {
+          "default_connection_mode": "web_socket",
+          "protocol": "responses",
+          "supported_connection_modes": [
+            "web_socket",
+            "http"
+          ]
+        }
+      },
+      "capabilities": {
+        "input": [
+          {
+            "limits": {},
+            "modality": "text"
+          },
+          {
+            "limits": {},
+            "modality": "image",
+            "sources": [
+              "local",
+              "remote_url"
+            ]
+          }
+        ],
+        "output": [
+          "text"
+        ],
+        "prompt_cache": {
+          "cache_write_tokens": true
+        },
+        "reasoning": true,
+        "streaming": true,
+        "temperature": false,
+        "tools": {
+          "custom_tools": true,
+          "freeform_tools": true,
+          "function_calling": true,
+          "parallel_tool_calls": true,
+          "programmatic_tool_calling": true
+        },
+        "web_search": true
+      },
+      "context_window": 1050000,
+      "default_temperature": null,
       "description": "Built to power complex coding and agentic workflows.",
       "display_name": "GPT-6 Sol",
       "max_context_window": 1050000,

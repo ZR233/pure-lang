@@ -370,6 +370,132 @@ async fn missing_metadata_uses_exact_success_then_default_but_explicit_empty_and
 }
 
 #[tokio::test]
+async fn gpt61_id_only_inventory_and_old_fallback_cache_enable_real_image_input() {
+    use pl_model::{
+        completion::{
+            AttachmentInput, AttachmentModality, AttachmentSource, CompletionRequest, ContentPart,
+            Message, MessageContent, MessageRole,
+        },
+        runtime::{ModelInvocationContext, ModelRuntime},
+    };
+    use pl_provider_fixture::{FixtureServer, Protocol, Reply, Step, responses_text};
+    let adapter = ProviderAdapterKind::OpenAi;
+    let slug = "gpt-6.1-sol";
+    let mut old = discover(json!({"data":[{"id":"unregistered-old-id"}]}), adapter)
+        .await
+        .remove(0);
+    old.slug = slug.into();
+    old.display_name = slug.into();
+    let server = Server::responses(vec![
+        http(200, "", &json!({"data":[{"id":slug}]}).to_string()),
+        http(200, "", &json!({"data":[{"id":slug,"input_modalities":["text"],"supported_reasoning_levels":[]}]}).to_string()),
+    ]).await;
+    let mut config = provider(&server.url, adapter);
+    let query = ModelCatalogQuery::for_provider(&config).unwrap();
+    let cache = ModelCatalogQueryCache {
+        identity: query.identity().into(),
+        etag: None,
+        models: vec![old],
+    };
+    // Startup/304/failure retain the successful inventory, enriched before GUI projection.
+    config
+        .set_model_catalog_overlay(cache.models.clone())
+        .unwrap();
+    let startup = config.effective_models().unwrap().remove(0);
+    assert!(
+        startup
+            .capabilities
+            .supports_input_modality(ModelModality::Image)
+    );
+    let models = updated(query.execute(Some(&cache)).await.unwrap());
+    config.set_model_catalog_overlay(models).unwrap();
+    let mut model = config.effective_models().unwrap().remove(0);
+    assert_eq!(model.slug, slug);
+    assert_eq!(model.context_window, Some(1_050_000));
+    assert_eq!(model.max_output_tokens, Some(128_000));
+    assert_eq!(
+        model.supported_efforts(),
+        ["low", "medium", "high", "xhigh", "max"]
+    );
+    assert!(model_descriptor(&model).pricing.is_some());
+    let explicit = updated(query.execute(None).await.unwrap());
+    config.set_model_catalog_overlay(explicit).unwrap();
+    let explicit = config.effective_models().unwrap().remove(0);
+    assert!(
+        !explicit
+            .capabilities
+            .supports_input_modality(ModelModality::Image)
+    );
+    assert!(explicit.supported_efforts().is_empty());
+    server.finish().await;
+
+    let fixture = FixtureServer::start(vec![Step::prompt(
+        Protocol::ResponsesHttp,
+        "describe",
+        0,
+        Reply::Sse(responses_text("a pixel", "gpt61-image", slug)),
+    )])
+    .await
+    .unwrap();
+    model
+        .binding
+        .set_transport(ModelTransportProfile::responses_http());
+    let runtime =
+        ModelRuntime::new(ProviderEndpoint::openai(Some(fixture.base_url())), model).unwrap();
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(1, 1)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let request = CompletionRequest::builder()
+        .messages(vec![Message {
+            role: MessageRole::User,
+            content: MessageContent::new(vec![
+                ContentPart::Text {
+                    text: "describe".into(),
+                },
+                ContentPart::Attachment {
+                    attachment_id: "pixel".into(),
+                    modality: AttachmentModality::Image,
+                    media_type: "image/png".into(),
+                    filename: None,
+                },
+            ]),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
+            metadata: Default::default(),
+            presentation: Default::default(),
+        }])
+        .attachments(vec![AttachmentInput {
+            attachment_id: "pixel".into(),
+            modality: AttachmentModality::Image,
+            media_type: "image/png".into(),
+            filename: None,
+            source: AttachmentSource::Bytes {
+                bytes: std::sync::Arc::from(png.into_inner()),
+            },
+        }])
+        .build();
+    let reply = runtime
+        .complete(request, ModelInvocationContext::default())
+        .await
+        .unwrap();
+    assert_eq!(reply.content.as_deref(), Some("a pixel"));
+    let records = fixture.finish().await.unwrap();
+    assert_eq!(records[0].body["model"], slug);
+    assert_eq!(
+        records[0].body["input"][0]["content"][1]["type"],
+        "input_image"
+    );
+    assert!(
+        records[0].body["input"][0]["content"][1]["image_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,")
+    );
+}
+
+#[tokio::test]
 async fn overlay_replaces_inventory_manual_wins_and_prices_join_only_local_exact_ids() {
     let definition = bundled_model_definition("openai").unwrap();
     let known = &definition.models[0];

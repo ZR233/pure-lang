@@ -110,11 +110,16 @@ pub(super) fn models(
             }
         }
     }
-    let metadata = defaults
+    let mut metadata = defaults
         .iter()
-        .chain(previous.into_iter().flatten())
         .map(|model| (model.slug.as_str(), model))
         .collect::<HashMap<_, _>>();
+    for model in previous.into_iter().flatten() {
+        if !metadata.contains_key(model.slug.as_str()) || !is_unknown_model_fallback(model, adapter)
+        {
+            metadata.insert(model.slug.as_str(), model);
+        }
+    }
     let result = records
         .into_iter()
         .map(|record| normalize(record, adapter, &metadata))
@@ -365,6 +370,11 @@ fn minimal(slug: &str, adapter: ProviderAdapterKind) -> ModelInfo {
         truncation_policy: TruncationPolicy::default(),
         base_instructions: String::new(),
     }
+}
+
+/// An unchanged ID-only skeleton contains no observed metadata to override a new definition.
+pub(crate) fn is_unknown_model_fallback(model: &ModelInfo, adapter: ProviderAdapterKind) -> bool {
+    *model == minimal(&model.slug, adapter)
 }
 
 fn effort_parameter(candidates: Vec<String>, adapter: ProviderAdapterKind) -> ModelParameter {

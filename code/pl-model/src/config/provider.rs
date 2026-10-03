@@ -222,12 +222,19 @@ impl ProviderConfig {
                 let mut models = if let Some(overlay) = &self.model_catalog_overlay {
                     let mut models = overlay.clone();
                     for model in &mut models {
-                        model.pricing = bundled
-                            .models
-                            .iter()
-                            .find(|local| local.slug == model.slug)
-                            .map(|local| local.pricing.clone())
-                            .unwrap_or(crate::model::ModelPricing::Unknown);
+                        if let Some(local) =
+                            bundled.models.iter().find(|local| local.slug == model.slug)
+                        {
+                            if crate::provider::discovery::is_unknown_model_fallback(
+                                model,
+                                self.adapter,
+                            ) {
+                                *model = local.clone();
+                            }
+                            model.pricing = local.pricing.clone();
+                        } else {
+                            model.pricing = crate::model::ModelPricing::Unknown;
+                        }
                     }
                     models.retain(|model| {
                         !additional_models
