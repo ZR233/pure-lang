@@ -5,6 +5,23 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.1.0](https://github.com/ZR233/pure-lang/compare/v6.0.0...v6.1.0) (2026-10-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **agent-runtime:** CompletionResponse 增加 replay 字段；TextSummaryRequest 与 ModelCompactionRequest 使用完整 CompletionRequest prefix，summary_request 接收冻结前缀。公共 API 调用方须同步构造字段并通过 append_response 保留原生回放范围。
+* **studio:** AgentWorkspace::project_writable_paths() 已移除，请改用 writable_paths()；目录写策略现在以实际 workspace root 而非 canonical Project root 为基准。worktree 根会话中共享 checkout 的 unrestricted/directory 子代理继承 confined 边界，不能再访问其他 checkout 或宿主路径。
+* **remote:** SSH helper 协议由 v6 升至 v7，客户端与 helper 必须同步更新；旧协议不能混用。
+
+### Bug Fixes
+
+* **agent-runtime:** 修复完整会话回放与重启恢复 ([8b602f8](https://github.com/ZR233/pure-lang/commit/8b602f8c80263dd1e49a15cbd0304d005aab8865))
+* **model:** 修复响应读取失败与上下文压缩中断恢复 ([616d461](https://github.com/ZR233/pure-lang/commit/616d461ccfd8f7abf936d20ff009c10154c6f23d))
+* **remote:** 修复助手容量耗尽与通信阻塞 ([fdc998a](https://github.com/ZR233/pure-lang/commit/fdc998a6dcafd1c9329b81c4124032a4bd8c1a4f))
+* **studio:** 修复 worktree 会话执行者写入边界 ([8cc2989](https://github.com/ZR233/pure-lang/commit/8cc298920b1fcc80239b1932defdf0fe3a345809))
+* **studio:** 修复供应商预设切换与认证错误提示 ([ac309f7](https://github.com/ZR233/pure-lang/commit/ac309f732870a1a7c689e6a11b31e44125b37c91))
+
 ## [6.0.0](https://github.com/ZR233/pure-lang/compare/v5.0.0...v6.0.0) (2026-09-30)
 
 
