@@ -1,7 +1,7 @@
 //! Endpoint-owned model discovery, independent of inference/model selection.
 mod decode;
 
-pub(crate) use decode::is_unknown_model_fallback;
+pub(crate) use decode::enrich_unknown_model_fallback;
 
 use super::{ProviderAdapterKind, ProviderEndpoint};
 use crate::{

@@ -381,13 +381,16 @@ async fn gpt61_id_only_inventory_and_old_fallback_cache_enable_real_image_input(
     use pl_provider_fixture::{FixtureServer, Protocol, Reply, Step, responses_text};
     let adapter = ProviderAdapterKind::OpenAi;
     let slug = "gpt-6.1-sol";
-    let mut old = discover(json!({"data":[{"id":"unregistered-old-id"}]}), adapter)
-        .await
-        .remove(0);
+    let mut old = discover(
+        json!({"data":[{"id":"unregistered-old-id","display_name":"GPT-6.1 Sol","description":"Provider description without capability declarations."}]}),
+        adapter,
+    )
+    .await
+    .remove(0);
     old.slug = slug.into();
-    old.display_name = slug.into();
+    let description = old.description.clone();
     let server = Server::responses(vec![
-        http(200, "", &json!({"data":[{"id":slug}]}).to_string()),
+        http(200, "", &json!({"data":[{"id":slug,"display_name":"GPT-6.1 Sol","created":1790640000,"object":"model","owned_by":"openai","type":"model"}]}).to_string()),
         http(200, "", &json!({"data":[{"id":slug,"input_modalities":["text"],"supported_reasoning_levels":[]}]}).to_string()),
     ]).await;
     let mut config = provider(&server.url, adapter);
@@ -402,6 +405,8 @@ async fn gpt61_id_only_inventory_and_old_fallback_cache_enable_real_image_input(
         .set_model_catalog_overlay(cache.models.clone())
         .unwrap();
     let startup = config.effective_models().unwrap().remove(0);
+    assert_eq!(startup.display_name, "GPT-6.1 Sol");
+    assert_eq!(startup.description, description);
     assert!(
         startup
             .capabilities
@@ -411,6 +416,7 @@ async fn gpt61_id_only_inventory_and_old_fallback_cache_enable_real_image_input(
     config.set_model_catalog_overlay(models).unwrap();
     let mut model = config.effective_models().unwrap().remove(0);
     assert_eq!(model.slug, slug);
+    assert_eq!(model.description, description);
     assert_eq!(model.context_window, Some(1_050_000));
     assert_eq!(model.max_output_tokens, Some(128_000));
     assert_eq!(

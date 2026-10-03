@@ -112,13 +112,16 @@ pub(super) fn models(
     }
     let mut metadata = defaults
         .iter()
-        .map(|model| (model.slug.as_str(), model))
+        .map(|model| (model.slug.as_str(), model.clone()))
         .collect::<HashMap<_, _>>();
     for model in previous.into_iter().flatten() {
-        if !metadata.contains_key(model.slug.as_str()) || !is_unknown_model_fallback(model, adapter)
-        {
-            metadata.insert(model.slug.as_str(), model);
-        }
+        let enriched = metadata
+            .get(model.slug.as_str())
+            .and_then(|current| enrich_unknown_model_fallback(model, current, adapter));
+        metadata.insert(
+            model.slug.as_str(),
+            enriched.unwrap_or_else(|| model.clone()),
+        );
     }
     let result = records
         .into_iter()
@@ -131,10 +134,10 @@ pub(super) fn models(
 fn normalize(
     record: Record,
     adapter: ProviderAdapterKind,
-    metadata: &HashMap<&str, &ModelInfo>,
+    metadata: &HashMap<&str, ModelInfo>,
 ) -> Result<ModelInfo, ModelCatalogQueryError> {
     let slug = record.identifier()?.to_owned();
-    let known = metadata.get(slug.as_str()).copied();
+    let known = metadata.get(slug.as_str());
     let mut model = known.cloned().unwrap_or_else(|| minimal(&slug, adapter));
     model.pricing = ModelPricing::Unknown;
     if let Some(value) = record.display_name.or(record.name) {
@@ -372,9 +375,26 @@ fn minimal(slug: &str, adapter: ProviderAdapterKind) -> ModelInfo {
     }
 }
 
-/// An unchanged ID-only skeleton contains no observed metadata to override a new definition.
-pub(crate) fn is_unknown_model_fallback(model: &ModelInfo, adapter: ProviderAdapterKind) -> bool {
-    *model == minimal(&model.slug, adapter)
+/// Presentation fields on a same-ID skeleton do not declare capabilities or budgets.
+pub(crate) fn enrich_unknown_model_fallback(
+    model: &ModelInfo,
+    current: &ModelInfo,
+    adapter: ProviderAdapterKind,
+) -> Option<ModelInfo> {
+    let mut skeleton = minimal(&model.slug, adapter);
+    skeleton.display_name.clone_from(&model.display_name);
+    skeleton.description.clone_from(&model.description);
+    if *model != skeleton {
+        return None;
+    }
+    let mut enriched = current.clone();
+    if model.display_name != model.slug {
+        enriched.display_name.clone_from(&model.display_name);
+    }
+    if model.description.is_some() {
+        enriched.description.clone_from(&model.description);
+    }
+    Some(enriched)
 }
 
 fn effort_parameter(candidates: Vec<String>, adapter: ProviderAdapterKind) -> ModelParameter {

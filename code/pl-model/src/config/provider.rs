@@ -225,11 +225,14 @@ impl ProviderConfig {
                         if let Some(local) =
                             bundled.models.iter().find(|local| local.slug == model.slug)
                         {
-                            if crate::provider::discovery::is_unknown_model_fallback(
-                                model,
-                                self.adapter,
-                            ) {
-                                *model = local.clone();
+                            if let Some(enriched) =
+                                crate::provider::discovery::enrich_unknown_model_fallback(
+                                    model,
+                                    local,
+                                    self.adapter,
+                                )
+                            {
+                                *model = enriched;
                             }
                             model.pricing = local.pricing.clone();
                         } else {
