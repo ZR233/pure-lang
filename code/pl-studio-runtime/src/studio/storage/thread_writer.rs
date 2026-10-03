@@ -2300,6 +2300,7 @@ mod storage_fault_tests {
                 context_window: None,
             },
             response: pl_model::completion::CompletionResponse {
+                replay: None,
                 response_id: None,
                 content: None,
                 reasoning_content: None,

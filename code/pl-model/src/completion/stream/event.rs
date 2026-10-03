@@ -89,6 +89,7 @@ pub enum ModelStreamEvent {
     PresentationItem {
         item: CompletionPresentationItem,
     },
+    Replay(super::replay::ReplayUpdate),
     WebSearchStarted {
         item_id: String,
         action: WebSearchAction,
@@ -184,6 +185,7 @@ impl ModelStreamEvent {
             | Self::ToolCallCaller { .. }
             | Self::ResponsesContextItem { .. }
             | Self::PresentationItem { .. }
+            | Self::Replay(_)
             | Self::WebSearchStarted { .. }
             | Self::WebSearchCompleted { .. }
             | Self::Usage(_)

@@ -276,6 +276,7 @@ impl StreamLifecycle {
             ModelStreamEvent::PresentationItem { item } => {
                 vec![ModelStreamEvent::PresentationItem { item }]
             }
+            ModelStreamEvent::Replay(update) => vec![ModelStreamEvent::Replay(update)],
             ModelStreamEvent::Usage(usage) => vec![ModelStreamEvent::Usage(usage)],
             ModelStreamEvent::Failed {
                 code,

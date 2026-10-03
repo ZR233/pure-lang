@@ -387,6 +387,27 @@ GLM-5.3 的始终思考 wire 与候选值域，并声明 image 的 local/data-ur
 分开声明：transport 走 Responses HTTP，effort 只写 `reasoning.effort`，不携带 thinking
 base body；GLM-5.3-Flash 的 image 使用 Responses 的 `input_image` 路线。
 
+### 完整 assistant 回放
+
+模型完成响应的 replay 是独立于 final 正文和展示投影的冻结事实。Responses 按原始 output
+顺序保留 message、phase、reasoning、工具身份及参数原文；Chat 保留可见标签解析前的
+assistant 正文。成功响应校验后随 Thread 上下文在内存中提交，下一次请求直接消费它；
+失败、取消及拒绝的候选输出不进入已提交历史。原生字段不得提高来源权限或伪造工具结果。
+Chat 的完成态展示项由同一标签解码器从完整回放派生，保留 commentary 和 final 的通道、
+正文及局部段落身份；这些展示身份不写入模型回放，不把 final 正文当作完整历史。
+
+普通请求、摘要、原生压缩和输入估算传递同一冻结回放，不能从 final、展示项或调试日志
+重新拼接。Responses HTTP 与 WebSocket 使用同一原生历史转换；完整旧输入加已提交输出
+与当前输入前缀相同时才使用增量 continuation，其他情况发送完整冻结上下文。
+
+`CompletionResponse.replay` 使用 `AssistantReplay` 保存材料，`CompletionRequest.append_response`
+校验调用绑定并维护请求内部的原生回放范围。调用方继续追加输入时保留这些范围，不能修改
+其已冻结的语义输入；编码和估算发现不一致时拒绝请求。`TextSummaryRequest.prefix` 与
+`ModelCompactionRequest.prefix` 接收完整 `CompletionRequest`，替代分散的输入、工具及推理字段。
+
+replay 是当前响应的可缺省附加字段，数据库与 assistant 帧版本不变。新响应必须生成完整
+replay；此前未记录的旧输出不迁移或补造，完整回放的保证适用于本次修改后创建的会话。
+
 ## 6.10 Prompt 缓存
 
 固定 instructions 与 prelude 包含模型基础指令、平台与全局配置、模式与角色、稳定 Skill 目录和

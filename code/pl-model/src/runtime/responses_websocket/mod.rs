@@ -10,8 +10,9 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
-use crate::completion::CompletionTraceContext;
 use crate::completion::stream::OpenAiRawEventStream;
+use crate::completion::stream::replay::{ReplayCollector, ReplayUpdate};
+use crate::completion::{AssistantReplay, CompletionTraceContext};
 use crate::provider::RESPONSES_WEBSOCKET_DIALECT;
 use crate::runtime::ModelSession;
 use crate::runtime::openai::sent_model_from_wire_body;
@@ -138,13 +139,17 @@ pub(super) async fn stream_responses(
         events_emitted: false,
         full_request: body,
         model_session,
+        replay: ReplayCollector::default(),
     };
     Ok(OpenedResponsesStream {
         stream: futures::stream::unfold(state, |mut state| async move {
             match &state.state {
                 ResponsesStreamState::Open(_) => {}
                 ResponsesStreamState::Completed(_) => {
-                    state.finish_completed_response();
+                    if let Err(error) = state.finish_completed_response() {
+                        let error = state.fail(error);
+                        return Some((Err(error), state));
+                    }
                     return None;
                 }
                 ResponsesStreamState::Failed(failed) => {
@@ -379,6 +384,7 @@ struct WebSocketEventState {
     events_emitted: bool,
     full_request: Map<String, Value>,
     model_session: ModelSession,
+    replay: ReplayCollector,
 }
 
 impl WebSocketEventState {
@@ -440,6 +446,11 @@ impl WebSocketEventState {
                             return Err(self.fail(error));
                         }
                     };
+                    if let Some(update) = ReplayUpdate::from_event(&event)
+                        && let Err(error) = self.replay.apply(update)
+                    {
+                        return Err(self.fail(error));
+                    }
                     match event.kind.as_str() {
                         "response.completed" => {
                             self.state = ResponsesStreamState::Completed(Box::new(
@@ -480,18 +491,21 @@ impl WebSocketEventState {
         error
     }
 
-    fn commit_completed_response(&mut self, event: &SseStreamEvent) {
+    fn commit_completed_response(&mut self, event: &SseStreamEvent) -> Result<()> {
         let response = event.response.as_ref();
         let response_id = response
             .and_then(|response| response.get("id"))
             .and_then(Value::as_str)
             .filter(|id| !id.trim().is_empty())
             .map(ToString::to_string);
-        let response_items = response
-            .and_then(|response| response.get("output"))
-            .and_then(Value::as_array)
-            .map(|items| canonical_response_history_items(items))
-            .unwrap_or_default();
+        let response_items = match self.replay.finish()? {
+            Some(AssistantReplay::Responses { output }) => output,
+            _ => {
+                return Err(protocol_error(
+                    "completed Responses stream has no native replay",
+                ));
+            }
+        };
         if response_id.is_some() {
             self.guard.last_request = Some(self.full_request.clone());
             self.guard.last_response_id = response_id;
@@ -501,66 +515,21 @@ impl WebSocketEventState {
             self.guard.last_response_id = None;
             self.guard.last_response_items.clear();
         }
+        Ok(())
     }
 
-    fn finish_completed_response(&mut self) {
+    fn finish_completed_response(&mut self) -> Result<()> {
         let ResponsesStreamState::Completed(completed) = &self.state else {
-            return;
+            return Ok(());
         };
         let event = completed.event().clone();
-        self.commit_completed_response(&event);
+        self.commit_completed_response(&event)?;
         if self.used_continuation {
             self.model_session.record_continuation_used();
         }
         self.state = ResponsesStreamState::Closed(ClosedResponsesStream::new());
+        Ok(())
     }
-}
-
-fn canonical_response_history_items(items: &[Value]) -> Vec<Value> {
-    items
-        .iter()
-        .filter_map(|item| {
-            let object = item.as_object()?;
-            match object.get("type").and_then(Value::as_str)? {
-                "message" => {
-                    let content = object
-                        .get("content")
-                        .and_then(Value::as_array)?
-                        .iter()
-                        .filter_map(|part| {
-                            let part = part.as_object()?;
-                            let kind = part.get("type").and_then(Value::as_str)?;
-                            let text = part.get("text").and_then(Value::as_str)?;
-                            matches!(kind, "output_text" | "input_text")
-                                .then(|| serde_json::json!({ "type": "output_text", "text": text }))
-                        })
-                        .collect::<Vec<_>>();
-                    Some(serde_json::json!({
-                        "type": "message",
-                        "role": object
-                            .get("role")
-                            .and_then(Value::as_str)
-                            .unwrap_or("assistant"),
-                        "content": content,
-                    }))
-                }
-                "function_call" => Some(serde_json::json!({
-                    "type": "function_call",
-                    "name": object.get("name")?,
-                    "arguments": object.get("arguments")?,
-                    "call_id": object.get("call_id")?,
-                })),
-                "custom_tool_call" => Some(serde_json::json!({
-                    "type": "custom_tool_call",
-                    "name": object.get("name")?,
-                    "input": object.get("input")?,
-                    "call_id": object.get("call_id")?,
-                })),
-                "reasoning" | "compaction" | "web_search_call" => None,
-                _ => None,
-            }
-        })
-        .collect()
 }
 
 impl Drop for WebSocketEventState {

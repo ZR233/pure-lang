@@ -3507,14 +3507,27 @@ mod storage_fault_tests {
         };
         let directory = tempfile::tempdir()?;
         let store = HistoryStore::open(&directory.path().join("history.sqlite"), "atomic").await?;
-        let record = |id: &str| ContextRecord {
-            id: id.into(),
-            turn_id: None,
-            source: ContextSource::User,
-            content: vec![ContextContent::Text {
-                text: std::sync::Arc::from(id),
-            }],
-            tool_calls: vec![],
+        let record = |id: &str| -> Result<ContextRecord> {
+            Ok(ContextRecord {
+                id: id.into(),
+                turn_id: None,
+                source: if id == "second" {
+                    ContextSource::Assistant
+                } else {
+                    ContextSource::User
+                },
+                content: if id == "second" {
+                    vec![ContextContent::Opaque { payload: pl_core::context::OpaquePayload::new("pl.model.assistant", 2, serde_json::json!({
+                    "receipt": {"binding":{"providerInstanceId":"fixture","requestedModel":"fixture","adapter":"openAiCompatible","protocol":"responses","isolation":"test","purpose":"turn","contextWindow":null},
+                    "response":{"responseId":"stored-replay","content":null,"replay":{"kind":"responses","output":[{"id":"stored-progress","type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"retained progress","annotations":[]}]}]},"toolCalls":[],"responsesContextItems":[],"accounting":{},"model":"fixture"}},"bindings":[]
+                }).to_string())? }]
+                } else {
+                    vec![ContextContent::Text {
+                        text: std::sync::Arc::from(id),
+                    }]
+                },
+                tool_calls: vec![],
+            })
         };
         let empty = std::collections::BTreeSet::new();
         let commit = || EffectCommit {
@@ -3532,7 +3545,7 @@ mod storage_fault_tests {
             commit_sequence: 1,
             context: ContextSnapshot {
                 revision: 1,
-                records: vec![record("first")].into(),
+                records: vec![record("first")?].into(),
             },
             ..Default::default()
         };
@@ -3561,14 +3574,14 @@ mod storage_fault_tests {
         state.usage_summary.inference_count = 2;
         state.usage_summary.applied_sequence = 2;
         state.context.revision = 2;
-        state.context.records = vec![record("first"), record("second")].into();
+        state.context.records = vec![record("first")?, record("second")?].into();
         let second = ThreadCheckpoint::capture("atomic".into(), 2, state);
         let effect = ThreadEffectBatch {
             thread_id: "atomic".into(),
             sequence: 2,
             context: Some(ContextChange::Append {
                 revision: 2,
-                records: vec![record("second")].into(),
+                records: vec![record("second")?].into(),
             }),
             ..Default::default()
         };
@@ -3642,7 +3655,7 @@ mod storage_fault_tests {
         let mut state = second.state.clone();
         let mut serialized_new_bytes = 0_usize;
         for sequence in 3..=139 {
-            let added = record(&format!("context-{sequence}"));
+            let added = record(&format!("context-{sequence}"))?;
             serialized_new_bytes += serde_json::to_vec(&added)?.len();
             let mut records = state.context.records.to_vec();
             records.push(added.clone());

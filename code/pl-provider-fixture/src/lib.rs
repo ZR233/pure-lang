@@ -25,6 +25,11 @@ use sha2::{Digest, Sha256};
 use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
+mod context_replay_recovery;
+pub use context_replay_recovery::{
+    ReplayExpectation, gui_context_replay_recovery_script, replay_output, replay_tool_arguments,
+};
+
 /// The GUI script accepts exactly this user prompt for its sole completion step.
 pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
 
@@ -34,7 +39,7 @@ pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
 /// The coordinator's ready-file check, the fixture CLI parser and the script
 /// selection all read this single list, so a scenario can no longer be accepted
 /// by one of them and rejected by another.
-pub const GUI_SCENARIOS: [&str; 11] = [
+pub const GUI_SCENARIOS: [&str; 12] = [
     "gui",
     "storage-compaction",
     "stress",
@@ -45,6 +50,7 @@ pub const GUI_SCENARIOS: [&str; 11] = [
     "history-lock",
     "history-fault",
     "plan-recovery",
+    "context-replay-recovery",
     "tool-scroll",
 ];
 
@@ -564,6 +570,11 @@ impl Protocol {
 /// An exact JSON body or a strict prompt plus ordinal step match.
 #[derive(Debug, Clone)]
 pub enum RequestMatch {
+    /// Requires the admitted history and physical continuation identity before replying.
+    Replay {
+        request: Box<RequestMatch>,
+        expected: context_replay_recovery::ReplayExpectation,
+    },
     Exact(Value),
     Prompt {
         text: String,
@@ -2472,7 +2483,9 @@ fn match_step(state: &AppState, method: &str, path: &str, body: &Value) -> Resul
             reply_matches
                 && method == expected_method
                 && path == expected_path
-                && match &step.request {
+                && step.request.replay_matches(body)
+                && match step.request.base() {
+                    RequestMatch::Replay { .. } => false,
                     RequestMatch::Exact(value) => body == value,
                     RequestMatch::Prompt { text, step } => {
                         *step == index
@@ -2524,17 +2537,17 @@ fn reject_diagnostic(
     });
     let expected_path = expected.map(|step| format!("/v1{}", step.protocol.path()));
     let actual = prompt(body);
-    let (expected_kind, expected_prompt) = match expected.map(|step| &step.request) {
+    let (expected_kind, expected_prompt) = match expected.map(|step| step.request.base()) {
         Some(RequestMatch::Prompt { text, .. }) => ("prompt", Some(text.clone())),
         Some(RequestMatch::Delivery { marker, .. }) => ("delivery", Some(marker.clone())),
         Some(RequestMatch::ToolOutput {
             call_id, marker, ..
         }) => ("tool_output", Some(format!("{call_id}:{marker}"))),
-        Some(RequestMatch::Exact(_)) => ("exact", None),
+        Some(RequestMatch::Exact(_) | RequestMatch::Replay { .. }) => ("exact", None),
         None => ("none", None),
     };
     let actual_prompt_present = actual.is_some();
-    let prompt_matches_expected = match expected.map(|step| &step.request) {
+    let prompt_matches_expected = match expected.map(|step| step.request.base()) {
         Some(RequestMatch::Prompt { text, .. }) => actual == Some(text.as_str()),
         Some(RequestMatch::Delivery { marker, .. }) => {
             actual.is_some_and(|value| value.contains(marker.as_str()))
@@ -2542,13 +2555,13 @@ fn reject_diagnostic(
         Some(RequestMatch::ToolOutput {
             call_id, marker, ..
         }) => tool_output_contains(body, call_id, marker),
-        Some(RequestMatch::Exact(_)) | None => false,
+        Some(RequestMatch::Exact(_) | RequestMatch::Replay { .. }) | None => false,
     };
-    let delivery_seen = match expected.map(|step| &step.request) {
+    let delivery_seen = match expected.map(|step| step.request.base()) {
         Some(RequestMatch::Delivery { marker, .. }) => user_messages_contain(body, marker),
         _ => false,
     };
-    let tool_output_seen = match expected.map(|step| &step.request) {
+    let tool_output_seen = match expected.map(|step| step.request.base()) {
         Some(RequestMatch::ToolOutput {
             call_id, marker, ..
         }) => tool_output_contains(body, call_id, marker),
@@ -2642,12 +2655,18 @@ fn tool_output_contains(body: &Value, call_id: &str, marker: &str) -> bool {
         .and_then(Value::as_array);
     items.is_some_and(|items| {
         items.iter().any(|item| {
-            item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                && item.get("call_id").and_then(Value::as_str) == Some(call_id)
+            (item.get("role").and_then(Value::as_str) == Some("tool")
+                && item.get("tool_call_id").and_then(Value::as_str) == Some(call_id)
                 && item
-                    .get("output")
+                    .get("content")
                     .and_then(Value::as_str)
-                    .is_some_and(|output| output.contains(marker))
+                    .is_some_and(|output| output.contains(marker)))
+                || (item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                    && item.get("call_id").and_then(Value::as_str) == Some(call_id)
+                    && item
+                        .get("output")
+                        .and_then(Value::as_str)
+                        .is_some_and(|output| output.contains(marker)))
         })
     })
 }

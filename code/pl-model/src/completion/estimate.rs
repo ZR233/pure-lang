@@ -7,7 +7,7 @@ use super::{CompletionRequest, ContentPart, ModelContextItem};
 /// records and resources return `None`; their encoded string length does not identify
 /// their model-visible token cost. Overflow and encoding failure also remain unknown.
 pub fn estimate_text_input_tokens(request: &CompletionRequest) -> Option<u64> {
-    if !request.prepared_content.is_empty() {
+    if request.validate_replay_spans().is_err() || !request.prepared_content.is_empty() {
         return None;
     }
     let mut characters = request

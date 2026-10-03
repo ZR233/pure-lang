@@ -2,8 +2,7 @@
 use super::{InvocationRunner, ModelInvocationContext};
 use crate::completion::tool_schema::CustomToolProjection;
 use crate::completion::{
-    CompletionFailure, CompletionRequest, ModelCompactionRequest, ModelCompactionResponse,
-    OpenAiCompactionMode,
+    CompletionFailure, ModelCompactionRequest, ModelCompactionResponse, OpenAiCompactionMode,
 };
 use crate::provider::ProviderWireProtocol;
 use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody};
@@ -57,13 +56,7 @@ pub(super) async fn compact_context(
         provider.endpoint().http_headers.as_ref(),
         REMOTE_COMPACTION_V2_FEATURE,
     );
-    let completion = CompletionRequest::builder()
-        .instructions(request.instructions)
-        .input(request.input)
-        .tools(request.tools)
-        .parallel_tool_calls(request.parallel_tool_calls)
-        .reasoning(request.reasoning)
-        .build();
+    let completion = request.prefix;
     let response = provider
         .for_compaction(headers, body)
         .complete(completion, context)
@@ -118,13 +111,9 @@ fn build_compaction_body(
     } else {
         CustomToolProjection::ToFunction
     };
-    let completion = CompletionRequest::builder()
-        .instructions(request.instructions.clone())
-        .input(request.input.clone())
-        .tools(request.tools.clone())
-        .parallel_tool_calls(request.parallel_tool_calls)
-        .reasoning(request.reasoning.clone())
-        .build()
+    let completion = request
+        .prefix
+        .clone()
         .provider_compatible(custom_tool_projection);
     completion.validate_against(&model_info.slug, &effective_capabilities)?;
     let OpenAiRequestBody::Responses(mut body) = OpenAiProtocol::responses().build_request(

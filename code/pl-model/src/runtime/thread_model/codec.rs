@@ -175,6 +175,7 @@ pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, Model
         instructions.push(format!("These tools must each be called alone in a model response: {}. Never combine one of these with any other tool call. Other independent tools may be called together in parallel.", names.join(", ")));
     }
     let mut input = Vec::new();
+    let mut replay_spans = Vec::new();
     let mut calls = BTreeMap::new();
     let mut pending_calls = BTreeSet::new();
     let mut call_order = Vec::new();
@@ -268,36 +269,13 @@ pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, Model
                     pending_calls.insert(call.call_id.clone());
                     call_order.push(call.call_id.clone());
                 }
-                for native in frame.receipt.response.responses_context_items {
-                    if native
-                        .value
-                        .get("role")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|role| role != "assistant")
-                    {
-                        return Err(invalid(
-                            "native assistant material cannot change message authority",
-                        ));
-                    }
-                    input.push(ModelContextItem::Responses { item: native });
-                }
-                let mut message = message(
-                    MessageRole::Assistant,
-                    MessageContent::text(frame.receipt.response.content.unwrap_or_default()),
-                );
-                message.reasoning_content = frame.receipt.response.reasoning_content;
-                if !frame.receipt.response.tool_calls.is_empty() {
-                    message.tool_calls = Some(
-                        frame
-                            .receipt
-                            .response
-                            .tool_calls
-                            .iter()
-                            .map(ToolCall::history_record)
-                            .collect(),
-                    );
-                }
-                input.push(ModelContextItem::from(message));
+                let mut encoded = CompletionRequest::builder().input(input).build();
+                encoded.replay_spans = replay_spans;
+                encoded
+                    .append_response(&frame.receipt.response)
+                    .map_err(|error| failure(ModelFailureKind::IncompatibleContext, error))?;
+                input = encoded.input;
+                replay_spans = encoded.replay_spans;
                 continue;
             }
             if !frames.is_empty() || !record.tool_calls.is_empty() {
@@ -409,10 +387,12 @@ pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, Model
     if !pending_calls.is_empty() {
         return Err(invalid("incomplete tool result batch"));
     }
-    Ok(CompletionRequest::builder()
+    let mut encoded = CompletionRequest::builder()
         .instructions(instructions.join("\n\n"))
         .input(input)
-        .build())
+        .build();
+    encoded.replay_spans = replay_spans;
+    Ok(encoded)
 }
 
 pub(super) struct ResponseContext<'a> {
@@ -455,6 +435,13 @@ fn response_inner(
         marker,
         binding,
     } = context;
+    let replay = response
+        .replay
+        .as_ref()
+        .ok_or_else(|| invalid("model response has no replay material"))?;
+    replay
+        .semantic_input(&response)
+        .map_err(|error| failure(ModelFailureKind::InvalidResponse, error))?;
     let observed_usage = usage(&response.accounting.usage);
     let bindings = response
         .tool_calls

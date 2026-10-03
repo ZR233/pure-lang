@@ -46,6 +46,7 @@ async fn main() -> Result<()> {
         "history-lock" => gui_history_lock_script(),
         "history-fault" => gui_history_fault_script(),
         "plan-recovery" => gui_plan_recovery_script(),
+        "context-replay-recovery" => pl_provider_fixture::gui_context_replay_recovery_script(),
         value => bail!("unknown fixture scenario: {value}"),
     };
     let fixture = Arc::new(FixtureServer::start(steps).await?);

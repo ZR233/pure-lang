@@ -1,3 +1,5 @@
+mod context_replay_recovery;
+
 use anyhow::{Context, Result, bail, ensure};
 use clap::Parser;
 use pl_dev_support::{paths, process};
@@ -193,7 +195,7 @@ struct HistoryFaultScenario<'a> {
     interrupt: &'a mpsc::Receiver<()>,
 }
 
-struct PlanRecoveryScenario<'a> {
+struct RecoveryScenario<'a> {
     workspace: &'a Path,
     app_dir: &'a Path,
     home: &'a Path,
@@ -390,6 +392,7 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             | "history-lock"
             | "history-fault"
             | "plan-recovery"
+            | "context-replay-recovery"
             | "tool-scroll"
     ) {
         ensure!(
@@ -474,7 +477,10 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         .arg(&stress_report_file)
         .stdout(Stdio::from(fixture_log.try_clone()?))
         .stderr(Stdio::from(fixture_log));
-    if options.scenario == "plan-recovery" {
+    if matches!(
+        options.scenario.as_str(),
+        "plan-recovery" | "context-replay-recovery"
+    ) {
         fixture_command.arg("--status-file").arg(&status_file);
     }
     #[cfg(windows)]
@@ -510,6 +516,24 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     }
     if let Some(fault) = &options.startup_fault {
         seed_startup_fault(&home, fault)?;
+    }
+
+    if options.scenario == "context-replay-recovery" {
+        return context_replay_recovery::run(
+            &RecoveryScenario {
+                workspace: &workspace,
+                app_dir: &app_dir,
+                home: &home,
+                working: working.path(),
+                output: &output,
+                fixture_log: &fixture_log_path,
+                requests_file: &requests_file,
+                status_file: &status_file,
+                interrupt: &interrupt_rx,
+            },
+            fixture,
+            &ready,
+        );
     }
 
     if options.scenario == "statistics" {
@@ -583,7 +607,7 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
 
     if options.scenario == "plan-recovery" {
         return run_plan_recovery_scenario(
-            &PlanRecoveryScenario {
+            &RecoveryScenario {
                 workspace: &workspace,
                 app_dir: &app_dir,
                 home: &home,
@@ -1275,6 +1299,14 @@ fn validate_ready(ready: &FixtureReady) -> Result<()> {
 }
 
 fn write_config(home: &Path, ready: &FixtureReady) -> Result<()> {
+    write_config_with_profile(home, ready, ModelTransportProfile::responses_http())
+}
+
+fn write_config_with_profile(
+    home: &Path,
+    ready: &FixtureReady,
+    profile: ModelTransportProfile,
+) -> Result<()> {
     let mut config = StudioConfig::default_config();
     let mut model = ModelInfo::compatible("fixture-model");
     model.display_name = "Local GUI fixture".into();
@@ -1282,9 +1314,7 @@ fn write_config(home: &Path, ready: &FixtureReady) -> Result<()> {
         model.context_window = Some(1_000_000);
         model.auto_compact_token_limit = Some(1);
     }
-    model
-        .binding
-        .set_transport(ModelTransportProfile::responses_http());
+    model.binding.set_transport(profile);
     model.binding.request.api_model = None;
     if ready.scenario == "tool-scroll" {
         model.capabilities.input.push(ModelInputCapability::media(
@@ -2969,10 +2999,10 @@ fn run_history_fault_scenario(
 /// rejects any extra or duplicated model request, so the run fails closed; the
 /// human verdict stays pending either way.
 fn run_plan_recovery_scenario(
-    context: &PlanRecoveryScenario<'_>,
+    context: &RecoveryScenario<'_>,
     mut fixture: OwnedProcess,
 ) -> Result<()> {
-    let PlanRecoveryScenario {
+    let RecoveryScenario {
         workspace,
         app_dir,
         home,
@@ -3017,7 +3047,7 @@ fn run_plan_recovery_scenario(
         // 1. First lifecycle: submit the Approve-branch Plan, then shut the GUI
         // down normally through the Driver while the confirmation is pending.
         let at_first_card = {
-            let mut gui = start_plan_recovery_gui(workspace, home, &gui_logs[0].0)?;
+            let mut gui = start_recovery_gui(workspace, home, &gui_logs[0].0)?;
             let vm_url = wait_for_vm(&gui_logs[0].0, &mut gui, &mut fixture, interrupt)?;
             let mut driver = start_plan_recovery_driver(context, "first", &vm_url, &project)?;
             wait_for_plan_recovery_stage(
@@ -3067,7 +3097,7 @@ fn run_plan_recovery_scenario(
         // 2. Restart lifecycle: restore the pending Plan, prove the reopened
         // window stays quiet, approve, stage the Revise branch, shut down again.
         let at_revise_card = {
-            let mut gui = start_plan_recovery_gui(workspace, home, &gui_logs[1].0)?;
+            let mut gui = start_recovery_gui(workspace, home, &gui_logs[1].0)?;
             let vm_url = wait_for_vm(&gui_logs[1].0, &mut gui, &mut fixture, interrupt)?;
             let mut driver = start_plan_recovery_driver(context, "restart", &vm_url, &project)?;
             wait_for_plan_recovery_stage(
@@ -3142,7 +3172,7 @@ fn run_plan_recovery_scenario(
         // 3. Recheck lifecycle: restore the second pending Plan, answer Revise
         // then Approve, and prove neither answered Plan re-pops.
         {
-            let mut gui = start_plan_recovery_gui(workspace, home, &gui_logs[2].0)?;
+            let mut gui = start_recovery_gui(workspace, home, &gui_logs[2].0)?;
             let vm_url = wait_for_vm(&gui_logs[2].0, &mut gui, &mut fixture, interrupt)?;
             let mut driver = start_plan_recovery_driver(context, "recheck", &vm_url, &project)?;
             wait_for_plan_recovery_stage(
@@ -3356,7 +3386,7 @@ fn plan_recovery_quiet_window(
     Ok(())
 }
 
-fn start_plan_recovery_gui(workspace: &Path, home: &Path, log_path: &Path) -> Result<OwnedProcess> {
+fn start_recovery_gui(workspace: &Path, home: &Path, log_path: &Path) -> Result<OwnedProcess> {
     let log = File::create(log_path)?;
     let mut command = Command::new("cargo");
     command
@@ -3369,7 +3399,7 @@ fn start_plan_recovery_gui(workspace: &Path, home: &Path, log_path: &Path) -> Re
 }
 
 fn start_plan_recovery_driver(
-    context: &PlanRecoveryScenario<'_>,
+    context: &RecoveryScenario<'_>,
     phase: &str,
     vm_url: &str,
     project: &Path,

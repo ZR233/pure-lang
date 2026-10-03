@@ -129,10 +129,7 @@ impl ThreadModel {
                 .summarize(
                     TextSummaryRequest {
                         instructions: &options.instructions,
-                        input: encoded.input,
-                        attachments: encoded.attachments,
-                        reasoning: encoded.reasoning,
-                        tools: &encoded.tools,
+                        prefix: encoded,
                         requirement: &options.requirement,
                         max_output_tokens: options.max_output_tokens,
                         empty_summary_error: "context compaction returned an empty summary",

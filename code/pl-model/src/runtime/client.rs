@@ -142,11 +142,7 @@ impl RemoteCompaction<'_> {
             .complete(
                 ModelCompactionRequest {
                     mode: crate::completion::OpenAiCompactionMode::RemoteV2,
-                    instructions: request.instructions.unwrap_or_default(),
-                    input: request.input,
-                    tools: request.tools,
-                    parallel_tool_calls: request.parallel_tool_calls,
-                    reasoning: request.reasoning,
+                    prefix: request,
                     prompt_cache_key,
                 },
                 context,

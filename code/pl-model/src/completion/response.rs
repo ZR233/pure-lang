@@ -13,14 +13,17 @@ pub struct CompletionResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_id: Option<String>,
     pub content: Option<String>,
+    /// Frozen model history, including commentary that is not part of the final-answer view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<super::AssistantReplay>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
     #[serde(default)]
     pub responses_context_items: Vec<ResponsesContextItem>,
-    /// Ordered provider output items with their original item and content-part identities.
-    /// Absent for protocols that do not report distinct output items.
+    /// Ordered provider output items, or Chat segments decoded from its complete replay.
+    /// Chat segment identities are local display identities and never enter model input.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub presentation_items: Vec<CompletionPresentationItem>,
     #[serde(default)]

@@ -58,7 +58,23 @@ impl ResponsesRequestBody {
             .collect::<Vec<_>>();
         let tool_callers = tool_callers_by_call_id(&history);
 
-        for item in &request.input {
+        let mut replay_end = 0;
+        let mut replay_spans = request.replay_spans.iter().peekable();
+        for (position, item) in request.input.iter().enumerate() {
+            if position < replay_end {
+                continue;
+            }
+            if replay_spans
+                .peek()
+                .is_some_and(|span| span.start == position)
+            {
+                let span = replay_spans
+                    .next()
+                    .ok_or_else(|| protocol_error("replay span disappeared"))?;
+                input.extend(span.output.iter().cloned().map(ResponsesInputItem::Native));
+                replay_end = span.start + span.semantic.len();
+                continue;
+            }
             if let pl_protocol::ModelContextItem::ToolMedia { items } = item {
                 let content = tool_media_content(items);
                 input.push(ResponsesInputItem::message(

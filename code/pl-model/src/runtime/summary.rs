@@ -1,17 +1,14 @@
 //! Text summarization with frozen history and an independent physical session.
 use super::{ModelInvocationContext, ModelRuntime, ModelSession};
 use crate::completion::{
-    CompletionFailure, InferenceAccounting, ModelContextItem, PureError, ToolSpec, summary_request,
+    CompletionFailure, CompletionRequest, InferenceAccounting, PureError, summary_request,
 };
 
 /// Supplied model-visible prefix and the host's summary requirement.
 #[derive(Debug)]
 pub struct TextSummaryRequest<'a> {
     pub instructions: &'a str,
-    pub input: Vec<ModelContextItem>,
-    pub attachments: Vec<crate::completion::AttachmentInput>,
-    pub reasoning: Option<crate::completion::ReasoningConfig>,
-    pub tools: &'a [ToolSpec],
+    pub prefix: CompletionRequest,
     pub requirement: &'a str,
     pub max_output_tokens: Option<u64>,
     pub empty_summary_error: &'a str,
@@ -45,15 +42,12 @@ impl ModelRuntime {
         invocation: ModelInvocationContext,
     ) -> Result<TextSummary, CompletionFailure> {
         let session = ModelSession::default();
-        let mut completion = summary_request(
+        let completion = summary_request(
             request.instructions,
-            request.input,
-            request.tools,
+            request.prefix,
             request.requirement,
             request.max_output_tokens,
         );
-        completion.attachments = request.attachments;
-        completion.reasoning = request.reasoning;
         let response = self
             .complete(completion, invocation.with_session(session.clone()))
             .await;

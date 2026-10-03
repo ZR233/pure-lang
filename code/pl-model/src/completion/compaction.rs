@@ -1,9 +1,7 @@
 //! Provider 远程上下文压缩请求与响应。
 
-use crate::completion::usage::ReasoningConfig;
 use pl_protocol::InferenceAccounting;
 use pl_protocol::ModelContextItem;
-use pl_protocol::ToolSpec;
 use serde::{Deserialize, Serialize};
 
 /// OpenAI provider 的上下文压缩协议选择。
@@ -25,11 +23,7 @@ impl OpenAiCompactionMode {
 #[derive(Debug, Clone)]
 pub struct ModelCompactionRequest {
     pub mode: OpenAiCompactionMode,
-    pub instructions: String,
-    pub input: Vec<ModelContextItem>,
-    pub tools: Vec<ToolSpec>,
-    pub parallel_tool_calls: bool,
-    pub reasoning: Option<ReasoningConfig>,
+    pub prefix: super::CompletionRequest,
     pub prompt_cache_key: Option<String>,
 }
 

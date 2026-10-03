@@ -37,6 +37,7 @@ pub(crate) struct StreamCompletionAccumulator {
     tool_calls: Vec<ToolCall>,
     tool_call_callers: HashMap<String, ToolCallCaller>,
     responses_context_items: Vec<ResponsesContextItem>,
+    replay: super::replay::ReplayCollector,
     presentation_items: Vec<CompletionPresentationItem>,
     presentation_indexes: HashMap<String, usize>,
     presentation_sizes: Vec<usize>,
@@ -76,6 +77,7 @@ impl StreamCompletionAccumulator {
             tool_calls: Vec::new(),
             tool_call_callers: HashMap::new(),
             responses_context_items: Vec::new(),
+            replay: Default::default(),
             presentation_items: Vec::new(),
             presentation_indexes: HashMap::new(),
             presentation_sizes: Vec::new(),
@@ -336,6 +338,7 @@ impl StreamCompletionAccumulator {
             ModelStreamEvent::PresentationItem { item } => {
                 self.record_presentation_item(item)?;
             }
+            ModelStreamEvent::Replay(update) => self.replay.apply(update)?,
             ModelStreamEvent::WebSearchStarted { item_id, action } => {
                 self.record_web_search_started(&item_id, action, event_tx);
             }
@@ -531,9 +534,19 @@ impl StreamCompletionAccumulator {
             .as_ref()
             .and_then(|observation| observation.reported_model.clone())
             .unwrap_or_default();
-        Ok(CompletionResponse {
+        let replay = self.replay.finish()?;
+        if let Some(crate::completion::AssistantReplay::Chat { content }) = &replay {
+            for item in super::chat_presentation::completed_chat_presentation(
+                content,
+                reasoning_content.as_deref(),
+            )? {
+                self.record_presentation_item(item)?;
+            }
+        }
+        let mut response = CompletionResponse {
             response_id: self.response_id.take(),
             content,
+            replay,
             reasoning_content,
             tool_calls: std::mem::take(&mut self.tool_calls),
             responses_context_items: std::mem::take(&mut self.responses_context_items),
@@ -546,7 +559,33 @@ impl StreamCompletionAccumulator {
             },
             model,
             model_observation: self.model_observation.take(),
-        })
+        };
+        if let Some(crate::completion::AssistantReplay::Responses { output }) = &response.replay {
+            let call_order = output
+                .iter()
+                .filter(|item| {
+                    matches!(
+                        item.get("type").and_then(serde_json::Value::as_str),
+                        Some("function_call" | "custom_tool_call")
+                    )
+                })
+                .filter_map(|item| {
+                    item.get("call_id")
+                        .or_else(|| item.get("id"))
+                        .and_then(serde_json::Value::as_str)
+                })
+                .collect::<Vec<_>>();
+            response.tool_calls.sort_by_key(|call| {
+                call_order
+                    .iter()
+                    .position(|id| *id == call.call_id)
+                    .unwrap_or(usize::MAX)
+            });
+        }
+        if let Some(replay) = &response.replay {
+            replay.semantic_input(&response)?;
+        }
+        Ok(response)
     }
 
     fn observe_reported_model(&mut self, model: &str, terminal: bool) {

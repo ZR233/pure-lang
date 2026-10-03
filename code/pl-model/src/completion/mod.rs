@@ -10,6 +10,7 @@
 
 mod attachment;
 pub(crate) mod compaction;
+pub(crate) mod replay;
 pub(crate) mod request;
 pub(crate) mod response;
 pub(crate) mod stream;
@@ -28,6 +29,7 @@ pub use pl_protocol::{
     Result, ToolCallCaller, ToolCallKind, ToolCallRecord, ToolSpec, UsageReport,
     WebSearchContextSize, WebSearchFilters, WebSearchUserLocation,
 };
+pub use replay::{AssistantReplay, Value};
 pub use request::*;
 pub use response::*;
 pub use tool_call::*;

@@ -35,6 +35,7 @@ pub(crate) struct OpenAiStreamDecoder {
     /// A delta that omits `item_id` is attributed to the item its `output_index` was announced for,
     /// never to a synthetic default that could duplicate the real item.
     output_index_items: HashMap<u32, String>,
+    completed_output_items: BTreeSet<String>,
     /// Set when the decoder rejected the stream as a protocol error; later events are dropped.
     protocol_failed: bool,
 }
@@ -59,11 +60,67 @@ impl OpenAiStreamDecoder {
             next_text_block_ordinal: HashMap::new(),
             next_reasoning_block_ordinal: HashMap::new(),
             output_index_items: HashMap::new(),
+            completed_output_items: BTreeSet::new(),
             protocol_failed: false,
         }
     }
 
     pub(crate) fn decode(&mut self, event: &SseStreamEvent) -> Vec<ModelStreamEvent> {
+        if self.protocol_failed || self.terminal_received {
+            return Vec::new();
+        }
+        let mut events = Vec::new();
+        // A full terminal envelope may contain items whose done event was omitted.
+        // Complete them through the same decoder so calls, final text and replay agree.
+        if event.kind == "response.completed"
+            && let Some(output) = event
+                .response
+                .as_ref()
+                .and_then(|response| response.get("output"))
+                .and_then(serde_json::Value::as_array)
+        {
+            let mut template = event.clone();
+            template.kind = "response.output_item.done".into();
+            template.response = None;
+            for (index, item) in output.iter().enumerate() {
+                if item
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|id| !self.completed_output_items.contains(id))
+                {
+                    let mut completed = template.clone();
+                    completed.output_index = u32::try_from(index).ok();
+                    completed.item = Some(item.clone());
+                    events.extend(self.decode(&completed));
+                }
+            }
+        }
+        if event.kind == "response.output_item.done"
+            && let Some(id) = event
+                .item
+                .as_ref()
+                .and_then(|item| item.get("id"))
+                .and_then(serde_json::Value::as_str)
+            && !self.completed_output_items.insert(id.to_owned())
+        {
+            // The collector still verifies a repeated done item for conflicts.
+            if let Some(update) = crate::completion::stream::replay::ReplayUpdate::from_event(event)
+            {
+                return vec![ModelStreamEvent::Replay(update)];
+            }
+            return Vec::new();
+        }
+        let mut decoded = self.decode_events(event);
+        use crate::completion::stream::replay::ReplayUpdate;
+        let update = ReplayUpdate::from_event(event);
+        if let Some(update) = update {
+            decoded.insert(0, ModelStreamEvent::Replay(update));
+        }
+        events.extend(decoded);
+        events
+    }
+
+    fn decode_events(&mut self, event: &SseStreamEvent) -> Vec<ModelStreamEvent> {
         if self.protocol_failed {
             return Vec::new();
         }

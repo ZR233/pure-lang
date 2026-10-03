@@ -15,6 +15,7 @@ pub struct CompletionRequest {
     pub input: Vec<ModelContextItem>,
     pub attachments: Vec<super::AttachmentInput>,
     pub(crate) prepared_content: Vec<ResolvedAttachment>,
+    pub(crate) replay_spans: Vec<super::replay::ReplaySpan>,
     pub tools: Vec<ToolSpec>,
     pub tool_choice: String,
     pub parallel_tool_calls: bool,
@@ -118,12 +119,56 @@ impl CompletionRequestBuilder {
 }
 
 impl CompletionRequest {
+    /// Appends a completed assistant response without reducing its history to final text.
+    ///
+    /// # Errors
+    /// Rejects replay material that changes authority or disagrees with submitted calls.
+    pub fn append_response(
+        &mut self,
+        response: &super::CompletionResponse,
+    ) -> pl_protocol::Result<()> {
+        let Some(replay) = response.replay.as_ref() else {
+            self.input.extend(super::replay::recorded_input(response)?);
+            return Ok(());
+        };
+        let semantic = replay.semantic_input(response)?;
+        if let super::AssistantReplay::Responses { output } = replay {
+            self.replay_spans.push(super::replay::ReplaySpan {
+                start: self.input.len(),
+                semantic: semantic.clone(),
+                output: output.clone(),
+            });
+        }
+        self.input.extend(semantic);
+        Ok(())
+    }
+
+    pub(crate) fn validate_replay_spans(&self) -> pl_protocol::Result<()> {
+        let mut end = 0;
+        for span in &self.replay_spans {
+            let next = span
+                .start
+                .checked_add(span.semantic.len())
+                .ok_or_else(|| PureError::Protocol("replay span overflow".into()))?;
+            if span.start < end
+                || self.input.get(span.start..next) != Some(span.semantic.as_slice())
+            {
+                return Err(PureError::Protocol(
+                    "assistant replay differs from semantic input".into(),
+                ));
+            }
+            end = next;
+        }
+        Ok(())
+    }
+
     pub fn builder() -> CompletionRequestBuilder {
         CompletionRequestBuilder {
             request: CompletionRequest {
                 instructions: None,
                 input: Vec::new(),
                 prepared_content: Vec::new(),
+                replay_spans: Vec::new(),
                 attachments: Vec::new(),
                 tools: Vec::new(),
                 tool_choice: default_tool_choice(),

@@ -63,6 +63,7 @@ pub(crate) fn build_openai_request_body(
     model: &ModelInfo,
     prompt_cache_key: Option<&str>,
 ) -> Result<OpenAiRequestBody> {
+    request.validate_replay_spans()?;
     let messages = messages_after_last_compaction(&request.input);
     validate_tool_history(&messages)?;
     match endpoint {
