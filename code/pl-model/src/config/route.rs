@@ -45,6 +45,14 @@ pub struct AgentModelConfig {
     pub routes: BTreeMap<AgentRoleId, ModelRouteConfig>,
 }
 
+/// An observation can make an intact desired route unavailable without corrupting config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelRouteAvailability {
+    Available,
+    ModelUnavailable { provider: ProviderId, model: String },
+    EffortUnavailable { provider: ProviderId, model: String },
+}
+
 /// 完成引用校验后可直接创建模型 provider 的角色路由。
 #[derive(Debug, Clone)]
 pub struct ResolvedModelRoute {
@@ -75,6 +83,77 @@ impl ResolvedModelRoute {
 }
 
 impl AgentModelConfig {
+    /// Check declaration integrity without discarding persisted choices removed by an endpoint.
+    /// Malformed providers, profiles, duplicate declarations, missing providers and empty routes
+    /// still fail. Call `route_availability` separately; edits must use strict `validate`.
+    pub fn validate_declarations(&self) -> Result<()> {
+        if self.providers.is_empty() {
+            return Err(PureError::ConfigError(
+                "at least one provider is required".into(),
+            ));
+        }
+        for (id, provider) in &self.providers {
+            provider.validate_declarations(id)?;
+        }
+        for route in self.routes.values() {
+            self.route_availability(route)?;
+        }
+        Ok(())
+    }
+
+    /// Typed availability, not English error-message matching. This is not edit authorization.
+    /// # Errors
+    /// Structural/provider errors remain fatal, rather than becoming model unavailability.
+    pub fn route_availability(&self, route: &ModelRouteConfig) -> Result<ModelRouteAvailability> {
+        if route.model.trim().is_empty() {
+            return Err(PureError::ConfigError("model route has empty model".into()));
+        }
+        let provider = self.providers.get(&route.provider).ok_or_else(|| {
+            PureError::ConfigError(format!(
+                "model route references missing provider: {}",
+                route.provider
+            ))
+        })?;
+        provider.validate_declarations(&route.provider)?;
+        let models = provider.effective_models()?;
+        let Some(model) = models.iter().find(|model| model.slug == route.model) else {
+            if !provider.supports_model_discovery() {
+                return Err(PureError::ConfigError(format!(
+                    "model route references missing model: {}",
+                    route.model
+                )));
+            }
+            return Ok(ModelRouteAvailability::ModelUnavailable {
+                provider: route.provider.clone(),
+                model: route.model.clone(),
+            });
+        };
+        let candidates = model.supported_efforts();
+        let valid = match &route.effort {
+            None => candidates.is_empty(),
+            Some(effort) => candidates.iter().any(|c| c == effort.as_str()),
+        };
+        if !valid {
+            // Hand-written models are authoritative desired declarations, not external
+            // observations. Their invalid choices remain strict even on an online provider.
+            if !provider.supports_model_discovery()
+                || provider
+                    .editable_models()
+                    .iter()
+                    .any(|manual| manual.slug == route.model)
+            {
+                return Err(PureError::ConfigError(
+                    "model route has invalid effort selection".into(),
+                ));
+            }
+            return Ok(ModelRouteAvailability::EffortUnavailable {
+                provider: route.provider.clone(),
+                model: route.model.clone(),
+            });
+        }
+        Ok(ModelRouteAvailability::Available)
+    }
+
     /// 校验所有 provider 与动态角色路由引用。
     pub fn validate(&self) -> Result<()> {
         if self.providers.is_empty() {

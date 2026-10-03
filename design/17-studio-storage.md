@@ -22,6 +22,7 @@ Studio home（`~/.anywork/`）的布局为：
 │   ├── settings.toml               # 本版本 UI 与产品设置
 │   ├── workspaces.toml             # 本版本 Project/Workspace 定义
 │   ├── catalog.toml                # 本版本新会话目录摘要
+│   ├── model-catalogs/<provider-key>/<query-key>/model.json # 各实例最后成功模型声明
 │   ├── sessions/<storage-key>/     # 每个新 Thread 一个目录（storage-key = id 的 sha256）
 │   │   ├── history.sqlite          # 历史、最新上下文与 checkpoint 同事务
 │   │   └── blobs/                  # 可靠附件正文，旧 checkpoint 子目录迁移后回收
@@ -44,6 +45,7 @@ Studio home（`~/.anywork/`）的布局为：
 canonical 会话、调用与迁移目录位于 `~/.anywork/v2/`；产品库位于
 `~/.anywork/studio/v2/`，进程级锁与 Skill 仍位于 `studio/`。
 `<storage-key>` 是 Thread id 的 SHA-256 十六进制摘要，不是原始 id。
+`<provider-key>` 与 `<query-key>` 是实例和查询身份的安全摘要，不作为可逆凭据表示。
 旧共享库 `studio/sessions.sqlite`、旧逐产品 `studio/calls.sqlite`、旧全局
 `studio/attachments/` 及旧迁移 staging 目录原样留在旧数据根，本版本不读取或切换它们。
 
@@ -89,6 +91,8 @@ repo/path/branch/base/revision。目录展示与物理 ownership 是不同职责
 装配服务 → 装载缓存、workspace/catalog 摘要与资源归属 → 启动后台任务 → 发布就绪与 GUI 首屏。
 独立准备步骤并行，依赖步骤在汇合后执行；所有步骤成功前不发布运行时，不启动持久化 writer。
 此时加载的会话状态、打开的会话数据库和历史条目均为零。
+模型目录的本地默认/成功缓存在配置引用校验之前准备；各实例启动在线探测是独立后台观察，
+不属于等待全部网络结果才发布首屏的条件。读取缓存失败仅产生该实例诊断，见 17.3。
 
 步骤优先执行已知版本迁移、索引重建与可恢复尾记录修复。无法处理的数据损坏、未知版本或
 无效引用返回类型化持久化错误；权限、容量、占用、凭据服务和内部错误不触发数据重置。
@@ -132,6 +136,28 @@ repo/path/branch/base/revision。目录展示与物理 ownership 是不同职责
 目录变更与会话 checkpoint 不共享伪造的跨文件事务。创建/归档等跨资源命令使用显式可恢复
 步骤和迁移/操作记录：目标文件全部验证并持久化后才发布新 catalog revision；失败保留可重试
 状态和原资源。
+
+### 模型目录成功缓存
+
+在线模型目录是可重建的 provider 观察，不是用户 desired config 或会话数据。每个实例、查询身份
+独立保存版本化 `model.json`：身份、成功/检查时间（Unix 秒）、可选 ETag 与统一模型声明；
+不保存明文认证信息，API 模型价格保存为 Unknown，计价来源由 [06](./06-model.md) 定义。
+查询身份覆盖实例、完整 base URL 路径、adapter 及影响查询的 header/凭据身份；旧身份文件不
+用于新地址或其他实例，也不因删除、改名或切地址顺带删除。
+
+仅在查询/解码/声明与身份校验成功后使用单文件原子替换，再发布对应内存观察。写失败保留上一份
+已发布目录和成功文件，报告失败而非持久成功；取消和迟到结果不得提交。ETag/304 只有相同身份
+已有成功快照时可更新检查时间。文件 schema 独立于 config.toml 与普通程序版本；不按 TTL 或
+普通升级拒绝失败回退，不把派生缓存写入 settings.toml 的权威配置载荷。
+
+启动配置引用校验前读取同身份成功缓存。缺失、损坏、不兼容或读取失败只产生该实例诊断并回退
+供应商默认定义，保留文件现场，不触发全局备份重置。后续探测失败不改写或清空成功缓存；
+动态模型选择暂不可解析时的 unavailable 语义见 [20](./20-config.md)。既有配置/凭据服务本身的
+环境错误仍沿用原启动边界，不冒充缓存缺失。
+
+在线任务必须纳入启动取消与 shutdown：先拒绝新发布，取消网络，等待在途原子提交及全部任务
+终态，再关闭资源。不存在无人持有的刷新任务或关闭后的缓存写入。缓存布局在 v2 备份边界内，
+但自身错误不能成为触发全局恢复的理由。
 
 ## 17.4 历史、调用与实时流
 

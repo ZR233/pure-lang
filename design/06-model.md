@@ -111,7 +111,7 @@ function/custom 工具、programmatic caller、hosted search、thinking 与工�
 
 每个 provider 实例保存 preset 身份、endpoint override、凭证、headers、tool wire policy、服务
 能力和 catalog binding；具体模型由角色 route 选择，不保存第二份 provider 默认模型。模型目录由
-provider 配置解析（bundled catalog 加追加/显式模型），不从全局列表兜底；目录可按 slug 保存当前
+provider 配置及其非持久目录观察解析（默认、成功缓存、在线声明与手工模型），不从全局列表兜底；目录可按 slug 保存当前
 连接方式 override。reasoning/thinking/effort 的 wire 规则由模型 parameters 声明驱动（见 6.8）。
 
 OpenAI-compatible 自定义模型必须显式提供完整 transport profile：Chat 模型只能声明
@@ -133,12 +133,13 @@ provider 实例统一决定；同一 provider 实例下的不同模型可以使�
 transport profile 是模型信息的必填字段，包含 protocol、supported_connection_modes 与
 default_connection_mode；provider 的模型目录可按模型 slug 保存 connection_overrides，解析后的
 模型把 override 投影为本次请求的最终连接方式。Chat + WS、空支持列表、默认模式不在支持列表，
-以及 override 指向未知或不支持模式的模型，都在配置加载/保存时拒绝，校验失败返回类型化的模型
-profile 错误（携带 slug 与涉事模态/wire 上下文），消费方并入配置错误；媒体契约校验使用同一错误
-类型。Web 与 Flutter 只渲染模型目录返回的 transport 和当前 override，不按 preset ID 推断。
+以及用户新保存的 override 指向未知或不支持模式的模型，都在保存时拒绝，校验失败返回类型化的模型
+profile 错误（携带 slug 与涉事模态/wire 上下文）；媒体契约校验使用同一错误类型。在线目录变化使
+既有选择不可用时，保留选择并报告外部绑定不可用，不将其判为用户数据损坏或自动改选。
+显式手工目录及声明本身仍严格校验。Web 与 Flutter 只渲染模型目录返回的 transport 和当前 override，不按 preset ID 推断。
 
-内建矩阵固定为：全部 GPT 使用 Responses，支持 WS/HTTP 且默认 WS——选择 HTTP 时仍调用
-`/responses` 并消费 SSE，绝不切换到 Chat Completions；DeepSeek V4.1 Flash 与 V4 Pro 使用
+OpenAI 的可复用绑定使用 Responses，支持 WS/HTTP 且默认 WS——选择 HTTP 时仍调用
+`/responses` 并消费 SSE，绝不切换到 Chat Completions；DeepSeek 的可复用绑定使用
 Responses/HTTP；通用 GLM 目录和全部 MiMo 使用 Chat Completions/HTTP，Coding Plan 的 GLM
 Responses 目录使用 Responses/HTTP。runtime 按当前模型选择对应
 endpoint path，同一 provider 实例可以路由不同协议的模型。
@@ -300,6 +301,37 @@ Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 
 使用显式模型列表。附加与显式模型都必须声明 transport；模型目录的 connection_overrides 只保存
 当前模式选择，不修改模型声明的支持矩阵。
 
+### 在线目录与默认定义
+
+OpenAI 与 DeepSeek 的默认模型目录由各自版本化 `model.json` 定义随二进制发布，复用完整
+ModelInfo 声明与既有模型字段序列化契约，统一提供模型集合、推荐模型/effort 与已记录价格。
+默认定义不在 Rust 名单或 preset 中重复维护；装配失败属于程序内部定义错误，不是用户配置损坏。
+其他未声明在线探测能力的目录保持既有静态或显式语义。
+
+在线查询由 endpoint 的窄能力执行，不要求先选择模型，且始终在当前 `base_url` 的路径前缀后
+追加 `/models`，保留既有查询参数与 provider 鉴权/header 规则。不得插入额外 `/v1`、固定请求
+Codex 后端或按 URL 猜测 adapter。每次探测单次请求、整体上限 10 秒、响应体上限 4 MiB，禁止
+自动重试与重定向；取消释放请求，不创建无主任务。错误保留必要状态与类型化原因，不回显认证头、
+token、带凭据 URL 或无界正文。
+
+typed 适配边界接受 OpenAI-compatible 的 `data`/`id` 与 Codex 富声明的 `models`/`slug`。
+归一化名称、描述、上下文/输出/压缩预算、模态和 effort；候选及 wire 继续数据驱动，不使用固定
+effort 枚举。服务端默认 effort 如有提供须属于候选，但不改写既有 route 或内部摘要的最弱选择。
+API 明确字段优先，缺失字段只按同一精确 ID 使用已有成功/默认声明补全，显式空值域和否定不补回。
+未知预算保持未知，不把 ID-only 列表称为完整参数声明，不凭名字补图片、窗口或 reasoning 能力；
+媒体能力还须满足已有 binding/profile 校验。Codex 的产品指令、shell 与工具权限不进入模型声明。
+重复/空 ID、错误 envelope、无效预算或 profile 明确失败；合法空名单是成功声明，不伪装为失败。
+
+provider 的唯一有效目录按本次在线成功、同查询身份最后成功、从未成功时默认定义选择；成功名单
+替换上一份 API 名单，不累计历史模型，也不从默认定义补回 API 未列出的 ID。手工附加模型保留
+完整声明及优先权，原有 bundled slug 冲突规则不变；完全 explicit 目录不自动转为在线目录。
+在线声明只进入非持久 overlay，不写入 `additional_models`，所有路由与展示复用同一解析入口。
+
+API 价格字段不可信为本地计价事实。价格只按该 provider 绑定目录/手工记录的大小写敏感精确 ID
+关联，不按前缀、别名或其他供应商同名项匹配。在线成功缓存保存 Unknown 价格，解析时关联当前
+本地价格；缺价仍保留用量并标记未计价，不伪造零费用。缓存身份、文件与回退见 [17](./17-studio-storage.md)，
+启动探测及 desired/目录水位见 [20](./20-config.md)。
+
 模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 Studio 的 instruction
 assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的
 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值；
@@ -346,10 +378,8 @@ set 列表（嵌套 dot 路径 + 透传字符串值，如 `reasoning.effort`、`
 
 | 供应商 | candidates | set（选中值 → 字段） | remove |
 | --- | --- | --- | --- |
-| OpenAI（GPT-5.5） | `low` / `medium` / `high` / `xhigh` | `reasoning.effort` = 值 | — |
-| OpenAI（GPT-6 Astra / GPT-5.6 Sol / Terra / Luna） | `low` / `medium` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
-| OpenAI（GPT-6 Sol / Luna） | `none` / `low` / `medium` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
-| DeepSeek | `low` / `high` / `max` | `reasoning_effort` = 值（`thinking.type = enabled` 作为 base body） | — |
+| OpenAI | 当前有效声明的候选（默认值域来自其 model.json，在线值域来自 API） | `reasoning.effort` = 值 | — |
+| DeepSeek | 当前有效声明的候选（默认值域来自其 model.json，在线值域来自 API） | `reasoning_effort` = 值（有 effort 时 `thinking.type = enabled` 作为 base body） | — |
 | 智谱普通 | `none` / `enabled` | `thinking.type` = 值 | — |
 | GLM-5.2 | `none` / `high` / `max` | `high`/`max`：`reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false`；`none`：`thinking.type = disabled` | `none` 移除 `reasoning_effort` |
 | GLM-5.3 / GLM-5.3-Flash（通用 Chat API） | `low` / `high` / `max` | 三档均为 `reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false` | — |
@@ -368,18 +398,14 @@ effort 选择只改变 `reasoning_effort` 值，Coding Plan 的 OpenAI Response 
 ## 6.9 模型家族预设
 
 同供应商的模型共享大量元数据（capabilities、truncation policy、effort 参数声明、base body）。
-内置目录不为每个模型独立构造完整模型信息，而是用模型家族（ModelFamily）预设封装共享部分，具体
-模型仅以差异字段实例化。家族不承担请求生命周期或费用计算；模型计价（ModelPricing）独立表达
+保留 Rust 声明的目录用模型家族（ModelFamily）预设封装共享部分，具体模型仅以差异字段实例化；
+在线供应商的默认数据复用完整模型声明格式，见 6.7。家族不承担请求生命周期或费用计算；模型计价（ModelPricing）独立表达
 未知价格或包含长度分档、时段倍率及来源的费率定义，具体结构以公开 Rust 类型为准。
 
-内建家族预设按供应商与模型线划分（OpenAI 各线、DeepSeek 主线与 Flash 线、MiMo、智谱文本与
-各 GLM 线、智谱 vision，以及 Coding Plan 的 GLM Responses 线），共享能力矩阵由各供应商能力
-构造复用；家族之间的差异集中在 effort 候选值域、request profile 与 typed input
-capabilities。GPT-6 Astra 与 GPT-6 Sol/Luna 共享 Responses transport、文本与图片输入及
-计费规则，Sol/Luna 可额外选择 `none` effort；OpenAI preset 新建 provider 时推荐 GPT-6 Sol，
-已有角色路由不因目录更新而自动改写。DeepSeek V4.1 Flash 使用经过官方文档确认的 Responses
-image profile，V4 Pro 只声明 text；两者共享 effort、thinking、上下文和 Responses HTTP 规则，
-但计费独立保存在各自模型实例。通用 Chat API 的 GLM-5.3 与 GLM-5.2 复用同一条"启用思考"
+MiMo、智谱文本、各 GLM 线、智谱 vision 与 Coding Plan 的 GLM Responses 线继续使用家族预设；
+差异集中在 effort、request profile 与 typed input capabilities。OpenAI/DeepSeek 默认定义以
+统一模型声明数据发布，在线适配复用绑定/媒体规则，不保留逐模型 Rust 家族名单。推荐模型及
+默认能力以供应商定义文件为准，已有角色路由不因目录更新而自动改写。通用 Chat API 的 GLM-5.3 与 GLM-5.2 复用同一条"启用思考"
 wire 组合，差异只在
 候选值域：GLM-5.3 为 `high` / `low` / `max`，且不提供禁用思考候选；GLM-5.3-Flash 复用
 GLM-5.3 的始终思考 wire 与候选值域，并声明 image 的 local/data-url 与 remote-url/snapshot

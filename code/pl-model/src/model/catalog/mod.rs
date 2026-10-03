@@ -1,14 +1,7 @@
-//! 默认模型目录，按 provider 家族文件组织，用 `ModelFamily` 预设复用共享元数据。
-//!
-//! 参见 design/06-model.md 6.8 / 6.9 节。同 provider 的模型共享 capabilities、
-//! truncation_policy、effort 参数声明（`ModelParameter`）和 base body，具体模型
-//! 仅以 [`ModelInstanceSpec`] 差异字段从 family 派生。各 provider 的家族预设、
-//! 实例数据与能力矩阵放在对应的 `deepseek` / `openai` / `mimo` / `zhipu` 子文件，
-//! 本模块只保留目录编排与跨家族共享的 media/wire helper。
+//! 默认目录编排与可复用媒体/wire 规则；OpenAI/DeepSeek 读取 embedded JSON，
+//! MiMo/Zhipu 保留家族预设。见 design/06-model.md 6.7–6.9。
 
-mod deepseek;
 mod mimo;
-mod openai;
 mod zhipu;
 
 use serde_json::Value;
@@ -19,20 +12,18 @@ use crate::model::info::{
 };
 use crate::model::parameter::{ParameterWire, WireAssignment};
 
-pub use deepseek::deepseek_default_model_slugs;
 pub use mimo::mimo_default_model_slugs;
-pub use openai::openai_default_model_slugs;
 pub use zhipu::{zhipu_default_model_slugs, zhipu_responses_default_model_slugs};
 
 pub(crate) use zhipu::responses_models as zhipu_responses_models;
 
 /// 内建默认模型目录；顺序固定为 DeepSeek → OpenAI → MiMo → Zhipu。
-pub fn default_models() -> Vec<ModelInfo> {
-    let mut models = deepseek::models();
-    models.extend(openai::models());
+pub fn default_models() -> Result<Vec<ModelInfo>, super::ModelDefinitionError> {
+    let mut models = super::bundled_model_definition("deepseek")?.models;
+    models.extend(super::bundled_model_definition("openai")?.models);
     models.extend(mimo::models());
     models.extend(zhipu::models());
-    models
+    Ok(models)
 }
 
 impl ModelRequestProfile {
@@ -45,7 +36,7 @@ impl ModelRequestProfile {
 
 /// 图片首发与重放表示的顺序策略。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MediaSendOrder {
+pub(crate) enum MediaSendOrder {
     /// 优先使用供应商文件，其次远端 URL，最后回退 DataUrl。
     ProviderFileFirst,
     /// 优先发送远端 URL，失败或受限时回退 DataUrl。
@@ -55,7 +46,7 @@ pub(super) enum MediaSendOrder {
 }
 
 /// 构造图片模态的媒体表示 profile。
-fn image_media_profiles(
+pub(crate) fn image_media_profiles(
     wire: MediaWireFormat,
     send_order: MediaSendOrder,
 ) -> Vec<ModelMediaInputProfile> {

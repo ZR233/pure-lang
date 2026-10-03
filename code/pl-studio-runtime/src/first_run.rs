@@ -23,21 +23,25 @@ use pl_protocol::ThreadModeId;
 pub struct ProviderTemplateKind(ProviderPresetId);
 
 impl ProviderTemplateKind {
-    pub fn all() -> Vec<Self> {
-        builtin_provider_catalog()
+    /// # Errors
+    /// Returns an error if the bundled catalog cannot be assembled.
+    pub fn all() -> Result<Vec<Self>> {
+        Ok(builtin_provider_catalog()?
             .presets
             .into_iter()
             .map(|preset| Self(preset.id))
-            .collect()
+            .collect())
     }
 
-    pub fn from_key(key: &str) -> Option<Self> {
+    /// # Errors
+    /// Returns catalog assembly errors; an unknown key returns `Ok(None)`.
+    pub fn from_key(key: &str) -> Result<Option<Self>> {
         let normalized = key.trim().replace('_', "-");
-        builtin_provider_catalog()
+        Ok(builtin_provider_catalog()?
             .presets
             .into_iter()
             .find(|preset| preset.id.as_str() == normalized)
-            .map(|preset| Self(preset.id))
+            .map(|preset| Self(preset.id)))
     }
 
     pub fn key(&self) -> &str {
@@ -48,20 +52,18 @@ impl ProviderTemplateKind {
         self.key()
     }
 
-    pub fn display_name(&self) -> String {
-        self.preset().display_name
+    /// # Errors
+    /// Returns an error if the bundled catalog cannot be assembled.
+    pub fn display_name(&self) -> Result<String> {
+        Ok(self.preset()?.display_name)
     }
 
-    pub(crate) fn provider_endpoint(&self) -> ProviderEndpoint {
-        let preset = self.preset();
-        preset
-            .provider
-            .to_endpoint()
-            .expect("builtin provider preset must resolve")
+    pub(crate) fn provider_endpoint(&self) -> Result<ProviderEndpoint> {
+        self.preset()?.provider.to_endpoint()
     }
 
     pub fn default_models(&self) -> Result<Vec<ModelInfo>> {
-        self.preset().provider.effective_models()
+        self.preset()?.provider.effective_models()
     }
 
     pub fn default_model_slugs(&self) -> Result<Vec<String>> {
@@ -72,16 +74,18 @@ impl ProviderTemplateKind {
             .collect())
     }
 
-    pub fn provider_config(&self) -> ProviderConfig {
-        self.preset().provider
+    /// # Errors
+    /// Returns an error if the bundled catalog cannot be assembled.
+    pub fn provider_config(&self) -> Result<ProviderConfig> {
+        Ok(self.preset()?.provider)
     }
 
-    fn preset(&self) -> pl_model::config::ProviderPreset {
-        builtin_provider_catalog()
+    fn preset(&self) -> Result<pl_model::config::ProviderPreset> {
+        Ok(builtin_provider_catalog()?
             .presets
             .into_iter()
             .find(|preset| preset.id == self.0)
-            .expect("ProviderTemplateKind is created from the builtin registry")
+            .expect("ProviderTemplateKind is created from the builtin registry"))
     }
 }
 
@@ -114,10 +118,12 @@ pub struct FirstRunProviderDraft {
 }
 
 impl FirstRunProviderDraft {
-    pub fn from_template(key: impl Into<String>, kind: ProviderTemplateKind) -> Self {
-        let endpoint = kind.provider_endpoint();
-        let default_model = kind.preset().suggested_model;
-        Self {
+    /// # Errors
+    /// Returns catalog assembly or provider endpoint validation errors.
+    pub fn from_template(key: impl Into<String>, kind: ProviderTemplateKind) -> Result<Self> {
+        let endpoint = kind.provider_endpoint()?;
+        let default_model = kind.preset()?.suggested_model;
+        Ok(Self {
             key: key.into(),
             kind,
             name: endpoint.name,
@@ -125,7 +131,7 @@ impl FirstRunProviderDraft {
             bearer_token: String::new(),
             default_model,
             models: Vec::new(),
-        }
+        })
     }
 
     pub fn all_models(&self) -> Result<Vec<ModelInfo>> {
@@ -144,7 +150,7 @@ impl FirstRunProviderDraft {
             )));
         }
 
-        let mut provider = self.kind.provider_config();
+        let mut provider = self.kind.provider_config()?;
         provider.name = non_empty_trimmed(&self.name, "provider name")?;
         provider.base_url = trim_optional(self.base_url.as_deref()).ok_or_else(|| {
             let key = &self.key;
@@ -185,14 +191,16 @@ pub struct FirstRunConfigDraft {
 }
 
 impl FirstRunConfigDraft {
-    pub fn new_default() -> Self {
-        let kind = ProviderTemplateKind::from_key("deepseek")
+    /// # Errors
+    /// Returns catalog assembly or default provider validation errors.
+    pub fn new_default() -> Result<Self> {
+        let kind = ProviderTemplateKind::from_key("deepseek")?
             .expect("PL builtin registry contains deepseek preset");
-        let provider = FirstRunProviderDraft::from_template("deepseek", kind);
-        Self {
+        let provider = FirstRunProviderDraft::from_template("deepseek", kind)?;
+        Ok(Self {
             default_provider: provider.key.clone(),
             providers: vec![provider],
-        }
+        })
     }
 
     pub fn suggest_provider_key(&self, kind: &ProviderTemplateKind) -> String {
@@ -215,11 +223,16 @@ impl FirstRunConfigDraft {
         unreachable!("unbounded provider key suggestion should always return")
     }
 
-    pub fn add_provider(&mut self, kind: ProviderTemplateKind) -> &mut FirstRunProviderDraft {
+    /// # Errors
+    /// Returns template errors without adding a partial provider draft.
+    pub fn add_provider(
+        &mut self,
+        kind: ProviderTemplateKind,
+    ) -> Result<&mut FirstRunProviderDraft> {
         let key = self.suggest_provider_key(&kind);
         self.providers
-            .push(FirstRunProviderDraft::from_template(key, kind));
-        self.providers.last_mut().expect("provider was just pushed")
+            .push(FirstRunProviderDraft::from_template(key, kind)?);
+        Ok(self.providers.last_mut().expect("provider was just pushed"))
     }
 
     pub fn to_config(&self) -> Result<StudioConfig> {

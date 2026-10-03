@@ -220,7 +220,7 @@ impl RemoteClient {
         let request_id = self
             .inner
             .next_request_id
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .map_err(|_| {
                 RemoteClientError::Protocol("remote request identity exhausted".to_string())
             })?

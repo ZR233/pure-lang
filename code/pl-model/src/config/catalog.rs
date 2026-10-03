@@ -11,9 +11,8 @@ use pl_protocol::{
 
 use super::{ModelCatalogId, ProviderConfig, ProviderPresetId};
 use crate::model::{
-    ModelInfo, ModelModality, deepseek_default_model_slugs, default_models,
-    mimo_default_model_slugs, openai_default_model_slugs, zhipu_default_model_slugs,
-    zhipu_responses_default_model_slugs, zhipu_responses_models,
+    ModelInfo, ModelModality, bundled_model_definition, default_models, mimo_default_model_slugs,
+    zhipu_default_model_slugs, zhipu_responses_default_model_slugs, zhipu_responses_models,
 };
 use crate::provider::{
     ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities, ProviderWireProtocol,
@@ -54,14 +53,22 @@ pub struct ProviderCatalogRegistry {
 
 impl ProviderCatalogRegistry {
     /// 构造当前二进制内置的完整目录。
-    pub fn builtin() -> Self {
+    pub fn builtin() -> Result<Self> {
+        let openai = bundled_model_definition("openai")?;
+        let deepseek = bundled_model_definition("deepseek")?;
         let model_catalogs = [
-            model_catalog("openai", openai_default_model_slugs()),
-            model_catalog("deepseek", deepseek_default_model_slugs()),
-            model_catalog("zhipu", zhipu_default_model_slugs()),
+            ModelCatalog {
+                id: ModelCatalogId::new("openai")?,
+                models: openai.models,
+            },
+            ModelCatalog {
+                id: ModelCatalogId::new("deepseek")?,
+                models: deepseek.models,
+            },
+            model_catalog("zhipu", zhipu_default_model_slugs())?,
             zhipu_responses_catalog(),
-            model_catalog("mimo", mimo_default_model_slugs()),
-            model_catalog("openai-compatible", &[]),
+            model_catalog("mimo", mimo_default_model_slugs())?,
+            model_catalog("openai-compatible", &[])?,
         ]
         .into_iter()
         .map(|catalog| (catalog.id.clone(), catalog))
@@ -71,7 +78,7 @@ impl ProviderCatalogRegistry {
             preset(
                 "openai",
                 ProviderEndpoint::openai(None),
-                "gpt-6-sol",
+                &openai.suggested_model,
                 "openai",
                 "OPENAI_API_KEY",
                 "OpenAI models served through the Responses API.",
@@ -80,7 +87,7 @@ impl ProviderCatalogRegistry {
             preset(
                 "deepseek",
                 ProviderEndpoint::deepseek(None),
-                "deepseek-flash",
+                &deepseek.suggested_model,
                 "deepseek",
                 "DEEPSEEK_API_KEY",
                 "DeepSeek reasoning and coding models.",
@@ -145,10 +152,10 @@ impl ProviderCatalogRegistry {
         };
         presets.push(compatible);
 
-        Self {
+        Ok(Self {
             presets,
             model_catalogs,
-        }
+        })
     }
 
     /// 校验 preset、catalog、transport 与 suggested model 的引用完整性。
@@ -242,27 +249,27 @@ impl ProviderCatalogRegistry {
 }
 
 /// 返回当前 PL 内置 Provider 目录。
-pub fn builtin_provider_catalog() -> ProviderCatalogRegistry {
+pub fn builtin_provider_catalog() -> Result<ProviderCatalogRegistry> {
     ProviderCatalogRegistry::builtin()
 }
 
 /// 返回一个内置模型目录的副本。
 pub fn builtin_model_catalog(id: &ModelCatalogId) -> Result<ModelCatalog> {
-    ProviderCatalogRegistry::builtin()
+    ProviderCatalogRegistry::builtin()?
         .model_catalog(id)
         .cloned()
         .ok_or_else(|| PureError::ConfigError(format!("unknown model catalog: {id}")))
 }
 
-fn model_catalog(id: &str, slugs: &[&str]) -> ModelCatalog {
-    let models = default_models()
+fn model_catalog(id: &str, slugs: &[&str]) -> Result<ModelCatalog> {
+    let models = default_models()?
         .into_iter()
         .filter(|model| slugs.contains(&model.slug.as_str()))
         .collect();
-    ModelCatalog {
+    Ok(ModelCatalog {
         id: ModelCatalogId::new(id).expect("static model catalog id is valid"),
         models,
-    }
+    })
 }
 
 /// Coding Plan 的 Responses 目录与通用 Chat 目录共用模型 slug，因此独立构造而不是按 slug 过滤。

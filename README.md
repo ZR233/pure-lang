@@ -70,7 +70,7 @@ core 默认纯内存，SQLite 通过 `sqlite` feature 显式启用。独立用�
 
 ### 前置条件
 
-- [Rust](https://rustup.rs/)（建议使用 stable；项目使用 2024 版语言标准）
+- [Rust](https://rustup.rs/)（版本由 `rust-toolchain.toml` 固定；项目使用 2024 版语言标准）
 - [Flutter](https://docs.flutter.dev/get-started/install) 3.47.1 或兼容版本（`flutter` 需在 PATH 中，内含 Dart）
 - Git、PowerShell（Windows）或 Bash（Linux/macOS）
 - 一个受支持的桌面开发环境：Windows、Linux 或 macOS
@@ -164,7 +164,7 @@ cargo xtask build-gui
 
 - Visual Studio 2022 或 Build Tools，勾选“使用 C++ 的桌面开发”和 Windows 10/11 SDK；
 - Windows 桌面支持：`cargo flutter config --enable-windows-desktop`；
-- Rust 使用 `stable-x86_64-pc-windows-msvc` 工具链；
+- Rust 使用与 `rust-toolchain.toml` 同版的 `x86_64-pc-windows-msvc` 工具链；
 - CMake（Visual Studio 安装器可选装）应位于 PATH；
 - 运行 `cargo xtask build-gui` 还需要前文的 Zig、`cargo-zigbuild` 和两个 musl Rust 目标。
 

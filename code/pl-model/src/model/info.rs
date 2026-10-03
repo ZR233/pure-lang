@@ -429,6 +429,48 @@ impl ModelInfo {
     /// Returns the inconsistent transport, media or tariff contract, or a
     /// non-positive default auto-compact token limit.
     pub fn validate(&self) -> Result<(), ModelProfileError> {
+        if [
+            self.context_window,
+            self.max_context_window,
+            self.max_output_tokens,
+        ]
+        .contains(&Some(0))
+            || matches!((self.context_window, self.max_context_window), (Some(current), Some(max)) if current > max)
+            || self
+                .default_temperature
+                .is_some_and(|t| !t.is_finite() || t < 0.0)
+        {
+            return Err(ModelProfileError::InvalidBudget {
+                model: self.slug.clone(),
+            });
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for parameter in &self.parameters {
+            let mut candidates = std::collections::BTreeSet::new();
+            if parameter.name.trim().is_empty()
+                || !names.insert(&parameter.name)
+                || parameter.candidates.is_empty()
+                || parameter
+                    .candidates
+                    .iter()
+                    .any(|c| c.trim().is_empty() || !candidates.insert(c))
+                || parameter.wire.len() != candidates.len()
+                || parameter.wire.iter().any(|(candidate, wire)| {
+                    !candidates.contains(candidate)
+                        || wire.set.is_empty() && wire.remove.is_empty()
+                        || wire
+                            .set
+                            .iter()
+                            .map(|s| &s.path)
+                            .chain(&wire.remove)
+                            .any(|path| path.split('.').any(str::is_empty))
+                })
+            {
+                return Err(ModelProfileError::InvalidParameter {
+                    model: self.slug.clone(),
+                });
+            }
+        }
         self.binding.transport.validate(&self.slug)?;
         if !matches!(
             (

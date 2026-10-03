@@ -24,13 +24,21 @@ pub(crate) fn headers(
         value.set_sensitive(true);
         headers.insert(AUTHORIZATION, value);
     }
-    for (key, value) in provider.into_iter().flatten().chain(model) {
-        let name = HeaderName::from_bytes(key.as_bytes())
-            .map_err(|_| PureError::ConfigError("invalid provider header name".into()))?;
-        let mut value = HeaderValue::from_str(value)
-            .map_err(|_| PureError::ConfigError("invalid provider header value".into()))?;
-        value.set_sensitive(true);
-        headers.insert(name, value);
+    for layer in provider.into_iter().chain(std::iter::once(model)) {
+        let mut names = std::collections::HashSet::new();
+        for (key, value) in layer {
+            let name = HeaderName::from_bytes(key.as_bytes())
+                .map_err(|_| PureError::ConfigError("invalid provider header name".into()))?;
+            if !names.insert(name.clone()) {
+                return Err(PureError::ConfigError(
+                    "duplicate provider header name".into(),
+                ));
+            }
+            let mut value = HeaderValue::from_str(value)
+                .map_err(|_| PureError::ConfigError("invalid provider header value".into()))?;
+            value.set_sensitive(true);
+            headers.insert(name, value);
+        }
     }
     Ok(headers)
 }

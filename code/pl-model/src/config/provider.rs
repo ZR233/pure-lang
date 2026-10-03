@@ -74,6 +74,9 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub capabilities: ProviderCapabilitySelection,
     pub catalog: ProviderModelCatalogConfig,
+    /// Successful endpoint observation, never persisted as desired user configuration.
+    #[serde(skip)]
+    model_catalog_overlay: Option<Vec<ModelInfo>>,
 }
 
 impl ProviderConfig {
@@ -131,6 +134,7 @@ impl ProviderConfig {
             apply_patch_tool_type: info.apply_patch_tool_type,
             capabilities: ProviderCapabilitySelection::Explicit(service_capabilities),
             catalog,
+            model_catalog_overlay: None,
         }
     }
 
@@ -152,7 +156,7 @@ impl ProviderConfig {
         match &self.capabilities {
             ProviderCapabilitySelection::Explicit(capabilities) => Ok(capabilities.clone()),
             ProviderCapabilitySelection::PresetDefaults => match self.preset_id() {
-                Some(preset_id) => super::builtin_provider_catalog()
+                Some(preset_id) => super::builtin_provider_catalog()?
                     .presets
                     .into_iter()
                     .find(|preset| &preset.id == preset_id)
@@ -183,7 +187,11 @@ impl ProviderConfig {
 
     /// 解析 PL 内置目录和产品附加目录，返回运行时唯一有效模型列表。
     pub fn effective_models(&self) -> Result<Vec<ModelInfo>> {
-        apply_connection_overrides(self.declared_models()?, self.connection_overrides())
+        apply_connection_overrides(
+            self.declared_models()?,
+            self.connection_overrides(),
+            self.supports_model_discovery(),
+        )
     }
 
     /// 返回模型目录声明，不应用 provider 实例的当前连接方式 override。
@@ -195,8 +203,8 @@ impl ProviderConfig {
                 ..
             } => {
                 let bundled = builtin_model_catalog(catalog)?;
-                let mut models = bundled.models;
-                let mut slugs = models
+                let mut slugs = bundled
+                    .models
                     .iter()
                     .map(|model| model.slug.clone())
                     .collect::<BTreeSet<_>>();
@@ -207,12 +215,91 @@ impl ProviderConfig {
                             model.slug
                         )));
                     }
-                    models.push(model.clone());
                 }
+                let mut models = if let Some(overlay) = &self.model_catalog_overlay {
+                    let mut models = overlay.clone();
+                    for model in &mut models {
+                        model.pricing = bundled
+                            .models
+                            .iter()
+                            .find(|local| local.slug == model.slug)
+                            .map(|local| local.pricing.clone())
+                            .unwrap_or(crate::model::ModelPricing::Unknown);
+                    }
+                    models.retain(|model| {
+                        !additional_models
+                            .iter()
+                            .any(|manual| manual.slug == model.slug)
+                    });
+                    models
+                } else {
+                    bundled.models
+                };
+                models.extend(additional_models.iter().cloned());
                 Ok(models)
             }
             ProviderModelCatalogConfig::Explicit { models, .. } => Ok(models.clone()),
         }
+    }
+
+    /// Publish a complete successful inventory; even an empty inventory replaces defaults.
+    /// The host owns query identity/generation checks and durable publication ordering.
+    /// # Errors
+    /// Explicit/unsupported catalogs or any invalid declaration reject the whole observation.
+    pub fn set_model_catalog_overlay(&mut self, mut models: Vec<ModelInfo>) -> Result<()> {
+        if !self.supports_model_discovery() {
+            return Err(PureError::Protocol(
+                "model catalog observation is unsupported".into(),
+            ));
+        }
+        for model in &mut models {
+            model.pricing = crate::model::ModelPricing::Unknown;
+        }
+        crate::model::validate_inventory(&models)
+            .map_err(|_| PureError::Protocol("invalid model catalog observation".into()))?;
+        if models.iter().any(|model| {
+            !crate::provider::discovery::valid_discovery_transport(
+                &model.binding.transport,
+                self.adapter,
+            )
+        }) {
+            return Err(PureError::Protocol(
+                "invalid model catalog observation profile".into(),
+            ));
+        }
+        self.model_catalog_overlay = Some(models);
+        Ok(())
+    }
+
+    pub fn has_model_catalog_overlay(&self) -> bool {
+        self.model_catalog_overlay.is_some()
+    }
+
+    /// Pure capability check, independent of credential resolution or network availability.
+    pub fn supports_model_discovery(&self) -> bool {
+        match (&self.catalog, self.adapter) {
+            (
+                ProviderModelCatalogConfig::Bundled { catalog, .. },
+                crate::provider::ProviderAdapterKind::OpenAi,
+            ) => catalog.as_str() == "openai",
+            (
+                ProviderModelCatalogConfig::Bundled { catalog, .. },
+                crate::provider::ProviderAdapterKind::DeepSeek,
+            ) => catalog.as_str() == "deepseek",
+            _ => false,
+        }
+    }
+
+    /// Clear an old-identity observation when changing an endpoint; the host may then attach
+    /// that identity's cache. This does not delete a cache or mutate desired configuration.
+    pub fn clear_model_catalog_overlay(&mut self) {
+        self.model_catalog_overlay = None;
+    }
+
+    /// Structural configuration validation for startup/reconciliation. Missing observed models
+    /// are not corruption; strict user-edit validation remains `AgentModelConfig::validate`.
+    pub fn validate_declarations(&self, provider_id: &ProviderId) -> Result<()> {
+        self.validate_structure(provider_id, false)
     }
 
     /// 返回按模型 slug 保存的当前连接方式 override。
@@ -382,6 +469,14 @@ impl ProviderConfig {
     }
 
     pub(super) fn validate(&self, provider_id: &ProviderId) -> Result<()> {
+        self.validate_structure(provider_id, true)
+    }
+
+    fn validate_structure(
+        &self,
+        provider_id: &ProviderId,
+        strict_availability: bool,
+    ) -> Result<()> {
         if self.name.trim().is_empty() {
             return Err(PureError::ConfigError(format!(
                 "provider {provider_id} has empty name"
@@ -404,7 +499,7 @@ impl ProviderConfig {
         }
         self.validate_preset_binding(provider_id)?;
         let models = self.effective_models()?;
-        if models.is_empty() {
+        if models.is_empty() && (strict_availability || self.model_catalog_overlay.is_none()) {
             return Err(PureError::ConfigError(format!(
                 "provider {provider_id} must define at least one model"
             )));
@@ -435,10 +530,21 @@ impl ProviderConfig {
                     "provider {provider_id} model {slug} auto compact limit must be a positive integer"
                 )));
             }
-            if !slugs.contains(slug.as_str()) {
+            if !slugs.contains(slug.as_str())
+                && (strict_availability || !self.supports_model_discovery())
+            {
                 return Err(PureError::ConfigError(format!(
                     "provider {provider_id} auto compact override references unknown model: {slug}"
                 )));
+            }
+        }
+        if strict_availability {
+            for slug in self.connection_overrides().keys() {
+                if !slugs.contains(slug.as_str()) {
+                    return Err(PureError::ConfigError(format!(
+                        "connection override references unknown model: {slug}"
+                    )));
+                }
             }
         }
         Ok(())
@@ -448,7 +554,7 @@ impl ProviderConfig {
         let Some(preset_id) = self.preset_id() else {
             return Ok(());
         };
-        let preset = super::builtin_provider_catalog()
+        let preset = super::builtin_provider_catalog()?
             .presets
             .into_iter()
             .find(|preset| &preset.id == preset_id)
@@ -487,16 +593,17 @@ impl ProviderConfig {
 fn apply_connection_overrides(
     mut models: Vec<ModelInfo>,
     overrides: &BTreeMap<String, ProviderConnectionMode>,
+    allow_unavailable: bool,
 ) -> Result<Vec<ModelInfo>> {
     for (slug, mode) in overrides {
-        let model = models
-            .iter_mut()
-            .find(|model| model.slug == *slug)
-            .ok_or_else(|| {
-                PureError::ConfigError(format!(
-                    "connection override references unknown model: {slug}"
-                ))
-            })?;
+        let Some(model) = models.iter_mut().find(|model| model.slug == *slug) else {
+            if allow_unavailable {
+                continue;
+            }
+            return Err(PureError::ConfigError(format!(
+                "connection override references unknown model: {slug}"
+            )));
+        };
         if !model
             .binding
             .transport

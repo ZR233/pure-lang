@@ -14,6 +14,10 @@ use crate::provider::ProviderWireProtocol;
 /// 模型 profile 校验失败的具体规则。
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ModelProfileError {
+    #[error("model {model} has an invalid token budget")]
+    InvalidBudget { model: String },
+    #[error("model {model} has an invalid parameter declaration")]
+    InvalidParameter { model: String },
     #[error("model {model} pricing: {source}")]
     InvalidPricing {
         model: String,

@@ -29,7 +29,9 @@ factory dispatch 或兼容 wrapper。
 
 ### 1. `code/pl-model/src/model/catalog/` — canonical 模型目录
 
-- 优先复用 `ModelFamily`，单模型只声明 slug、显示信息、窗口、价格等差异字段。
+- OpenAI/DeepSeek 的默认名单、推荐模型和已记录价格只来自各自嵌入的 `assets/models/<catalog>/model.json`，复用 `ModelInfo`；不在 Rust slug 数组、preset 或初始角色路由复制名单。其他静态目录优先复用 `ModelFamily`。
+- 在线发现始终查询配置 `base_url` 的路径前缀 `/models`，不插入额外 `/v1` 或固定 Codex 后端。typed 适配支持 `data/id` 与 `models/slug`；ID-only 缺失参数保持未知，仅同精确 ID 可补已有声明，显式空候选不补回。
+- 成功名单替换 API 名单，不把未列出的默认模型补回；手工附加模型保留优先权，explicit 目录不自动转为在线目录。API 价格一律忽略，价格按 provider 绑定目录内大小写敏感精确 ID 关联，缺价用 `Unknown` 保留用量而非零费用。
 - 用 `ModelTransportProfile` 声明 protocol、支持的连接模式与默认连接模式。
 - 用 `ModelRequestProfile`、`ModelParameter` 和 `ParameterWire` 表达 body/header/effort 差异。
 - 先按 `test-quality` 检查已有能力、transport、价格及 request profile 的完整行为证明。仅增加遵循既有规则的模型条目不新增名称、数量或默认值清单镜像；解析、选择、计价或 wire 规则改变时，优先用合成样例增强真实行为测试。需要真实 provider 兼容证据时使用显式 opt-in 验收，不以清单回读替代。
@@ -55,7 +57,10 @@ factory dispatch 或兼容 wrapper。
 
 ### 5. `pl-studio-runtime` 与 Flutter
 
-- Studio first-run/config editor 只消费 canonical preset/catalog snapshot。
+- Studio first-run 使用默认定义，配置编辑器和模型选择器只消费实例完整 canonical 有效模型 snapshot，不由 Flutter 重新合并默认目录覆盖在线名单。
+- 每次启动各支持实例独立探测一次，首屏先用同身份成功缓存或默认 JSON；失败不清空成功缓存，不按 TTL/普通程序升级拒绝回退。成功缓存独立位于 Studio home 的 v2/model-catalogs 下，不写入 config.toml 或 additional_models。
+- desired Settings revision 与目录 revision 分开；自动结果按实例 identity/generation 合并到当前状态，别家成功不能让本家 stale。所有解析仍经 effective_models；启动在 route/Profile 校验前装配缓存。外部模型暂不可用保留用户选择并报告 unavailable，不触发全局数据恢复。
+- 探测任务登记生命周期 owner，shutdown/启动取消等待网络与提交终态；目录通知仅更新受影响 provider 的安全绑定，不重算在途请求或历史价格。
 - `default_model` 仅是 Studio 新建/编辑 provider 时生成角色 route 的投影，不进入 runtime provider。
 - Flutter 只渲染 bridge 返回的 transport、能力、价格和参数候选，不按 preset ID 推断。
 

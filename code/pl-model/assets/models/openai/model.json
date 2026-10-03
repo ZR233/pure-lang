@@ -1,0 +1,1144 @@
+{
+  "catalog": "openai",
+  "models": [
+    {
+      "auto_compact_token_limit": null,
+      "base_instructions": "",
+      "binding": {
+        "request": {
+          "media": [
+            {
+              "first_send": [
+                "remote_url",
+                "data_url"
+              ],
+              "modality": "image",
+              "replay": [
+                "data_url"
+              ],
+              "wire": "responses_input_image"
+            }
+          ],
+          "protocol": {
+            "api": "responses",
+            "maxTokensField": "omit",
+            "programmaticToolCalling": true
+          }
+        },
+        "transport": {
+          "default_connection_mode": "web_socket",
+          "protocol": "responses",
+          "supported_connection_modes": [
+            "web_socket",
+            "http"
+          ]
+        }
+      },
+      "capabilities": {
+        "input": [
+          {
+            "limits": {},
+            "modality": "text"
+          },
+          {
+            "limits": {},
+            "modality": "image",
+            "sources": [
+              "local",
+              "remote_url"
+            ]
+          }
+        ],
+        "output": [
+          "text"
+        ],
+        "prompt_cache": {
+          "cache_write_tokens": true
+        },
+        "reasoning": true,
+        "streaming": true,
+        "temperature": false,
+        "tools": {
+          "custom_tools": true,
+          "freeform_tools": true,
+          "function_calling": true,
+          "parallel_tool_calls": true,
+          "programmatic_tool_calling": true
+        },
+        "web_search": true
+      },
+      "context_window": 1050000,
+      "default_temperature": null,
+      "description": "OpenAI flagship model for complex reasoning, coding and agent tasks.",
+      "display_name": "GPT-6 Astra",
+      "max_context_window": 1050000,
+      "max_output_tokens": 128000,
+      "parameters": [
+        {
+          "candidates": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "name": "effort",
+          "wire": {
+            "high": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "high"
+                }
+              ]
+            },
+            "low": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "low"
+                }
+              ]
+            },
+            "max": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "max"
+                }
+              ]
+            },
+            "medium": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "medium"
+                }
+              ]
+            },
+            "xhigh": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "xhigh"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "pricing": {
+        "currency": "USD",
+        "kind": "rates",
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          {
+            "cacheReadPerMtok": 1.0,
+            "cacheWritePerMtok": 12.5,
+            "inputFrom": 0,
+            "inputPerMtok": 10.0,
+            "inputUntil": 272001,
+            "outputFrom": 0,
+            "outputPerMtok": 50.0,
+            "outputUntil": null
+          },
+          {
+            "cacheReadPerMtok": 2.0,
+            "cacheWritePerMtok": 25.0,
+            "inputFrom": 272001,
+            "inputPerMtok": 20.0,
+            "inputUntil": null,
+            "outputFrom": 0,
+            "outputPerMtok": 75.0,
+            "outputUntil": null
+          }
+        ],
+        "verifiedAt": 1788566400,
+        "weeklyAdjustment": null
+      },
+      "slug": "gpt-6-astra",
+      "truncation_policy": {
+        "limit": 10000,
+        "mode": "tokens"
+      }
+    },
+    {
+      "auto_compact_token_limit": null,
+      "base_instructions": "",
+      "binding": {
+        "request": {
+          "media": [
+            {
+              "first_send": [
+                "remote_url",
+                "data_url"
+              ],
+              "modality": "image",
+              "replay": [
+                "data_url"
+              ],
+              "wire": "responses_input_image"
+            }
+          ],
+          "protocol": {
+            "api": "responses",
+            "maxTokensField": "omit",
+            "programmaticToolCalling": true
+          }
+        },
+        "transport": {
+          "default_connection_mode": "web_socket",
+          "protocol": "responses",
+          "supported_connection_modes": [
+            "web_socket",
+            "http"
+          ]
+        }
+      },
+      "capabilities": {
+        "input": [
+          {
+            "limits": {},
+            "modality": "text"
+          },
+          {
+            "limits": {},
+            "modality": "image",
+            "sources": [
+              "local",
+              "remote_url"
+            ]
+          }
+        ],
+        "output": [
+          "text"
+        ],
+        "prompt_cache": {
+          "cache_write_tokens": true
+        },
+        "reasoning": true,
+        "streaming": true,
+        "temperature": false,
+        "tools": {
+          "custom_tools": true,
+          "freeform_tools": true,
+          "function_calling": true,
+          "parallel_tool_calls": true,
+          "programmatic_tool_calling": true
+        },
+        "web_search": true
+      },
+      "context_window": 1050000,
+      "default_temperature": null,
+      "description": "Built to power complex coding and agentic workflows.",
+      "display_name": "GPT-6 Sol",
+      "max_context_window": 1050000,
+      "max_output_tokens": 128000,
+      "parameters": [
+        {
+          "candidates": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "name": "effort",
+          "wire": {
+            "high": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "high"
+                }
+              ]
+            },
+            "low": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "low"
+                }
+              ]
+            },
+            "max": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "max"
+                }
+              ]
+            },
+            "medium": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "medium"
+                }
+              ]
+            },
+            "none": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "none"
+                }
+              ]
+            },
+            "xhigh": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "xhigh"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "pricing": {
+        "currency": "USD",
+        "kind": "rates",
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          {
+            "cacheReadPerMtok": 0.2,
+            "cacheWritePerMtok": 2.5,
+            "inputFrom": 0,
+            "inputPerMtok": 2.0,
+            "inputUntil": 272001,
+            "outputFrom": 0,
+            "outputPerMtok": 10.0,
+            "outputUntil": null
+          },
+          {
+            "cacheReadPerMtok": 0.4,
+            "cacheWritePerMtok": 5.0,
+            "inputFrom": 272001,
+            "inputPerMtok": 4.0,
+            "inputUntil": null,
+            "outputFrom": 0,
+            "outputPerMtok": 15.0,
+            "outputUntil": null
+          }
+        ],
+        "verifiedAt": 1788566400,
+        "weeklyAdjustment": null
+      },
+      "slug": "gpt-6-sol",
+      "truncation_policy": {
+        "limit": 10000,
+        "mode": "tokens"
+      }
+    },
+    {
+      "auto_compact_token_limit": null,
+      "base_instructions": "",
+      "binding": {
+        "request": {
+          "media": [
+            {
+              "first_send": [
+                "remote_url",
+                "data_url"
+              ],
+              "modality": "image",
+              "replay": [
+                "data_url"
+              ],
+              "wire": "responses_input_image"
+            }
+          ],
+          "protocol": {
+            "api": "responses",
+            "maxTokensField": "omit",
+            "programmaticToolCalling": true
+          }
+        },
+        "transport": {
+          "default_connection_mode": "web_socket",
+          "protocol": "responses",
+          "supported_connection_modes": [
+            "web_socket",
+            "http"
+          ]
+        }
+      },
+      "capabilities": {
+        "input": [
+          {
+            "limits": {},
+            "modality": "text"
+          },
+          {
+            "limits": {},
+            "modality": "image",
+            "sources": [
+              "local",
+              "remote_url"
+            ]
+          }
+        ],
+        "output": [
+          "text"
+        ],
+        "prompt_cache": {
+          "cache_write_tokens": true
+        },
+        "reasoning": true,
+        "streaming": true,
+        "temperature": false,
+        "tools": {
+          "custom_tools": true,
+          "freeform_tools": true,
+          "function_calling": true,
+          "parallel_tool_calls": true,
+          "programmatic_tool_calling": true
+        },
+        "web_search": true
+      },
+      "context_window": 1050000,
+      "default_temperature": null,
+      "description": "Efficient model for focused, high-volume tasks.",
+      "display_name": "GPT-6 Luna",
+      "max_context_window": 1050000,
+      "max_output_tokens": 128000,
+      "parameters": [
+        {
+          "candidates": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "name": "effort",
+          "wire": {
+            "high": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "high"
+                }
+              ]
+            },
+            "low": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "low"
+                }
+              ]
+            },
+            "max": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "max"
+                }
+              ]
+            },
+            "medium": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "medium"
+                }
+              ]
+            },
+            "none": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "none"
+                }
+              ]
+            },
+            "xhigh": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "xhigh"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "pricing": {
+        "currency": "USD",
+        "kind": "rates",
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          {
+            "cacheReadPerMtok": 0.010000000000000002,
+            "cacheWritePerMtok": 0.125,
+            "inputFrom": 0,
+            "inputPerMtok": 0.1,
+            "inputUntil": 272001,
+            "outputFrom": 0,
+            "outputPerMtok": 0.5,
+            "outputUntil": null
+          },
+          {
+            "cacheReadPerMtok": 0.020000000000000004,
+            "cacheWritePerMtok": 0.25,
+            "inputFrom": 272001,
+            "inputPerMtok": 0.2,
+            "inputUntil": null,
+            "outputFrom": 0,
+            "outputPerMtok": 0.75,
+            "outputUntil": null
+          }
+        ],
+        "verifiedAt": 1788566400,
+        "weeklyAdjustment": null
+      },
+      "slug": "gpt-6-luna",
+      "truncation_policy": {
+        "limit": 10000,
+        "mode": "tokens"
+      }
+    },
+    {
+      "auto_compact_token_limit": null,
+      "base_instructions": "",
+      "binding": {
+        "request": {
+          "media": [
+            {
+              "first_send": [
+                "remote_url",
+                "data_url"
+              ],
+              "modality": "image",
+              "replay": [
+                "data_url"
+              ],
+              "wire": "responses_input_image"
+            }
+          ],
+          "protocol": {
+            "api": "responses",
+            "maxTokensField": "omit",
+            "programmaticToolCalling": true
+          }
+        },
+        "transport": {
+          "default_connection_mode": "web_socket",
+          "protocol": "responses",
+          "supported_connection_modes": [
+            "web_socket",
+            "http"
+          ]
+        }
+      },
+      "capabilities": {
+        "input": [
+          {
+            "limits": {},
+            "modality": "text"
+          },
+          {
+            "limits": {},
+            "modality": "image",
+            "sources": [
+              "local",
+              "remote_url"
+            ]
+          }
+        ],
+        "output": [
+          "text"
+        ],
+        "prompt_cache": {
+          "cache_write_tokens": false
+        },
+        "reasoning": true,
+        "streaming": true,
+        "temperature": false,
+        "tools": {
+          "custom_tools": true,
+          "freeform_tools": true,
+          "function_calling": true,
+          "parallel_tool_calls": true,
+          "programmatic_tool_calling": true
+        },
+        "web_search": true
+      },
+      "context_window": 272000,
+      "default_temperature": null,
+      "description": "Frontier model for complex coding, research, and real-world work.",
+      "display_name": "GPT-5.5",
+      "max_context_window": 272000,
+      "max_output_tokens": null,
+      "parameters": [
+        {
+          "candidates": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "name": "effort",
+          "wire": {
+            "high": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "high"
+                }
+              ]
+            },
+            "low": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "low"
+                }
+              ]
+            },
+            "medium": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "medium"
+                }
+              ]
+            },
+            "xhigh": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "xhigh"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "pricing": {
+        "currency": "USD",
+        "kind": "rates",
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          {
+            "cacheReadPerMtok": 0.5,
+            "cacheWritePerMtok": null,
+            "inputFrom": 0,
+            "inputPerMtok": 5.0,
+            "inputUntil": 272001,
+            "outputFrom": 0,
+            "outputPerMtok": 30.0,
+            "outputUntil": null
+          },
+          {
+            "cacheReadPerMtok": 1.0,
+            "cacheWritePerMtok": null,
+            "inputFrom": 272001,
+            "inputPerMtok": 10.0,
+            "inputUntil": null,
+            "outputFrom": 0,
+            "outputPerMtok": 45.0,
+            "outputUntil": null
+          }
+        ],
+        "verifiedAt": 1788566400,
+        "weeklyAdjustment": null
+      },
+      "slug": "gpt-5.5",
+      "truncation_policy": {
+        "limit": 10000,
+        "mode": "tokens"
+      }
+    },
+    {
+      "auto_compact_token_limit": null,
+      "base_instructions": "",
+      "binding": {
+        "request": {
+          "media": [
+            {
+              "first_send": [
+                "remote_url",
+                "data_url"
+              ],
+              "modality": "image",
+              "replay": [
+                "data_url"
+              ],
+              "wire": "responses_input_image"
+            }
+          ],
+          "protocol": {
+            "api": "responses",
+            "maxTokensField": "omit",
+            "programmaticToolCalling": true
+          }
+        },
+        "transport": {
+          "default_connection_mode": "web_socket",
+          "protocol": "responses",
+          "supported_connection_modes": [
+            "web_socket",
+            "http"
+          ]
+        }
+      },
+      "capabilities": {
+        "input": [
+          {
+            "limits": {},
+            "modality": "text"
+          },
+          {
+            "limits": {},
+            "modality": "image",
+            "sources": [
+              "local",
+              "remote_url"
+            ]
+          }
+        ],
+        "output": [
+          "text"
+        ],
+        "prompt_cache": {
+          "cache_write_tokens": true
+        },
+        "reasoning": true,
+        "streaming": true,
+        "temperature": false,
+        "tools": {
+          "custom_tools": true,
+          "freeform_tools": true,
+          "function_calling": true,
+          "parallel_tool_calls": true,
+          "programmatic_tool_calling": true
+        },
+        "web_search": true
+      },
+      "context_window": 272000,
+      "default_temperature": null,
+      "description": "Latest frontier agentic coding model.",
+      "display_name": "GPT-5.6-Sol",
+      "max_context_window": 272000,
+      "max_output_tokens": null,
+      "parameters": [
+        {
+          "candidates": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "name": "effort",
+          "wire": {
+            "high": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "high"
+                }
+              ]
+            },
+            "low": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "low"
+                }
+              ]
+            },
+            "max": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "max"
+                }
+              ]
+            },
+            "medium": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "medium"
+                }
+              ]
+            },
+            "xhigh": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "xhigh"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "pricing": {
+        "currency": "USD",
+        "kind": "rates",
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          {
+            "cacheReadPerMtok": 0.4,
+            "cacheWritePerMtok": 5.0,
+            "inputFrom": 0,
+            "inputPerMtok": 4.0,
+            "inputUntil": 272001,
+            "outputFrom": 0,
+            "outputPerMtok": 20.0,
+            "outputUntil": null
+          },
+          {
+            "cacheReadPerMtok": 0.8,
+            "cacheWritePerMtok": 10.0,
+            "inputFrom": 272001,
+            "inputPerMtok": 8.0,
+            "inputUntil": null,
+            "outputFrom": 0,
+            "outputPerMtok": 30.0,
+            "outputUntil": null
+          }
+        ],
+        "verifiedAt": 1788566400,
+        "weeklyAdjustment": null
+      },
+      "slug": "gpt-5.6-sol",
+      "truncation_policy": {
+        "limit": 10000,
+        "mode": "tokens"
+      }
+    },
+    {
+      "auto_compact_token_limit": null,
+      "base_instructions": "",
+      "binding": {
+        "request": {
+          "media": [
+            {
+              "first_send": [
+                "remote_url",
+                "data_url"
+              ],
+              "modality": "image",
+              "replay": [
+                "data_url"
+              ],
+              "wire": "responses_input_image"
+            }
+          ],
+          "protocol": {
+            "api": "responses",
+            "maxTokensField": "omit",
+            "programmaticToolCalling": true
+          }
+        },
+        "transport": {
+          "default_connection_mode": "web_socket",
+          "protocol": "responses",
+          "supported_connection_modes": [
+            "web_socket",
+            "http"
+          ]
+        }
+      },
+      "capabilities": {
+        "input": [
+          {
+            "limits": {},
+            "modality": "text"
+          },
+          {
+            "limits": {},
+            "modality": "image",
+            "sources": [
+              "local",
+              "remote_url"
+            ]
+          }
+        ],
+        "output": [
+          "text"
+        ],
+        "prompt_cache": {
+          "cache_write_tokens": true
+        },
+        "reasoning": true,
+        "streaming": true,
+        "temperature": false,
+        "tools": {
+          "custom_tools": true,
+          "freeform_tools": true,
+          "function_calling": true,
+          "parallel_tool_calls": true,
+          "programmatic_tool_calling": true
+        },
+        "web_search": true
+      },
+      "context_window": 272000,
+      "default_temperature": null,
+      "description": "Balanced agentic coding model for everyday work.",
+      "display_name": "GPT-5.6-Terra",
+      "max_context_window": 272000,
+      "max_output_tokens": null,
+      "parameters": [
+        {
+          "candidates": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "name": "effort",
+          "wire": {
+            "high": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "high"
+                }
+              ]
+            },
+            "low": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "low"
+                }
+              ]
+            },
+            "max": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "max"
+                }
+              ]
+            },
+            "medium": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "medium"
+                }
+              ]
+            },
+            "xhigh": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "xhigh"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "pricing": {
+        "currency": "USD",
+        "kind": "rates",
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          {
+            "cacheReadPerMtok": 0.2,
+            "cacheWritePerMtok": 2.5,
+            "inputFrom": 0,
+            "inputPerMtok": 2.0,
+            "inputUntil": 272001,
+            "outputFrom": 0,
+            "outputPerMtok": 12.0,
+            "outputUntil": null
+          },
+          {
+            "cacheReadPerMtok": 0.4,
+            "cacheWritePerMtok": 5.0,
+            "inputFrom": 272001,
+            "inputPerMtok": 4.0,
+            "inputUntil": null,
+            "outputFrom": 0,
+            "outputPerMtok": 18.0,
+            "outputUntil": null
+          }
+        ],
+        "verifiedAt": 1788566400,
+        "weeklyAdjustment": null
+      },
+      "slug": "gpt-5.6-terra",
+      "truncation_policy": {
+        "limit": 10000,
+        "mode": "tokens"
+      }
+    },
+    {
+      "auto_compact_token_limit": null,
+      "base_instructions": "",
+      "binding": {
+        "request": {
+          "media": [
+            {
+              "first_send": [
+                "remote_url",
+                "data_url"
+              ],
+              "modality": "image",
+              "replay": [
+                "data_url"
+              ],
+              "wire": "responses_input_image"
+            }
+          ],
+          "protocol": {
+            "api": "responses",
+            "maxTokensField": "omit",
+            "programmaticToolCalling": true
+          }
+        },
+        "transport": {
+          "default_connection_mode": "web_socket",
+          "protocol": "responses",
+          "supported_connection_modes": [
+            "web_socket",
+            "http"
+          ]
+        }
+      },
+      "capabilities": {
+        "input": [
+          {
+            "limits": {},
+            "modality": "text"
+          },
+          {
+            "limits": {},
+            "modality": "image",
+            "sources": [
+              "local",
+              "remote_url"
+            ]
+          }
+        ],
+        "output": [
+          "text"
+        ],
+        "prompt_cache": {
+          "cache_write_tokens": true
+        },
+        "reasoning": true,
+        "streaming": true,
+        "temperature": false,
+        "tools": {
+          "custom_tools": true,
+          "freeform_tools": true,
+          "function_calling": true,
+          "parallel_tool_calls": true,
+          "programmatic_tool_calling": true
+        },
+        "web_search": true
+      },
+      "context_window": 272000,
+      "default_temperature": null,
+      "description": "Fast and affordable agentic coding model.",
+      "display_name": "GPT-5.6-Luna",
+      "max_context_window": 272000,
+      "max_output_tokens": null,
+      "parameters": [
+        {
+          "candidates": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "name": "effort",
+          "wire": {
+            "high": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "high"
+                }
+              ]
+            },
+            "low": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "low"
+                }
+              ]
+            },
+            "max": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "max"
+                }
+              ]
+            },
+            "medium": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "medium"
+                }
+              ]
+            },
+            "xhigh": {
+              "set": [
+                {
+                  "path": "reasoning.effort",
+                  "value": "xhigh"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "pricing": {
+        "currency": "USD",
+        "kind": "rates",
+        "source": "https://developers.openai.com/api/docs/pricing",
+        "tiers": [
+          {
+            "cacheReadPerMtok": 0.020000000000000004,
+            "cacheWritePerMtok": 0.25,
+            "inputFrom": 0,
+            "inputPerMtok": 0.2,
+            "inputUntil": 272001,
+            "outputFrom": 0,
+            "outputPerMtok": 1.2,
+            "outputUntil": null
+          },
+          {
+            "cacheReadPerMtok": 0.04000000000000001,
+            "cacheWritePerMtok": 0.5,
+            "inputFrom": 272001,
+            "inputPerMtok": 0.4,
+            "inputUntil": null,
+            "outputFrom": 0,
+            "outputPerMtok": 1.7999999999999998,
+            "outputUntil": null
+          }
+        ],
+        "verifiedAt": 1788566400,
+        "weeklyAdjustment": null
+      },
+      "slug": "gpt-5.6-luna",
+      "truncation_policy": {
+        "limit": 10000,
+        "mode": "tokens"
+      }
+    }
+  ],
+  "schemaVersion": 1,
+  "suggestedEffort": "none",
+  "suggestedModel": "gpt-6-sol"
+}

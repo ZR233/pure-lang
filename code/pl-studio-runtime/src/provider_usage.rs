@@ -526,13 +526,17 @@ async fn provider_usage_record(
     operation_id: String,
 ) -> Result<ProviderUsageRecord, ProviderUsageTransitionError> {
     let observed_at = unix_seconds();
-    let state = match provider_template_kind(&provider)
-        .as_ref()
-        .map(|kind| kind.key())
-    {
-        Some("deepseek") => provider_usage_data(provider, query_deepseek).await,
-        Some("zhipu-coding-plan") => provider_usage_data(provider, query_zhipu).await,
-        Some(_) | None => ProviderUsageState::unsupported(),
+    let state = match provider_template_kind(&provider) {
+        Ok(kind) => match kind.as_ref().map(|kind| kind.key()) {
+            Some("deepseek") => provider_usage_data(provider, query_deepseek).await,
+            Some("zhipu-coding-plan") => provider_usage_data(provider, query_zhipu).await,
+            Some(_) | None => ProviderUsageState::unsupported(),
+        },
+        Err(error) => ProviderUsageState::failed(StateError {
+            code: "providerUsageConfigurationFailed".to_string(),
+            message: error.to_string(),
+            retryable: false,
+        }),
     };
     record
         .decide(ProviderUsageCommand::Observe {

@@ -2,6 +2,7 @@
 mod clients;
 pub mod compatible;
 pub mod deepseek;
+pub mod discovery;
 pub(crate) mod files;
 pub mod mimo;
 pub mod openai;

@@ -257,7 +257,7 @@ impl HistoryChannel {
 
     fn reserve(&self, bytes: u64) -> bool {
         self.process_bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current
                     .checked_add(bytes)
                     .filter(|total| *total <= MAX_HISTORY_PROCESS_BYTES)

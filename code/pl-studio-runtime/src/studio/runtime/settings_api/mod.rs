@@ -25,7 +25,7 @@ pub(crate) use view::settings_snapshot;
 impl StudioRuntime {
     /// Reads the canonical built-in provider and model catalog.
     pub fn load_provider_catalog(&self) -> Result<pl_protocol::ProviderCatalogSnapshot> {
-        Ok(pl_model::config::builtin_provider_catalog().snapshot()?)
+        Ok(pl_model::config::builtin_provider_catalog()?.snapshot()?)
     }
 
     /// Reads the secret-free canonical Settings snapshot from the in-memory owner.

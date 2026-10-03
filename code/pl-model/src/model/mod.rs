@@ -2,6 +2,7 @@
 
 pub(crate) mod capabilities;
 mod catalog;
+mod definition;
 mod family;
 pub(crate) mod info;
 mod parameter;
@@ -14,10 +15,13 @@ pub use capabilities::{
     ToolCapabilities,
 };
 pub(crate) use catalog::zhipu_responses_models;
+pub(crate) use catalog::{MediaSendOrder, image_media_profiles};
 pub use catalog::{
-    deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
-    openai_default_model_slugs, zhipu_default_model_slugs, zhipu_responses_default_model_slugs,
+    default_models, mimo_default_model_slugs, zhipu_default_model_slugs,
+    zhipu_responses_default_model_slugs,
 };
+pub(crate) use definition::validate_inventory;
+pub use definition::{BundledModelDefinition, ModelDefinitionError, bundled_model_definition};
 pub use family::ModelFamily;
 pub use info::{
     ChatRequestOptions, DEFAULT_AUTO_COMPACT_TOKEN_LIMIT, MaxTokensField, MediaMixPolicy,
@@ -32,6 +36,7 @@ pub use parameter::{
 pub use pricing::{
     DailyPriceWindow, ModelPricing, PricingError, TokenPriceTier, WeeklyPriceAdjustment,
 };
+pub use profile_error::ModelProfileError;
 
 pub use pl_protocol::{
     InferenceAccounting, ModelPriceTierDto, ModelPricingDto, PricingMode, UsageReport,

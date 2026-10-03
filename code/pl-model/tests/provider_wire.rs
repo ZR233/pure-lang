@@ -92,6 +92,7 @@ fn model(slug: &str, profile: ModelTransportProfile) -> ModelInfo {
 
 fn bundled(slug: &str) -> ModelInfo {
     default_models()
+        .unwrap()
         .into_iter()
         .find(|model| model.slug == slug)
         .unwrap()
@@ -1812,6 +1813,7 @@ async fn explicitly_enabled_deepseek_hosted_search_has_its_own_minimal_wire_dial
 #[tokio::test]
 async fn coding_plan_uses_responses_http_and_model_effort_not_chat_thinking() {
     let preset = builtin_provider_catalog()
+        .unwrap()
         .presets
         .into_iter()
         .find(|item| item.id.as_str() == "zhipu-coding-plan")
@@ -1858,6 +1860,7 @@ async fn coding_plan_uses_responses_http_and_model_effort_not_chat_thinking() {
 #[tokio::test]
 async fn new_openai_provider_routes_gpt6_sol_none_effort_through_responses() {
     let preset = builtin_provider_catalog()
+        .unwrap()
         .presets
         .into_iter()
         .find(|item| item.id.as_str() == "openai")

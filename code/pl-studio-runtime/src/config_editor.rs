@@ -65,10 +65,14 @@ pub struct RoleEdit {
     pub effort: String,
 }
 
-pub fn provider_template_kind(provider: &ProviderConfig) -> Option<ProviderTemplateKind> {
+/// # Errors
+/// Returns the bundled catalog assembly error without treating it as a missing preset.
+pub fn provider_template_kind(provider: &ProviderConfig) -> Result<Option<ProviderTemplateKind>> {
     provider
         .preset_id()
-        .and_then(|preset| ProviderTemplateKind::from_key(preset.as_str()))
+        .map(|preset| ProviderTemplateKind::from_key(preset.as_str()))
+        .transpose()
+        .map(Option::flatten)
 }
 
 impl ProviderModelEdit {
@@ -147,7 +151,7 @@ impl ProviderEdit {
             .collect::<Result<Vec<_>>>()?;
         let mut config = match &self.preset {
             Some(preset_id) => {
-                let preset = builtin_provider_catalog()
+                let preset = builtin_provider_catalog()?
                     .presets
                     .into_iter()
                     .find(|preset| &preset.id == preset_id)

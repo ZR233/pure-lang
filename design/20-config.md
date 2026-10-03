@@ -16,6 +16,8 @@ anywork 使用独立产品身份，默认仅访问 `~/.anywork`，凭据服务�
 
 配置运行时在 Studio 启动时读取配置；此后普通对话和设置查询只读内存 canonical snapshot；
 配置文件不存在时设置页展示内存中的默认配置；外部文件变化只有显式重载命令才能应用。
+支持在线模型探测的 provider 在每次程序启动各独立探测一次，设置查询不触发额外联网。首屏先使用
+成功缓存或默认模型定义，不等待所有网络结果；模型观察不写回 config.toml。完整语义见 20.5。
 普通设置项在用户修改后即时写入配置；独立新增/编辑页面保留本地草稿，必须点击页面内保存
 按钮才写入，取消则丢弃草稿。
 
@@ -50,13 +52,16 @@ anywork 使用独立产品身份，默认仅访问 `~/.anywork`，凭据服务�
 所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整设置状态快照，
 由 Flutter 原子替换 Settings 领域；不得返回聚合状态、raw JSON 或 raw map。CAS 或校验失败
 时保留当前 canonical 状态，不覆盖新配置。
+该 revision 表示用户 desired 设置；在线目录观察使用独立目录水位，不推进 desired revision。
+完整快照同时携带两个水位，消费方拒绝迟到目录或设置快照，模型相关命令提交时重验当前有效声明。
 
 ## 20.2 配置职责
 
 每个 provider 的模型目录独立保存按模型 slug 索引的压缩阈值覆盖值，bundled、附加与 explicit
 模型使用同一解析规则。覆盖值为正整数 tokens，缺省表示使用模型默认值；恢复默认仅删除对应
 模型覆盖项。默认值与安全上限由 [06](./06-model.md) 定义，不复制进用户配置作为第二事实源。
-无效值和不存在的模型引用在发布配置前拒绝，失败不改变 canonical snapshot。新增可选覆盖
+用户新保存的无效值和不存在的模型引用在发布配置前拒绝，失败不改变 canonical snapshot。在线
+目录变化使既有引用不可用时保留选择并报告 unavailable，见 20.5。新增可选覆盖
 集合缺省为空，已有配置和凭据保持原样；既有模型默认阈值字段继续保持默认元信息语义。
 Settings 命令携带 revision 并返回完整 canonical snapshot，保留未修改的模型和 provider 数据。
 模型刷新将覆盖值纳入冻结配置身份，新建、恢复和后续安全刷新使用最新解析值，不改写已发请求。
@@ -68,6 +73,9 @@ TOML 解析、原子保存和默认值、instructions/skills/MCP/runtime/disable
 UI 配置、Agent Profile 文件的逐文件解析与原子保存，以及 Thread 首轮固定 instruction
 snapshot 的生成。pl-model 只消费已经解析好的 provider 和模型信息，不负责文件 IO 或路径
 定位。
+配置 owner 在同一发布边界区分磁盘 desired config 与非持久模型目录 overlay；解析视图合成两者，
+所有 route、Profile、标题与 Settings 展示消费同一有效目录。保存只序列化 desired，不能把发现模型
+塞进 additional_models 后随其他设置写回，也不能将其投影为可编辑 custom model。
 
 `[ui]` 仅保留 `follow_active_turn`（默认 true）和 `compact_timeline`（默认 false）；主题不
 属于持久化设置。未知 UI 字段按既有规则忽略，正常保存后不再输出；启动不因未知字段重写
@@ -215,9 +223,28 @@ ModelPricing 明确区分未知价格与包含费率的定义：货币不做汇�
 来源、核对日期及完整档位保存在后端目录，设置页直接展示后端提供的行；文档不保存价格
 快照。
 
-Bundled 模型只读，`additional_models` 只能添加新的 slug，冲突直接校验失败，不支持字段级
-覆盖；完全自定义 provider 用 `Explicit` 保存完整模型列表；角色引用的 model 必须存在于
-该 provider 解析后的有效模型集合中（bundled catalog + 追加/显式模型）。
+Bundled 默认定义只读，`additional_models` 只能添加不与默认定义冲突的 slug，不支持用户对默认
+条目的字段级覆盖；完全自定义 provider 用 `Explicit` 保存完整模型列表。支持在线探测的 bundled
+目录可叠加非持久成功观察，按 [06](./06-model.md) 选择完整 API 名单并保留手工声明优先权；不将
+explicit 目录自动改为远程目录，不借此改变 config.toml schema 或既有模型字段命名。
+
+### 在线模型观察与配置校验
+
+每次启动对每个支持探测的实例独立进行一次查询；同 preset 的多个实例也独立。查询跟随当前
+base_url，网络边界归 [06](./06-model.md)，成功缓存与默认回退归 [17](./17-studio-storage.md)。
+缺少所需凭据形成该实例失败，不阻塞其他实例；没有定时轮询，用户可另发手动刷新命令。
+
+配置解析先恢复该实例同身份成功声明或默认定义，再验证模型声明、结构与用户 Profile。支持在线
+目录的既有 route/effort/connection override 因缓存缺失或服务撤下模型/候选而不可用时，保持用户
+选择并返回外部绑定 unavailable，不自动猜模型、删覆盖值或触发全局数据重置。显式手工目录、
+缺失 provider、坏 schema 与声明本身继续严格校验；用户新保存/切换的选择须在当前有效目录中合法。
+已知配置版本迁移仍使用既有数据保全流程，模型观察自身不引入新的 TOML 版本。
+
+各实例探测按自身 generation/查询身份裁决结果，并合并到当前 desired 状态，不以开始时的旧全局
+Settings revision 提交。别家成功不得使本家 stale；用户更换地址、headers、凭据或目录来源、删除
+实例后，旧结果丢弃。同实例手动与自动刷新合并或串行，不并行覆盖。等待网络不持全局配置锁。
+目录变化只通知受影响 provider 的绑定消费者：在途请求保持冻结，后续安全边界 deferred 重绑或
+明确 unavailable；不因目录观察重装无关 provider 的工具或重算历史费用。
 
 ## 20.6 提示词配置
 
@@ -309,6 +336,9 @@ preset、endpoint、凭证提示、协议、允许连接模式、suggested model
 来自 catalog 快照，Flutter 不保存生产目录副本。Studio 草稿选择一个默认 provider；五个
 模型角色初始化为创建时选择的 suggested/default model 和该模型声明的默认 effort，该选择
 只投影为五条 route，不写入 provider runtime。
+
+内置目录装配失败必须沿目录查询、模板选择和草稿构造接口返回原始错误，不得静默使用空目录
+或触发 panic；此类错误属于程序定义故障，不进入用户配置损坏的重置流程。
 
 设置项写入前必须完成本地校验并由 Studio 统一执行完整校验，失败时只在 UI 展示错误，不
 写入磁盘：

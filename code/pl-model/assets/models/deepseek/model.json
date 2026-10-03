@@ -1,0 +1,321 @@
+{
+  "catalog": "deepseek",
+  "models": [
+    {
+      "auto_compact_token_limit": null,
+      "base_instructions": "",
+      "binding": {
+        "request": {
+          "body": {
+            "thinking": {
+              "type": "enabled"
+            }
+          },
+          "media": [
+            {
+              "first_send": [
+                "provider_file",
+                "remote_url",
+                "data_url"
+              ],
+              "modality": "image",
+              "replay": [
+                "provider_file",
+                "data_url"
+              ],
+              "wire": "responses_input_image"
+            }
+          ],
+          "protocol": {
+            "api": "responses",
+            "maxTokensField": "omit",
+            "programmaticToolCalling": false
+          }
+        },
+        "transport": {
+          "default_connection_mode": "http",
+          "protocol": "responses",
+          "supported_connection_modes": [
+            "http"
+          ]
+        }
+      },
+      "capabilities": {
+        "input": [
+          {
+            "limits": {},
+            "modality": "text"
+          },
+          {
+            "limits": {
+              "max_bytes": 33554432,
+              "max_count": 600,
+              "max_height": 4096,
+              "max_total_bytes": 33554432,
+              "max_width": 4096,
+              "media_types": [
+                "image/jpeg",
+                "image/png",
+                "image/gif",
+                "image/webp"
+              ]
+            },
+            "modality": "image",
+            "sources": [
+              "local",
+              "remote_url"
+            ]
+          }
+        ],
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "output": [
+          "text"
+        ],
+        "prompt_cache": {
+          "cache_write_tokens": false
+        },
+        "reasoning": true,
+        "streaming": true,
+        "temperature": false,
+        "tools": {
+          "custom_tools": false,
+          "freeform_tools": false,
+          "function_calling": true,
+          "parallel_tool_calls": true,
+          "programmatic_tool_calling": false
+        },
+        "web_search": false
+      },
+      "context_window": 1000000,
+      "default_temperature": null,
+      "description": "DeepSeek fast multimodal reasoning model with thinking mode.",
+      "display_name": "DeepSeek V4.1 Flash",
+      "max_context_window": 1000000,
+      "max_output_tokens": 384000,
+      "parameters": [
+        {
+          "candidates": [
+            "low",
+            "high",
+            "max"
+          ],
+          "name": "effort",
+          "wire": {
+            "high": {
+              "set": [
+                {
+                  "path": "reasoning_effort",
+                  "value": "high"
+                }
+              ]
+            },
+            "low": {
+              "set": [
+                {
+                  "path": "reasoning_effort",
+                  "value": "low"
+                }
+              ]
+            },
+            "max": {
+              "set": [
+                {
+                  "path": "reasoning_effort",
+                  "value": "max"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "pricing": {
+        "currency": "CNY",
+        "kind": "rates",
+        "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+        "tiers": [
+          {
+            "cacheReadPerMtok": 0.02,
+            "cacheWritePerMtok": null,
+            "inputFrom": 0,
+            "inputPerMtok": 1.0,
+            "inputUntil": null,
+            "outputFrom": 0,
+            "outputPerMtok": 4.0,
+            "outputUntil": null
+          }
+        ],
+        "verifiedAt": 1789084800,
+        "weeklyAdjustment": {
+          "multiplier": 2.0,
+          "utcOffsetMinutes": 480,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "windows": [
+            {
+              "endMinute": 720,
+              "startMinute": 540
+            },
+            {
+              "endMinute": 1080,
+              "startMinute": 840
+            }
+          ]
+        }
+      },
+      "slug": "deepseek-flash",
+      "truncation_policy": {
+        "limit": 10000,
+        "mode": "tokens"
+      }
+    },
+    {
+      "auto_compact_token_limit": null,
+      "base_instructions": "",
+      "binding": {
+        "request": {
+          "body": {
+            "thinking": {
+              "type": "enabled"
+            }
+          },
+          "protocol": {
+            "api": "responses",
+            "maxTokensField": "omit",
+            "programmaticToolCalling": false
+          }
+        },
+        "transport": {
+          "default_connection_mode": "http",
+          "protocol": "responses",
+          "supported_connection_modes": [
+            "http"
+          ]
+        }
+      },
+      "capabilities": {
+        "input": [
+          {
+            "limits": {},
+            "modality": "text"
+          }
+        ],
+        "interleaved": {
+          "field": "reasoning_content"
+        },
+        "output": [
+          "text"
+        ],
+        "prompt_cache": {
+          "cache_write_tokens": false
+        },
+        "reasoning": true,
+        "streaming": true,
+        "temperature": false,
+        "tools": {
+          "custom_tools": false,
+          "freeform_tools": false,
+          "function_calling": true,
+          "parallel_tool_calls": true,
+          "programmatic_tool_calling": false
+        },
+        "web_search": false
+      },
+      "context_window": 1000000,
+      "default_temperature": null,
+      "description": "DeepSeek flagship reasoning model with thinking mode.",
+      "display_name": "DeepSeek V4 Pro",
+      "max_context_window": 1000000,
+      "max_output_tokens": 384000,
+      "parameters": [
+        {
+          "candidates": [
+            "low",
+            "high",
+            "max"
+          ],
+          "name": "effort",
+          "wire": {
+            "high": {
+              "set": [
+                {
+                  "path": "reasoning_effort",
+                  "value": "high"
+                }
+              ]
+            },
+            "low": {
+              "set": [
+                {
+                  "path": "reasoning_effort",
+                  "value": "low"
+                }
+              ]
+            },
+            "max": {
+              "set": [
+                {
+                  "path": "reasoning_effort",
+                  "value": "max"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "pricing": {
+        "currency": "CNY",
+        "kind": "rates",
+        "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+        "tiers": [
+          {
+            "cacheReadPerMtok": 0.15,
+            "cacheWritePerMtok": null,
+            "inputFrom": 0,
+            "inputPerMtok": 4.5,
+            "inputUntil": null,
+            "outputFrom": 0,
+            "outputPerMtok": 13.5,
+            "outputUntil": null
+          }
+        ],
+        "verifiedAt": 1789084800,
+        "weeklyAdjustment": {
+          "multiplier": 2.0,
+          "utcOffsetMinutes": 480,
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "windows": [
+            {
+              "endMinute": 720,
+              "startMinute": 540
+            },
+            {
+              "endMinute": 1080,
+              "startMinute": 840
+            }
+          ]
+        }
+      },
+      "slug": "deepseek-v4-pro",
+      "truncation_policy": {
+        "limit": 10000,
+        "mode": "tokens"
+      }
+    }
+  ],
+  "schemaVersion": 1,
+  "suggestedEffort": "low",
+  "suggestedModel": "deepseek-flash"
+}
