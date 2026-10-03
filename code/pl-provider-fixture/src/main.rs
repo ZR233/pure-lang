@@ -6,7 +6,7 @@ use pl_provider_fixture::{
     FixtureLiveStatus, FixtureServer, GUI_SCENARIOS, ReadyFile, gui_history_fault_script,
     gui_history_lock_script, gui_plan_recovery_script, gui_realtime_script, gui_script,
     gui_statistics_script, gui_stress_body_large_script, gui_stress_body_script, gui_stress_script,
-    gui_tool_scroll_script,
+    gui_tool_scroll_script, gui_websocket_recovery_script,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -47,6 +47,8 @@ async fn main() -> Result<()> {
         "history-fault" => gui_history_fault_script(),
         "plan-recovery" => gui_plan_recovery_script(),
         "context-replay-recovery" => pl_provider_fixture::gui_context_replay_recovery_script(),
+        "websocket-recovery" => gui_websocket_recovery_script(),
+        "call-lifecycle-recovery" => pl_provider_fixture::gui_call_lifecycle_recovery_script(),
         value => bail!("unknown fixture scenario: {value}"),
     };
     let fixture = Arc::new(FixtureServer::start(steps).await?);

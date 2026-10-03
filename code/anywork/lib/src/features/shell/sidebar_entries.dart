@@ -197,6 +197,7 @@ class _ThreadTile extends ConsumerWidget {
         : Icons.chat_bubble_outline;
     final colors = Theme.of(context).colorScheme;
     final issue = recoveryIssue;
+    final blocked = issue?.blocksAccess ?? false;
     // 只读消费 Thread 的 canonical 工作区模式：worktree 会话显示工作树标识，
     // local 会话不显示。标识不改变会话或项目配置。
     final worktreeMarker = thread.workspaceMode.isWorktree
@@ -224,7 +225,7 @@ class _ThreadTile extends ConsumerWidget {
           ? context.colors.onPrimaryContainer
           : colors.onSurfaceVariant,
       markerColor: null,
-      onTap: issue == null
+      onTap: !blocked
           ? () async {
               await ref
                   .read(studioControllerProvider.notifier)
@@ -236,6 +237,9 @@ class _ThreadTile extends ConsumerWidget {
         key: ValueKey('thread-menu-${thread.id}'),
         icon: const Icon(Icons.more_horiz, size: 18),
         onSelected: (action) async {
+          if (action == 'retry') {
+            await ref.read(studioControllerProvider.notifier).retryRecovery();
+          }
           if (action == 'pin') {
             await _saveSidebarPreferences(ref, threadId: thread.id);
           }
@@ -249,6 +253,12 @@ class _ThreadTile extends ConsumerWidget {
           }
         },
         itemBuilder: (_) => [
+          if (issue?.canRetry == true)
+            PopupMenuItem(
+              key: StudioDriverKeys.retryRecoveryIssue(issue!.id),
+              value: 'retry',
+              child: Text(context.l10n.runtimeFatalRetry),
+            ),
           PopupMenuItem(
             value: 'pin',
             child: Text(
@@ -266,13 +276,13 @@ class _ThreadTile extends ConsumerWidget {
           PopupMenuItem(
             key: StudioDriverKeys.renameThread(thread.id),
             value: 'rename',
-            enabled: issue == null,
+            enabled: !blocked,
             child: Text(context.l10n.sidebarRenameSession),
           ),
           PopupMenuItem(
             key: StudioDriverKeys.archiveThread(thread.id),
             value: 'archive',
-            enabled: issue == null,
+            enabled: !blocked,
             child: Text(context.l10n.sidebarArchiveSession),
           ),
         ],

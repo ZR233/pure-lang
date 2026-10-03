@@ -142,18 +142,26 @@ struct LivePreview {
 #[derive(Clone, PartialEq, Eq, Hash)]
 enum ObservedKey {
     /// One request-scoped aggregate channel, published before the adapter itemizes the response.
-    Aggregate(AggregateChannel),
+    Aggregate(u32, AggregateChannel),
     /// One provider item part: the item identity plus its part discriminator.
-    Provider(Arc<str>, PresentationPart),
+    Provider(u32, Arc<str>, PresentationPart),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ObservedVersion {
+    content: u64,
+    ended: bool,
 }
 
 /// Cheap key of one observation identity, derived without building its projection id.
-fn observed_key(identity: &ObservedPartIdentity) -> ObservedKey {
+fn observed_key(generation: u32, identity: &ObservedPartIdentity) -> ObservedKey {
     match identity {
-        ObservedPartIdentity::Aggregate { channel } => ObservedKey::Aggregate(*channel),
-        ObservedPartIdentity::Provider(provider) => {
-            ObservedKey::Provider(provider.item_id.clone(), provider.presentation_part())
-        }
+        ObservedPartIdentity::Aggregate { channel } => ObservedKey::Aggregate(generation, *channel),
+        ObservedPartIdentity::Provider(provider) => ObservedKey::Provider(
+            generation,
+            provider.item_id.clone(),
+            provider.presentation_part(),
+        ),
     }
 }
 
@@ -203,8 +211,8 @@ fn preview_entry_bytes(id_len: u64, preview: &LivePreview) -> u64 {
 /// the estimate conservative without materializing anything.
 fn observed_index_bytes(observed: &ObservedKey) -> u64 {
     match observed {
-        ObservedKey::Aggregate(_) => RETAINED_ENTRY_OVERHEAD,
-        ObservedKey::Provider(item_id, _) => {
+        ObservedKey::Aggregate(_, _) => RETAINED_ENTRY_OVERHEAD,
+        ObservedKey::Provider(_, item_id, _) => {
             (item_id.len() as u64).saturating_add(RETAINED_ENTRY_OVERHEAD)
         }
     }
@@ -668,7 +676,7 @@ pub(in crate::studio) struct LiveProjection {
     /// never rebuilds that id and never re-walks the long common prefix of every sibling key. The
     /// two can never disagree: every insert or removal of a provider preview moves both, and
     /// [`LiveProjection::retain`] re-derives this index from the entries that survived.
-    observed: HashMap<ObservedKey, u64>,
+    observed: HashMap<ObservedKey, ObservedVersion>,
     /// Content version of every window item, owned by this projection and independent of the
     /// execution commit sequence.
     ///
@@ -939,6 +947,15 @@ impl LiveProjection {
                 }
             }
             ids.extend(self.started_provider_ids(&attempt.attempt_id));
+            // Later generations can still use channel aggregates (for example Chat).
+            // They must be resolved as started identities just like generation zero.
+            let prefix = super::order::observation_prefix(&attempt.attempt_id);
+            ids.extend(
+                self.previews
+                    .range(prefix.clone()..)
+                    .take_while(|(id, _)| id.starts_with(&prefix))
+                    .map(|(id, _)| id.clone()),
+            );
         }
         let (mut existing, reserved) = self.resolve(chat, thread, ids)?;
         let hidden_inputs = self.hidden_inputs.clone();
@@ -1101,7 +1118,11 @@ impl LiveProjection {
             .any(|part| matches!(part.identity(), ObservedPartIdentity::Provider(_)))
         {
             for channel in [AggregateChannel::Text, AggregateChannel::Reasoning] {
-                let id = aggregate_id(&attempt.attempt_id, channel);
+                let id = aggregate_id(
+                    &attempt.attempt_id,
+                    progress.observation().generation,
+                    channel,
+                );
                 let streaming = self
                     .items
                     .get(&id)
@@ -1113,10 +1134,97 @@ impl LiveProjection {
                 }
             }
         }
-        // Per-observation consumption: every observation carries a stable identity and its own content
-        // version, and only an identity whose version advanced is delivered. An unchanged identity
-        // neither re-materializes its body nor re-emits a frame.
-        for part in progress.parts() {
+        for failed in &progress.observation().failed {
+            self.stream_observation_parts(
+                chat,
+                thread,
+                attempt,
+                failed.generation,
+                &failed.parts,
+                Some(&failed.message),
+            )
+            .await?;
+        }
+        self.stream_observation_parts(
+            chat,
+            thread,
+            attempt,
+            progress.observation().generation,
+            progress.parts(),
+            None,
+        )
+        .await?;
+        for (id, message) in
+            super::responses::recovery_notices(&attempt.attempt_id, progress.observation())
+        {
+            let fields = BTreeMap::from([(ChatField::Body, ContentBlock::from_text(&message))]);
+            if self
+                .previews
+                .get(&id)
+                .is_some_and(|entry| fields_equal(&entry.fields, &fields))
+            {
+                continue;
+            }
+            self.adopt_session_revision(chat, &id).await?;
+            let revision = self.bump_content_revision(&id);
+            let order = chat
+                .reserve_order(&id)
+                .await
+                .map_err(|error| ProjectionError::History(error.to_string()))?;
+            let created_at = self.created_at(&id, at);
+            let state = ThreadItemState::Text(ThreadTextItem::new(
+                ThreadTextChannel::Commentary,
+                String::new(),
+                Vec::new(),
+                ThreadContentLifecycle::completed(at),
+            ));
+            let meta = static_meta(&ThreadItem::new(
+                id.clone(),
+                thread.id.clone(),
+                attempt.turn_id.clone(),
+                order,
+                revision,
+                created_at,
+                at,
+                state.clone(),
+            ))
+            .map_err(|error| ProjectionError::History(error.to_string()))?;
+            self.store_fact(
+                id.clone(),
+                Fact {
+                    ordinal: order,
+                    revision,
+                    created_at,
+                    turn_id: attempt.turn_id.clone(),
+                },
+            );
+            let entry = LivePreview {
+                fields,
+                observed: None,
+                meta,
+                shape: static_state(&state),
+                order,
+                observed_version: progress.version(),
+            };
+            self.publish_preview(chat, &id, &attempt.turn_id, revision, &entry)?;
+            self.store_preview(id, entry);
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn stream_observation_parts(
+        &mut self,
+        chat: &Session,
+        thread: &pl_protocol::Thread,
+        attempt: &pl_core::thread::RequestAttempt,
+        generation: u32,
+        parts: &pl_core::model::ModelParts,
+        failure: Option<&Arc<str>>,
+    ) -> Result<(), ProjectionError> {
+        let at = crate::studio::unix_seconds();
+        // Consume each shared part in place, never an allocated per-frame list of observations.
+        for part in parts {
             // An observation with no body yet is not a displayable preview; wait for its first byte.
             if part.is_empty() {
                 continue;
@@ -1135,11 +1243,19 @@ impl LiveProjection {
             // already delivered its newest body. Both checks skip the same way (neither touches a
             // delivered body or frame), so reordering cannot pull a terminal identity back in: an
             // advanced version still reaches, and is rejected by, the terminal test.
-            let key = observed_key(part.identity());
-            if self.observed.get(&key) == Some(&part.version()) {
+            let key = observed_key(generation, part.identity());
+            let observed_version = ObservedVersion {
+                content: part.version(),
+                ended: failure.is_some(),
+            };
+            if self.observed.get(&key) == Some(&observed_version) {
                 continue;
             }
-            let Some((id, field, static_item)) = observation_preview(&attempt.attempt_id, part)
+            let lifecycle = failure.map_or_else(ThreadContentLifecycle::streaming, |message| {
+                ThreadContentLifecycle::failed(at, message.to_string())
+            });
+            let Some((id, field, static_item)) =
+                observation_preview(&attempt.attempt_id, generation, part, &lifecycle)
             else {
                 return Err(ProjectionError::UnsupportedOutput(
                     "provider presentation part does not match its item".into(),
@@ -1190,7 +1306,7 @@ impl LiveProjection {
                         0,
                         created_at,
                         at,
-                        static_item,
+                        static_item.clone(),
                     ))
                     .map_err(|error| ProjectionError::History(error.to_string()))?;
                     // Placement metadata, so the retained window bounds this identity like any other
@@ -1216,6 +1332,21 @@ impl LiveProjection {
                     }
                 }
             };
+            let shape = static_state(&static_item);
+            if entry.shape != shape {
+                entry.meta = static_meta(&ThreadItem::new(
+                    id.clone(),
+                    thread.id.clone(),
+                    attempt.turn_id.clone(),
+                    entry.order,
+                    revision,
+                    self.created_at(&id, at),
+                    at,
+                    static_item,
+                ))
+                .map_err(|error| ProjectionError::History(error.to_string()))?;
+                entry.shape = shape;
+            }
             entry.observed = Some(key);
             entry.observed_version = part.version();
             entry.fields.insert(field, part.content().clone());
@@ -1768,7 +1899,10 @@ impl LiveProjection {
         let next = preview_bytes(&id, &entry);
         let id_len = id.len() as u64;
         let observed = entry.observed.clone();
-        let version = entry.observed_version;
+        let version = ObservedVersion {
+            content: entry.observed_version,
+            ended: entry.shape.is_terminal(),
+        };
         match self.previews.insert(id, entry) {
             Some(replaced) => {
                 let replaced_bytes = preview_entry_bytes(id_len, &replaced);
@@ -1994,8 +2128,13 @@ impl LiveProjection {
         self.observed.clear();
         for preview in self.previews.values() {
             if let Some(observed) = &preview.observed {
-                self.observed
-                    .insert(observed.clone(), preview.observed_version);
+                self.observed.insert(
+                    observed.clone(),
+                    ObservedVersion {
+                        content: preview.observed_version,
+                        ended: preview.shape.is_terminal(),
+                    },
+                );
             }
         }
     }
@@ -2045,10 +2184,12 @@ pub(in crate::studio) async fn seed_repaired_targets(
 ///
 /// It is the same in-memory identity the committed effect later finalizes for the whole channel, so a
 /// preview and the terminal item it precedes never disagree on the id.
-fn aggregate_id(attempt_id: &str, channel: AggregateChannel) -> String {
+fn aggregate_id(attempt_id: &str, generation: u32, channel: AggregateChannel) -> String {
     match channel {
-        AggregateChannel::Text => super::order::response_id(attempt_id, "text"),
-        AggregateChannel::Reasoning => super::order::response_id(attempt_id, "reasoning"),
+        AggregateChannel::Text => super::order::observation_id(attempt_id, generation, "text"),
+        AggregateChannel::Reasoning => {
+            super::order::observation_id(attempt_id, generation, "reasoning")
+        }
     }
 }
 
@@ -2065,13 +2206,15 @@ fn aggregate_id(attempt_id: &str, channel: AggregateChannel) -> String {
 /// terminal field identities agree and a streaming `SummaryText(n)` never misaligns with a terminal
 /// reasoning chunk. `None` reports a part that cannot belong to its item kind instead of inventing a
 /// row.
-fn observation_preview(
+pub(super) fn observation_preview(
     attempt_id: &str,
+    generation: u32,
     part: &ObservedPart,
+    lifecycle: &ThreadContentLifecycle,
 ) -> Option<(String, ChatField, ThreadItemState)> {
     Some(match part.identity() {
         ObservedPartIdentity::Aggregate { channel } => {
-            let id = aggregate_id(attempt_id, *channel);
+            let id = aggregate_id(attempt_id, generation, *channel);
             match channel {
                 AggregateChannel::Text => (
                     id,
@@ -2080,7 +2223,7 @@ fn observation_preview(
                         ThreadTextChannel::Commentary,
                         String::new(),
                         Vec::new(),
-                        ThreadContentLifecycle::streaming(),
+                        lifecycle.clone(),
                     )),
                 ),
                 AggregateChannel::Reasoning => (
@@ -2089,7 +2232,7 @@ fn observation_preview(
                     ThreadItemState::Thinking(ThreadThinkingItem::new(
                         Vec::new(),
                         vec![String::new()],
-                        ThreadContentLifecycle::streaming(),
+                        lifecycle.clone(),
                     )),
                 ),
             }
@@ -2097,6 +2240,7 @@ fn observation_preview(
         ObservedPartIdentity::Provider(identity) => {
             let id = super::order::presentation_id(
                 attempt_id,
+                generation,
                 identity.item_id.as_ref(),
                 Some(identity.presentation_part()),
             );
@@ -2108,7 +2252,7 @@ fn observation_preview(
                         trace_channel(channel),
                         String::new(),
                         Vec::new(),
-                        ThreadContentLifecycle::streaming(),
+                        lifecycle.clone(),
                     )),
                 ),
                 (ObservedItemKind::Reasoning, ObservedPartKind::ReasoningText) => (
@@ -2117,7 +2261,7 @@ fn observation_preview(
                     ThreadItemState::Thinking(ThreadThinkingItem::new(
                         Vec::new(),
                         vec![String::new()],
-                        ThreadContentLifecycle::streaming(),
+                        lifecycle.clone(),
                     )),
                 ),
                 (ObservedItemKind::Reasoning, ObservedPartKind::SummaryText) => (
@@ -2126,7 +2270,7 @@ fn observation_preview(
                     ThreadItemState::Thinking(ThreadThinkingItem::new(
                         vec![String::new()],
                         Vec::new(),
-                        ThreadContentLifecycle::streaming(),
+                        lifecycle.clone(),
                     )),
                 ),
                 _ => return None,

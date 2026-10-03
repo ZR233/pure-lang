@@ -27,6 +27,7 @@ abstract final class StudioDriverState {
   static List<ProviderSettingsView> _providers = const [];
   static PersistenceStateSnapshot _persistenceState =
       const PersistenceStateSnapshot.ready();
+  static List<StudioRecoveryIssue> _recoveryIssues = const [];
   static ConversationActivityView? _conversationActivity;
   static bool _activityExpanded = false;
   static TimelineScrollDiagnostic? _timelineScroll;
@@ -139,6 +140,7 @@ abstract final class StudioDriverState {
         ),
     ]);
     _persistenceState = state.persistenceState;
+    _recoveryIssues = List.unmodifiable(state.recoveryIssues);
     _project = state.projects
         .where((project) => project.id == state.selectedProjectId)
         .firstOrNull;
@@ -195,6 +197,18 @@ abstract final class StudioDriverState {
     final workspace = _workspace;
     final lastTurn = workspace?.lastTurn;
     return jsonEncode({
+      'recoveryIssues': [
+        for (final issue in _recoveryIssues)
+          {
+            'id': issue.id,
+            'category': issue.category.name,
+            'actions': issue.availableActions
+                .map((action) => action.name)
+                .toList(),
+            'threadId': issue.threadId,
+            'detail': issue.detail,
+          },
+      ],
       'timelineWindow': {
         'itemIds':
             _timelineWorkspace?.items.map((item) => item.id).toList() ?? [],
@@ -682,6 +696,16 @@ abstract final class StudioDriverState {
     'status': turn.state.status.name,
     'activity': turn.state.activity?.name,
     'reason': turn.state.reason,
+    if (turn.state case FailedStudioTurnState(:final failure))
+      'failure': {
+        'category': failure.category,
+        'retryable': failure.retryable,
+        'message': failure.message,
+        'providerKind': failure.providerKind,
+        'code': failure.code,
+        'httpStatus': failure.httpStatus,
+        'retryAfterMs': failure.retryAfterMs,
+      },
     'updatedAt': turn.updatedAt.toUtc().toIso8601String(),
   };
 

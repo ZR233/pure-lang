@@ -132,6 +132,7 @@ AsyncValue<StartPageView> startPage(Ref ref) {
         final healthy =
             project != null &&
             state.recoveryIssue(
+                  blockingOnly: true,
                   scope: RecoveryIssueScope.project,
                   projectId: project.id,
                 ) ==

@@ -7190,7 +7190,7 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeRecoveryIssueCatego
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
             0 => crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::ProcessLease,
-            1 => crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::AgentState,
+            1 => crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::ToolCatalog,
             2 => crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::Repository,
             3 => crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::Storage,
             _ => unreachable!("Invalid variant for BridgeRecoveryIssueCategory: {}", inner),
@@ -16133,7 +16133,7 @@ impl flutter_rust_bridge::IntoDart
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
             Self::ProcessLease => 0.into_dart(),
-            Self::AgentState => 1.into_dart(),
+            Self::ToolCatalog => 1.into_dart(),
             Self::Repository => 2.into_dart(),
             Self::Storage => 3.into_dart(),
             _ => unreachable!(),
@@ -23187,7 +23187,7 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeRecoveryIssueCatego
         <i32>::sse_encode(
             match self {
                 crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::ProcessLease => 0,
-                crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::AgentState => 1,
+                crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::ToolCatalog => 1,
                 crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::Repository => 2,
                 crate::api::studio::types::runtime::BridgeRecoveryIssueCategory::Storage => 3,
                 _ => {

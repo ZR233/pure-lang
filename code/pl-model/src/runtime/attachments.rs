@@ -39,7 +39,6 @@ impl AttachmentBackend<'_> {
             if let PureError::Provider(failure) = &mut error {
                 failure.context.stage = pl_protocol::ProviderFailureStage::Attachment;
                 failure.context.recovery = pl_protocol::ProviderRecovery::None;
-                failure.retry = pl_protocol::RetryDisposition::Permanent;
             }
             error
         })
@@ -212,6 +211,7 @@ impl AttachmentBackend<'_> {
                 let response = transport::checked(
                     self.client
                         .get(url)
+                        .timeout(super::transport_policy::FINITE_REQUEST_TIMEOUT)
                         .send()
                         .await
                         .map_err(reqwest_error_to_pure)?,
@@ -275,12 +275,17 @@ impl AttachmentBackend<'_> {
                     .insert(key, UploadState::Unsupported);
                 return Ok(None);
             }
-            Err(error) => {
+            Err(mut error) => {
                 if error
                     .provider_failure_ref()
                     .is_some_and(|failure| failure.http_status.is_some())
                 {
                     self.session.uploaded_files.lock().await.remove(&key);
+                } else if let PureError::Provider(failure) = &mut error {
+                    // A POST may already have created the remote file. Keep its
+                    // pending identity and prohibit replay when no status proves
+                    // rejection, including response-body timeout after success.
+                    failure.retry = pl_protocol::RetryDisposition::Permanent;
                 }
                 return Err(error);
             }

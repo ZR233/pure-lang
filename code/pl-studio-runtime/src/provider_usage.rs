@@ -354,6 +354,7 @@ fn endpoint_url(base_url: &str, path: &str) -> crate::Result<String> {
 
 fn reqwest_client() -> crate::Result<reqwest::Client> {
     reqwest::Client::builder()
+        .retry(reqwest::retry::never())
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(http_error)

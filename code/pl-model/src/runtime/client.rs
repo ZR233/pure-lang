@@ -155,6 +155,7 @@ impl RemoteCompaction<'_> {
                     accounting: Box::new(response.accounting.clone()),
                     model_observation: response.model_observation.clone().map(Box::new),
                     presentation_items: Vec::new(),
+                    partial_progress: None,
                     cancelled: false,
                 }
             })?;

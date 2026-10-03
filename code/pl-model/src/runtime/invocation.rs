@@ -10,8 +10,7 @@ use pl_protocol::{InferenceModelObservation, InferenceTiming, PureError, Result}
 use super::{ModelSession, responses_websocket, wire_capture};
 
 use crate::completion::stream::{
-    CompletionEventStream, StreamCollectContext, collect_completion_event_stream,
-    decode_raw_event_stream,
+    CompletionEventStream, StreamCollectContext, decode_raw_event_stream,
 };
 use crate::completion::{
     CompletionFailure, CompletionRequest, CompletionResponse, CompletionTraceContext,
@@ -21,12 +20,14 @@ use crate::model::info::ModelInfo;
 use crate::provider::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProtocol};
 use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody};
 use crate::runtime::transport_policy::{
-    MODEL_MAX_RETRIES, RESPONSES_WEBSOCKET_MAX_RETRIES, model_request_retry_delay,
+    MODEL_MAX_RETRIES, RESPONSES_WEBSOCKET_IDLE_TIMEOUT, RESPONSES_WEBSOCKET_MAX_RETRIES,
+    model_request_retry_delay,
 };
 
 struct OpenedCompletionStream {
     events: CompletionEventStream,
     sent_model: String,
+    idle_timeout: Option<Duration>,
 }
 /// 单次模型调用的运行期上下文。
 ///
@@ -108,62 +109,27 @@ impl ModelInvocationContext {
         self.prompt_cache_key = prompt_cache_key;
         self
     }
-    fn publish_retry_notice(&self, attempt: u32, notice: ConnectionNotice) -> Result<()> {
-        use pl_protocol::trace::{
-            AgentEvent, TraceEventDraft, TraceEventKind, TracePartAction, TracePartCompletion,
-            TracePartSource, TracePartState, TraceTextChannel, TraceTextPart,
-        };
-        let (Some(trace), Some(sink)) = (&self.trace, &self.trace_sink) else {
-            return Ok(());
-        };
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-        let (phase, message) = match notice {
-            ConnectionNotice::Retrying => (
-                "retry",
-                format!("连接中断，正在重试（{attempt}/{MODEL_MAX_RETRIES}）。"),
-            ),
-            ConnectionNotice::Recovered => ("result", "连接已恢复，继续执行。".into()),
-            ConnectionNotice::Exhausted => (
-                "result",
-                format!("连接重试 {MODEL_MAX_RETRIES} 次仍失败，本轮已停止。"),
-            ),
-        };
-        let item_id = format!("{}-connection-{attempt}-{phase}", trace.inference_id);
-        let start = sink
-            .emit(TraceEventDraft::start(
-                timestamp,
-                trace.turn_id.clone(),
-                item_id.clone(),
-                TracePartSource::Runtime,
-                TracePartState::Text(TraceTextPart::streaming(
-                    TraceTextChannel::Commentary,
-                    message,
-                )),
-            ))
-            .map_err(|error| {
-                PureError::Protocol(format!("retry progress publication failed: {error}"))
-            })?;
-        if let TraceEventKind::TracePartStarted { item } = start.kind {
-            let _ = self.event_tx.send(AgentEvent::TracePartStarted { item });
-        }
-        let end = sink
-            .emit(TraceEventDraft::apply(
-                timestamp,
-                trace.turn_id.clone(),
-                item_id,
-                TracePartAction::Complete(TracePartCompletion::Text {
-                    authoritative_content: None,
-                }),
-            ))
-            .map_err(|error| {
-                PureError::Protocol(format!("retry progress publication failed: {error}"))
-            })?;
-        if let TraceEventKind::TracePartCompleted { item } = end.kind {
-            let _ = self.event_tx.send(AgentEvent::TracePartCompleted { item });
-        }
+    fn begin_retry(&self, error: &mut CompletionFailure) -> Result<()> {
+        let sender = self
+            .progress
+            .as_ref()
+            .expect("invocation owns its observation");
+        let message = error.to_string();
+        sender
+            .charge_output(
+                sender
+                    .charged_output()
+                    .saturating_add(message.len() as u64)
+                    .saturating_add(256),
+            )
+            .map_err(|error| PureError::MemoryError(error.to_string()))?;
+        sender
+            .begin_recovery(MODEL_MAX_RETRIES, Arc::from(message))
+            .map_err(|error| PureError::Protocol(error.to_string()))?;
+        // These parts now belong solely to the retained failed generation. A
+        // cancellation/refresh failure before the next send must not relabel
+        // them as that unsent generation's current presentation.
+        error.presentation_items.clear();
         Ok(())
     }
 }
@@ -184,12 +150,6 @@ pub(crate) struct InvocationRunner {
     purpose: InvocationPurpose,
     pub(crate) clock: Arc<dyn super::InferenceClock>,
     pub(crate) pricing_mode: pl_protocol::PricingMode,
-}
-
-enum ConnectionNotice {
-    Retrying,
-    Recovered,
-    Exhausted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -291,7 +251,8 @@ impl InvocationRunner {
         }
         let http_client = reqwest::Client::builder()
             .retry(reqwest::retry::never())
-            .timeout(Duration::from_secs(300))
+            .connect_timeout(super::transport_policy::HTTP_CONNECT_TIMEOUT)
+            .read_timeout(super::transport_policy::HTTP_READ_IDLE_TIMEOUT)
             .build()
             .map_err(|e| PureError::HttpError(e.to_string()))?;
 
@@ -346,6 +307,68 @@ impl InvocationRunner {
     pub async fn complete(
         &self,
         request: CompletionRequest,
+        mut context: ModelInvocationContext,
+    ) -> std::result::Result<CompletionResponse, CompletionFailure> {
+        let progress = context
+            .progress
+            .get_or_insert_with(|| {
+                pl_core::model::ModelProgressSender::detached(
+                    crate::completion::stream::MAX_COMPLETION_OUTPUT_BYTES as u64,
+                )
+            })
+            .clone();
+        progress.publish(pl_core::model::ModelProgress::default());
+        let caller_cancellation = context.cancellation.take().unwrap_or_default();
+        let closing = context.session.closing_token();
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        context.cancellation = Some(cancellation.clone());
+        let invocation = self.complete_inner(request, context);
+        tokio::pin!(invocation);
+        // Cancellation is cooperative: await the same invocation so its partial
+        // accounting and transport guards finish before releasing admission.
+        let mut result = tokio::select! {
+            biased;
+            _ = caller_cancellation.cancelled() => {
+                cancellation.cancel();
+                invocation.await
+            }
+            _ = closing.cancelled() => {
+                cancellation.cancel();
+                invocation.await
+            }
+            result = &mut invocation => result,
+        };
+        match &mut result {
+            Ok(response) => {
+                progress.finish_recovery(pl_core::model::ModelRecoveryPhase::Recovered);
+                response.observation = progress.latest().observation().clone();
+            }
+            Err(error) => {
+                let phase = if error.is_cancelled() {
+                    pl_core::model::ModelRecoveryPhase::Cancelled
+                } else if progress
+                    .latest()
+                    .observation()
+                    .recovery
+                    .is_some_and(|status| {
+                        status.phase == pl_core::model::ModelRecoveryPhase::Exhausted
+                    })
+                {
+                    pl_core::model::ModelRecoveryPhase::Exhausted
+                } else {
+                    pl_core::model::ModelRecoveryPhase::Failed
+                };
+                progress.finish_recovery(phase);
+                let latest = progress.latest();
+                error.partial_progress = (!latest.is_empty()).then_some(latest);
+            }
+        }
+        result
+    }
+
+    async fn complete_inner(
+        &self,
+        request: CompletionRequest,
         context: ModelInvocationContext,
     ) -> std::result::Result<CompletionResponse, CompletionFailure> {
         super::context::validate(self.model.binding.transport.protocol, &request.input)?;
@@ -362,29 +385,6 @@ impl InvocationRunner {
             context.session.admit().await?
         };
         let mut request = super::context::project_request(&self.endpoint, &self.model, request)?;
-        let prepare = async {
-            super::attachments::AttachmentBackend {
-                endpoint: &self.endpoint,
-                model: &self.model,
-                client: &self.http_client,
-                session: &context.session,
-                fingerprint: self.connection_fingerprint(),
-                now: self.clock.unix_seconds()?,
-                cancellation: context.cancellation.clone().unwrap_or_default(),
-            }
-            .prepare(&mut request)
-            .await
-        };
-        if let Some(token) = &context.cancellation {
-            tokio::select! {
-                biased;
-                _ = token.cancelled() => return Err(CompletionFailure::cancelled(
-                    PureError::LlmError("attachment preparation cancelled".into()), Box::default())),
-                result = prepare => result?,
-            }
-        } else {
-            prepare.await?;
-        }
         let inference_timer = InferenceTimer::start();
         let original_trace = context.trace.clone();
         let retry_jitter_key = original_trace
@@ -393,6 +393,8 @@ impl InvocationRunner {
             .unwrap_or(self.model.slug.as_str())
             .to_string();
         let mut attempt_number = 0_u32;
+        let mut transport_attempts = 0_u64;
+        let mut attachments_prepared = false;
         let transport_metrics_before = context.session.orchestration_snapshot();
         let mut http_fallbacks = 0_u64;
         let mut refreshed_attachments = false;
@@ -412,6 +414,12 @@ impl InvocationRunner {
             }
             let transport = self.active_transport(&context.session);
             let max_retries = MODEL_MAX_RETRIES;
+            let preparation = if attachments_prepared {
+                Ok(())
+            } else {
+                self.prepare_attachments(&mut request, &context).await
+            };
+            let attempted_stream = preparation.is_ok();
             let mut attempt_request = request.clone();
             if attempt_number > 0 {
                 for media in &mut attempt_request.prepared_content {
@@ -436,13 +444,19 @@ impl InvocationRunner {
                     format!("{original_inference_id}-{transport}-retry-{attempt_number}");
             }
             let request_started_at = self.clock.unix_seconds()?;
-            let (result, retry_allowed) = self
-                .run_stream_attempt(attempt_request, &context, trace, &inference_timer)
-                .await;
-            let error = match result {
+            let (result, retry_allowed) = match preparation {
+                Ok(()) => {
+                    attachments_prepared = true;
+                    transport_attempts += 1;
+                    self.run_stream_attempt(attempt_request, &context, trace, &inference_timer)
+                        .await
+                }
+                Err(error) => (Err(error), true),
+            };
+            let mut error = match result {
                 Ok(mut response) => {
                     let transport_metrics_after = context.session.orchestration_snapshot();
-                    response.orchestration.transport_attempts = u64::from(attempt_number) + 1;
+                    response.orchestration.transport_attempts = transport_attempts;
                     response.orchestration.continuation_attempts = transport_metrics_after
                         .continuation_attempts
                         .saturating_sub(transport_metrics_before.continuation_attempts);
@@ -459,10 +473,6 @@ impl InvocationRunner {
                         self.pricing_mode,
                         request_started_at,
                     );
-                    if attempt_number > 0 {
-                        context
-                            .publish_retry_notice(attempt_number, ConnectionNotice::Recovered)?;
-                    }
                     return Ok(response);
                 }
                 Err(mut error) => {
@@ -474,10 +484,17 @@ impl InvocationRunner {
                     error
                 }
             };
-            last_model_observation = error.model_observation().cloned();
+            last_model_observation = error
+                .model_observation()
+                .cloned()
+                .or(last_model_observation);
+            if error.is_cancelled() {
+                return Err(error);
+            }
             if !retry_allowed {
                 if transport == OpenAiTransport::ResponsesWebSocket
                     && error.is_transient_model_transport()
+                    && self.supports_http_fallback()
                 {
                     let connection_key = self.connection_fingerprint();
                     let activated = context
@@ -508,6 +525,7 @@ impl InvocationRunner {
                 .unwrap_or_default();
             if recovery == pl_protocol::ProviderRecovery::HttpFallback
                 && transport == OpenAiTransport::ResponsesWebSocket
+                && self.supports_http_fallback()
                 && attempt_number < max_retries
             {
                 if context
@@ -518,7 +536,9 @@ impl InvocationRunner {
                     http_fallbacks += 1;
                 }
                 attempt_number += 1;
-                context.publish_retry_notice(attempt_number, ConnectionNotice::Retrying)?;
+                if let Err(cause) = context.begin_retry(&mut error) {
+                    return Err(error.with_source(cause));
+                }
                 continue;
             }
             if recovery == pl_protocol::ProviderRecovery::RefreshAttachments
@@ -533,44 +553,18 @@ impl InvocationRunner {
                     })
                 })
             {
+                attempt_number += 1;
+                if let Err(cause) = context.begin_retry(&mut error) {
+                    return Err(error.with_source(cause));
+                }
                 context
                     .session
                     .uploaded_files
                     .lock()
                     .await
                     .retain(|(fingerprint, _), _| *fingerprint != self.connection_fingerprint());
-                let prepare = async {
-                    super::attachments::AttachmentBackend {
-                        endpoint: &self.endpoint,
-                        model: &self.model,
-                        client: &self.http_client,
-                        session: &context.session,
-                        fingerprint: self.connection_fingerprint(),
-                        now: self.clock.unix_seconds()?,
-                        cancellation: context.cancellation.clone().unwrap_or_default(),
-                    }
-                    .prepare(&mut request)
-                    .await
-                };
-                if let Some(token) = &context.cancellation {
-                    let model_observation = error.model_observation().cloned();
-                    tokio::select! {
-                        biased;
-                        _ = token.cancelled() => {
-                            let mut cancelled = CompletionFailure::cancelled(
-                                PureError::LlmError("attachment refresh cancelled".into()),
-                                error.accounting,
-                            ).with_optional_model_observation(model_observation);
-                            cancelled.presentation_items = error.presentation_items;
-                            return Err(cancelled);
-                        },
-                        result = prepare => result?,
-                    }
-                } else {
-                    prepare.await?;
-                }
+                attachments_prepared = false;
                 refreshed_attachments = true;
-                attempt_number += 1;
                 continue;
             }
             if !error.is_transient_model_transport() {
@@ -578,12 +572,16 @@ impl InvocationRunner {
             }
 
             if attempt_number >= max_retries {
-                context.publish_retry_notice(attempt_number, ConnectionNotice::Exhausted)?;
+                if let Some(progress) = &context.progress {
+                    progress.finish_recovery(pl_core::model::ModelRecoveryPhase::Exhausted);
+                }
                 return Err(error);
             }
             // WS 重连一次仍失败后切换 HTTP；切换不重置逻辑请求的总预算。
             if transport == OpenAiTransport::ResponsesWebSocket
+                && attempted_stream
                 && attempt_number >= RESPONSES_WEBSOCKET_MAX_RETRIES
+                && self.supports_http_fallback()
             {
                 let activated = context
                     .session
@@ -594,7 +592,9 @@ impl InvocationRunner {
                 }
             }
             attempt_number += 1;
-            context.publish_retry_notice(attempt_number, ConnectionNotice::Retrying)?;
+            if let Err(cause) = context.begin_retry(&mut error) {
+                return Err(error.with_source(cause));
+            }
             let delay = model_request_retry_delay(
                 attempt_number,
                 error.retry_after_ms(),
@@ -630,6 +630,39 @@ impl InvocationRunner {
                 tokio::time::sleep(delay).await;
             }
         }
+    }
+
+    async fn prepare_attachments(
+        &self,
+        request: &mut CompletionRequest,
+        context: &ModelInvocationContext,
+    ) -> std::result::Result<(), CompletionFailure> {
+        let mut candidate = request.clone();
+        let prepare = async {
+            super::attachments::AttachmentBackend {
+                endpoint: &self.endpoint,
+                model: &self.model,
+                client: &self.http_client,
+                session: &context.session,
+                fingerprint: self.connection_fingerprint(),
+                now: self.clock.unix_seconds()?,
+                cancellation: context.cancellation.clone().unwrap_or_default(),
+            }
+            .prepare(&mut candidate)
+            .await
+        };
+        if let Some(token) = &context.cancellation {
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => return Err(CompletionFailure::cancelled(
+                    PureError::LlmError("attachment preparation cancelled".into()), Box::default())),
+                result = prepare => result?,
+            }
+        } else {
+            prepare.await?;
+        }
+        *request = candidate;
+        Ok(())
     }
 
     /// 收集一次尝试；本地工具仅在成功返回后执行，托管工具和已报告使用量的响应不能重放。
@@ -683,8 +716,7 @@ impl InvocationRunner {
                                         crate::completion::stream::event::ModelStreamEvent::ResponsesContextItem { .. }))
                                     || matches!(event,
                                     crate::completion::stream::event::ModelStreamEvent::Usage(_)
-                                    | crate::completion::stream::event::ModelStreamEvent::Completed { .. }
-                                    | crate::completion::stream::event::ModelStreamEvent::PresentationItem { .. }))
+                                    | crate::completion::stream::event::ModelStreamEvent::Completed { .. }))
                             {
                                 replay_unsafe.store(true, Ordering::Release);
                             }
@@ -696,17 +728,19 @@ impl InvocationRunner {
                         }
                     })
                     .boxed();
-                let result = collect_completion_event_stream(
-                    tracked_stream,
-                    StreamCollectContext {
-                        event_tx: &context.event_tx,
-                        trace,
-                        trace_sink: context.trace_sink.clone(),
-                        cancellation: context.cancellation.clone(),
-                        model_observation: Some(model_observation),
-                    },
-                )
-                .await;
+                let result =
+                    crate::completion::stream::collect_completion_event_stream_with_idle_timeout(
+                        tracked_stream,
+                        StreamCollectContext {
+                            event_tx: &context.event_tx,
+                            trace,
+                            trace_sink: context.trace_sink.clone(),
+                            cancellation: context.cancellation.clone(),
+                            model_observation: Some(model_observation),
+                        },
+                        opened.idle_timeout,
+                    )
+                    .await;
                 let retry_allowed = !replay_unsafe.load(Ordering::Acquire);
                 (result, retry_allowed)
             }
@@ -752,6 +786,14 @@ impl InvocationRunner {
         OpenAiTransport::Http
     }
 
+    fn supports_http_fallback(&self) -> bool {
+        self.model
+            .binding
+            .transport
+            .supported_connection_modes
+            .contains(&ProviderConnectionMode::Http)
+    }
+
     fn stream_events(
         &self,
         body: OpenAiRequestBody,
@@ -791,6 +833,7 @@ impl InvocationRunner {
                 return Ok(OpenedCompletionStream {
                     events: decode_raw_event_stream(raw_stream.stream, protocol),
                     sent_model: raw_stream.sent_model,
+                    idle_timeout: Some(RESPONSES_WEBSOCKET_IDLE_TIMEOUT),
                 });
             }
             let capture = wire_capture::capture_http(&body, trace.as_ref()).await?;
@@ -854,6 +897,7 @@ impl InvocationRunner {
             Ok(OpenedCompletionStream {
                 events: decode_raw_event_stream(raw_stream, protocol),
                 sent_model: expected_sent_model,
+                idle_timeout: None,
             })
         }
     }

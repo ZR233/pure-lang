@@ -1,7 +1,7 @@
 //! Canonical 流式补全：收集编排与子状态机入口。
 //!
 //! [`decode_raw_event_stream`] 把 provider 原始流解码为 canonical 事件流，
-//! [`collect_completion_event_stream`] 驱动 [`StreamCompletionAccumulator`]
+//! [`collect_completion_event_stream_with_idle_timeout`] 驱动 [`StreamCompletionAccumulator`]
 //! 累积出 `CompletionResponse`。生命周期合法性（`lifecycle`）、工具调用增量
 //! （`tool_stream`）、标签式可见输出（`tagged_output`）与 trace 投影
 //! （`trace_projection`）是独立子状态机。
@@ -31,7 +31,7 @@ pub(crate) use accumulator::StreamCompletionAccumulator;
 pub(crate) use decode::{CompletionEventStream, OpenAiRawEventStream, decode_raw_event_stream};
 pub(crate) use tool_stream::ToolStream;
 
-const COMPLETION_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+pub(crate) const MAX_COMPLETION_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 
 /// 流收集期间的宿主上下文：事件输出、trace 目标与取消信号。
 pub(crate) struct StreamCollectContext<'a> {
@@ -42,23 +42,10 @@ pub(crate) struct StreamCollectContext<'a> {
     pub(crate) model_observation: Option<pl_protocol::InferenceModelObservation>,
 }
 
-pub(crate) async fn collect_completion_event_stream(
-    stream: CompletionEventStream,
-    context: StreamCollectContext<'_>,
-) -> std::result::Result<crate::completion::CompletionResponse, crate::completion::CompletionFailure>
-{
-    collect_completion_event_stream_with_idle_timeout(
-        stream,
-        context,
-        COMPLETION_STREAM_IDLE_TIMEOUT,
-    )
-    .await
-}
-
 pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
     mut stream: CompletionEventStream,
     context: StreamCollectContext<'_>,
-    idle_timeout: Duration,
+    idle_timeout: Option<Duration>,
 ) -> std::result::Result<crate::completion::CompletionResponse, crate::completion::CompletionFailure>
 {
     let StreamCollectContext {
@@ -72,7 +59,12 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
         StreamCompletionAccumulator::with_model_observation(trace, trace_sink, model_observation);
 
     loop {
-        let next_event = tokio::time::timeout(idle_timeout, stream.next());
+        let next_event = async {
+            match idle_timeout {
+                Some(timeout) => tokio::time::timeout(timeout, stream.next()).await,
+                None => Ok(stream.next().await),
+            }
+        };
         let next_event = match cancellation.as_ref() {
             Some(token) => {
                 tokio::select! {
@@ -103,6 +95,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                     accounting: Box::new(accumulator.accounting()),
                     model_observation: accumulator.model_observation().map(Box::new),
                     presentation_items: accumulator.take_presentation_items(),
+                    partial_progress: None,
                     cancelled: false,
                 });
             }
@@ -116,6 +109,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                     accounting: Box::new(accumulator.accounting()),
                     model_observation: accumulator.model_observation().map(Box::new),
                     presentation_items: accumulator.take_presentation_items(),
+                    partial_progress: None,
                     cancelled: false,
                 });
             }
@@ -127,6 +121,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                 accounting: Box::new(accumulator.accounting()),
                 model_observation: accumulator.model_observation().map(Box::new),
                 presentation_items: accumulator.take_presentation_items(),
+                partial_progress: None,
                 cancelled: false,
             });
         }
@@ -141,6 +136,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
             accounting: Box::new(accounting),
             model_observation: model_observation.map(Box::new),
             presentation_items: accumulator.take_presentation_items(),
+            partial_progress: None,
             cancelled: false,
         })
 }

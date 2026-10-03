@@ -757,6 +757,112 @@ impl pl_core::thread::cold::ColdStore for OutputQuotaStore {
     }
 }
 
+#[tokio::test]
+async fn retry_metadata_failed_body_and_new_tool_arguments_share_the_reliable_quota() {
+    for limit in [410, 1000] {
+        let failed_body = "f".repeat(400);
+        let mut steps = vec![Step::prompt(
+            Protocol::ResponsesHttp,
+            "retry quota",
+            0,
+            Reply::Sse(vec![
+                json!({"type":"response.created","response":{"id":"partial","model":"reported-fixture"}}),
+                json!({"type":"response.output_item.done","output_index":0,"item":{"id":"same-item","type":"message","role":"assistant","content":[{"type":"output_text","text":failed_body}]}}),
+            ]),
+        )];
+        if limit == 1000 {
+            steps.push(Step::prompt(Protocol::ResponsesHttp, "retry quota", 1, Reply::Sse(vec![
+                json!({"type":"response.created","response":{"id":"retry","model":"reported-fixture"}}),
+                json!({"type":"response.output_item.done","output_index":0,"item":{"id":"same-item","type":"message","role":"assistant","content":[{"type":"output_text","text":"accepted retry body"}]}}),
+                json!({"type":"response.output_item.added","output_index":1,"item":{"id":"tool-item","type":"function_call","name":"lookup","call_id":"discarded-call"}}),
+                json!({"type":"response.function_call_arguments.delta","item_id":"tool-item","call_id":"discarded-call","delta":"x".repeat(400)}),
+            ])));
+        }
+        let fixture = FixtureServer::start(steps).await.unwrap();
+        let runtime = ModelRuntime::new(
+            ProviderEndpoint::compatible("fixture", fixture.base_url()),
+            model("live-fixture", ModelTransportProfile::responses_http()),
+        )
+        .unwrap();
+        let session = ModelFactory::new(pl_model::runtime::ThreadModel::new(runtime, None))
+            .open_session()
+            .await
+            .unwrap();
+        let thread = ThreadHandle::start("retry-quota-thread".into(), session).unwrap();
+        thread
+            .attach_storage(pl_core::thread::cold::ColdStoreHandle::new(
+                OutputQuotaStore { limit },
+            ))
+            .await
+            .unwrap();
+        let mut subscription = thread.subscribe();
+        let runner = tokio::spawn({
+            let thread = thread.clone();
+            async move { thread.run_turn(user_turn("retry quota")).await }
+        });
+        let snapshot = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let snapshot = subscription.next().await.unwrap();
+                if snapshot.persistence.resume_required {
+                    break snapshot;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            snapshot.persistence.fault,
+            Some(pl_core::thread::cold::StorageFaultKind::QueueFull)
+        );
+        let _ = tokio::time::timeout(Duration::from_secs(5), runner)
+            .await
+            .unwrap()
+            .unwrap();
+        let effects = thread.effects().await.unwrap();
+        let error = effects
+            .iter()
+            .find_map(
+                |effect| match effect.attempt.as_ref().map(|attempt| &attempt.outcome) {
+                    Some(pl_core::thread::AttemptOutcome::Failed(error)) => Some(error),
+                    _ => None,
+                },
+            )
+            .unwrap();
+        let receipt = pl_model::runtime::model_failure_receipt(error)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            receipt.model_observation.unwrap().reported_model.as_deref(),
+            Some("reported-fixture"),
+            "local recovery failure must retain provider identity"
+        );
+        let progress = receipt.partial_progress.unwrap();
+        if limit == 410 {
+            assert_eq!(progress.observation().generation, 0);
+            assert_eq!(progress.parts()[0].text(), failed_body);
+        } else {
+            assert_eq!(progress.observation().generation, 1);
+            assert_eq!(
+                progress.observation().failed[0].parts[0].text(),
+                failed_body
+            );
+            assert_eq!(progress.parts()[0].text(), "accepted retry body");
+        }
+        assert!(
+            snapshot.tasks.is_empty(),
+            "refused arguments must never reach execution"
+        );
+        assert_eq!(
+            fixture.finish().await.unwrap().len(),
+            if limit == 410 { 1 } else { 2 }
+        );
+        tokio::time::timeout(Duration::from_secs(5), thread.close())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+}
+
 /// A provider stream that outgrows the call's reliable output quota is cancelled with what it had.
 ///
 /// The real adapter charges each observed increment through the Thread's own reservation *before* it
@@ -1073,14 +1179,13 @@ async fn a_staged_tool_identity_is_charged_once_against_the_reliable_quota() {
     let _ = tokio::time::timeout(Duration::from_secs(10), thread.close()).await;
 }
 
-/// Driving the collector without a live progress sender still enforces its own output ceiling.
+/// A host call without a Thread progress channel still has the same bounded output ceiling.
 ///
-/// A host call outside a Thread carries no `ModelProgressSender`, so the per-call reservation never
-/// runs. The completion collector must still bound the text/reasoning/tool-argument domain it
-/// retains: a single over-limit delta is refused by the collector itself instead of being copied in
-/// and growing the retained body without bound.
+/// The invocation owns a detached observation so failed generations can survive in its receipt.
+/// It shares the collector's 16 MiB ceiling across generations: an over-limit delta is refused
+/// before becoming accepted content, even when no host installed a progress consumer or cold store.
 #[tokio::test]
-async fn a_stream_without_a_progress_sender_is_still_bounded_by_the_collector() {
+async fn a_stream_without_a_thread_progress_channel_is_still_bounded() {
     let oversized = "x".repeat(16 * 1024 * 1024 + 1);
     let fixture = FixtureServer::start(vec![Step::prompt(
         Protocol::ResponsesHttp,
@@ -1103,8 +1208,7 @@ async fn a_stream_without_a_progress_sender_is_still_bounded_by_the_collector() 
     )
     .expect("fixture endpoint is valid");
 
-    // No progress sender: this drives the decoder and the collector directly, with no Thread-owned
-    // reservation in front of them.
+    // No host progress sender or Thread-owned storage reservation.
     let failure = tokio::time::timeout(
         Duration::from_secs(30),
         runtime.complete(
@@ -1115,11 +1219,11 @@ async fn a_stream_without_a_progress_sender_is_still_bounded_by_the_collector() 
         ),
     )
     .await
-    .expect("the collector bound must not stall on an over-limit stream")
-    .expect_err("an over-limit stream is refused by the collector itself");
+    .expect("the output bound must not stall on an over-limit stream")
+    .expect_err("an over-limit stream is refused before retention");
     assert!(
-        matches!(&*failure.source, PureError::MemoryError(message) if message.contains("16 MiB")),
-        "the collector's own ceiling refuses the stream, not a progress sender: {:?}",
+        matches!(&*failure.source, PureError::MemoryError(message) if message.contains("16777216") && message.contains("16777217") && message.contains("retained 0 bytes")),
+        "the exact 16 MiB invocation ceiling refuses the first over-limit delta: {:?}",
         failure.source
     );
     let _ = fixture.shutdown().await;

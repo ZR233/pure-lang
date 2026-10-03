@@ -34,6 +34,9 @@ pub struct CompletionResponse {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_observation: Option<InferenceModelObservation>,
+    /// Display-only recovery facts; abandoned candidates never become response content.
+    #[serde(default)]
+    pub observation: pl_core::model::ModelObservation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +94,7 @@ pub struct CompletionFailure {
     pub model_observation: Option<Box<InferenceModelObservation>>,
     /// All provider output items received before this invocation failed.
     pub presentation_items: Vec<CompletionPresentationItem>,
+    pub partial_progress: Option<pl_core::model::ModelProgress>,
     pub(crate) cancelled: bool,
 }
 
@@ -107,6 +111,7 @@ impl CompletionFailure {
             accounting,
             model_observation: None,
             presentation_items: Vec::new(),
+            partial_progress: None,
             cancelled: false,
         }
     }
@@ -121,6 +126,12 @@ impl CompletionFailure {
 
     pub fn model_observation(&self) -> Option<&InferenceModelObservation> {
         self.model_observation.as_deref()
+    }
+
+    /// A local recovery failure replaces the cause, not facts received from the provider.
+    pub(crate) fn with_source(mut self, source: PureError) -> Self {
+        self.source = Box::new(source);
+        self
     }
 
     pub(crate) fn with_model_observation(
@@ -149,6 +160,7 @@ impl CompletionFailure {
             accounting,
             model_observation: None,
             presentation_items: Vec::new(),
+            partial_progress: None,
             cancelled: true,
         }
     }
@@ -161,6 +173,7 @@ impl From<PureError> for CompletionFailure {
             accounting: Box::default(),
             model_observation: None,
             presentation_items: Vec::new(),
+            partial_progress: None,
             cancelled: false,
         }
     }

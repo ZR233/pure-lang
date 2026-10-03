@@ -75,7 +75,18 @@ async fn read_response_error(response: reqwest::Response) -> PureError {
     let mut body = Vec::new();
     let mut stream = response.bytes_stream();
     let mut body_failure = None;
-    while let Some(chunk) = stream.next().await {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let chunk = match tokio::time::timeout_at(deadline, stream.next()).await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(_) => {
+                body_failure = Some(PureError::transient_model_transport(
+                    "error response body read deadline exceeded",
+                ));
+                break;
+            }
+        };
         let chunk = match chunk {
             Ok(chunk) => chunk,
             Err(error) => {
@@ -195,7 +206,14 @@ fn response_request_id(headers: &HeaderMap) -> Option<String> {
 pub(crate) async fn sse(
     request: reqwest::RequestBuilder,
 ) -> Result<BoxStream<'static, Result<SseStreamEvent>>> {
-    let response = checked(request.send().await.map_err(reqwest_error_to_pure)?).await?;
+    let response = tokio::time::timeout(
+        super::transport_policy::HTTP_REQUEST_TIMEOUT,
+        request.send(),
+    )
+    .await
+    .map_err(|_| PureError::transient_model_transport("HTTP request header deadline exceeded"))?
+    .map_err(reqwest_error_to_pure)?;
+    let response = checked(response).await?;
     let is_sse = response
         .headers()
         .get(CONTENT_TYPE)

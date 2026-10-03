@@ -28,12 +28,13 @@ impl CatalogSources {
             }
             StudioProductEventKind::SkillsStateChanged(value) => Some((
                 format!("skills:{}", value.project_id),
-                serde_json::json!(
+                serde_json::json!((
+                    value.state.revision(),
                     value
                         .state
                         .value()
                         .map(|data| (&data.config_fingerprint, data.catalog_revision))
-                ),
+                )),
             )),
             StudioProductEventKind::LspStateChanged(value) => Some((
                 "lsp".into(),
@@ -134,6 +135,7 @@ impl StudioRuntime {
                                     &sources,
                                     &mut attempted,
                                     vec![(id.clone(), thread.clone())],
+                                    &stopping,
                                 )
                                 .await;
                             tokio::select! {
@@ -150,8 +152,8 @@ impl StudioRuntime {
                         workers.retain(|_, (_, updates)| !updates.is_closed());
                     },
                     () = runtime.tool_catalog_updates.notified() => {
-                        let revision = sources.0.get("ssh").and_then(|value| value.parse::<u64>().ok()).unwrap_or_default().saturating_add(1);
-                        sources.0.insert("ssh".into(), revision.to_string());
+                        let revision = sources.0.get("refresh").and_then(|value| value.parse::<u64>().ok()).unwrap_or_default().saturating_add(1);
+                        sources.0.insert("refresh".into(), revision.to_string());
                     },
                     changed = settings.changed() => if changed.is_err() { break; },
                     changed = ssh_ready.changed() => if changed.is_err() { break; },
@@ -180,6 +182,7 @@ impl StudioRuntime {
         sources: &CatalogSources,
         attempted: &mut BTreeMap<String, (ThreadHandle, String)>,
         active: Vec<(String, ThreadHandle)>,
+        stopping: &tokio_util::sync::CancellationToken,
     ) {
         let ids: std::collections::BTreeSet<_> = active.iter().map(|(id, _)| id.clone()).collect();
         attempted.retain(|id, _| ids.contains(id));
@@ -211,7 +214,9 @@ impl StudioRuntime {
             }) {
                 continue;
             }
-            let result = self.install_refreshed_tools(&id, &thread, &snapshot).await;
+            let result = self
+                .install_refreshed_tools(&id, &thread, &snapshot, stopping.clone())
+                .await;
             let result = match result {
                 Err(error) => match error.downcast::<pl_core::thread::ThreadError>() {
                     Ok(pl_core::thread::ThreadError::RejectedTools(resources)) => {
@@ -240,6 +245,9 @@ impl StudioRuntime {
             }
             // Cache attempts, including failures, until an input revision changes.
             // Recovery issues remain visible; only successful transfer commits a binding.
+            if stopping.is_cancelled() || thread.snapshot().lifecycle != ThreadLifecycle::Open {
+                continue;
+            }
             attempted.insert(id.clone(), (thread.clone(), fingerprint));
             self.publish_tool_refresh_result(&id, &thread, result.as_ref().err());
         }
@@ -255,22 +263,23 @@ impl StudioRuntime {
         let issue = error.map(|error| crate::studio::StudioRecoveryIssue {
             id: issue_id.clone(),
             scope: crate::studio::StudioRecoveryIssueScope::Thread,
-            category: crate::studio::StudioRecoveryIssueCategory::AgentState,
-            action: crate::studio::StudioRecoveryIssueAction::CleanupThread,
+            category: crate::studio::StudioRecoveryIssueCategory::ToolCatalog,
+            action: crate::studio::StudioRecoveryIssueAction::Retry,
             project_id: None,
             thread_id: Some(id.to_string()),
             worktree: None,
             message: format!(
-                "Tool catalog unavailable; correct configuration or reactivate this Thread: {error}"
+                "Tool catalog refresh failed; correct configuration and retry: {error:#}"
             ),
         });
         self.recovery.update_if_current(
             &issue_id,
             issue,
             || {
-                self.threads
-                    .thread(id)
-                    .is_some_and(|current| current.same_instance(thread))
+                self.threads.thread(id).is_some_and(|current| {
+                    current.same_instance(thread)
+                        && current.snapshot().lifecycle == ThreadLifecycle::Open
+                })
             },
             |issues| {
                 self.agent_facility
@@ -285,17 +294,28 @@ impl StudioRuntime {
         id: &str,
         thread: &ThreadHandle,
         snapshot: &pl_core::thread::ThreadSnapshot,
+        cancellation: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<()> {
+        if self.thread_factory.tool_authority_invalidated(id)? {
+            thread
+                .register_tools_if_extensions(snapshot.extension_sequence, Vec::new())
+                .await?;
+        }
         let prepared = self
             .thread_factory
-            .refresh_thread_tools(id, snapshot, tokio_util::sync::CancellationToken::new())
+            .refresh_thread_tools(id, snapshot, cancellation)
             .await;
         let (tools, exposure, binding) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
-                thread
-                    .register_tools_if_extensions(snapshot.extension_sequence, Vec::new())
-                    .await?;
+                if matches!(
+                    error,
+                    crate::thread_assembler::ThreadAssemblyError::InvalidatedBinding(_)
+                ) {
+                    thread
+                        .register_tools_if_extensions(snapshot.extension_sequence, Vec::new())
+                        .await?;
+                }
                 return Err(error.into());
             }
         };

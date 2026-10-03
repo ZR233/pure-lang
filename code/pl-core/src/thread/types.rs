@@ -1008,13 +1008,22 @@ pub enum TurnOutcome {
 
 /// Durable Turn execution state, independent of provider response status.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind", content = "value")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind",
+    content = "value"
+)]
 pub enum TurnState {
     Running,
     Finished(TurnOutcome),
     Cancelled,
     Interrupted,
-    Failed { description: String },
+    Failed {
+        description: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model_failure: Option<Box<crate::model::ModelFailureFacts>>,
+    },
 }
 
 /// One accepted bounded Turn and its final disposition.

@@ -806,8 +806,8 @@ StudioRecoveryIssue _recoveryIssueFromFrb(
     category: switch (issue.category) {
       frb.BridgeRecoveryIssueCategory.processLease =>
         RecoveryIssueCategory.processLease,
-      frb.BridgeRecoveryIssueCategory.agentState =>
-        RecoveryIssueCategory.agentState,
+      frb.BridgeRecoveryIssueCategory.toolCatalog =>
+        RecoveryIssueCategory.toolCatalog,
       frb.BridgeRecoveryIssueCategory.repository =>
         RecoveryIssueCategory.repository,
       frb.BridgeRecoveryIssueCategory.storage => RecoveryIssueCategory.storage,

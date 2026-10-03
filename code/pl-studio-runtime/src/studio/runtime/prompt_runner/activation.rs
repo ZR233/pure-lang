@@ -32,17 +32,6 @@ impl StudioRuntime {
                 .map(pl_protocol::Thread::from)
                 .context("selected Thread not found")?
         };
-        if self.recovery_issues().iter().any(|issue| {
-            issue.scope == crate::StudioRecoveryIssueScope::Thread
-                && issue.category == crate::StudioRecoveryIssueCategory::AgentState
-                && issue.thread_id.as_deref() == Some(thread.root_thread_id.as_str())
-        }) {
-            return Err(anyhow::Error::new(pl_protocol::studio::StudioError::new(
-                pl_protocol::studio::StudioErrorCode::Protocol,
-                "This Thread is blocked because its durable timeline is incompatible; use the recovery cleanup action",
-                false,
-            )));
-        }
         Ok(ThreadRecord {
             id: thread.id,
             project_id: thread.project_id,

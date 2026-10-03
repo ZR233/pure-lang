@@ -19,8 +19,7 @@ use crate::runtime::openai::sent_model_from_wire_body;
 use crate::runtime::openai::sse::SseStreamEvent;
 use crate::runtime::session::{ResponsesWebSocketConnection, ResponsesWebSocketSession};
 use crate::runtime::transport_policy::{
-    RESPONSES_WEBSOCKET_CONNECT_TIMEOUT, RESPONSES_WEBSOCKET_IDLE_TIMEOUT,
-    RESPONSES_WEBSOCKET_SEND_TIMEOUT,
+    RESPONSES_WEBSOCKET_CONNECT_TIMEOUT, RESPONSES_WEBSOCKET_SEND_TIMEOUT,
 };
 
 mod dialer;
@@ -29,8 +28,7 @@ mod state;
 
 use error::{
     close_error, connection_error, continuation_id_invalid, continuation_retry_error,
-    handshake_error, handshake_timeout_error, protocol_error, response_terminal_error,
-    server_error,
+    handshake_error, handshake_timeout_error, protocol_error, server_error,
 };
 use state::{
     ClosedResponsesStream, CompletedResponsesStream, FailedResponsesStream, ResponsesStreamState,
@@ -69,22 +67,38 @@ pub(super) async fn stream_responses(
     } = input;
     normalize_websocket_request_body(&mut body);
 
-    let mut guard = model_session.lock_responses_websocket().await;
-    if guard.connection_key != Some(connection_key) || guard.connection.is_none() {
-        guard.invalidate();
-        guard.connection =
+    // Own invalidation before the first await that can publish/send a request.
+    let mut state = WebSocketEventState {
+        guard: model_session.lock_responses_websocket().await,
+        state: ResponsesStreamState::open(),
+        used_continuation: false,
+        full_request: body.clone(),
+        model_session: model_session.clone(),
+        replay: ReplayCollector::default(),
+    };
+    if state.guard.connection_key != Some(connection_key)
+        || state
+            .guard
+            .connection
+            .as_ref()
+            .is_none_or(|connection| connection.is_closed())
+    {
+        state.guard.invalidate();
+        state.guard.reap_retired().await?;
+        state.guard.connection =
             Some(connect(&api_base, token.as_deref(), provider_headers, model_headers).await?);
-        guard.connection_key = Some(connection_key);
+        state.guard.connection_key = Some(connection_key);
     }
 
     let (mut wire_body, used_continuation, fallback_reason) =
-        match incremental_request(&guard, &body) {
+        match incremental_request(&state.guard, &body) {
             Ok(incremental) => (incremental, true, None),
             Err(reason) => (body.clone(), false, Some(reason)),
         };
     if used_continuation {
         model_session.record_continuation_attempt();
     }
+    state.used_continuation = used_continuation;
     let input = body.get("input");
     let input_items = input.and_then(Value::as_array).map_or(0, Vec::len);
     let context_bytes = input
@@ -127,20 +141,11 @@ pub(super) async fn stream_responses(
         first_differing_index,
         "Responses WebSocket request prepared"
     );
-    if let Err(error) = send_request(&mut guard, &request_text).await {
-        guard.invalidate();
+    if let Err(error) = send_request(&mut state.guard, &request_text).await {
+        state.guard.invalidate();
         return Err(error);
     }
 
-    let state = WebSocketEventState {
-        guard,
-        state: ResponsesStreamState::open(),
-        used_continuation,
-        events_emitted: false,
-        full_request: body,
-        model_session,
-        replay: ReplayCollector::default(),
-    };
     Ok(OpenedResponsesStream {
         stream: futures::stream::unfold(state, |mut state| async move {
             match &state.state {
@@ -381,7 +386,6 @@ struct WebSocketEventState {
     guard: OwnedMutexGuard<ResponsesWebSocketSession>,
     state: ResponsesStreamState,
     used_continuation: bool,
-    events_emitted: bool,
     full_request: Map<String, Value>,
     model_session: ModelSession,
     replay: ReplayCollector,
@@ -396,19 +400,14 @@ impl WebSocketEventState {
                     .connection
                     .as_mut()
                     .ok_or_else(|| connection_error("connection is unavailable"))?;
-                timeout(RESPONSES_WEBSOCKET_IDLE_TIMEOUT, connection.next()).await
+                connection.next().await
             };
             let message = match next {
-                Ok(Some(Ok(message))) => message,
-                Ok(Some(Err(error))) => return Err(self.invalidate_with_connection_error(error)),
-                Ok(None) => {
+                Some(Ok(message)) => message,
+                Some(Err(error)) => return Err(self.invalidate_with_connection_error(error)),
+                None => {
                     return Err(self.invalidate_with_connection_error(connection_error(
                         "connection closed before a terminal response event",
-                    )));
-                }
-                Err(_) => {
-                    return Err(self.invalidate_with_connection_error(connection_error(
-                        "idle timeout waiting for a response event",
                     )));
                 }
             };
@@ -422,21 +421,11 @@ impl WebSocketEventState {
                         }
                     };
                     if value.get("type").and_then(Value::as_str) == Some("error") {
-                        if !self.events_emitted
-                            && self.used_continuation
-                            && continuation_id_invalid(&value)
-                        {
+                        if self.used_continuation && continuation_id_invalid(&value) {
                             self.model_session.record_continuation_invalid();
                             return Err(self.fail(continuation_retry_error()));
                         }
                         let error = server_error(&value);
-                        return Err(self.fail(error));
-                    }
-                    if matches!(
-                        value.get("type").and_then(Value::as_str),
-                        Some("response.failed" | "response.incomplete")
-                    ) && let Some(error) = response_terminal_error(&value)
-                    {
                         return Err(self.fail(error));
                     }
                     let event: SseStreamEvent = match serde_json::from_value(value) {
@@ -465,7 +454,6 @@ impl WebSocketEventState {
                         }
                         _ => {}
                     }
-                    self.events_emitted = true;
                     return Ok(event);
                 }
                 Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => {}
@@ -506,9 +494,15 @@ impl WebSocketEventState {
                 ));
             }
         };
-        if response_id.is_some() {
+        // Native replay preserves every output field. An abbreviated terminal can
+        // use validated completed items, but an id alone cannot prove an empty prefix.
+        let complete_output = !response_items.is_empty()
+            || response
+                .and_then(|response| response.get("output"))
+                .is_some_and(Value::is_array);
+        if let Some(response_id) = response_id.filter(|_| complete_output) {
             self.guard.last_request = Some(self.full_request.clone());
-            self.guard.last_response_id = response_id;
+            self.guard.last_response_id = Some(response_id);
             self.guard.last_response_items = response_items;
         } else {
             self.guard.last_request = None;

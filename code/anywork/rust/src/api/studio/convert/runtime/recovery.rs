@@ -19,8 +19,8 @@ pub(crate) fn bridge_recovery_issue(issue: StudioRecoveryIssue) -> BridgeStudioR
             pl_studio_runtime::StudioRecoveryIssueCategory::ProcessLease => {
                 BridgeRecoveryIssueCategory::ProcessLease
             }
-            pl_studio_runtime::StudioRecoveryIssueCategory::AgentState => {
-                BridgeRecoveryIssueCategory::AgentState
+            pl_studio_runtime::StudioRecoveryIssueCategory::ToolCatalog => {
+                BridgeRecoveryIssueCategory::ToolCatalog
             }
             pl_studio_runtime::StudioRecoveryIssueCategory::Repository => {
                 BridgeRecoveryIssueCategory::Repository

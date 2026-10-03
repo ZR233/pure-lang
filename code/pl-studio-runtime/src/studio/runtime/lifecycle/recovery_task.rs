@@ -14,6 +14,9 @@ impl StudioRuntime {
             "runtime is not ready"
         );
         self.start_recovery_scan().await;
+        // A diagnostic scan cannot repair a failed catalog. Advance the refresh
+        // generation even when configuration fingerprints have not changed.
+        self.tool_catalog_updates.notify_one();
         Ok(self.read_recovery_state())
     }
 

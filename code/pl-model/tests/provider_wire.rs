@@ -1573,12 +1573,26 @@ async fn failed_stream_retains_every_received_item_beyond_the_live_window() {
         })
     }))
     .collect();
-    let fixture = FixtureServer::start(vec![Step::prompt(
-        Protocol::ResponsesHttp,
-        "incomplete items",
-        0,
-        Reply::Sse(events),
-    )])
+    // Plain completed items are safe to replay. The interrupted observation must
+    // survive a later permanent failure, not be mistaken for the final result.
+    let fixture = FixtureServer::start(vec![
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            "incomplete items",
+            0,
+            Reply::Sse(events),
+        ),
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            "incomplete items",
+            1,
+            Reply::HttpError {
+                status: 401,
+                code: "invalid_api_key".into(),
+                message: "recovery rejected".into(),
+            },
+        ),
+    ])
     .await
     .unwrap();
     let runtime = ModelRuntime::new(
@@ -1593,12 +1607,35 @@ async fn failed_stream_retains_every_received_item_beyond_the_live_window() {
         )
         .await
         .unwrap_err();
-    assert_eq!(failure.presentation_items.len(), 150);
-    for (index, item) in failure.presentation_items.iter().enumerate() {
-        assert_eq!(item.provider_item_id, format!("partial-item-{index}"));
-        assert_eq!(item.parts[0].text, format!("part-{index}"));
+    assert_eq!(
+        failure
+            .source
+            .provider_failure_ref()
+            .unwrap()
+            .code
+            .as_deref(),
+        Some("invalid_api_key")
+    );
+    assert!(failure.presentation_items.is_empty());
+    let progress = failure.partial_progress.unwrap();
+    assert_eq!(progress.observation().generation, 1);
+    assert_eq!(progress.observation().failed.len(), 1);
+    assert_eq!(
+        progress.observation().recovery.unwrap().phase,
+        pl_core::model::ModelRecoveryPhase::Failed
+    );
+    let retained = &progress.observation().failed[0].parts;
+    assert_eq!(retained.len(), 150);
+    for (index, part) in retained.iter().enumerate() {
+        let pl_core::model::ObservedPartIdentity::Provider(identity) = part.identity() else {
+            panic!("received provider item must retain its original identity");
+        };
+        assert_eq!(identity.item_id.as_ref(), format!("partial-item-{index}"));
+        assert_eq!(part.text(), format!("part-{index}"));
     }
-    assert_eq!(fixture.finish().await.unwrap().len(), 1);
+    let records = fixture.finish().await.unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].body["input"], records[1].body["input"]);
 }
 
 #[tokio::test]
@@ -1979,6 +2016,92 @@ async fn deepseek_file_upload_precedes_responses_and_sends_only_file_reference()
         records[1].body["input"][0]["content"][1]["file_id"],
         "file-fixture"
     );
+}
+
+#[tokio::test]
+async fn attachment_preparation_and_inference_share_retry_budget_and_keep_successful_upload() {
+    let bytes = tiny_png();
+    let upload = json!({
+        "purpose":"user_data", "expires_after[anchor]":"created_at", "expires_after[seconds]":"86400",
+        "file":{"filename":"tiny.png","mime_type":"image/png","sha256":hex::encode(Sha256::digest(&bytes))}
+    });
+    let unavailable = || Reply::HttpError {
+        status: 503,
+        code: "server_error".into(),
+        message: "temporary failure".into(),
+    };
+    let mut steps = (0..4)
+        .map(|_| Step::exact(Protocol::Files, upload.clone(), unavailable()))
+        .collect::<Vec<_>>();
+    steps.push(Step::exact(
+        Protocol::Files,
+        upload,
+        Reply::Json(json!({"id":"file-once"})),
+    ));
+    for step in 5..7 {
+        steps.push(Step::prompt(
+            Protocol::ResponsesHttp,
+            "inspect",
+            step,
+            unavailable(),
+        ));
+    }
+    steps.push(Step::prompt(
+        Protocol::ResponsesHttp,
+        "next",
+        7,
+        Reply::Sse(responses_text("recovered", "next", "deepseek-flash")),
+    ));
+    let fixture = FixtureServer::start(steps).await.unwrap();
+    let mut endpoint = ProviderEndpoint::deepseek(Some(fixture.base_url()));
+    endpoint.service_capabilities.files = FileUploadCapability::DeepSeek;
+    let runtime = ModelRuntime::new(endpoint, bundled("deepseek-flash")).unwrap();
+    let session = ModelSession::default();
+    let failure = runtime
+        .complete(
+            image_request("inspect", bytes.clone()),
+            ModelInvocationContext::new(session.clone()),
+        )
+        .await
+        .unwrap_err();
+    assert!(failure.is_transient_model_transport());
+    let recovery = failure
+        .partial_progress
+        .as_ref()
+        .unwrap()
+        .observation()
+        .recovery
+        .unwrap();
+    assert_eq!(
+        recovery.phase,
+        pl_core::model::ModelRecoveryPhase::Exhausted
+    );
+    assert_eq!(recovery.retry, 5);
+    let next = runtime
+        .complete(
+            image_request("next", bytes),
+            ModelInvocationContext::new(session.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(next.content.as_deref(), Some("recovered"));
+    assert_eq!(next.orchestration.transport_attempts, 1);
+    session.close().await.unwrap();
+    let records = fixture.finish().await.unwrap();
+    assert_eq!(records.len(), 8);
+    assert_eq!(
+        records
+            .iter()
+            .filter(|r| r.path.ends_with("/files"))
+            .count(),
+        5
+    );
+    for record in &records[5..] {
+        assert_eq!(
+            record.body["input"][0]["content"][1]["file_id"],
+            "file-once"
+        );
+    }
 }
 
 #[tokio::test]

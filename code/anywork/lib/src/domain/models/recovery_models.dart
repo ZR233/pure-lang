@@ -1,6 +1,6 @@
 enum RecoveryIssueScope { application, project, thread }
 
-enum RecoveryIssueCategory { processLease, agentState, repository, storage }
+enum RecoveryIssueCategory { processLease, toolCatalog, repository, storage }
 
 enum RecoveryIssueAction {
   retry,
@@ -75,4 +75,6 @@ class StudioRecoveryIssue {
       availableActions.contains(RecoveryIssueAction.cleanupWorktree);
 
   bool get canRetry => availableActions.contains(RecoveryIssueAction.retry);
+
+  bool get blocksAccess => category != RecoveryIssueCategory.toolCatalog;
 }

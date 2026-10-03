@@ -44,7 +44,7 @@ pub enum StudioRecoveryIssueScope {
 #[serde(rename_all = "camelCase")]
 pub enum StudioRecoveryIssueCategory {
     ProcessLease,
-    AgentState,
+    ToolCatalog,
     Repository,
     Storage,
 }

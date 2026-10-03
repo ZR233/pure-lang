@@ -80,6 +80,7 @@ pub(crate) async fn upload_file(
         ))
         .headers(headers)
         .multipart(form)
+        .timeout(crate::runtime::transport_policy::FINITE_REQUEST_TIMEOUT)
         .send()
         .await
         .map_err(transport::reqwest_error_to_pure)?;

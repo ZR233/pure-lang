@@ -18,6 +18,7 @@ pub(super) struct ToolBinding {
     pub catalog: Option<std::sync::Arc<pl_tool::skill::FrozenSkillCatalog>>,
     pub initial_skill_prompt: String,
     pub policy_key: String,
+    pub permission_mode: crate::approval::PermissionMode,
     pub policies:
         std::collections::BTreeMap<String, pl_core::tool::execution_policy::ExecutionPolicyHandle>,
     pub project: ProjectRecord,
@@ -34,6 +35,23 @@ pub(in crate::studio) struct RefreshedToolBinding {
 }
 
 impl StudioThreadFactory {
+    pub(in crate::studio) fn tool_authority_invalidated(&self, id: &str) -> anyhow::Result<bool> {
+        let mode = self
+            .services
+            .config_runtime
+            .read()?
+            .config
+            .runtime
+            .permission_mode;
+        let bindings = self
+            .bindings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(bindings
+            .get(id)
+            .is_some_and(|binding| binding.target_invalidated || binding.permission_mode != mode))
+    }
+
     pub(in crate::studio) fn ssh_alias(&self, id: &str) -> Option<String> {
         self.bindings
             .lock()
@@ -58,7 +76,7 @@ impl StudioThreadFactory {
             return Err(pl_core::thread::ThreadError::Closed.into());
         }
         if current.target_invalidated {
-            return Err(ThreadAssemblyError::Identity(
+            return Err(ThreadAssemblyError::InvalidatedBinding(
                 "SSH target or credentials changed during tool refresh; reactivate this Thread"
                     .into(),
             ));
@@ -150,7 +168,7 @@ impl StudioThreadFactory {
                 )
             })?;
         if binding.target_invalidated {
-            return Err(ThreadAssemblyError::Identity(
+            return Err(ThreadAssemblyError::InvalidatedBinding(
                 "SSH target or credentials changed; reactivate this Thread".into(),
             ));
         }
@@ -168,7 +186,7 @@ impl StudioThreadFactory {
             .into_iter()
             .find(|project| project.id == thread.project_id)
             .ok_or_else(|| {
-                ThreadAssemblyError::Identity(
+                ThreadAssemblyError::InvalidatedBinding(
                     "project target disappeared; reactivate this Thread".into(),
                 )
             })?;
@@ -183,7 +201,7 @@ impl StudioThreadFactory {
                 .find(|entry| entry.profile.alias == previous.alias)
                 .map(|entry| entry.profile);
             if current.as_ref() != Some(previous) {
-                return Err(ThreadAssemblyError::Identity(
+                return Err(ThreadAssemblyError::InvalidatedBinding(
                     "SSH target configuration changed; reactivate this Thread".into(),
                 ));
             }
@@ -242,14 +260,17 @@ impl StudioThreadFactory {
                     &binding.workspace.root().to_string_lossy(),
                 )
                 .map_err(|error| resource_error("normalize Thread remote workspace", error))?;
-                let host = self
+                let opening = self
                     .services
                     .ssh_manager
-                    .open_workspace_host(server, requested.clone())
-                    .await
-                    .map_err(|error| resource_error("reopen Thread remote workspace", error))?;
+                    .open_workspace_host(server, requested.clone());
+                let host = tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => return Err(pl_core::thread::ThreadError::Cancelled.into()),
+                    result = opening => result.map_err(|error| resource_error("reopen Thread remote workspace", error))?,
+                };
                 if host.files.canonical_path() != requested.as_str() {
-                    return Err(ThreadAssemblyError::Identity(
+                    return Err(ThreadAssemblyError::InvalidatedBinding(
                         "remote workspace target changed; reactivate this Thread".into(),
                     ));
                 }
@@ -267,6 +288,8 @@ impl StudioThreadFactory {
         } else {
             None
         };
+        let policy_changed =
+            binding.policy_key != super::thread_tools::approval_policy_key(&config, &route);
         let mut prepared = self
             .prepare_thread_tools_with(
                 ThreadToolAssembly {
@@ -289,7 +312,16 @@ impl StudioThreadFactory {
                         .and_then(WeakCommandProcesses::upgrade),
                 },
             )
-            .await?;
+            .await
+            .map_err(|error| {
+                if policy_changed {
+                    ThreadAssemblyError::InvalidatedBinding(format!(
+                        "authorization policy changed; catalog preparation failed: {error:#}"
+                    ))
+                } else {
+                    error
+                }
+            })?;
         let exposure = if child
             || prepared.visibility == pl_tool::search::ToolVisibilityConstraint::Exclusive
         {
@@ -330,6 +362,7 @@ impl StudioThreadFactory {
                 remote: prepared.remote.clone(),
                 catalog: prepared.catalog.clone(),
                 policy_key: super::thread_tools::approval_policy_key(&config, &route),
+                permission_mode: config.runtime.permission_mode,
                 policies: prepared.tools.approval_policies.clone(),
                 ..binding
             },
@@ -371,7 +404,7 @@ fn ensure_same_target(
         || previous.path != current.path
         || previous.ssh_alias != current.ssh_alias
     {
-        return Err(ThreadAssemblyError::Identity("physical workspace target changed; reactivate this Thread before accessing the new target".into()));
+        return Err(ThreadAssemblyError::InvalidatedBinding("physical workspace target changed; reactivate this Thread before accessing the new target".into()));
     }
     Ok(())
 }

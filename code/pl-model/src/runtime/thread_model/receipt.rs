@@ -287,7 +287,7 @@ pub(super) fn failure_error(
         accounting: (*failure.accounting).clone(),
         model_observation,
         presentation_items: std::mem::take(&mut failure.presentation_items),
-        partial_progress,
+        partial_progress: failure.partial_progress.take().or(partial_progress),
     };
     let details = failure_details(&receipt);
     ModelError {

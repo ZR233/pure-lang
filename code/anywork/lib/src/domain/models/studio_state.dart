@@ -301,10 +301,12 @@ class StudioState {
     String? projectId,
     String? threadId,
     String? id,
+    bool blockingOnly = false,
   }) {
     return recoveryIssues
         .where(
           (issue) =>
+              (!blockingOnly || issue.blocksAccess) &&
               (scope == null || issue.scope == scope) &&
               (projectId == null || issue.projectId == projectId) &&
               (threadId == null || issue.threadId == threadId) &&

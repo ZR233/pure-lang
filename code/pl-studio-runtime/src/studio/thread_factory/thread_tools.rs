@@ -52,6 +52,7 @@ impl StudioThreadFactory {
         let binding = super::tool_bindings::ToolBinding {
             incarnation: std::sync::Arc::new(()),
             target_invalidated: false,
+            permission_mode: assembly.config.runtime.permission_mode,
             initial_skill_prompt: String::new(),
             catalog: None,
             policy_key: approval_policy_key(assembly.config, assembly.route),

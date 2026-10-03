@@ -208,7 +208,7 @@ pub(super) fn run(
     Ok(())
 }
 
-fn wait_stage(
+pub(super) fn wait_stage(
     marker: &Path,
     driver: &mut OwnedProcess,
     gui: &mut OwnedProcess,
@@ -233,7 +233,7 @@ fn wait_stage(
     Ok(())
 }
 
-fn wait_driver(
+pub(super) fn wait_driver(
     driver: &mut OwnedProcess,
     gui: &mut OwnedProcess,
     fixture: &mut OwnedProcess,

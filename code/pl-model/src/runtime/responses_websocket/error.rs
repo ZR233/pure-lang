@@ -4,13 +4,14 @@ use serde_json::{Map, Value};
 use tokio_tungstenite::tungstenite::Error as TungsteniteError;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
-use super::super::provider_error::{ProviderFailureMetadata, redact_secret_like_values};
+use super::super::provider_error::{provider_stream_failure, redact_secret_like_values};
 
 const HANDSHAKE_TIMEOUT_MESSAGE: &str = "Responses WebSocket handshake timed out after 15 seconds; check WebSocket network access or switch this provider instance to HTTP explicitly in Studio settings";
 
 #[derive(Debug, Deserialize)]
 struct WebSocketErrorDetail {
     code: Option<String>,
+    param: Option<String>,
     message: Option<String>,
     retry_after_ms: Option<u64>,
     #[serde(default, deserialize_with = "deserialize_optional_u16")]
@@ -20,6 +21,7 @@ struct WebSocketErrorDetail {
 #[derive(Debug, Deserialize)]
 struct WebSocketErrorEvent {
     code: Option<String>,
+    param: Option<String>,
     message: Option<String>,
     retry_after_ms: Option<u64>,
     #[serde(
@@ -32,24 +34,6 @@ struct WebSocketErrorEvent {
     error: Option<WebSocketErrorDetail>,
     #[serde(default)]
     headers: Map<String, Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WebSocketTerminalEvent {
-    response: WebSocketTerminalResponse,
-}
-
-#[derive(Debug, Deserialize)]
-struct WebSocketTerminalResponse {
-    #[serde(default)]
-    error: Option<WebSocketErrorDetail>,
-    #[serde(default)]
-    incomplete_details: Option<WebSocketIncompleteDetails>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WebSocketIncompleteDetails {
-    reason: Option<String>,
 }
 
 pub(super) fn handshake_error(error: TungsteniteError) -> PureError {
@@ -111,6 +95,20 @@ pub(crate) fn connection_error(detail: impl AsRef<str>) -> PureError {
     )))
 }
 
+pub(crate) fn socket_error(error: TungsteniteError) -> PureError {
+    match error {
+        TungsteniteError::ConnectionClosed
+        | TungsteniteError::AlreadyClosed
+        | TungsteniteError::Io(_)
+        | TungsteniteError::Tls(_)
+        | TungsteniteError::WriteBufferFull(_)
+        | TungsteniteError::Protocol(
+            tokio_tungstenite::tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+        ) => connection_error(error.to_string()),
+        _ => protocol_error(error.to_string()),
+    }
+}
+
 pub(super) fn close_error(frame: Option<CloseFrame>) -> PureError {
     let Some(frame) = frame else {
         return connection_error("server closed the connection without a close frame");
@@ -121,17 +119,27 @@ pub(super) fn close_error(frame: Option<CloseFrame>) -> PureError {
         frame.reason
     ));
     if matches!(code, 1002 | 1003 | 1007 | 1008 | 1009 | 1010) {
-        PureError::LlmError(detail)
+        protocol_error(detail)
     } else {
         PureError::transient_model_transport(detail)
     }
 }
 
 pub(super) fn protocol_error(detail: impl AsRef<str>) -> PureError {
-    PureError::LlmError(redact_secret_like_values(&format!(
-        "Responses WebSocket protocol error: {}",
-        detail.as_ref()
-    )))
+    PureError::provider_failure(pl_protocol::ProviderFailure {
+        context: pl_protocol::ProviderFailureContext {
+            stage: pl_protocol::ProviderFailureStage::Stream,
+            ..Default::default()
+        },
+        kind: pl_protocol::ProviderFailureKind::Protocol,
+        code: None,
+        http_status: None,
+        message: redact_secret_like_values(&format!(
+            "Responses WebSocket protocol error: {}",
+            detail.as_ref()
+        )),
+        retry: pl_protocol::RetryDisposition::Permanent,
+    })
 }
 
 pub(super) fn server_error(value: &Value) -> PureError {
@@ -155,44 +163,7 @@ pub(super) fn server_error(value: &Value) -> PureError {
         .and_then(|error| error.retry_after_ms)
         .or(parsed.retry_after_ms)
         .or_else(|| retry_after_from_json_headers(&parsed.headers));
-    let metadata = ProviderFailureMetadata {
-        code,
-        http_status: status,
-        retry_after_ms,
-    };
-
-    if metadata.is_retryable() {
-        return metadata.into_transient(detail);
-    }
-    match status {
-        Some(_) => PureError::HttpError(detail),
-        None => PureError::LlmError(detail),
-    }
-}
-
-pub(super) fn response_terminal_error(event: &Value) -> Option<PureError> {
-    let parsed = serde_json::from_value::<WebSocketTerminalEvent>(event.clone()).ok()?;
-    let error = parsed.response.error.as_ref();
-    let code = error.and_then(|error| error.code.as_deref()).or_else(|| {
-        parsed
-            .response
-            .incomplete_details
-            .as_ref()
-            .and_then(|details| details.reason.as_deref())
-    });
-    let status = error.and_then(|error| error.status);
-    let metadata = ProviderFailureMetadata {
-        code,
-        http_status: status,
-        retry_after_ms: error.and_then(|error| error.retry_after_ms),
-    };
-    if !metadata.is_retryable() {
-        return None;
-    }
-    let message = error
-        .and_then(|error| error.message.as_deref())
-        .unwrap_or("Responses WebSocket response failed temporarily");
-    Some(metadata.into_transient(websocket_error_message(status, code, message)))
+    provider_stream_failure(code, status, retry_after_ms, detail)
 }
 
 pub(super) fn continuation_id_invalid(value: &Value) -> bool {
@@ -205,15 +176,16 @@ pub(super) fn continuation_id_invalid(value: &Value) -> bool {
         .or(parsed.code.as_deref())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let message = nested
-        .and_then(|error| error.message.as_deref())
-        .or(parsed.message.as_deref())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    code.contains("previous_response")
-        || message.contains("previous_response_id")
-        || (message.contains("response")
-            && (message.contains("not found") || message.contains("invalid")))
+    let param = nested
+        .and_then(|error| error.param.as_deref())
+        .or(parsed.param.as_deref());
+    matches!(
+        code.as_str(),
+        "previous_response_not_found"
+            | "previous_response_id_not_found"
+            | "invalid_previous_response_id"
+    ) || (param == Some("previous_response_id")
+        && matches!(code.as_str(), "invalid_request_error" | "not_found"))
 }
 
 pub(super) fn continuation_retry_error() -> PureError {

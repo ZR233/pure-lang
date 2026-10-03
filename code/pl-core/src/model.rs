@@ -991,6 +991,63 @@ pub struct ModelProgress {
     version: u64,
     #[serde(default, skip_serializing_if = "ModelParts::is_empty")]
     parts: ModelParts,
+    #[serde(default)]
+    observation: ModelObservation,
+}
+
+/// Receipt of transparent recovery inside one prepared call, never canonical model input.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelObservation {
+    #[serde(default)]
+    pub generation: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<FailedModelObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<ModelRecoveryStatus>,
+}
+
+/// A safely abandoned observation. Shared parts keep their original provider identities.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedModelObservation {
+    pub generation: u32,
+    pub parts: ModelParts,
+    pub message: Arc<str>,
+}
+
+/// Provider-neutral recovery phase; only the adapter owns replay policy and retries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelRecoveryPhase {
+    Retrying,
+    Recovered,
+    Exhausted,
+    Failed,
+    Cancelled,
+}
+
+/// Persistent status, so watch coalescing cannot lose a retry boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelRecoveryStatus {
+    pub phase: ModelRecoveryPhase,
+    pub retry: u32,
+    pub max_retries: u32,
+}
+
+/// Bounded recovery observation refused a producer's transition.
+#[derive(Debug, thiserror::Error)]
+#[error("model recovery observation limit reached")]
+pub struct ModelObservationLimit;
+
+impl From<ModelObservation> for ModelProgress {
+    fn from(observation: ModelObservation) -> Self {
+        Self {
+            observation,
+            ..Self::default()
+        }
+    }
 }
 
 impl ModelProgress {
@@ -999,6 +1056,7 @@ impl ModelProgress {
         Self {
             version,
             parts: ModelParts::from_vec(parts),
+            observation: ModelObservation::default(),
         }
     }
 
@@ -1015,9 +1073,16 @@ impl ModelProgress {
         &self.parts
     }
 
+    /// Recovery facts retained in live snapshots and final producer receipts.
+    pub fn observation(&self) -> &ModelObservation {
+        &self.observation
+    }
+
     /// Reports whether no part has been observed yet.
     pub fn is_empty(&self) -> bool {
         self.parts.is_empty()
+            && self.observation.failed.is_empty()
+            && self.observation.recovery.is_none()
     }
 
     /// Number of currently observed identities.
@@ -1530,6 +1595,84 @@ impl OutputBudget {
 }
 
 impl ModelProgressSender {
+    /// Creates a detached producer observation when no Thread owns a live channel.
+    /// Final receipts still retain the same recovery facts.
+    pub fn detached(output_limit: u64) -> Self {
+        let (sender, _) = tokio::sync::watch::channel(ModelProgress::default());
+        let output = OutputBudget {
+            store: None,
+            thread_id: String::new(),
+            operation_id: String::new(),
+            limit: output_limit,
+            charged: std::sync::Mutex::new(0),
+            refused: std::sync::Mutex::new(None),
+            refusal: None,
+        };
+        Self {
+            sender,
+            reservation: None,
+            output: Some(Arc::new(output)),
+        }
+    }
+
+    /// Output already charged by this call, including abandoned generations.
+    pub fn charged_output(&self) -> u64 {
+        self.output.as_ref().map_or(0, |output| {
+            *output
+                .charged
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        })
+    }
+
+    /// Atomically retires the current observation and starts its next generation.
+    /// The bounded latest snapshot retains every failed boundary, even without a live consumer.
+    ///
+    /// # Errors
+    /// Refuses exhausted or unbounded recovery policies; it never drops earlier observations.
+    pub fn begin_recovery(
+        &self,
+        max_retries: u32,
+        message: Arc<str>,
+    ) -> Result<(), ModelObservationLimit> {
+        let mut result = Ok(());
+        self.sender.send_modify(|progress| {
+            let observation = &mut progress.observation;
+            // A producer chooses its own retry policy, within a fixed resident metadata bound.
+            if max_retries > 32 || observation.generation >= max_retries {
+                result = Err(ModelObservationLimit);
+                return;
+            }
+            observation.failed.push(FailedModelObservation {
+                generation: observation.generation,
+                parts: std::mem::take(&mut progress.parts),
+                message,
+            });
+            observation.generation += 1;
+            observation.recovery = Some(ModelRecoveryStatus {
+                phase: ModelRecoveryPhase::Retrying,
+                retry: observation.generation,
+                max_retries,
+            });
+            progress.version = progress.version.saturating_add(1);
+        });
+        result
+    }
+
+    /// Updates terminal recovery state without resetting failed observations or the generation.
+    pub fn finish_recovery(&self, phase: ModelRecoveryPhase) {
+        self.sender.send_if_modified(|progress| {
+            let Some(status) = &mut progress.observation.recovery else {
+                return false;
+            };
+            if status.phase == phase {
+                return false;
+            }
+            status.phase = phase;
+            progress.version = progress.version.saturating_add(1);
+            true
+        });
+    }
     /// Creates the observation channel for one call that already holds its reliable output quota.
     pub(crate) fn channel(
         store: Option<crate::thread::cold::ColdStoreHandle>,
@@ -1581,12 +1724,17 @@ impl ModelProgressSender {
     /// Returns the attached cold store's synchronous reservation failure.
     pub fn reserve_observed_item(
         &self,
+        generation: u32,
         provider_item_id: &str,
         part: Option<crate::chat::PresentationPart>,
     ) -> Result<(), crate::thread::cold::ColdStoreError> {
         if let Some(reservation) = &self.reservation {
-            let item_id =
-                crate::chat::presentation_item_id(&reservation.attempt_id, provider_item_id, part);
+            let item_id = crate::chat::presentation_item_id(
+                &reservation.attempt_id,
+                generation,
+                provider_item_id,
+                part,
+            );
             reservation
                 .store
                 .reserve_observed_item(&reservation.thread_id, &item_id)?;
@@ -1692,6 +1840,15 @@ pub enum ModelFailureKind {
     ImplementationPanicked,
 }
 
+/// Durable model-owned facts, also retained when failure precedes ordinary attempt admission.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelFailureFacts {
+    pub kind: ModelFailureKind,
+    pub details: Option<Box<OpaquePayload>>,
+    pub usage: Box<ModelUsage>,
+}
+
 /// Invocation failure with usage observed before termination.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1726,6 +1883,15 @@ impl std::error::Error for ModelError {
 }
 
 impl ModelError {
+    /// Captures producer facts without retaining runtime error objects or interpreting their payload.
+    pub fn failure_facts(&self) -> ModelFailureFacts {
+        ModelFailureFacts {
+            kind: self.kind,
+            details: self.details.clone(),
+            usage: self.usage.clone(),
+        }
+    }
+
     fn from_panic(source: crate::error_record::BoundaryPanic) -> Self {
         Self {
             kind: ModelFailureKind::ImplementationPanicked,

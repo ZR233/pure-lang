@@ -727,16 +727,20 @@ fn has_stream_facts(state: &ThreadSnapshot, attempt: &RequestAttempt) -> (bool, 
 /// 落在 `model:{attempt}:text|reasoning`，item 化后的正文落在该 provider item/part 的 canonical id。
 fn observed_content_part(
     attempt_id: &str,
+    generation: u32,
     part: &ObservedPart,
 ) -> Option<(String, ObservedStream)> {
     let stream = observed_stream(part)?;
     let item_id = match part.identity() {
         ObservedPartIdentity::Aggregate { channel } => match channel {
-            AggregateChannel::Text => super::order::response_id(attempt_id, "text"),
-            AggregateChannel::Reasoning => super::order::response_id(attempt_id, "reasoning"),
+            AggregateChannel::Text => super::order::observation_id(attempt_id, generation, "text"),
+            AggregateChannel::Reasoning => {
+                super::order::observation_id(attempt_id, generation, "reasoning")
+            }
         },
         ObservedPartIdentity::Provider(identity) => super::order::presentation_id(
             attempt_id,
+            generation,
             &identity.item_id,
             Some(identity.presentation_part()),
         ),
@@ -855,7 +859,9 @@ impl ActivityDetailOwner {
             (self.attempt_id.as_deref(), self.progress.as_ref())
         {
             for part in progress.parts() {
-                let Some((item_id, stream)) = observed_content_part(attempt_id, part) else {
+                let Some((item_id, stream)) =
+                    observed_content_part(attempt_id, progress.observation().generation, part)
+                else {
                     continue;
                 };
                 let content_part = ThreadActivityContentPart {

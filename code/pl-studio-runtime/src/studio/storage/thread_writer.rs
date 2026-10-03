@@ -1101,8 +1101,12 @@ async fn persist_effect(
     for item in &projected.items {
         inner.chat.confirm_saved(&item.id, item.revision);
     }
-    if let Some(attempt) = &write.effect.attempt {
-        // Release the attempt's speculative previews, but never an identity this transaction just
+    if let Some(attempt) = &write.effect.attempt
+        && !matches!(attempt.outcome, pl_core::thread::AttemptOutcome::Running)
+    {
+        // Only a terminal attempt releases speculative previews: a delayed Running save can arrive
+        // after newer current/failed observations were published, and owns none of those bodies.
+        // Never release an identity this transaction just
         // confirmed: the durable row owns that content and its window position even if the session
         // never saw the terminal publication or a slow producer published one more revision of it.
         inner.chat.drop_previews_with_prefix_except(
@@ -2169,6 +2173,7 @@ mod storage_fault_tests {
                 "first-turn",
                 TurnState::Failed {
                     description: "model preparation rejected media".into(),
+                    model_failure: None,
                 },
             ),
             (4, "second-turn", TurnState::Running),
@@ -2312,6 +2317,7 @@ mod storage_fault_tests {
                 accounting: Default::default(),
                 model: "fixture-model".into(),
                 model_observation: None,
+                observation: Default::default(),
             },
         };
         // The durable assistant frame is exactly this pair of receipt and tool bindings.
@@ -2380,6 +2386,104 @@ mod storage_fault_tests {
         let (_, prepared) =
             projection.advance(chat, &sink.0.thread, &write.effect, &write.checkpoint.state)?;
         assert!(sink.0.channel.prepare(prepared));
+        Ok(())
+    }
+
+    /// A delayed Running acknowledgement must not retire provider observations published after
+    /// its batch was prepared. The writer step lock fixes the interleaving without timing sleeps.
+    #[tokio::test]
+    async fn running_save_ack_preserves_later_failed_and_current_observations() -> Result<()> {
+        use pl_core::{
+            chat::{ChatFocus, PresentationPart, presentation_item_id},
+            model::{
+                ActiveModelProgress, ModelProgressSender, ModelTextChannel, ObservedItemKind,
+                ObservedPart, ObservedPartIdentity, ObservedPartKind, ProviderPartIdentity,
+            },
+            thread::{AttemptOutcome, AttemptStatus},
+        };
+
+        let temp = tempfile::tempdir()?;
+        let store = StudioStore::open(temp.path().join("studio/v2/studio.sqlite")).await?;
+        let id = "running-save-ack";
+        let sink =
+            ThreadStorageSink::new(store.clone(), pl_protocol::Thread::placeholder(id), None)
+                .await?;
+        let chat = store.chat_session(id).await?;
+        let view = chat.open_chat(ChatFocus::Latest).await?;
+        let mut projection = live_projection();
+        let (mut attempt, mut update) = committed_parts_attempt("turn", "attempt", 0)?;
+        attempt.status = AttemptStatus::Running;
+        update.outcome = AttemptOutcome::Running;
+        let mut write = ticket(id, 1);
+        write.checkpoint.state.attempts = Arc::from([attempt]);
+        Arc::make_mut(&mut write.effect).attempt = Some(update);
+        let mut state = write.checkpoint.state.clone();
+
+        let locked = sink.0.channel.step_lock.lock().await;
+        drive_live_projection(&mut projection, &chat, &sink, id, write)?;
+        let sender = ModelProgressSender::detached(1024);
+        let part = |text: &str| {
+            ObservedPart::new(ObservedPartIdentity::Provider(ProviderPartIdentity {
+                item_id: Arc::from("same-provider-id"),
+                output_index: Some(0),
+                item_kind: ObservedItemKind::Text(ModelTextChannel::Final),
+                part: ObservedPartKind::OutputText,
+                content_index: 0,
+            }))
+            .authorized(text)
+        };
+        sender.edit_parts(|parts| parts.push(part("failed body")));
+        sender.begin_recovery(5, Arc::from("connection interrupted"))?;
+        sender.edit_parts(|parts| parts.push(part("current body")));
+        state.model_progress = Some(ActiveModelProgress {
+            attempt_id: "attempt".into(),
+            progress: sender.latest(),
+        });
+        projection.stream(&chat, &sink.0.thread, &state, 1).await?;
+        let failed_id = presentation_item_id(
+            "attempt",
+            0,
+            "same-provider-id",
+            Some(PresentationPart::OutputText(0)),
+        );
+        let current_id = presentation_item_id(
+            "attempt",
+            1,
+            "same-provider-id",
+            Some(PresentationPart::OutputText(0)),
+        );
+        let failed = snapshot_item(&view, &failed_id);
+        let current = snapshot_item(&view, &current_id);
+        drop(locked);
+        tokio::time::timeout(Duration::from_secs(5), sink.flush(id, 1)).await??;
+
+        // No further provider update is needed to keep either identity visible after the save ack.
+        let saved_window = view.snapshot();
+        assert_eq!(
+            saved_window
+                .items
+                .iter()
+                .find(|item| item.item_id == failed_id)
+                .context("Running save acknowledgement removed the failed observation")?,
+            &failed
+        );
+        assert_eq!(
+            saved_window
+                .items
+                .iter()
+                .find(|item| item.item_id == current_id)
+                .context("Running save acknowledgement removed the current observation")?,
+            &current
+        );
+        assert!(
+            store
+                .history(id)
+                .await?
+                .existing_items([failed_id, current_id])
+                .await?
+                .is_empty(),
+            "Running saved only its prepared start facts, not these later observations"
+        );
         Ok(())
     }
 
@@ -2569,6 +2673,7 @@ mod storage_fault_tests {
         let turn_item_id = crate::studio::thread_projection::order::turn_id(turn_id);
         let last_part_id = crate::studio::thread_projection::order::presentation_id(
             attempt_id,
+            0,
             &format!("stress-item-{}", parts - 1),
             Some(crate::studio::thread_projection::order::PresentationPart::OutputText(0)),
         );

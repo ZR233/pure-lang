@@ -72,17 +72,13 @@ impl Owner {
             turn.state = match &result {
                 Ok(completed) => TurnState::Finished(completed.outcome),
                 Err(ThreadError::Cancelled) => match self.input_driver.error() {
-                    Some(error) => TurnState::Failed {
-                        description: error.to_string(),
-                    },
+                    Some(error) => failed_turn(error),
                     None if self.interrupted_turn.as_deref() == Some(&turn_id) => {
                         TurnState::Interrupted
                     }
                     None => TurnState::Cancelled,
                 },
-                Err(error) => TurnState::Failed {
-                    description: error.to_string(),
-                },
+                Err(error) => failed_turn(error),
             };
         }
         self.state.turns = turns.into();
@@ -246,5 +242,15 @@ impl Owner {
             content = Vec::new();
             step = step.checked_add(1).ok_or(ThreadError::RevisionExhausted)?;
         }
+    }
+}
+
+fn failed_turn(error: &ThreadError) -> TurnState {
+    TurnState::Failed {
+        description: error.to_string(),
+        model_failure: match error {
+            ThreadError::Model(error) => Some(Box::new(error.failure_facts())),
+            _ => None,
+        },
     }
 }

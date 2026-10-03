@@ -124,6 +124,8 @@ pub enum ThreadAssemblyError {
     InitialContextOnRecovery,
     #[error("Thread identity is already owned or has an invalid parent: {0}")]
     Identity(String),
+    #[error("Thread tool binding was invalidated: {0}")]
+    InvalidatedBinding(String),
     #[error("message identity {0} conflicts with an accepted delivery")]
     MessageConflict(String),
     #[error("message identity {0} is already accepted with an unverifiable body")]

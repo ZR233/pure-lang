@@ -158,6 +158,7 @@ impl ThreadModel {
                             accounting: Box::new(result.2),
                             model_observation: result.3.map(Box::new),
                             presentation_items: Vec::new(),
+                            partial_progress: None,
                             cancelled: false,
                         },
                         None,

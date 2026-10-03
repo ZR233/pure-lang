@@ -2461,6 +2461,7 @@ async fn committed_identity_survives_the_preview_release_after_a_save_ack() {
     let prefix = pl_core::chat::presentation_prefix("attempt");
     let id = pl_core::chat::presentation_item_id(
         "attempt",
+        0,
         "message-1",
         Some(PresentationPart::OutputText(0)),
     );
@@ -2508,6 +2509,7 @@ async fn preview_release_still_removes_an_identity_that_never_committed() {
     let prefix = pl_core::chat::presentation_prefix("attempt");
     let dropped = pl_core::chat::presentation_item_id(
         "attempt",
+        0,
         "message-2",
         Some(PresentationPart::OutputText(0)),
     );
@@ -2537,11 +2539,13 @@ async fn the_preview_release_spares_the_identities_the_commit_just_confirmed() {
     let prefix = pl_core::chat::presentation_prefix("attempt");
     let confirmed = pl_core::chat::presentation_item_id(
         "attempt",
+        0,
         "message-1",
         Some(PresentationPart::OutputText(0)),
     );
     let dropped = pl_core::chat::presentation_item_id(
         "attempt",
+        0,
         "message-2",
         Some(PresentationPart::OutputText(0)),
     );
@@ -2573,6 +2577,7 @@ async fn a_late_preview_never_reopens_a_committed_terminal_identity() {
     let prefix = pl_core::chat::presentation_prefix("attempt");
     let id = pl_core::chat::presentation_item_id(
         "attempt",
+        0,
         "message-1",
         Some(PresentationPart::OutputText(0)),
     );
@@ -2615,6 +2620,7 @@ async fn a_save_ack_before_the_last_preview_never_releases_the_committed_body() 
     let prefix = pl_core::chat::presentation_prefix("attempt");
     let id = pl_core::chat::presentation_item_id(
         "attempt",
+        0,
         "message-1",
         Some(PresentationPart::OutputText(0)),
     );
@@ -2660,6 +2666,7 @@ fn presentation_item_identity_bytes_are_stable_for_every_part_shape() {
     assert_eq!(
         pl_core::chat::presentation_item_id(
             attempt,
+            0,
             "message-1",
             Some(PresentationPart::OutputText(0)),
         ),
@@ -2668,6 +2675,7 @@ fn presentation_item_identity_bytes_are_stable_for_every_part_shape() {
     assert_eq!(
         pl_core::chat::presentation_item_id(
             attempt,
+            0,
             "message-1",
             Some(PresentationPart::ReasoningText(2)),
         ),
@@ -2676,6 +2684,7 @@ fn presentation_item_identity_bytes_are_stable_for_every_part_shape() {
     assert_eq!(
         pl_core::chat::presentation_item_id(
             attempt,
+            0,
             "message-1",
             Some(PresentationPart::SummaryText(1)),
         ),
@@ -2683,7 +2692,7 @@ fn presentation_item_identity_bytes_are_stable_for_every_part_shape() {
     );
     // An identity with no part is still the same item under the same reserved name.
     assert_eq!(
-        pl_core::chat::presentation_item_id(attempt, "message-1", None),
+        pl_core::chat::presentation_item_id(attempt, 0, "message-1", None),
         format!("{head}:empty"),
     );
 }

@@ -54,6 +54,7 @@ pub fn presentation_prefix(attempt_id: &str) -> String {
 
 pub fn presentation_item_id(
     attempt_id: &str,
+    generation: u32,
     provider_item_id: &str,
     part: Option<PresentationPart>,
 ) -> String {
@@ -64,6 +65,9 @@ pub fn presentation_item_id(
         PRESENTATION_PREFIX_BYTES + attempt_id.len() + provider_item_id.len(),
     );
     write_presentation_prefix(&mut base, attempt_id);
+    if generation != 0 {
+        let _ = write!(base, "generation:{generation}:");
+    }
     let _ = write!(base, "{}:{provider_item_id}", provider_item_id.len());
     match part {
         Some(PresentationPart::OutputText(index)) => {

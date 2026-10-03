@@ -33,6 +33,7 @@ type TransportClose = futures::future::Shared<
 
 struct SessionAdmission {
     closing: AtomicBool,
+    cancellation: tokio_util::sync::CancellationToken,
     permit: Arc<tokio::sync::Semaphore>,
 }
 
@@ -40,6 +41,7 @@ impl Default for SessionAdmission {
     fn default() -> Self {
         Self {
             closing: AtomicBool::new(false),
+            cancellation: tokio_util::sync::CancellationToken::new(),
             permit: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
@@ -68,13 +70,14 @@ impl std::fmt::Debug for ModelSession {
 }
 
 impl ModelSession {
-    /// Stops and joins physical transport tasks after the owner has drained model calls.
+    /// Cancels active model calls and joins physical transport tasks.
     /// Clones identify the same session. Closing seals admission before draining active calls.
     ///
     /// # Errors
     /// Reports transport task failure, preserving the session for a close retry.
     pub async fn close(&self) -> Result<(), pl_protocol::PureError> {
         self.admission.closing.store(true, Ordering::Release);
+        self.admission.cancellation.cancel();
         let _lease = self
             .admission
             .permit
@@ -84,22 +87,28 @@ impl ModelSession {
             .map_err(|_| {
                 pl_protocol::PureError::LlmError("model session admission closed".into())
             })?;
-        let pending = self.closing_transport.lock().await.clone();
-        let close = if let Some(pending) = pending {
-            pending
+        let mut pending = self.closing_transport.lock().await;
+        let close = if let Some(pending) = pending.as_ref() {
+            pending.clone()
         } else {
-            let connection = self.lock_responses_websocket().await.connection.take();
+            let mut transport = self.lock_responses_websocket().await;
+            transport.invalidate();
+            let connections = std::mem::take(&mut transport.retired);
             let close = async move {
-                if let Some(mut connection) = connection {
-                    connection.close().await.map_err(Arc::new)?;
+                let mut failure = None;
+                for mut connection in connections {
+                    if let Err(error) = connection.close().await {
+                        failure.get_or_insert_with(|| Arc::new(error));
+                    }
                 }
-                Ok(())
+                failure.map_or(Ok(()), Err)
             }
             .boxed()
             .shared();
-            *self.closing_transport.lock().await = Some(close.clone());
+            *pending = Some(close.clone());
             close
         };
+        drop(pending);
         let result = close.await;
         self.closing_transport.lock().await.take();
         result.map_err(|error| {
@@ -116,6 +125,14 @@ impl ModelSession {
             })?
             .clear();
         Ok(())
+    }
+
+    /// Resets physical continuation without changing session fallback policy.
+    pub(crate) async fn reset_transport(&self) -> Result<(), pl_protocol::PureError> {
+        let _lease = self.admit().await?;
+        let mut transport = self.lock_responses_websocket().await;
+        transport.invalidate();
+        transport.reap_retired().await
     }
 
     pub(crate) async fn admit(
@@ -141,6 +158,10 @@ impl ModelSession {
             ));
         }
         Ok(lease)
+    }
+
+    pub(crate) fn closing_token(&self) -> tokio_util::sync::CancellationToken {
+        self.admission.cancellation.clone()
     }
 
     pub(crate) fn orchestration_snapshot(&self) -> TransportOrchestrationSnapshot {
@@ -203,6 +224,7 @@ impl ModelSession {
 pub(crate) struct ResponsesWebSocketSession {
     pub(crate) connection_key: Option<u64>,
     pub(crate) connection: Option<ResponsesWebSocketConnection>,
+    retired: Vec<ResponsesWebSocketConnection>,
     pub(crate) last_request: Option<Map<String, Value>>,
     pub(crate) last_response_id: Option<String>,
     pub(crate) last_response_items: Vec<Value>,
@@ -211,9 +233,23 @@ pub(crate) struct ResponsesWebSocketSession {
 impl ResponsesWebSocketSession {
     pub(crate) fn invalidate(&mut self) {
         self.connection_key = None;
-        self.connection = None;
+        if let Some(connection) = self.connection.take() {
+            connection.retire();
+            self.retired.push(connection);
+        }
         self.last_request = None;
         self.last_response_id = None;
         self.last_response_items.clear();
+    }
+
+    pub(crate) async fn reap_retired(&mut self) -> Result<(), pl_protocol::PureError> {
+        while let Some(connection) = self.retired.last_mut() {
+            // Keep the handle in session state until the await is complete:
+            // cancellation must not detach a task that still needs joining.
+            let result = connection.close().await;
+            self.retired.pop();
+            result?;
+        }
+        Ok(())
     }
 }

@@ -1,5 +1,6 @@
 mod context_replay_recovery;
 mod model_catalog;
+mod websocket_recovery;
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::Parser;
@@ -397,6 +398,8 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             | "history-fault"
             | "plan-recovery"
             | "context-replay-recovery"
+            | "websocket-recovery"
+            | "call-lifecycle-recovery"
             | "tool-scroll"
     ) {
         ensure!(
@@ -483,7 +486,10 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         .stderr(Stdio::from(fixture_log));
     if matches!(
         options.scenario.as_str(),
-        "plan-recovery" | "context-replay-recovery"
+        "plan-recovery"
+            | "context-replay-recovery"
+            | "websocket-recovery"
+            | "call-lifecycle-recovery"
     ) {
         fixture_command.arg("--status-file").arg(&status_file);
     }
@@ -531,8 +537,19 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         seed_startup_fault(&home, fault)?;
     }
 
-    if options.scenario == "context-replay-recovery" {
-        return context_replay_recovery::run(
+    if matches!(
+        options.scenario.as_str(),
+        "context-replay-recovery" | "websocket-recovery" | "call-lifecycle-recovery"
+    ) {
+        let run = if matches!(
+            options.scenario.as_str(),
+            "websocket-recovery" | "call-lifecycle-recovery"
+        ) {
+            websocket_recovery::run
+        } else {
+            context_replay_recovery::run
+        };
+        return run(
             &RecoveryScenario {
                 workspace: &workspace,
                 app_dir: &app_dir,
@@ -1312,7 +1329,12 @@ fn validate_ready(ready: &FixtureReady) -> Result<()> {
 }
 
 fn write_config(home: &Path, ready: &FixtureReady) -> Result<()> {
-    write_config_with_profile(home, ready, ModelTransportProfile::responses_http())
+    let profile = if ready.scenario == "websocket-recovery" {
+        ModelTransportProfile::responses_websocket()
+    } else {
+        ModelTransportProfile::responses_http()
+    };
+    write_config_with_profile(home, ready, profile)
 }
 
 fn write_config_with_profile(
@@ -1323,8 +1345,12 @@ fn write_config_with_profile(
     let mut config = StudioConfig::default_config()?;
     let mut model = ModelInfo::compatible("fixture-model");
     model.display_name = "Local GUI fixture".into();
-    if ready.scenario == "storage-compaction" {
+    if matches!(
+        ready.scenario.as_str(),
+        "storage-compaction" | "call-lifecycle-recovery"
+    ) {
         model.context_window = Some(1_000_000);
+        model.max_context_window = Some(1_000_000);
         model.auto_compact_token_limit = Some(1);
     }
     model.binding.set_transport(profile);
@@ -1342,10 +1368,9 @@ fn write_config_with_profile(
         });
     }
     let provider_id = ProviderId::new(format!("gui-fixture-{}", std::process::id()))?;
-    let provider = ProviderConfig::from_explicit_models(
-        ProviderEndpoint::compatible("Local GUI fixture", &ready.base_url),
-        vec![model],
-    );
+    let mut endpoint = ProviderEndpoint::compatible("Local GUI fixture", &ready.base_url);
+    endpoint.service_capabilities.remote_compaction = ready.scenario == "call-lifecycle-recovery";
+    let provider = ProviderConfig::from_explicit_models(endpoint, vec![model]);
     config.models.providers.clear();
     config
         .models

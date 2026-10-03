@@ -130,12 +130,20 @@ fn state(
                 pl_protocol::TurnCancellationCause::Recovery
             },
         )),
-        CoreTurnState::Failed { description } => {
-            TurnState::Failed(pl_protocol::FailedTurnState::new(
-                started,
-                at,
-                failure(snapshot, &record.turn_id, description),
-            ))
+        CoreTurnState::Failed {
+            description,
+            model_failure: facts,
+        } => {
+            let failure = match facts {
+                Some(facts) => model_failure(&pl_core::model::ModelError {
+                    kind: facts.kind,
+                    details: facts.details.clone(),
+                    usage: facts.usage.clone(),
+                    source: None,
+                }),
+                None => failure(snapshot, &record.turn_id, description),
+            };
+            TurnState::Failed(pl_protocol::FailedTurnState::new(started, at, failure))
         }
     })
 }

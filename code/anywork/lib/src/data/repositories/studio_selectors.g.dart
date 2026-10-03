@@ -392,7 +392,7 @@ final class StartPageProvider
   }
 }
 
-String _$startPageHash() => r'1a1b0c8c65d2a3cbaabb8f2c2e4078bacdef8f14';
+String _$startPageHash() => r'31234c239f7c6fea100df99e5cd543c5156aac9d';
 
 @ProviderFor(statusBar)
 final statusBarProvider = StatusBarProvider._();

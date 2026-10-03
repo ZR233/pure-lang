@@ -34,6 +34,18 @@ pub(super) fn response_id(id: &str, kind: &str) -> String {
     format!("model:{}:{id}:{kind}", id.len())
 }
 
+pub(super) fn observation_id(id: &str, generation: u32, kind: &str) -> String {
+    if generation == 0 {
+        response_id(id, kind)
+    } else {
+        format!("model:{}:{id}:observation:{generation}:{kind}", id.len())
+    }
+}
+
+pub(super) fn observation_prefix(id: &str) -> String {
+    format!("model:{}:{id}:observation:", id.len())
+}
+
 pub(super) fn presentation_prefix(attempt_id: &str) -> String {
     pl_core::chat::presentation_prefix(attempt_id)
 }
@@ -44,10 +56,11 @@ pub(in crate::studio) use pl_core::chat::PresentationPart;
 /// streaming starts, so only the provider item's identity and the part's kind/index define a row.
 pub(in crate::studio) fn presentation_id(
     attempt_id: &str,
+    generation: u32,
     provider_item_id: &str,
     part: Option<PresentationPart>,
 ) -> String {
-    pl_core::chat::presentation_item_id(attempt_id, provider_item_id, part)
+    pl_core::chat::presentation_item_id(attempt_id, generation, provider_item_id, part)
 }
 
 pub(super) fn presentation_part(
@@ -69,6 +82,7 @@ pub(super) fn presentation_part(
 
 pub(super) fn presentation_ids<'a>(
     attempt_id: &'a str,
+    generation: u32,
     items: &'a [pl_model::completion::CompletionPresentationItem],
 ) -> impl Iterator<Item = String> + 'a {
     items.iter().flat_map(move |item| {
@@ -77,6 +91,7 @@ pub(super) fn presentation_ids<'a>(
             .map(move |part| {
                 presentation_id(
                     attempt_id,
+                    generation,
                     &item.provider_item_id,
                     Some(presentation_part(part)),
                 )
@@ -84,7 +99,7 @@ pub(super) fn presentation_ids<'a>(
             .chain(
                 item.parts
                     .is_empty()
-                    .then(|| presentation_id(attempt_id, &item.provider_item_id, None)),
+                    .then(|| presentation_id(attempt_id, generation, &item.provider_item_id, None)),
             )
     })
 }

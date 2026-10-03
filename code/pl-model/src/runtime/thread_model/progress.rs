@@ -29,8 +29,8 @@ use crate::completion::stream::event::{
 };
 use pl_core::chat::PresentationPart;
 use pl_core::model::{
-    AggregateChannel, ModelParts, ModelProgress, ModelProgressSender, ModelTextChannel,
-    ObservedItemKind, ObservedPart, ObservedPartIdentity, ObservedPartKind, ProviderPartIdentity,
+    AggregateChannel, ModelParts, ModelProgressSender, ModelTextChannel, ObservedItemKind,
+    ObservedPart, ObservedPartIdentity, ObservedPartKind, ProviderPartIdentity,
 };
 use pl_protocol::PureError;
 use pl_protocol::trace::TraceTextChannel;
@@ -69,6 +69,8 @@ struct Book {
 
 pub(crate) struct ProgressProjection {
     sender: Option<ModelProgressSender>,
+    generation: u32,
+    budget_base: u64,
     /// Bookkeeping paired with the stored part list, which lives in the published snapshot.
     book: Book,
     /// Charged high-water of each tool call's argument bytes, keyed by the accumulator identity the
@@ -105,15 +107,22 @@ struct Edit<'a> {
     sender: &'a ModelProgressSender,
     /// Bytes the call's tool arguments are charged, fixed for the duration of one part edit.
     tool_total: u64,
+    generation: u32,
+    budget_base: u64,
 }
 
 impl ProgressProjection {
     pub(crate) fn new(sender: Option<ModelProgressSender>) -> Self {
-        if let Some(sender) = &sender {
-            sender.publish(ModelProgress::default());
-        }
+        let generation = sender
+            .as_ref()
+            .map_or(0, |sender| sender.latest().observation().generation);
+        let budget_base = sender
+            .as_ref()
+            .map_or(0, ModelProgressSender::charged_output);
         Self {
             sender,
+            generation,
+            budget_base,
             book: Book::default(),
             tool_bytes: BTreeMap::new(),
             tool_keys: ToolStream::new(),
@@ -136,6 +145,8 @@ impl ProgressProjection {
             .expect("a progress edit requires the live observation channel");
         let tool_total = self.tool_bytes.values().copied().sum::<u64>();
         let book = &mut self.book;
+        let generation = self.generation;
+        let budget_base = self.budget_base;
         let sender_ref: &ModelProgressSender = &sender;
         sender.edit_parts(move |parts| {
             work(&mut Edit {
@@ -143,6 +154,8 @@ impl ProgressProjection {
                 book,
                 sender: sender_ref,
                 tool_total,
+                generation,
+                budget_base,
             })
         })
     }
@@ -160,7 +173,11 @@ impl ProgressProjection {
         };
         let tool = self.tool_bytes.values().copied().sum::<u64>();
         sender
-            .charge_output(self.book.parts_bytes.saturating_add(tool))
+            .charge_output(
+                self.budget_base
+                    .saturating_add(self.book.parts_bytes)
+                    .saturating_add(tool),
+            )
             .map_err(|error| PureError::MemoryError(error.to_string()))
     }
 
@@ -171,7 +188,11 @@ impl ProgressProjection {
             return Ok(());
         }
         self.tool_bytes.insert(key.to_owned(), next);
-        self.charge_total()
+        if let Err(error) = self.charge_total() {
+            self.tool_bytes.insert(key.to_owned(), previous);
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub(crate) fn observe(&mut self, event: &ModelStreamEvent) -> Result<(), PureError> {
@@ -291,19 +312,20 @@ impl Edit<'_> {
     /// the terminal receipt reports those instead of a body that was never retained. The producer
     /// stays bounded by the reservation rather than by the provider's own output limit.
     fn accept(&mut self, previous_len: usize, next_len: usize) -> Result<(), PureError> {
-        self.book.parts_bytes = self
+        let next_total = self
             .book
             .parts_bytes
             .saturating_sub(previous_len as u64)
             .saturating_add(next_len as u64);
-        self.charge_total()
-    }
-
-    fn charge_total(&self) -> Result<(), PureError> {
-        let total = self.book.parts_bytes.saturating_add(self.tool_total);
         self.sender
-            .charge_output(total)
-            .map_err(|error| PureError::MemoryError(error.to_string()))
+            .charge_output(
+                self.budget_base
+                    .saturating_add(next_total)
+                    .saturating_add(self.tool_total),
+            )
+            .map_err(|error| PureError::MemoryError(error.to_string()))?;
+        self.book.parts_bytes = next_total;
+        Ok(())
     }
 
     /// Recomputes the retained total after observations were dropped (aggregate → provider rows).
@@ -434,7 +456,7 @@ impl Edit<'_> {
         let provider_item_id = item.provider_item_id.as_str();
         let reserve = |part: Option<PresentationPart>| {
             sender
-                .reserve_observed_item(provider_item_id, part)
+                .reserve_observed_item(self.generation, provider_item_id, part)
                 .map_err(|error| {
                     PureError::MemoryError(format!("presentation item reservation failed: {error}"))
                 })
@@ -496,7 +518,11 @@ impl Edit<'_> {
 
     fn reserve(&self, provider: &ProviderPartIdentity) -> Result<(), PureError> {
         self.sender
-            .reserve_observed_item(&provider.item_id, Some(provider.presentation_part()))
+            .reserve_observed_item(
+                self.generation,
+                &provider.item_id,
+                Some(provider.presentation_part()),
+            )
             .map_err(|error| {
                 PureError::MemoryError(format!("presentation item reservation failed: {error}"))
             })

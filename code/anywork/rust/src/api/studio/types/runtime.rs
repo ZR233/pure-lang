@@ -154,7 +154,7 @@ pub enum BridgeRecoveryIssueScope {
 #[serde(rename_all = "camelCase")]
 pub enum BridgeRecoveryIssueCategory {
     ProcessLease,
-    AgentState,
+    ToolCatalog,
     Repository,
     Storage,
 }

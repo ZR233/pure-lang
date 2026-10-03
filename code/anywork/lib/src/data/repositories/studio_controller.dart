@@ -110,6 +110,7 @@ class StudioController extends _$StudioController {
     final projectId = bootstrapped.selectedProjectId;
     if (projectId == null ||
         bootstrapped.recoveryIssue(
+              blockingOnly: true,
               scope: RecoveryIssueScope.project,
               projectId: projectId,
             ) !=
@@ -215,6 +216,7 @@ class StudioController extends _$StudioController {
     if (current == null ||
         current.selectedProjectId == projectId ||
         current.recoveryIssue(
+              blockingOnly: true,
               scope: RecoveryIssueScope.project,
               projectId: projectId,
             ) !=
@@ -231,6 +233,7 @@ class StudioController extends _$StudioController {
     if (current == null ||
         projectId == null ||
         current.recoveryIssue(
+              blockingOnly: true,
               scope: RecoveryIssueScope.project,
               projectId: projectId,
             ) !=
@@ -330,6 +333,7 @@ class StudioController extends _$StudioController {
         !_isInitialized(current) ||
         thread == null ||
         current.recoveryIssue(
+              blockingOnly: true,
               scope: RecoveryIssueScope.thread,
               threadId: threadId,
             ) !=
@@ -370,6 +374,7 @@ class StudioController extends _$StudioController {
         !_isInitialized(current) ||
         thread == null ||
         current.recoveryIssue(
+              blockingOnly: true,
               scope: RecoveryIssueScope.thread,
               threadId: threadId,
             ) !=
@@ -420,6 +425,7 @@ class StudioController extends _$StudioController {
         .firstOrNull;
     if (target == null ||
         current.recoveryIssue(
+              blockingOnly: true,
               scope: RecoveryIssueScope.thread,
               threadId: threadId,
             ) !=
@@ -436,6 +442,7 @@ class StudioController extends _$StudioController {
     if (current == null ||
         !current.threads.any((thread) => thread.id == threadId) ||
         current.recoveryIssue(
+              blockingOnly: true,
               scope: RecoveryIssueScope.thread,
               threadId: threadId,
             ) !=
@@ -1587,6 +1594,7 @@ class StudioController extends _$StudioController {
         projectId == null ||
         current.selectedThreadId != null ||
         current.recoveryIssue(
+              blockingOnly: true,
               scope: RecoveryIssueScope.project,
               projectId: projectId,
             ) !=

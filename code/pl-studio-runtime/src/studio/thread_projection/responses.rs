@@ -45,6 +45,7 @@ pub(in crate::studio) fn started_channels(
     if let Some(Ok(Some(receipt))) = output.map(pl_model::runtime::model_response_receipt) {
         for id in super::order::presentation_ids(
             &attempt.attempt_id,
+            receipt.response.observation.generation,
             &receipt.response.presentation_items,
         ) {
             if started(&id) {
@@ -53,8 +54,9 @@ pub(in crate::studio) fn started_channels(
         }
     }
     let prefix = super::order::presentation_prefix(&attempt.attempt_id);
+    let observation_prefix = super::order::observation_prefix(&attempt.attempt_id);
     for id in known_ids {
-        if id.starts_with(&prefix) && started(&id) {
+        if (id.starts_with(&prefix) || id.starts_with(&observation_prefix)) && started(&id) {
             channels.insert(id);
         }
     }
@@ -273,6 +275,7 @@ pub(super) fn project_attempt(
                 text: String::new(),
                 reasoning: None,
                 presentation_items: Vec::new(),
+                observation: Default::default(),
             },
             ThreadContentLifecycle::cancelled(
                 updated_at,
@@ -291,6 +294,22 @@ pub(super) fn project_attempt(
             ThreadTextChannel::Commentary,
         ),
     };
+    items.extend(project_recovery(
+        thread_id,
+        attempt,
+        ordinal,
+        created_at,
+        revision,
+        updated_at,
+        &response.observation,
+    )?);
+    let text_id =
+        super::order::observation_id(&attempt.attempt_id, response.observation.generation, "text");
+    let reasoning_id = super::order::observation_id(
+        &attempt.attempt_id,
+        response.observation.generation,
+        "reasoning",
+    );
     // 上述终态即使正文为空也要发出，但只对**实际开始过 streaming 的同一 identity channel**
     // 收束；`finalize.contains` 是一次 durable 事实查询的结果，因此 writer 与 live 对同一
     // identity 落相同终态，而从未开始的 channel 不会凭空出现空条目。
@@ -304,15 +323,14 @@ pub(super) fn project_attempt(
             revision,
             updated_at,
             &response.presentation_items,
+            response.observation.generation,
             &lifecycle,
         )?);
         // The legacy preview has only two aggregate identities. When one was already started,
         // finalize it without repeating the provider's aggregate text or reasoning.
-        if terminates_live_channels
-            && finalize.contains(&super::order::response_id(&attempt.attempt_id, "reasoning"))
-        {
+        if terminates_live_channels && finalize.contains(&reasoning_id) {
             items.push(ThreadItem::new(
-                super::order::response_id(&attempt.attempt_id, "reasoning"),
+                reasoning_id.clone(),
                 thread_id.into(),
                 attempt.turn_id.clone(),
                 ordinal,
@@ -326,11 +344,9 @@ pub(super) fn project_attempt(
                 )),
             ));
         }
-        if terminates_live_channels
-            && finalize.contains(&super::order::response_id(&attempt.attempt_id, "text"))
-        {
+        if terminates_live_channels && finalize.contains(&text_id) {
             items.push(ThreadItem::new(
-                super::order::response_id(&attempt.attempt_id, "text"),
+                text_id.clone(),
                 thread_id.into(),
                 attempt.turn_id.clone(),
                 ordinal,
@@ -353,10 +369,11 @@ pub(super) fn project_attempt(
     // already received; a normally received response always carries those parts in its own receipt,
     // so an empty part set here means the authoritative output was lost. Failing closed keeps a
     // partial preview body from being committed as that response's content.
-    if finalize
-        .iter()
-        .any(|id| id.starts_with(&super::order::presentation_prefix(&attempt.attempt_id)))
-    {
+    let mut current_prefix = super::order::presentation_prefix(&attempt.attempt_id);
+    if response.observation.generation != 0 {
+        current_prefix.push_str(&format!("generation:{}:", response.observation.generation));
+    }
+    if finalize.iter().any(|id| id.starts_with(&current_prefix)) {
         if keeps_bounded_preview(&attempt.outcome) {
             return Ok(items);
         }
@@ -366,7 +383,7 @@ pub(super) fn project_attempt(
     }
     if let Some(reasoning) = response.reasoning.filter(|text| !text.is_empty()) {
         items.push(ThreadItem::new(
-            super::order::response_id(&attempt.attempt_id, "reasoning"),
+            reasoning_id.clone(),
             thread_id.into(),
             attempt.turn_id.clone(),
             ordinal,
@@ -379,11 +396,9 @@ pub(super) fn project_attempt(
                 lifecycle.clone(),
             )),
         ));
-    } else if terminates_live_channels
-        && finalize.contains(&super::order::response_id(&attempt.attempt_id, "reasoning"))
-    {
+    } else if terminates_live_channels && finalize.contains(&reasoning_id) {
         items.push(ThreadItem::new(
-            super::order::response_id(&attempt.attempt_id, "reasoning"),
+            reasoning_id.clone(),
             thread_id.into(),
             attempt.turn_id.clone(),
             ordinal,
@@ -399,7 +414,7 @@ pub(super) fn project_attempt(
     }
     if !response.text.is_empty() {
         items.push(ThreadItem::new(
-            super::order::response_id(&attempt.attempt_id, "text"),
+            text_id.clone(),
             thread_id.into(),
             attempt.turn_id.clone(),
             ordinal,
@@ -413,11 +428,9 @@ pub(super) fn project_attempt(
                 lifecycle,
             )),
         ));
-    } else if terminates_live_channels
-        && finalize.contains(&super::order::response_id(&attempt.attempt_id, "text"))
-    {
+    } else if terminates_live_channels && finalize.contains(&text_id) {
         items.push(ThreadItem::new(
-            super::order::response_id(&attempt.attempt_id, "text"),
+            text_id,
             thread_id.into(),
             attempt.turn_id.clone(),
             ordinal,
@@ -444,6 +457,7 @@ fn project_presentation_items(
     revision: u64,
     updated_at: i64,
     presentation_items: &[CompletionPresentationItem],
+    generation: u32,
     lifecycle: &ThreadContentLifecycle,
 ) -> Result<Vec<ThreadItem>, ProjectionError> {
     let mut projected = Vec::new();
@@ -457,6 +471,7 @@ fn project_presentation_items(
         {
             let id = super::order::presentation_id(
                 &attempt.attempt_id,
+                generation,
                 &item.provider_item_id,
                 part.map(super::order::presentation_part),
             );
@@ -531,6 +546,134 @@ fn project_presentation_items(
         }
     }
     Ok(projected)
+}
+
+/// The same provider-neutral facts drive live commentary and durable final projection.
+pub(super) fn recovery_notices(
+    attempt_id: &str,
+    observation: &pl_core::model::ModelObservation,
+) -> Vec<(String, String)> {
+    use pl_core::model::ModelRecoveryPhase;
+    let Some(status) = observation.recovery else {
+        return Vec::new();
+    };
+    let mut notices = observation
+        .failed
+        .iter()
+        .map(|failed| {
+            let retry = failed.generation + 1;
+            (
+                super::order::response_id(attempt_id, &format!("recovery:retry:{retry}")),
+                format!("连接中断，正在重试（{retry}/{}）。", status.max_retries),
+            )
+        })
+        .collect::<Vec<_>>();
+    let message = match status.phase {
+        ModelRecoveryPhase::Retrying => None,
+        ModelRecoveryPhase::Recovered => Some("连接已恢复，继续执行。".to_owned()),
+        ModelRecoveryPhase::Exhausted => Some(format!(
+            "连接重试 {} 次仍失败，本轮已停止。",
+            status.max_retries
+        )),
+        ModelRecoveryPhase::Failed => Some("连接恢复未完成，本轮已停止。".to_owned()),
+        ModelRecoveryPhase::Cancelled => Some("连接恢复已取消，本轮已停止。".to_owned()),
+    };
+    if let Some(message) = message {
+        notices.push((
+            super::order::response_id(attempt_id, "recovery:result"),
+            message,
+        ));
+    }
+    notices
+}
+
+#[allow(clippy::too_many_arguments)]
+fn project_recovery(
+    thread_id: &str,
+    attempt: &pl_core::thread::journal::AttemptUpdate,
+    ordinal: u64,
+    created_at: i64,
+    revision: u64,
+    updated_at: i64,
+    observation: &pl_core::model::ModelObservation,
+) -> Result<Vec<ThreadItem>, ProjectionError> {
+    let mut items = Vec::new();
+    for failed in &observation.failed {
+        let lifecycle = ThreadContentLifecycle::failed(updated_at, failed.message.to_string());
+        for part in &failed.parts {
+            if part.is_empty() {
+                continue;
+            }
+            let Some((id, field, shape)) = super::live::observation_preview(
+                &attempt.attempt_id,
+                failed.generation,
+                part,
+                &lifecycle,
+            ) else {
+                return Err(ProjectionError::UnsupportedOutput(
+                    "failed observation has invalid part identity".into(),
+                ));
+            };
+            let state = match shape {
+                ThreadItemState::Text(text) => ThreadItemState::Text(ThreadTextItem::new(
+                    text.channel(),
+                    part.text(),
+                    Vec::new(),
+                    lifecycle.clone(),
+                )),
+                ThreadItemState::Thinking(_) => {
+                    let (summary, reasoning) = if matches!(
+                        field,
+                        pl_core::chat::ChatField::Part(
+                            pl_core::chat::PresentationPart::SummaryText(_)
+                        )
+                    ) {
+                        (vec![part.text()], Vec::new())
+                    } else {
+                        (Vec::new(), vec![part.text()])
+                    };
+                    ThreadItemState::Thinking(ThreadThinkingItem::new(
+                        summary,
+                        reasoning,
+                        lifecycle.clone(),
+                    ))
+                }
+                _ => {
+                    return Err(ProjectionError::UnsupportedOutput(
+                        "failed observation has invalid content state".into(),
+                    ));
+                }
+            };
+            items.push(ThreadItem::new(
+                id,
+                thread_id.into(),
+                attempt.turn_id.clone(),
+                ordinal,
+                revision,
+                created_at,
+                updated_at,
+                state,
+            ));
+        }
+    }
+    for (id, message) in recovery_notices(&attempt.attempt_id, observation) {
+        items.push(ThreadItem::new(
+            id,
+            thread_id.into(),
+            attempt.turn_id.clone(),
+            ordinal,
+            revision,
+            created_at,
+            updated_at,
+            ThreadItemState::Text(ThreadTextItem::new(
+                ThreadTextChannel::Commentary,
+                message,
+                Vec::new(),
+                ThreadContentLifecycle::completed(updated_at),
+            )),
+        ));
+    }
+    Ok(items)
 }
 
 fn inference_item(
@@ -611,6 +754,7 @@ struct ResponseContent {
     text: String,
     reasoning: Option<String>,
     presentation_items: Vec<CompletionPresentationItem>,
+    observation: pl_core::model::ModelObservation,
 }
 
 fn failure_content(error: &pl_core::model::ModelError) -> Result<ResponseContent, ProjectionError> {
@@ -630,6 +774,7 @@ fn failure_content(error: &pl_core::model::ModelError) -> Result<ResponseContent
             text: String::new(),
             reasoning: None,
             presentation_items: Vec::new(),
+            observation: Default::default(),
         },
     };
     if let Some(receipt) = receipt
@@ -717,6 +862,7 @@ fn progress_content(
         text,
         reasoning: (!reasoning.is_empty()).then_some(reasoning),
         presentation_items: items,
+        observation: progress.observation().clone(),
     })
 }
 
@@ -750,12 +896,13 @@ fn response_content(output: &ModelStepOutput) -> Result<ResponseContent, Project
             }
         }
     }
-    let (reasoning, presentation_items) = receipt.map_or_else(
-        || (None, Vec::new()),
+    let (reasoning, presentation_items, observation) = receipt.map_or_else(
+        || (None, Vec::new(), Default::default()),
         |receipt| {
             (
                 receipt.response.reasoning_content,
                 receipt.response.presentation_items,
+                receipt.response.observation,
             )
         },
     );
@@ -763,5 +910,6 @@ fn response_content(output: &ModelStepOutput) -> Result<ResponseContent, Project
         text: text_content(&output.content),
         reasoning,
         presentation_items,
+        observation,
     })
 }

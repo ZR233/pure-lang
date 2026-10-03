@@ -85,6 +85,7 @@ pub(super) async fn compact_context(
         accounting: Box::new(accounting.clone()),
         model_observation: model_observation.clone().map(Box::new),
         presentation_items: response.presentation_items,
+        partial_progress: Some(response.observation.into()),
         cancelled: false,
     })?;
     Ok(ModelCompactionResponse {

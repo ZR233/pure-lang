@@ -39,7 +39,7 @@ pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
 /// The coordinator's ready-file check, the fixture CLI parser and the script
 /// selection all read this single list, so a scenario can no longer be accepted
 /// by one of them and rejected by another.
-pub const GUI_SCENARIOS: [&str; 12] = [
+pub const GUI_SCENARIOS: [&str; 14] = [
     "gui",
     "storage-compaction",
     "stress",
@@ -52,7 +52,143 @@ pub const GUI_SCENARIOS: [&str; 12] = [
     "plan-recovery",
     "context-replay-recovery",
     "tool-scroll",
+    "websocket-recovery",
+    "call-lifecycle-recovery",
 ];
+
+/// Native compaction exhausts its budget, then a fresh input succeeds and waits
+/// in a real agent tool. Cancellation must not issue that tool's next model step.
+pub fn gui_call_lifecycle_recovery_script() -> Vec<Step> {
+    let mut script = RealtimeScript::new();
+    let title = session_title_prompt("Lifecycle seed");
+    script.optional_title(&title);
+    script.add(|step| {
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            "Lifecycle seed",
+            step,
+            Reply::Sse(responses_text(
+                "Lifecycle seed answer",
+                "seed",
+                "fixture-model",
+            )),
+        )
+    });
+    script.optional_title(&title);
+    for _ in 0..6 {
+        script.add(|step| {
+            let mut request = Step::prompt(
+                Protocol::ResponsesHttp,
+                "Lifecycle seed",
+                step,
+                Reply::HttpError {
+                    status: 503,
+                    code: "server_error".into(),
+                    message: "compaction unavailable".into(),
+                },
+            );
+            request.request = RequestMatch::Compaction {
+                marker: "Lifecycle seed".into(),
+                step,
+            };
+            request
+        });
+    }
+    for (previous, prompt, waiting) in [
+        ("Lifecycle seed", "Lifecycle wait", true),
+        ("Lifecycle wait", "Lifecycle next", false),
+    ] {
+        script.add(|step| {
+            let mut request = Step::prompt(Protocol::ResponsesHttp, previous, step,
+            Reply::Sse(vec![
+                json!({"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":format!("checkpoint-{prompt}")}}),
+                json!({"type":"response.completed","response":{"id":format!("compact-{prompt}"),"usage":{"input_tokens":2,"output_tokens":1}}})
+            ]));
+            request.request = RequestMatch::Compaction { marker: previous.into(), step };
+            request
+        });
+        script.add(|step| {
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                // Preparation failed before admission. The original input remains
+                // queued and is admitted with the new input after recovery.
+                if waiting { "Lifecycle failed" } else { prompt },
+                step,
+                Reply::Sse(if waiting {
+                    responses_tool_calls(
+                        "waiting",
+                        "fixture-model",
+                        &[RealtimeToolCall {
+                            item_id: "wait-item",
+                            call_id: "wait-call",
+                            name: "wait",
+                            arguments: json!({"taskIds":[],"timeoutMs":300000}).to_string(),
+                        }],
+                    )
+                } else {
+                    responses_text("Lifecycle next answer", "next", "fixture-model")
+                }),
+            )
+        });
+        script.optional_title(&title);
+    }
+    script.finish()
+}
+
+/// Real WS interruption, recovery and a separate cancellable retry window.
+pub fn gui_websocket_recovery_script() -> Vec<Step> {
+    let title = session_title_prompt("WebSocket recover");
+    let mut script = RealtimeScript::new();
+    for (prompt, text, response_id, retry_after_ms) in [
+        (
+            "WebSocket recover",
+            "WS abandoned fragment",
+            "ws-abandoned",
+            Some(8000),
+        ),
+        (
+            "WebSocket recover",
+            "WS recovered answer",
+            "ws-success",
+            None,
+        ),
+        (
+            "WebSocket cancel",
+            "WS cancelled fragment",
+            "ws-cancelled",
+            Some(30000),
+        ),
+        ("WebSocket next", "WS next turn answer", "ws-next", None),
+    ] {
+        script.add(|index| {
+            Step::prompt(
+                Protocol::ResponsesWebSocket,
+                title.clone(),
+                index,
+                Reply::WebSocket(responses_text(
+                    "WebSocket Recovery",
+                    "ws-title",
+                    "fixture-model",
+                )),
+            )
+            .optional()
+        });
+        let mut events = responses_text(text, response_id, "fixture-model");
+        if let Some(retry_after_ms) = retry_after_ms {
+            events.pop();
+            events.push(json!({"type":"error","error":{"code":"server_error","message":"manual WS interruption","retry_after_ms":retry_after_ms}}));
+        }
+        script.add(|index| {
+            Step::prompt(
+                Protocol::ResponsesWebSocket,
+                prompt,
+                index,
+                Reply::WebSocket(events),
+            )
+        });
+    }
+    script.finish()
+}
 
 /// Real file listings and a long shell argument for observing tool expansion.
 /// Each prompt is followed by enough text to put its tools inside the timeline.
@@ -580,6 +716,11 @@ pub enum RequestMatch {
         text: String,
         step: usize,
     },
+    /// Native compaction is preparation of old context, before the next input.
+    Compaction {
+        marker: String,
+        step: usize,
+    },
     /// Strict match on the runtime's background delivery notice for one task.
     ///
     /// A delivered background result reaches the provider as a runtime message,
@@ -644,11 +785,34 @@ pub enum Reply {
     /// Sends initial events then waits for shutdown or client cancellation.
     HangingSse(Vec<Value>),
     WebSocket(Vec<Value>),
+    /// Ordered wire faults and synchronization points, without implementing retry policy.
+    WebSocketScript(Vec<WebSocketAction>),
+    /// Rejects an upgrade before a response.create can be sent.
+    WebSocketHandshake {
+        status: u16,
+    },
     Json(Value),
     HttpError {
         status: u16,
         code: String,
         message: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum WebSocketAction {
+    Event(Value),
+    RawText(String),
+    Ping,
+    Close {
+        code: u16,
+        reason: String,
+    },
+    Disconnect,
+    /// Signals that preceding frames were sent, then waits for release, shutdown or peer close.
+    Barrier {
+        reached: CancellationToken,
+        release: CancellationToken,
     },
 }
 
@@ -2332,7 +2496,8 @@ async fn handle(State(state): State<AppState>, request: axum::extract::Request) 
         )
             .into_response(),
         Ok(Reply::Json(body)) => Json(body).into_response(),
-        Ok(Reply::WebSocket(_)) | Err(()) => (
+        Ok(Reply::WebSocket(_) | Reply::WebSocketScript(_) | Reply::WebSocketHandshake { .. })
+        | Err(()) => (
             StatusCode::BAD_REQUEST,
             Json(json!({"error":{"code":"fixture_mismatch","message":"unexpected request"}})),
         )
@@ -2341,6 +2506,21 @@ async fn handle(State(state): State<AppState>, request: axum::extract::Request) 
 }
 
 async fn websocket_route(State(state): State<AppState>, upgrade: WebSocketUpgrade) -> Response {
+    let reject_upgrade = {
+        let script = state.script.lock().expect("fixture state poisoned");
+        script
+            .steps
+            .get(script.cursor)
+            .is_some_and(|step| matches!(step.reply, Reply::WebSocketHandshake { .. }))
+    };
+    if reject_upgrade {
+        return match match_step(&state, "GET", "/v1/responses", &Value::Null) {
+            Ok(Reply::WebSocketHandshake { status }) => StatusCode::from_u16(status)
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+                .into_response(),
+            _ => StatusCode::BAD_REQUEST.into_response(),
+        };
+    }
     upgrade.on_upgrade(move |socket| websocket(socket, state))
 }
 
@@ -2400,25 +2580,62 @@ async fn files(State(state): State<AppState>, mut multipart: Multipart) -> Respo
 }
 
 async fn websocket(mut socket: WebSocket, state: AppState) {
-    while let Some(Ok(message)) = socket.recv().await {
+    loop {
+        let message = tokio::select! {
+            _ = state.stopping.cancelled() => return,
+            message = socket.recv() => message,
+        };
+        let Some(Ok(message)) = message else {
+            return;
+        };
         let WsMessage::Text(text) = message else {
             continue;
         };
         let body = serde_json::from_str::<Value>(&text).unwrap_or(Value::Null);
-        match match_step(&state, "WS", "/v1/responses", &body) {
+        let actions = match match_step(&state, "WS", "/v1/responses", &body) {
             Ok(Reply::WebSocket(events)) => {
-                for event in events {
-                    if socket
-                        .send(WsMessage::Text(event.to_string().into()))
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
+                events.into_iter().map(WebSocketAction::Event).collect()
             }
+            Ok(Reply::WebSocketScript(actions)) => actions,
             _ => {
                 let _ = socket.send(WsMessage::Text(json!({"type":"response.failed","response":{"error":{"code":"fixture_mismatch","message":"unexpected request"}}}).to_string().into())).await;
+                return;
+            }
+        };
+        for action in actions {
+            let frame = match action {
+                WebSocketAction::Event(event) => WsMessage::Text(event.to_string().into()),
+                WebSocketAction::RawText(text) => WsMessage::Text(text.into()),
+                WebSocketAction::Ping => WsMessage::Ping(Bytes::from_static(b"fixture")),
+                WebSocketAction::Close { code, reason } => {
+                    let _ = socket
+                        .send(WsMessage::Close(Some(axum::extract::ws::CloseFrame {
+                            code,
+                            reason: reason.into(),
+                        })))
+                        .await;
+                    return;
+                }
+                WebSocketAction::Disconnect => return,
+                WebSocketAction::Barrier { reached, release } => {
+                    reached.cancel();
+                    loop {
+                        tokio::select! {
+                            _ = state.stopping.cancelled() => return,
+                            _ = release.cancelled() => break,
+                            message = socket.recv() => match message {
+                                Some(Ok(WsMessage::Ping(payload))) => {
+                                    if socket.send(WsMessage::Pong(payload)).await.is_err() { return; }
+                                }
+                                Some(Ok(WsMessage::Pong(_))) => {},
+                                _ => return,
+                            },
+                        }
+                    }
+                    continue;
+                }
+            };
+            if socket.send(frame).await.is_err() {
                 return;
             }
         }
@@ -2459,7 +2676,9 @@ fn match_step(state: &AppState, method: &str, path: &str, body: &Value) -> Resul
         .take_while(|&index| index == script.cursor || script.steps[index - 1].optional)
         .find(|&index| {
             let step = &script.steps[index];
-            let expected_method = if step.protocol == Protocol::ResponsesWebSocket {
+            let expected_method = if matches!(step.reply, Reply::WebSocketHandshake { .. }) {
+                "GET"
+            } else if step.protocol == Protocol::ResponsesWebSocket {
                 "WS"
             } else {
                 "POST"
@@ -2467,18 +2686,21 @@ fn match_step(state: &AppState, method: &str, path: &str, body: &Value) -> Resul
             let expected_path = format!("/v1{}", step.protocol.path());
             let reply_matches = matches!(
                 (step.protocol, &step.reply),
-                (Protocol::ResponsesWebSocket, Reply::WebSocket(_))
-                    | (
-                        Protocol::ResponsesHttp | Protocol::Chat,
-                        Reply::Sse(_)
-                            | Reply::PacedEvents { .. }
-                            | Reply::PacedSse { .. }
-                            | Reply::PacedBody { .. }
-                            | Reply::HangingSse(_)
-                            | Reply::Json(_)
-                            | Reply::HttpError { .. }
-                    )
-                    | (Protocol::Files, Reply::Json(_) | Reply::HttpError { .. })
+                (
+                    Protocol::ResponsesWebSocket,
+                    Reply::WebSocket(_)
+                        | Reply::WebSocketScript(_)
+                        | Reply::WebSocketHandshake { .. }
+                ) | (
+                    Protocol::ResponsesHttp | Protocol::Chat,
+                    Reply::Sse(_)
+                        | Reply::PacedEvents { .. }
+                        | Reply::PacedSse { .. }
+                        | Reply::PacedBody { .. }
+                        | Reply::HangingSse(_)
+                        | Reply::Json(_)
+                        | Reply::HttpError { .. }
+                ) | (Protocol::Files, Reply::Json(_) | Reply::HttpError { .. })
             );
             reply_matches
                 && method == expected_method
@@ -2494,6 +2716,14 @@ fn match_step(state: &AppState, method: &str, path: &str, body: &Value) -> Resul
                                 && script.requests.iter().any(|request| {
                                     request.accepted && prompt(&request.body) == Some(text.as_str())
                                 }))
+                    }
+                    RequestMatch::Compaction { marker, step } => {
+                        *step == index
+                            && body["input"]
+                                .as_array()
+                                .and_then(|items| items.last())
+                                .is_some_and(|item| item["type"] == "compaction_trigger")
+                            && body["input"].to_string().contains(marker)
                     }
                     RequestMatch::Delivery { marker, step } => {
                         *step == index && user_messages_contain(body, marker)
@@ -2539,6 +2769,7 @@ fn reject_diagnostic(
     let actual = prompt(body);
     let (expected_kind, expected_prompt) = match expected.map(|step| step.request.base()) {
         Some(RequestMatch::Prompt { text, .. }) => ("prompt", Some(text.clone())),
+        Some(RequestMatch::Compaction { marker, .. }) => ("compaction", Some(marker.clone())),
         Some(RequestMatch::Delivery { marker, .. }) => ("delivery", Some(marker.clone())),
         Some(RequestMatch::ToolOutput {
             call_id, marker, ..
@@ -2549,6 +2780,7 @@ fn reject_diagnostic(
     let actual_prompt_present = actual.is_some();
     let prompt_matches_expected = match expected.map(|step| step.request.base()) {
         Some(RequestMatch::Prompt { text, .. }) => actual == Some(text.as_str()),
+        Some(RequestMatch::Compaction { marker, .. }) => body["input"].to_string().contains(marker),
         Some(RequestMatch::Delivery { marker, .. }) => {
             actual.is_some_and(|value| value.contains(marker.as_str()))
         }

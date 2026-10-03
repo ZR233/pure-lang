@@ -26,7 +26,7 @@ use super::state::{CompletedStream, FailedStream, StreamAccumulatorState};
 use super::tool_stream::{self, ToolStream};
 use super::trace_projection::TraceProjection;
 
-const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+use super::MAX_COMPLETION_OUTPUT_BYTES as MAX_OUTPUT_BYTES;
 
 pub(crate) struct StreamCompletionAccumulator {
     content_parts: Vec<ContentPart>,
@@ -559,6 +559,7 @@ impl StreamCompletionAccumulator {
             },
             model,
             model_observation: self.model_observation.take(),
+            observation: Default::default(),
         };
         if let Some(crate::completion::AssistantReplay::Responses { output }) = &response.replay {
             let call_order = output

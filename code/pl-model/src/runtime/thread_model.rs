@@ -105,10 +105,9 @@ impl CoreModelSession for ThreadModelSession {
             .clone();
         if observed != request.committed_private_context {
             self.physical
-                .close()
+                .reset_transport()
                 .await
                 .map_err(|error| failure(ModelFailureKind::Unavailable, error))?;
-            self.physical = ModelSession::default();
             *self
                 .observed
                 .lock()

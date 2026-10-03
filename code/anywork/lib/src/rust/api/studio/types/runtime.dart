@@ -536,7 +536,7 @@ enum BridgeRecoveryIssueAction {
 
 enum BridgeRecoveryIssueCategory {
   processLease,
-  agentState,
+  toolCatalog,
   repository,
   storage,
 }
