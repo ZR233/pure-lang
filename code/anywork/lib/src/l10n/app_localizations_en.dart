@@ -2602,4 +2602,30 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get startupRecoveredNotice =>
       'Unrecoverable data was backed up and initial settings restored. Backup location:';
+
+  @override
+  String get settingsModelCatalogRefresh => 'Refresh models';
+
+  @override
+  String get settingsModelCatalogDefault => 'Bundled models';
+
+  @override
+  String get settingsModelCatalogCached => 'Last successful model list';
+
+  @override
+  String get settingsModelCatalogOnline => 'Models from this provider';
+
+  @override
+  String get settingsModelCatalogChecked => 'Last checked';
+
+  @override
+  String get settingsModelCatalogFailed =>
+      'Could not refresh models. The previous list is still available.';
+
+  @override
+  String get settingsModelCatalogCacheWarning =>
+      'The saved model list could not be loaded. Showing bundled models.';
+
+  @override
+  String get settingsModelCatalogEmpty => 'This provider returned no models.';
 }

@@ -185,12 +185,15 @@ impl ProviderConfig {
         self.preset.as_ref()
     }
 
-    /// 解析 PL 内置目录和产品附加目录，返回运行时唯一有效模型列表。
+    /// 解析 PL 内置目录和产品附加目录，返回唯一有效模型列表。
+    /// 远程目录撤下的旧连接 override 保留在配置中，不注入当前声明；展示可继续发布，
+    /// 实际请求必须经过 `AgentModelConfig::resolve_route` 的严格连接选择校验。
     pub fn effective_models(&self) -> Result<Vec<ModelInfo>> {
         apply_connection_overrides(
             self.declared_models()?,
             self.connection_overrides(),
             self.supports_model_discovery(),
+            self.editable_models(),
         )
     }
 
@@ -296,8 +299,8 @@ impl ProviderConfig {
         self.model_catalog_overlay = None;
     }
 
-    /// Structural configuration validation for startup/reconciliation. Missing observed models
-    /// are not corruption; strict user-edit validation remains `AgentModelConfig::validate`.
+    /// Structural validation for startup/reconciliation. Missing observed models or withdrawn
+    /// connection candidates are not corruption; manual declarations and edits remain strict.
     pub fn validate_declarations(&self, provider_id: &ProviderId) -> Result<()> {
         self.validate_structure(provider_id, false)
     }
@@ -498,7 +501,12 @@ impl ProviderConfig {
             )));
         }
         self.validate_preset_binding(provider_id)?;
-        let models = self.effective_models()?;
+        let models = apply_connection_overrides(
+            self.declared_models()?,
+            self.connection_overrides(),
+            !strict_availability && self.supports_model_discovery(),
+            self.editable_models(),
+        )?;
         if models.is_empty() && (strict_availability || self.model_catalog_overlay.is_none()) {
             return Err(PureError::ConfigError(format!(
                 "provider {provider_id} must define at least one model"
@@ -536,15 +544,6 @@ impl ProviderConfig {
                 return Err(PureError::ConfigError(format!(
                     "provider {provider_id} auto compact override references unknown model: {slug}"
                 )));
-            }
-        }
-        if strict_availability {
-            for slug in self.connection_overrides().keys() {
-                if !slugs.contains(slug.as_str()) {
-                    return Err(PureError::ConfigError(format!(
-                        "connection override references unknown model: {slug}"
-                    )));
-                }
             }
         }
         Ok(())
@@ -594,8 +593,22 @@ fn apply_connection_overrides(
     mut models: Vec<ModelInfo>,
     overrides: &BTreeMap<String, ProviderConnectionMode>,
     allow_unavailable: bool,
+    editable_models: &[ModelInfo],
 ) -> Result<Vec<ModelInfo>> {
+    for model in &models {
+        // A user override must never repair an invalid declared transport profile.
+        model
+            .binding
+            .transport
+            .validate(&model.slug)
+            .map_err(|error| PureError::ConfigError(error.to_string()))?;
+    }
     for (slug, mode) in overrides {
+        if slug.trim().is_empty() {
+            return Err(PureError::ConfigError(
+                "connection override has empty model".into(),
+            ));
+        }
         let Some(model) = models.iter_mut().find(|model| model.slug == *slug) else {
             if allow_unavailable {
                 continue;
@@ -610,6 +623,11 @@ fn apply_connection_overrides(
             .supported_connection_modes
             .contains(mode)
         {
+            if allow_unavailable && !editable_models.iter().any(|manual| manual.slug == *slug) {
+                // Preserve desired state, but keep the current display profile valid.
+                // Route availability/strict resolution must reject this saved selection.
+                continue;
+            }
             return Err(PureError::ConfigError(format!(
                 "model {slug} does not support connection mode {mode:?}"
             )));

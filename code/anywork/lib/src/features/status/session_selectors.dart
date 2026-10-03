@@ -244,6 +244,8 @@ class ModelRoleSelector extends StatelessWidget {
           onSelected: (option) {
             final nextEffort = option.reasoningEfforts.contains(effort)
                 ? effort
+                : option.defaultReasoningEffort.isNotEmpty
+                ? option.defaultReasoningEffort
                 : option.reasoningEfforts.firstOrNull;
             onSelected(option.providerId, option.model, nextEffort);
           },
@@ -280,15 +282,24 @@ class ReasoningEffortSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     final currentModel = modelForRoute(providers, providerId, model);
     final efforts = currentModel?.reasoningEfforts ?? const [];
-    if (currentModel == null || efforts.isEmpty) {
+    final selectedEffort = effort?.isNotEmpty == true ? effort : null;
+    if (selectedEffort == null && efforts.isEmpty) {
       return const SizedBox.shrink();
     }
-    final current = efforts.contains(effort) ? effort! : efforts.first;
+    final unavailable =
+        selectedEffort == null || !efforts.contains(selectedEffort);
+    final label = unavailable
+        ? context.l10n.settingsAgentRouteUnavailable(
+            selectedEffort ?? context.l10n.settingsMissing,
+          )
+        : selectedEffort;
+    final enabled =
+        currentModel != null && efforts.isNotEmpty && blockedReason == null;
     return UpwardPopupMenu<String>(
       key: StudioDriverKeys.reasoningEffort,
       tooltip: blockedReason ?? context.l10n.statusReasoningEffort,
-      initialValue: current,
-      enabled: blockedReason == null,
+      initialValue: selectedEffort,
+      enabled: enabled,
       onBlockedTap: blockedReason == null
           ? null
           : () => onExplain?.call(blockedReason!),
@@ -307,7 +318,7 @@ class ReasoningEffortSelector extends StatelessWidget {
             ),
           ),
       ],
-      child: _ControlItem(label: current, enabled: blockedReason == null),
+      child: _ControlItem(label: label, enabled: enabled),
     );
   }
 }
@@ -358,15 +369,7 @@ List<ModelSelectionOption> modelOptions(List<ProviderSettingsView> providers) {
   return buildModelSelectionOptions(
     providers,
     modelsForProvider: (provider) {
-      final models = provider.models.isEmpty
-          ? [
-              ProviderModelView(
-                slug: provider.defaultModel,
-                displayName: provider.defaultModel,
-                reasoningEfforts: const [],
-              ),
-            ]
-          : provider.models;
+      final models = provider.models;
       return models.where((model) => model.slug.isNotEmpty).toList();
     },
   );

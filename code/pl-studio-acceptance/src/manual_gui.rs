@@ -1,4 +1,5 @@
 mod context_replay_recovery;
+mod model_catalog;
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::Parser;
@@ -46,6 +47,9 @@ pub(crate) struct ManualGuiOptions {
     /// Damage an isolated startup input, then capture recovery and its backup.
     #[arg(long, value_parser = ["config", "database", "log", "cache"])]
     pub(crate) startup_fault: Option<String>,
+    /// Add isolated OpenAI/DeepSeek instances against a loopback model-list fixture.
+    #[arg(long, value_name = "URL")]
+    pub(crate) model_catalog_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -508,7 +512,16 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         ready.scenario == options.scenario,
         "fixture scenario does not match request"
     );
-    if let Err(error) = write_config(&home, &ready) {
+    if let Err(error) = write_config(&home, &ready).and_then(|()| {
+        if let Some(url) = &options.model_catalog_url {
+            ensure!(
+                options.scenario == "gui",
+                "--model-catalog-url requires --scenario gui"
+            );
+            model_catalog::configure(&home, url)?;
+        }
+        Ok(())
+    }) {
         let _ = fixture.stop(&requests_file);
         drop(fixture);
         write_fixture_log(&fixture_log_path, &output.join("fixture.log"))?;
@@ -1307,7 +1320,7 @@ fn write_config_with_profile(
     ready: &FixtureReady,
     profile: ModelTransportProfile,
 ) -> Result<()> {
-    let mut config = StudioConfig::default_config();
+    let mut config = StudioConfig::default_config()?;
     let mut model = ModelInfo::compatible("fixture-model");
     model.display_name = "Local GUI fixture".into();
     if ready.scenario == "storage-compaction" {

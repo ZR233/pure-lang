@@ -2,14 +2,15 @@
 use pl_model::{
     config::{
         AgentModelConfig, AgentRoleId, ModelCatalogId, ModelRouteAvailability, ModelRouteConfig,
-        ProviderConfig, ProviderId, ReasoningEffort,
+        ProviderConfig, ProviderId, ReasoningEffort, model_descriptor,
     },
     model::{
-        BundledModelDefinition, ModelDefinitionError, ModelInfo, ModelModality, ModelPricing,
-        ModelTransportProfile, bundled_model_definition,
+        BundledModelDefinition, ModelDefinitionError, ModelInfo, ModelModality, ModelParameter,
+        ModelPricing, ModelTransportProfile, ParameterWire, WireAssignment,
+        bundled_model_definition,
     },
     provider::{
-        ProviderAdapterKind, ProviderEndpoint,
+        ProviderAdapterKind, ProviderConnectionMode, ProviderEndpoint,
         discovery::{
             ModelCatalogQuery, ModelCatalogQueryCache, ModelCatalogQueryError,
             ModelCatalogQueryResult,
@@ -149,6 +150,14 @@ async fn current_endpoint_prefix_query_auth_and_safe_identity_are_used() {
         ModelTransportProfile::responses_websocket()
     );
     assert_eq!(model.pricing, ModelPricing::Unknown);
+    config.set_model_catalog_overlay(models.clone()).unwrap();
+    let descriptor: pl_model::config::ModelDescriptor =
+        model_descriptor(&config.effective_models().unwrap()[0]);
+    assert_eq!(descriptor.context_window, None);
+    assert_eq!(descriptor.max_context_window, None);
+    assert_eq!(descriptor.max_output_tokens, None);
+    assert_eq!(descriptor.pricing, None);
+    assert_eq!(descriptor.reasoning, None);
     for change in 0..4 {
         let mut changed = config.clone();
         match change {
@@ -236,6 +245,14 @@ async fn rich_envelopes_drive_real_inference_wire_and_unknown_pricing_preserves_
                 .supports_input_modality(ModelModality::Image)
         );
         assert!(model.base_instructions.is_empty());
+        let mut config = provider("http://127.0.0.1:1", adapter);
+        config.set_model_catalog_overlay(models).unwrap();
+        let descriptor = model_descriptor(&config.effective_models().unwrap()[0]);
+        assert_eq!(descriptor.context_window, Some(64000));
+        assert_eq!(descriptor.pricing, None);
+        let reasoning = descriptor.reasoning.unwrap();
+        assert_eq!(reasoning.candidates, ["gentle", "new-ultra"]);
+        assert_eq!(reasoning.default.as_deref(), Some("gentle"));
         let fixture = FixtureServer::start(vec![
             Step::prompt(
                 Protocol::ResponsesHttp,
@@ -407,24 +424,27 @@ async fn overlay_replaces_inventory_manual_wins_and_prices_join_only_local_exact
     assert!(fresh.effective_models().unwrap().is_empty());
 }
 
-#[test]
-fn availability_preserves_removed_choice_without_weakening_strict_edits_or_structure_validation() {
-    let mut provider = provider("http://127.0.0.1:1", ProviderAdapterKind::OpenAi);
-    let mut selected = provider.effective_models().unwrap()[0].clone();
+#[tokio::test]
+async fn availability_preserves_removed_choice_without_weakening_strict_edits_or_structure_validation()
+ {
+    let mut selected_provider = provider("http://127.0.0.1:1", ProviderAdapterKind::OpenAi);
+    let mut selected = selected_provider.effective_models().unwrap()[0].clone();
     selected.slug = "remote-only-choice".into();
-    provider
+    selected_provider
         .set_model_catalog_overlay(vec![selected.clone()])
         .unwrap();
-    provider
+    selected_provider
         .set_model_connection_mode(
             &selected.slug,
             pl_model::provider::ProviderConnectionMode::Http,
         )
         .unwrap();
-    provider
+    selected_provider
         .set_model_auto_compact_override(&selected.slug, Some(1234))
         .unwrap();
-    provider.set_model_catalog_overlay(Vec::new()).unwrap();
+    selected_provider
+        .set_model_catalog_overlay(Vec::new())
+        .unwrap();
     let id = ProviderId::new("instance-a").unwrap();
     let role = AgentRoleId::new("explorer").unwrap();
     let route = ModelRouteConfig {
@@ -433,7 +453,7 @@ fn availability_preserves_removed_choice_without_weakening_strict_edits_or_struc
         effort: selected.default_effort().map(ReasoningEffort::new),
     };
     let mut config = AgentModelConfig {
-        providers: [(id.clone(), provider)].into(),
+        providers: [(id.clone(), selected_provider)].into(),
         routes: [(role.clone(), route.clone())].into(),
     };
     config.validate_declarations().unwrap();
@@ -455,6 +475,175 @@ fn availability_preserves_removed_choice_without_weakening_strict_edits_or_struc
         ModelRouteAvailability::ModelUnavailable { .. }
     ));
     assert!(from_disk.validate().is_err());
+
+    // A remote model can remain present while withdrawing a saved connection candidate.
+    let mut narrowed = cached_model("connection-choice", ProviderAdapterKind::OpenAi);
+    narrowed.binding.transport.supported_connection_modes = vec![ProviderConnectionMode::WebSocket];
+    let server = Server::json(json!({"models":[{
+        "slug": narrowed.slug,
+        "binding": narrowed.binding,
+        "context_window": 64000
+    }]}))
+    .await;
+    let mut connection_provider = provider(&server.url, ProviderAdapterKind::OpenAi);
+    connection_provider
+        .set_model_catalog_overlay(vec![cached_model(
+            "connection-choice",
+            ProviderAdapterKind::OpenAi,
+        )])
+        .unwrap();
+    connection_provider
+        .set_model_connection_mode("connection-choice", ProviderConnectionMode::Http)
+        .unwrap();
+    let desired_before_observation = serde_json::to_value(&connection_provider).unwrap();
+    let query = ModelCatalogQuery::for_provider(&connection_provider).unwrap();
+    let observed = updated(query.execute(None).await.unwrap());
+    assert_eq!(observed[0].binding.transport, narrowed.binding.transport);
+    connection_provider
+        .set_model_catalog_overlay(observed)
+        .unwrap();
+    connection_provider.validate_declarations(&id).unwrap();
+    let display = model_descriptor(&connection_provider.effective_models().unwrap()[0]);
+    assert_eq!(display.context_window, Some(64000));
+    assert_eq!(display.transport.default_connection_mode, "web_socket");
+    assert_eq!(display.transport.connection_modes.len(), 1);
+    assert_eq!(display.transport.connection_modes[0].id, "web_socket");
+    assert_eq!(
+        connection_provider.connection_overrides()["connection-choice"],
+        ProviderConnectionMode::Http
+    );
+    let connection_route = ModelRouteConfig {
+        provider: id.clone(),
+        model: "connection-choice".into(),
+        effort: None,
+    };
+    let mut connection_config = AgentModelConfig {
+        providers: [(id.clone(), connection_provider)].into(),
+        routes: [(role.clone(), connection_route.clone())].into(),
+    };
+    connection_config.validate_declarations().unwrap();
+    assert_eq!(
+        connection_config
+            .route_availability(&connection_route)
+            .unwrap(),
+        ModelRouteAvailability::ConnectionUnavailable {
+            provider: id.clone(),
+            model: "connection-choice".into(),
+            connection_mode: ProviderConnectionMode::Http,
+        }
+    );
+    assert!(connection_config.validate().is_err());
+    assert!(connection_config.resolve(&role).is_err());
+    assert!(
+        connection_config
+            .resolve_route(role.clone(), &connection_route)
+            .is_err()
+    );
+    assert_eq!(
+        serde_json::to_value(&connection_config.providers[&id]).unwrap(),
+        desired_before_observation
+    );
+    assert_eq!(connection_config.routes[&role], connection_route);
+    let mut manual_config = connection_config.clone();
+    if let pl_model::config::ProviderModelCatalogConfig::Bundled {
+        additional_models, ..
+    } = &mut manual_config.providers.get_mut(&id).unwrap().catalog
+    {
+        let mut manual = narrowed.clone();
+        manual.binding.transport = ModelTransportProfile::responses_http();
+        additional_models.push(manual);
+    }
+    // The same-ID manual declaration, not the remote WS-only one, is authoritative.
+    manual_config.validate().unwrap();
+    assert_eq!(
+        manual_config.route_availability(&connection_route).unwrap(),
+        ModelRouteAvailability::Available
+    );
+    assert_eq!(
+        manual_config
+            .resolve(&role)
+            .unwrap()
+            .model
+            .binding
+            .transport
+            .default_connection_mode,
+        ProviderConnectionMode::Http
+    );
+    if let pl_model::config::ProviderModelCatalogConfig::Bundled {
+        additional_models, ..
+    } = &mut manual_config.providers.get_mut(&id).unwrap().catalog
+    {
+        additional_models[0] = narrowed.clone();
+    }
+    assert!(manual_config.validate_declarations().is_err());
+    assert!(manual_config.route_availability(&connection_route).is_err());
+    assert!(manual_config.resolve(&role).is_err());
+    let mut explicit = ProviderConfig::from_explicit_models(
+        ProviderEndpoint::openai(None),
+        vec![narrowed.clone()],
+    );
+    if let pl_model::config::ProviderModelCatalogConfig::Explicit {
+        connection_overrides,
+        ..
+    } = &mut explicit.catalog
+    {
+        connection_overrides.insert(narrowed.slug.clone(), ProviderConnectionMode::Http);
+    }
+    assert!(explicit.effective_models().is_err());
+    assert!(explicit.validate_declarations(&id).is_err());
+    let mut non_discovery = connection_config.clone();
+    non_discovery.providers.get_mut(&id).unwrap().adapter = ProviderAdapterKind::OpenAiCompatible;
+    assert!(non_discovery.validate_declarations().is_err());
+    let mut bad_profile = manual_config.clone();
+    if let pl_model::config::ProviderModelCatalogConfig::Bundled {
+        additional_models,
+        connection_overrides,
+        ..
+    } = &mut bad_profile.providers.get_mut(&id).unwrap().catalog
+    {
+        // Even an otherwise valid override cannot repair a contradictory declared default.
+        additional_models[0]
+            .binding
+            .transport
+            .default_connection_mode = ProviderConnectionMode::Http;
+        connection_overrides.insert(narrowed.slug.clone(), ProviderConnectionMode::WebSocket);
+    }
+    assert!(bad_profile.validate_declarations().is_err());
+    let instance = connection_config.providers.get_mut(&id).unwrap();
+    assert!(
+        instance
+            .set_model_connection_mode("connection-choice", ProviderConnectionMode::Http)
+            .is_err()
+    );
+    assert_eq!(
+        instance.connection_overrides()["connection-choice"],
+        ProviderConnectionMode::Http
+    );
+    instance
+        .set_model_connection_mode("connection-choice", ProviderConnectionMode::WebSocket)
+        .unwrap();
+    assert_eq!(
+        connection_config
+            .route_availability(&connection_route)
+            .unwrap(),
+        ModelRouteAvailability::Available
+    );
+    connection_config.validate().unwrap();
+    assert_eq!(
+        connection_config
+            .resolve(&role)
+            .unwrap()
+            .model
+            .binding
+            .transport
+            .default_connection_mode,
+        ProviderConnectionMode::WebSocket
+    );
+    // Only discovery was sent: rejected resolution cannot construct a fallback inference request.
+    let requests = server.finish().await;
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with("GET /models HTTP/1.1\r\n"));
+
     let mut current = selected.clone();
     current.parameters.clear();
     current.binding.request.body.clear();
@@ -497,7 +686,7 @@ fn availability_preserves_removed_choice_without_weakening_strict_edits_or_struc
 #[tokio::test]
 async fn invalid_declaration_rejects_whole_response_without_leaking_response_or_mutating_cache() {
     let invalid_profile = json!({"transport":{"protocol":"chat_completions","supported_connection_modes":["web_socket"],"default_connection_mode":"web_socket"},"request":{"protocol":{"api":"chatCompletions","parallelToolCalls":false,"maxTokensField":"max_tokens","includeUsage":false,"toolStream":false}}});
-    for body in [
+    let mut invalid_bodies = vec![
         json!({"data":[{"id":"ok"},{"id":"ok"}]}),
         json!({"data":[{"id":" "}]}),
         json!({"data":[{"id":"ok","context_window":0}]}),
@@ -512,7 +701,29 @@ async fn invalid_declaration_rejects_whole_response_without_leaking_response_or_
         json!({"success":false,"data":[]}),
         json!({"models":[],"data":[]}),
         json!({"not-models":[]}),
+    ];
+    for (protocol, modes, default) in [
+        ("responses", json!([]), "web_socket"),
+        (
+            "responses",
+            json!(["web_socket", "web_socket"]),
+            "web_socket",
+        ),
+        ("responses", json!(["web_socket", "unknown"]), "web_socket"),
+        ("responses", json!(["web_socket"]), "http"),
+        ("responses", json!(["http", "web_socket"]), "http"),
+        ("unknown", json!(["web_socket"]), "web_socket"),
     ] {
+        let mut binding = serde_json::to_value(
+            cached_model("invalid-profile", ProviderAdapterKind::OpenAi).binding,
+        )
+        .unwrap();
+        binding["transport"]["protocol"] = json!(protocol);
+        binding["transport"]["supported_connection_modes"] = modes;
+        binding["transport"]["default_connection_mode"] = json!(default);
+        invalid_bodies.push(json!({"models":[{"slug":"valid-before-invalid"},{"slug":"invalid-profile","binding":binding}]}));
+    }
+    for body in invalid_bodies {
         let server = Server::json(body).await;
         let query =
             ModelCatalogQuery::for_provider(&provider(&server.url, ProviderAdapterKind::OpenAi))
@@ -604,7 +815,9 @@ async fn discovery_profile_validity_is_independent_of_connection_mode_order() {
         ModelTransportProfile::responses_websocket()
     );
     let mut config = provider("http://127.0.0.1:1", ProviderAdapterKind::OpenAi);
-    config.set_model_catalog_overlay(vec![model]).unwrap();
+    config
+        .set_model_catalog_overlay(vec![model.clone()])
+        .unwrap();
     config
         .set_model_connection_mode(
             "profile-order",
@@ -618,6 +831,86 @@ async fn discovery_profile_validity_is_independent_of_connection_mode_order() {
             .default_connection_mode,
         pl_model::provider::ProviderConnectionMode::Http
     );
+
+    model.binding.transport.supported_connection_modes = vec![ProviderConnectionMode::WebSocket];
+    let server = Server::responses(vec![
+        http(
+            200,
+            "ETag: \"narrowed\"\r\n",
+            &json!({"models":[{"slug":model.slug,"binding":model.binding}]}).to_string(),
+        ),
+        http(304, "", ""),
+        http(200, "", &json!({"data":[{"id":model.slug}]}).to_string()),
+    ])
+    .await;
+    let query =
+        ModelCatalogQuery::for_provider(&provider(&server.url, ProviderAdapterKind::OpenAi))
+            .unwrap();
+    let cache = ModelCatalogQueryCache {
+        identity: query.identity().into(),
+        etag: Some("\"narrowed\"".into()),
+        models: updated(query.execute(None).await.unwrap()),
+    };
+    assert_eq!(cache.models[0].binding.transport, model.binding.transport);
+    assert!(matches!(
+        query.execute(Some(&cache)).await.unwrap(),
+        ModelCatalogQueryResult::NotModified { .. }
+    ));
+    let inherited = updated(query.execute(Some(&cache)).await.unwrap());
+    assert_eq!(inherited[0].binding.transport, model.binding.transport);
+    config.set_model_catalog_overlay(inherited.clone()).unwrap();
+    let descriptor = model_descriptor(&config.effective_models().unwrap()[0]);
+    assert_eq!(descriptor.transport.connection_modes.len(), 1);
+    assert_eq!(descriptor.transport.connection_modes[0].id, "web_socket");
+    for modes in [
+        Vec::new(),
+        vec![
+            ProviderConnectionMode::WebSocket,
+            ProviderConnectionMode::WebSocket,
+        ],
+        vec![ProviderConnectionMode::Http],
+    ] {
+        let mut invalid = inherited.clone();
+        invalid[0].binding.transport.supported_connection_modes = modes;
+        assert!(config.set_model_catalog_overlay(invalid.clone()).is_err());
+        let invalid_cache = ModelCatalogQueryCache {
+            models: invalid,
+            ..cache.clone()
+        };
+        assert_eq!(
+            query.execute(Some(&invalid_cache)).await.unwrap_err(),
+            ModelCatalogQueryError::Protocol
+        );
+    }
+    assert_eq!(config.declared_models().unwrap(), inherited);
+    let requests = server.finish().await;
+    assert_eq!(requests.len(), 3);
+    assert!(
+        requests[1]
+            .to_ascii_lowercase()
+            .contains("if-none-match: \"narrowed\"\r\n")
+    );
+
+    let deepseek = cached_model("deepseek-profile", ProviderAdapterKind::DeepSeek);
+    let observed = discover(
+        json!({"models":[{"slug":deepseek.slug,"binding":deepseek.binding}]}),
+        ProviderAdapterKind::DeepSeek,
+    )
+    .await;
+    assert_eq!(
+        observed[0].binding.transport,
+        ModelTransportProfile::responses_http()
+    );
+    let server =
+        Server::json(json!({"models":[{"slug":model.slug,"binding":model.binding}]})).await;
+    let query =
+        ModelCatalogQuery::for_provider(&provider(&server.url, ProviderAdapterKind::DeepSeek))
+            .unwrap();
+    assert_eq!(
+        query.execute(None).await.unwrap_err(),
+        ModelCatalogQueryError::Protocol
+    );
+    server.finish().await;
 }
 
 #[tokio::test]
@@ -728,4 +1021,52 @@ fn malformed_bundled_definition_is_packaging_failure_not_user_config_reset() {
     );
     let error: pl_protocol::PureError = ModelDefinitionError::Declaration.into();
     assert!(matches!(error, pl_protocol::PureError::Provider(_)));
+
+    let mut definition = BundledModelDefinition {
+        schema_version: 1,
+        catalog: "synthetic".into(),
+        suggested_model: "one".into(),
+        suggested_effort: None,
+        models: vec![ModelInfo::compatible("one")],
+    };
+    let parse = |definition: &BundledModelDefinition| {
+        BundledModelDefinition::parse(&serde_json::to_string(definition).unwrap(), "synthetic")
+    };
+    assert!(parse(&definition).is_ok());
+    definition.suggested_effort = Some("stronger".into());
+    assert_eq!(
+        parse(&definition).unwrap_err(),
+        ModelDefinitionError::Recommendation
+    );
+    let candidates = vec!["gentle".to_owned(), "stronger".to_owned()];
+    definition.models[0].parameters.push(ModelParameter {
+        name: "effort".into(),
+        label: None,
+        wire: candidates
+            .iter()
+            .map(|candidate| {
+                (
+                    candidate.clone(),
+                    ParameterWire {
+                        set: vec![WireAssignment {
+                            path: "reasoning_effort".into(),
+                            value: json!(candidate),
+                        }],
+                        remove: Vec::new(),
+                    },
+                )
+            })
+            .collect(),
+        candidates,
+    });
+    let parsed = parse(&definition).unwrap();
+    assert_eq!(parsed.models[0].default_effort().as_deref(), Some("gentle"));
+    assert_eq!(parsed.suggested_effort.as_deref(), Some("stronger"));
+    for invalid in [None, Some("outside".into())] {
+        definition.suggested_effort = invalid;
+        assert_eq!(
+            parse(&definition).unwrap_err(),
+            ModelDefinitionError::Recommendation
+        );
+    }
 }

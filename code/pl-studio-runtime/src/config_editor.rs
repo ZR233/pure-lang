@@ -82,6 +82,16 @@ impl ProviderModelEdit {
             .filter(|model| model.slug == slug)
             .cloned()
             .unwrap_or_else(|| ModelInfo::compatible(&slug));
+        if let Some(current) = current
+            && current.slug == slug
+            && current.display_name
+                == trim_optional(Some(&self.display_name)).unwrap_or_else(|| slug.clone())
+            && current.context_window.unwrap_or(32_000) == self.context_window
+            && current.max_output_tokens.unwrap_or(4_096) == self.max_output_tokens
+            && current.binding.transport.protocol == self.protocol
+        {
+            return Ok(current.clone());
+        }
         model.display_name =
             trim_optional(Some(&self.display_name)).unwrap_or_else(|| slug.clone());
         if self.context_window == 0
@@ -160,7 +170,10 @@ impl ProviderEdit {
                             "provider {provider_key} references unknown preset: {preset_id}"
                         ))
                     })?;
-                let mut config = preset.provider;
+                let mut config = current
+                    .filter(|current| current.preset_id() == Some(preset_id))
+                    .cloned()
+                    .unwrap_or(preset.provider);
                 if current.and_then(ProviderConfig::preset_id) == Some(preset_id) {
                     let current = current.expect("matching current preset is present");
                     config.bearer_token_env = current.bearer_token_env.clone();
@@ -200,18 +213,29 @@ impl ProviderEdit {
                 config
             }
         };
-        for (model, mode) in &self.model_connection_modes {
-            config.set_model_connection_mode(model, *mode)?;
-        }
-        for (model, limit) in &self.model_auto_compact_limits {
-            config.set_model_auto_compact_override(model, Some(*limit))?;
+        match &mut config.catalog {
+            ProviderModelCatalogConfig::Bundled {
+                connection_overrides,
+                auto_compact_overrides,
+                ..
+            }
+            | ProviderModelCatalogConfig::Explicit {
+                connection_overrides,
+                auto_compact_overrides,
+                ..
+            } => {
+                *connection_overrides = self.model_connection_modes.clone();
+                *auto_compact_overrides = self.model_auto_compact_limits.clone();
+            }
         }
         config.pricing_mode = self.pricing_mode;
         config.name = name;
         config.base_url = base_url;
         config.bearer_token = bearer_token;
         let models = config.effective_models()?;
-        validate_models(&provider_key, &default_model, &models)?;
+        if !config.supports_model_discovery() {
+            validate_models(&provider_key, &default_model, &models)?;
+        }
 
         Ok(EditedProvider {
             id: ProviderId::new(provider_key)?,
@@ -324,7 +348,7 @@ impl ProviderSettingsEdit {
             ui: current.ui.clone(),
         };
         crate::config::normalize_builtin_mcp_server_states(&mut config);
-        config.validate()?;
+        config.validate_declarations()?;
         Ok(config)
     }
 }
@@ -423,27 +447,12 @@ fn route_values_to_route(
     })?;
     let model_slug = non_empty_trimmed(model_value, "route model")?;
     let models = provider.effective_models()?;
-    let model = models
-        .iter()
-        .find(|model| model.slug == model_slug)
-        .ok_or_else(|| {
-            PureError::ConfigError(format!(
-                "{subject} references missing model: {provider_key}.{model_slug}"
-            ))
-        })?;
+    let model = models.iter().find(|model| model.slug == model_slug);
     let effort = effort_value.trim();
     let effort = if effort.is_empty() {
-        model.default_effort()
-    } else if model
-        .supported_efforts()
-        .iter()
-        .any(|candidate| candidate == effort)
-    {
-        Some(effort.to_string())
+        model.and_then(ModelInfo::default_effort)
     } else {
-        return Err(PureError::ConfigError(format!(
-            "{subject} uses unsupported effort '{effort}' for model {provider_key}.{model_slug}"
-        )));
+        Some(effort.to_string())
     };
 
     Ok(ModelRouteConfig {
@@ -459,24 +468,14 @@ fn reconciled_route(
     default_models: &BTreeMap<ProviderId, String>,
     fallback_provider: &ProviderId,
 ) -> Result<ModelRouteConfig> {
-    if let Some(route) = route
-        && let Some(provider) = providers.get(&route.provider)
-        && let Ok(models) = provider.effective_models()
-        && let Some(model) = models.iter().find(|model| model.slug == route.model)
-    {
-        let efforts = model.supported_efforts();
-        if (route.effort.is_none() && efforts.is_empty())
-            || route.effort.as_ref().is_some_and(|configured| {
-                efforts.iter().any(|effort| effort == configured.as_str())
-            })
-        {
-            return Ok(route.clone());
+    if let Some(route) = route {
+        if !providers.contains_key(&route.provider) {
+            return Err(PureError::ConfigError(format!(
+                "model route references missing provider: {}",
+                route.provider
+            )));
         }
-        return Ok(ModelRouteConfig {
-            provider: route.provider.clone(),
-            model: route.model.clone(),
-            effort: model.default_effort().map(ReasoningEffort::new),
-        });
+        return Ok(route.clone());
     }
 
     route_for_provider_default(providers, default_models, fallback_provider)

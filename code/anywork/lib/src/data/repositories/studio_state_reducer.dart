@@ -721,6 +721,17 @@ StudioState applySettingsState(
   StudioState current,
   SettingsStateSnapshot next,
 ) {
+  final previous = current.settingsState;
+  // Both observations are monotonic. A delayed save response must not replace a newer catalog.
+  if (next.state.value != null && previous.state.value != null) {
+    if (next.revision < previous.revision ||
+        next.modelCatalogRevision < previous.modelCatalogRevision ||
+        (next.revision == previous.revision &&
+            next.modelCatalogRevision == previous.modelCatalogRevision)) {
+      return current;
+    }
+    return current.copyWith(settingsState: next);
+  }
   return _applyObservedSnapshot(
     current,
     current.settingsState,

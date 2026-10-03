@@ -9,6 +9,7 @@ export 'failure_models.dart';
 export 'interaction_models.dart';
 export 'persistence_models.dart';
 export 'provider_models.dart';
+export 'model_catalog.dart';
 export 'recovery_models.dart';
 export 'remote_models.dart';
 export 'runtime_models.dart';

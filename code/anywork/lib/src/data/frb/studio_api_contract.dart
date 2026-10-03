@@ -22,6 +22,7 @@ abstract interface class ChatWindowReader {
 }
 
 abstract class StudioApi {
+  Future<SettingsStateSnapshot> refreshModelCatalog(String providerId);
   Future<RecoveryStateSnapshot> retryRecovery();
   Future<ProviderCatalogView> loadProviderCatalog();
   Future<List<AgentProfileView>> readAgentProfiles();
@@ -1253,6 +1254,14 @@ class FrbStudioApi
         threadId: threadId,
         attachmentId: attachmentId,
       ),
+    );
+  }
+
+  @override
+  Future<SettingsStateSnapshot> refreshModelCatalog(String providerId) async {
+    await _ensureReady();
+    return _settingsStateFromFrb(
+      await _bridgeCall(() => frb.refreshModelCatalog(providerId: providerId)),
     );
   }
 

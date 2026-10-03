@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{AgentRoleId, ProviderConfig, ProviderId};
 use crate::model::ModelInfo;
-use crate::provider::ProviderEndpoint;
+use crate::provider::{ProviderConnectionMode, ProviderEndpoint};
 
 /// 模型推理强度的产品无关字符串值。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -49,8 +49,19 @@ pub struct AgentModelConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelRouteAvailability {
     Available,
-    ModelUnavailable { provider: ProviderId, model: String },
-    EffortUnavailable { provider: ProviderId, model: String },
+    ModelUnavailable {
+        provider: ProviderId,
+        model: String,
+    },
+    EffortUnavailable {
+        provider: ProviderId,
+        model: String,
+    },
+    ConnectionUnavailable {
+        provider: ProviderId,
+        model: String,
+        connection_mode: ProviderConnectionMode,
+    },
 }
 
 /// 完成引用校验后可直接创建模型 provider 的角色路由。
@@ -128,6 +139,20 @@ impl AgentModelConfig {
                 model: route.model.clone(),
             });
         };
+        if let Some(connection_mode) = provider.connection_overrides().get(&route.model)
+            && !model
+                .binding
+                .transport
+                .supported_connection_modes
+                .contains(connection_mode)
+        {
+            // Declaration validation already rejects unsupported manual/Explicit choices.
+            return Ok(ModelRouteAvailability::ConnectionUnavailable {
+                provider: route.provider.clone(),
+                model: route.model.clone(),
+                connection_mode: *connection_mode,
+            });
+        }
         let candidates = model.supported_efforts();
         let valid = match &route.effort {
             None => candidates.is_empty(),
@@ -206,6 +231,20 @@ impl AgentModelConfig {
                     route.provider, route.model
                 ))
             })?;
+        if let Some(connection_mode) = provider.connection_overrides().get(&route.model)
+            && !model
+                .binding
+                .transport
+                .supported_connection_modes
+                .contains(connection_mode)
+        {
+            // effective_models may preserve a withdrawn remote override for display only.
+            // Never silently bind an actual request to the declaration's default instead.
+            return Err(PureError::ConfigError(format!(
+                "role {role} uses unsupported connection mode {connection_mode:?} for model {}.{}",
+                route.provider, route.model
+            )));
+        }
         let candidates = model.supported_efforts();
         match (&route.effort, candidates.is_empty()) {
             (Some(_), true) => {

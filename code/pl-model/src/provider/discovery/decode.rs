@@ -164,7 +164,18 @@ fn normalize(
             return Err(ModelCatalogQueryError::Protocol);
         }
         model.binding = value;
-        model.binding.transport = super::discovery_transport(adapter);
+        // Canonicalize ordering, never restore a connection candidate the API withdrew.
+        model.binding.transport.supported_connection_modes = super::discovery_transport(adapter)
+            .supported_connection_modes
+            .into_iter()
+            .filter(|mode| {
+                model
+                    .binding
+                    .transport
+                    .supported_connection_modes
+                    .contains(mode)
+            })
+            .collect();
     }
     let supplied_media_profile = record
         .capabilities

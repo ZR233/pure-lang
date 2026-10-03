@@ -2162,6 +2162,12 @@ class StudioController extends _$StudioController {
     if (latest != null) state = AsyncData(applySettingsState(latest, next));
   }
 
+  Future<void> refreshModelCatalog(String providerId) async {
+    final next = await _api.refreshModelCatalog(providerId);
+    final latest = state.value;
+    if (latest != null) state = AsyncData(applySettingsState(latest, next));
+  }
+
   Future<void> refreshProviderUsages() async {
     final current = state.value;
     if (current == null) return;

@@ -13,6 +13,682 @@ part of 'settings.dart';
 // dart format off
 T _$identity<T>(T value) => value;
 /// @nodoc
+mixin _$BridgeModelCatalogError {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError()';
+}
+
+
+}
+
+/// @nodoc
+class $BridgeModelCatalogErrorCopyWith<$Res>  {
+$BridgeModelCatalogErrorCopyWith(BridgeModelCatalogError _, $Res Function(BridgeModelCatalogError) __);
+}
+
+
+/// Adds pattern-matching-related methods to [BridgeModelCatalogError].
+extension BridgeModelCatalogErrorPatterns on BridgeModelCatalogError {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeModelCatalogError_Unsupported value)?  unsupported,TResult Function( BridgeModelCatalogError_Configuration value)?  configuration,TResult Function( BridgeModelCatalogError_Timeout value)?  timeout,TResult Function( BridgeModelCatalogError_Transport value)?  transport,TResult Function( BridgeModelCatalogError_Http value)?  http,TResult Function( BridgeModelCatalogError_TooLarge value)?  tooLarge,TResult Function( BridgeModelCatalogError_Protocol value)?  protocol,TResult Function( BridgeModelCatalogError_CacheIdentity value)?  cacheIdentity,TResult Function( BridgeModelCatalogError_UnexpectedNotModified value)?  unexpectedNotModified,TResult Function( BridgeModelCatalogError_CacheWrite value)?  cacheWrite,TResult Function( BridgeModelCatalogError_Closing value)?  closing,TResult Function( BridgeModelCatalogError_Stale value)?  stale,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case BridgeModelCatalogError_Unsupported() when unsupported != null:
+return unsupported(_that);case BridgeModelCatalogError_Configuration() when configuration != null:
+return configuration(_that);case BridgeModelCatalogError_Timeout() when timeout != null:
+return timeout(_that);case BridgeModelCatalogError_Transport() when transport != null:
+return transport(_that);case BridgeModelCatalogError_Http() when http != null:
+return http(_that);case BridgeModelCatalogError_TooLarge() when tooLarge != null:
+return tooLarge(_that);case BridgeModelCatalogError_Protocol() when protocol != null:
+return protocol(_that);case BridgeModelCatalogError_CacheIdentity() when cacheIdentity != null:
+return cacheIdentity(_that);case BridgeModelCatalogError_UnexpectedNotModified() when unexpectedNotModified != null:
+return unexpectedNotModified(_that);case BridgeModelCatalogError_CacheWrite() when cacheWrite != null:
+return cacheWrite(_that);case BridgeModelCatalogError_Closing() when closing != null:
+return closing(_that);case BridgeModelCatalogError_Stale() when stale != null:
+return stale(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeModelCatalogError_Unsupported value)  unsupported,required TResult Function( BridgeModelCatalogError_Configuration value)  configuration,required TResult Function( BridgeModelCatalogError_Timeout value)  timeout,required TResult Function( BridgeModelCatalogError_Transport value)  transport,required TResult Function( BridgeModelCatalogError_Http value)  http,required TResult Function( BridgeModelCatalogError_TooLarge value)  tooLarge,required TResult Function( BridgeModelCatalogError_Protocol value)  protocol,required TResult Function( BridgeModelCatalogError_CacheIdentity value)  cacheIdentity,required TResult Function( BridgeModelCatalogError_UnexpectedNotModified value)  unexpectedNotModified,required TResult Function( BridgeModelCatalogError_CacheWrite value)  cacheWrite,required TResult Function( BridgeModelCatalogError_Closing value)  closing,required TResult Function( BridgeModelCatalogError_Stale value)  stale,}){
+final _that = this;
+switch (_that) {
+case BridgeModelCatalogError_Unsupported():
+return unsupported(_that);case BridgeModelCatalogError_Configuration():
+return configuration(_that);case BridgeModelCatalogError_Timeout():
+return timeout(_that);case BridgeModelCatalogError_Transport():
+return transport(_that);case BridgeModelCatalogError_Http():
+return http(_that);case BridgeModelCatalogError_TooLarge():
+return tooLarge(_that);case BridgeModelCatalogError_Protocol():
+return protocol(_that);case BridgeModelCatalogError_CacheIdentity():
+return cacheIdentity(_that);case BridgeModelCatalogError_UnexpectedNotModified():
+return unexpectedNotModified(_that);case BridgeModelCatalogError_CacheWrite():
+return cacheWrite(_that);case BridgeModelCatalogError_Closing():
+return closing(_that);case BridgeModelCatalogError_Stale():
+return stale(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeModelCatalogError_Unsupported value)?  unsupported,TResult? Function( BridgeModelCatalogError_Configuration value)?  configuration,TResult? Function( BridgeModelCatalogError_Timeout value)?  timeout,TResult? Function( BridgeModelCatalogError_Transport value)?  transport,TResult? Function( BridgeModelCatalogError_Http value)?  http,TResult? Function( BridgeModelCatalogError_TooLarge value)?  tooLarge,TResult? Function( BridgeModelCatalogError_Protocol value)?  protocol,TResult? Function( BridgeModelCatalogError_CacheIdentity value)?  cacheIdentity,TResult? Function( BridgeModelCatalogError_UnexpectedNotModified value)?  unexpectedNotModified,TResult? Function( BridgeModelCatalogError_CacheWrite value)?  cacheWrite,TResult? Function( BridgeModelCatalogError_Closing value)?  closing,TResult? Function( BridgeModelCatalogError_Stale value)?  stale,}){
+final _that = this;
+switch (_that) {
+case BridgeModelCatalogError_Unsupported() when unsupported != null:
+return unsupported(_that);case BridgeModelCatalogError_Configuration() when configuration != null:
+return configuration(_that);case BridgeModelCatalogError_Timeout() when timeout != null:
+return timeout(_that);case BridgeModelCatalogError_Transport() when transport != null:
+return transport(_that);case BridgeModelCatalogError_Http() when http != null:
+return http(_that);case BridgeModelCatalogError_TooLarge() when tooLarge != null:
+return tooLarge(_that);case BridgeModelCatalogError_Protocol() when protocol != null:
+return protocol(_that);case BridgeModelCatalogError_CacheIdentity() when cacheIdentity != null:
+return cacheIdentity(_that);case BridgeModelCatalogError_UnexpectedNotModified() when unexpectedNotModified != null:
+return unexpectedNotModified(_that);case BridgeModelCatalogError_CacheWrite() when cacheWrite != null:
+return cacheWrite(_that);case BridgeModelCatalogError_Closing() when closing != null:
+return closing(_that);case BridgeModelCatalogError_Stale() when stale != null:
+return stale(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  unsupported,TResult Function()?  configuration,TResult Function()?  timeout,TResult Function( int? httpStatus)?  transport,TResult Function( int status)?  http,TResult Function()?  tooLarge,TResult Function()?  protocol,TResult Function()?  cacheIdentity,TResult Function()?  unexpectedNotModified,TResult Function()?  cacheWrite,TResult Function()?  closing,TResult Function()?  stale,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case BridgeModelCatalogError_Unsupported() when unsupported != null:
+return unsupported();case BridgeModelCatalogError_Configuration() when configuration != null:
+return configuration();case BridgeModelCatalogError_Timeout() when timeout != null:
+return timeout();case BridgeModelCatalogError_Transport() when transport != null:
+return transport(_that.httpStatus);case BridgeModelCatalogError_Http() when http != null:
+return http(_that.status);case BridgeModelCatalogError_TooLarge() when tooLarge != null:
+return tooLarge();case BridgeModelCatalogError_Protocol() when protocol != null:
+return protocol();case BridgeModelCatalogError_CacheIdentity() when cacheIdentity != null:
+return cacheIdentity();case BridgeModelCatalogError_UnexpectedNotModified() when unexpectedNotModified != null:
+return unexpectedNotModified();case BridgeModelCatalogError_CacheWrite() when cacheWrite != null:
+return cacheWrite();case BridgeModelCatalogError_Closing() when closing != null:
+return closing();case BridgeModelCatalogError_Stale() when stale != null:
+return stale();case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  unsupported,required TResult Function()  configuration,required TResult Function()  timeout,required TResult Function( int? httpStatus)  transport,required TResult Function( int status)  http,required TResult Function()  tooLarge,required TResult Function()  protocol,required TResult Function()  cacheIdentity,required TResult Function()  unexpectedNotModified,required TResult Function()  cacheWrite,required TResult Function()  closing,required TResult Function()  stale,}) {final _that = this;
+switch (_that) {
+case BridgeModelCatalogError_Unsupported():
+return unsupported();case BridgeModelCatalogError_Configuration():
+return configuration();case BridgeModelCatalogError_Timeout():
+return timeout();case BridgeModelCatalogError_Transport():
+return transport(_that.httpStatus);case BridgeModelCatalogError_Http():
+return http(_that.status);case BridgeModelCatalogError_TooLarge():
+return tooLarge();case BridgeModelCatalogError_Protocol():
+return protocol();case BridgeModelCatalogError_CacheIdentity():
+return cacheIdentity();case BridgeModelCatalogError_UnexpectedNotModified():
+return unexpectedNotModified();case BridgeModelCatalogError_CacheWrite():
+return cacheWrite();case BridgeModelCatalogError_Closing():
+return closing();case BridgeModelCatalogError_Stale():
+return stale();}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  unsupported,TResult? Function()?  configuration,TResult? Function()?  timeout,TResult? Function( int? httpStatus)?  transport,TResult? Function( int status)?  http,TResult? Function()?  tooLarge,TResult? Function()?  protocol,TResult? Function()?  cacheIdentity,TResult? Function()?  unexpectedNotModified,TResult? Function()?  cacheWrite,TResult? Function()?  closing,TResult? Function()?  stale,}) {final _that = this;
+switch (_that) {
+case BridgeModelCatalogError_Unsupported() when unsupported != null:
+return unsupported();case BridgeModelCatalogError_Configuration() when configuration != null:
+return configuration();case BridgeModelCatalogError_Timeout() when timeout != null:
+return timeout();case BridgeModelCatalogError_Transport() when transport != null:
+return transport(_that.httpStatus);case BridgeModelCatalogError_Http() when http != null:
+return http(_that.status);case BridgeModelCatalogError_TooLarge() when tooLarge != null:
+return tooLarge();case BridgeModelCatalogError_Protocol() when protocol != null:
+return protocol();case BridgeModelCatalogError_CacheIdentity() when cacheIdentity != null:
+return cacheIdentity();case BridgeModelCatalogError_UnexpectedNotModified() when unexpectedNotModified != null:
+return unexpectedNotModified();case BridgeModelCatalogError_CacheWrite() when cacheWrite != null:
+return cacheWrite();case BridgeModelCatalogError_Closing() when closing != null:
+return closing();case BridgeModelCatalogError_Stale() when stale != null:
+return stale();case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_Unsupported extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_Unsupported(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_Unsupported);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.unsupported()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_Configuration extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_Configuration(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_Configuration);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.configuration()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_Timeout extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_Timeout(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_Timeout);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.timeout()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_Transport extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_Transport({this.httpStatus}): super._();
+
+
+ final  int? httpStatus;
+
+/// Create a copy of BridgeModelCatalogError
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeModelCatalogError_TransportCopyWith<BridgeModelCatalogError_Transport> get copyWith => _$BridgeModelCatalogError_TransportCopyWithImpl<BridgeModelCatalogError_Transport>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_Transport&&(identical(other.httpStatus, httpStatus) || other.httpStatus == httpStatus));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,httpStatus);
+}
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.transport(httpStatus: $httpStatus)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeModelCatalogError_TransportCopyWith<$Res> implements $BridgeModelCatalogErrorCopyWith<$Res> {
+  factory $BridgeModelCatalogError_TransportCopyWith(BridgeModelCatalogError_Transport value, $Res Function(BridgeModelCatalogError_Transport) _then) = _$BridgeModelCatalogError_TransportCopyWithImpl;
+@useResult
+$Res call({
+ int? httpStatus
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeModelCatalogError_TransportCopyWithImpl<$Res>
+    implements $BridgeModelCatalogError_TransportCopyWith<$Res> {
+  _$BridgeModelCatalogError_TransportCopyWithImpl(this._self, this._then);
+
+  final BridgeModelCatalogError_Transport _self;
+  final $Res Function(BridgeModelCatalogError_Transport) _then;
+
+/// Create a copy of BridgeModelCatalogError
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? httpStatus = freezed,}) {
+  return _then(BridgeModelCatalogError_Transport(
+httpStatus: freezed == httpStatus ? _self.httpStatus : httpStatus // ignore: cast_nullable_to_non_nullable
+as int?,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_Http extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_Http({required this.status}): super._();
+
+
+ final  int status;
+
+/// Create a copy of BridgeModelCatalogError
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeModelCatalogError_HttpCopyWith<BridgeModelCatalogError_Http> get copyWith => _$BridgeModelCatalogError_HttpCopyWithImpl<BridgeModelCatalogError_Http>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_Http&&(identical(other.status, status) || other.status == status));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,status);
+}
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.http(status: $status)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeModelCatalogError_HttpCopyWith<$Res> implements $BridgeModelCatalogErrorCopyWith<$Res> {
+  factory $BridgeModelCatalogError_HttpCopyWith(BridgeModelCatalogError_Http value, $Res Function(BridgeModelCatalogError_Http) _then) = _$BridgeModelCatalogError_HttpCopyWithImpl;
+@useResult
+$Res call({
+ int status
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeModelCatalogError_HttpCopyWithImpl<$Res>
+    implements $BridgeModelCatalogError_HttpCopyWith<$Res> {
+  _$BridgeModelCatalogError_HttpCopyWithImpl(this._self, this._then);
+
+  final BridgeModelCatalogError_Http _self;
+  final $Res Function(BridgeModelCatalogError_Http) _then;
+
+/// Create a copy of BridgeModelCatalogError
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? status = null,}) {
+  return _then(BridgeModelCatalogError_Http(
+status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
+as int,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_TooLarge extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_TooLarge(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_TooLarge);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.tooLarge()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_Protocol extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_Protocol(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_Protocol);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.protocol()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_CacheIdentity extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_CacheIdentity(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_CacheIdentity);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.cacheIdentity()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_UnexpectedNotModified extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_UnexpectedNotModified(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_UnexpectedNotModified);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.unexpectedNotModified()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_CacheWrite extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_CacheWrite(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_CacheWrite);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.cacheWrite()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_Closing extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_Closing(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_Closing);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.closing()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeModelCatalogError_Stale extends BridgeModelCatalogError {
+  const BridgeModelCatalogError_Stale(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_Stale);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogError.stale()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
 mixin _$LspScopeInput {
 
 

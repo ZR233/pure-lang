@@ -8,6 +8,7 @@ use utoipa::ToSchema;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudioSettingsSnapshot {
     pub revision: u64,
+    pub model_catalog_revision: u64,
     pub updated_at: i64,
     pub settings: StudioSettings,
 }
@@ -31,6 +32,8 @@ pub struct StudioSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudioProviderSettings {
+    pub effective_models: Vec<crate::ModelDescriptor>,
+    pub model_catalog: StudioModelCatalogStatus,
     pub pricing_enabled: bool,
     pub id: String,
     pub template_kind: String,
@@ -49,6 +52,64 @@ pub struct StudioProviderSettings {
     pub model_connection_modes: Vec<StudioModelConnectionSettings>,
     pub model_auto_compact_limits: Vec<StudioModelAutoCompactSettings>,
     pub catalog_id: Option<String>,
+}
+
+/// One provider instance's derived directory observation, never desired configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudioModelCatalogStatus {
+    pub supported: bool,
+    pub source: StudioModelCatalogSource,
+    pub probing: bool,
+    pub last_success_at: Option<i64>,
+    pub checked_at: Option<i64>,
+    pub error: Option<StudioModelCatalogError>,
+    pub cache_warning: Option<StudioModelCatalogCacheWarning>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioModelCatalogSource {
+    Default,
+    Cached,
+    Online,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum StudioModelCatalogError {
+    Unsupported,
+    Configuration,
+    Timeout,
+    Transport {
+        #[serde(rename = "httpStatus")]
+        http_status: Option<u16>,
+    },
+    Http {
+        status: u16,
+    },
+    TooLarge,
+    Protocol,
+    CacheIdentity,
+    UnexpectedNotModified,
+    CacheWrite,
+    Closing,
+    Stale,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioModelCatalogCacheWarning {
+    Read,
+    Schema,
+    Identity,
+    Declaration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RefreshModelCatalogRequest {
+    pub provider_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]

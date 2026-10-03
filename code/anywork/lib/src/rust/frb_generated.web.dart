@@ -280,6 +280,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelCatalogCacheWarning
+  dco_decode_box_autoadd_bridge_model_catalog_cache_warning(dynamic raw);
+
+  @protected
+  BridgeModelCatalogError dco_decode_box_autoadd_bridge_model_catalog_error(
+    dynamic raw,
+  );
+
+  @protected
   BridgeModelPerformanceSnapshot
   dco_decode_box_autoadd_bridge_model_performance_snapshot(dynamic raw);
 
@@ -911,7 +920,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeModelCapabilities dco_decode_bridge_model_capabilities(dynamic raw);
 
   @protected
+  BridgeModelCatalogCacheWarning dco_decode_bridge_model_catalog_cache_warning(
+    dynamic raw,
+  );
+
+  @protected
   BridgeModelCatalogDescriptor dco_decode_bridge_model_catalog_descriptor(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeModelCatalogError dco_decode_bridge_model_catalog_error(dynamic raw);
+
+  @protected
+  BridgeModelCatalogSource dco_decode_bridge_model_catalog_source(dynamic raw);
+
+  @protected
+  BridgeModelCatalogStatusDto dco_decode_bridge_model_catalog_status_dto(
     dynamic raw,
   );
 
@@ -1860,6 +1885,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelCatalogCacheWarning?
+  dco_decode_opt_box_autoadd_bridge_model_catalog_cache_warning(dynamic raw);
+
+  @protected
+  BridgeModelCatalogError?
+  dco_decode_opt_box_autoadd_bridge_model_catalog_error(dynamic raw);
+
+  @protected
   BridgeModelPricing? dco_decode_opt_box_autoadd_bridge_model_pricing(
     dynamic raw,
   );
@@ -2333,6 +2366,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeMcpStateSnapshot sse_decode_box_autoadd_bridge_mcp_state_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelCatalogCacheWarning
+  sse_decode_box_autoadd_bridge_model_catalog_cache_warning(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelCatalogError sse_decode_box_autoadd_bridge_model_catalog_error(
     SseDeserializer deserializer,
   );
 
@@ -3152,7 +3196,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelCatalogCacheWarning sse_decode_bridge_model_catalog_cache_warning(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeModelCatalogDescriptor sse_decode_bridge_model_catalog_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelCatalogError sse_decode_bridge_model_catalog_error(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelCatalogSource sse_decode_bridge_model_catalog_source(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelCatalogStatusDto sse_decode_bridge_model_catalog_status_dto(
     SseDeserializer deserializer,
   );
 
@@ -4329,6 +4393,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelCatalogCacheWarning?
+  sse_decode_opt_box_autoadd_bridge_model_catalog_cache_warning(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelCatalogError?
+  sse_decode_opt_box_autoadd_bridge_model_catalog_error(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeModelPricing? sse_decode_opt_box_autoadd_bridge_model_pricing(
     SseDeserializer deserializer,
   );
@@ -4899,6 +4975,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_mcp_state_snapshot(
     BridgeMcpStateSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_model_catalog_cache_warning(
+    BridgeModelCatalogCacheWarning self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_model_catalog_error(
+    BridgeModelCatalogError self,
     SseSerializer serializer,
   );
 
@@ -5860,8 +5948,32 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_model_catalog_cache_warning(
+    BridgeModelCatalogCacheWarning self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_model_catalog_descriptor(
     BridgeModelCatalogDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_catalog_error(
+    BridgeModelCatalogError self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_catalog_source(
+    BridgeModelCatalogSource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_catalog_status_dto(
+    BridgeModelCatalogStatusDto self,
     SseSerializer serializer,
   );
 
@@ -7293,6 +7405,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_history_fault(
     BridgeHistoryFault? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_model_catalog_cache_warning(
+    BridgeModelCatalogCacheWarning? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_model_catalog_error(
+    BridgeModelCatalogError? self,
     SseSerializer serializer,
   );
 

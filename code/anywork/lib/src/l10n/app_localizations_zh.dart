@@ -2490,4 +2490,28 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get startupRecoveredNotice => '已备份无法恢复的数据，并恢复初始配置。备份位置：';
+
+  @override
+  String get settingsModelCatalogRefresh => '刷新模型';
+
+  @override
+  String get settingsModelCatalogDefault => '内置模型列表';
+
+  @override
+  String get settingsModelCatalogCached => '上次成功的模型列表';
+
+  @override
+  String get settingsModelCatalogOnline => '供应商返回的模型列表';
+
+  @override
+  String get settingsModelCatalogChecked => '上次检查';
+
+  @override
+  String get settingsModelCatalogFailed => '模型刷新失败，继续使用原有列表。';
+
+  @override
+  String get settingsModelCatalogCacheWarning => '无法加载已保存的模型列表，当前使用内置列表。';
+
+  @override
+  String get settingsModelCatalogEmpty => '供应商未返回任何模型。';
 }

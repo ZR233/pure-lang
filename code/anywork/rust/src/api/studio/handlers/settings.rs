@@ -69,6 +69,18 @@ pub async fn read_settings_state() -> Result<BridgeSettingsStateSnapshot, Bridge
     Ok(bridge_settings_snapshot(bridge.studio.read_settings()?))
 }
 
+pub async fn refresh_model_catalog(
+    provider_id: String,
+) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge_settings_snapshot(
+        bridge
+            .studio
+            .refresh_model_catalog(pl_protocol::studio::RefreshModelCatalogRequest { provider_id })
+            .await?,
+    ))
+}
+
 pub async fn reload_settings_from_disk(
     expected_settings_revision: u64,
 ) -> Result<BridgeSettingsStateSnapshot, BridgeError> {

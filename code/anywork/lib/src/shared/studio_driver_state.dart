@@ -21,6 +21,7 @@ abstract final class StudioDriverState {
   static ComposerThreadState _newThreadComposer =
       const ComposerThreadState.idle();
   static int _settingsRevision = 0;
+  static int _modelCatalogRevision = 0;
   static List<ModeModelRouteView> _modeModelRoutes = const [];
   static List<RoleSettingsView> _roles = const [];
   static List<ProviderSettingsView> _providers = const [];
@@ -125,6 +126,7 @@ abstract final class StudioDriverState {
     _newThreadWorkspaceMode = state.newThreadWorkspaceMode;
     _newThreadComposer = state.newThreadComposer;
     _settingsRevision = state.settingsRevision;
+    _modelCatalogRevision = state.settingsState.modelCatalogRevision;
     _modeModelRoutes = List.unmodifiable(state.modeModelRoutes);
     _providers = List.unmodifiable(state.providers);
     _roles = List.unmodifiable([
@@ -290,6 +292,7 @@ abstract final class StudioDriverState {
       ],
       'settings': {
         'revision': _settingsRevision,
+        'modelCatalogRevision': _modelCatalogRevision,
         'providers': [
           for (final provider in _providers)
             {
@@ -300,6 +303,25 @@ abstract final class StudioDriverState {
               'hasBearerToken': provider.hasBearerToken,
               'status': provider.status,
               'models': [for (final model in provider.allModels) model.slug],
+              'modelDetails': [
+                for (final model in provider.allModels)
+                  {
+                    'slug': model.slug,
+                    'contextWindow': model.contextWindow,
+                    'maxOutputTokens': model.maxOutputTokens,
+                    'reasoningEfforts': model.reasoningEfforts,
+                    'defaultReasoningEffort': model.defaultReasoningEffort,
+                    'priced': model.priceTiers.isNotEmpty,
+                  },
+              ],
+              'modelCatalog': {
+                'supported': provider.modelCatalog.supported,
+                'source': provider.modelCatalog.source.name,
+                'probing': provider.modelCatalog.probing,
+                'error': provider.modelCatalog.error?.kind.name,
+                'cacheWarning': provider.modelCatalog.cacheWarning?.name,
+                'lastSuccessAt': provider.modelCatalog.lastSuccessAt,
+              },
               // 压缩阈值三层视图：slug → {default, override, effective, safe}。
               // 缺失值保持 null，便于 Driver 断言未知容量与覆盖归一化。
               'autoCompactLimits': [

@@ -123,12 +123,13 @@ pub(crate) fn bridge_agent_directory(
 }
 
 pub(crate) fn bridge_settings_state(
-    state: ObservedResource<pl_protocol::studio::StudioSettings>,
+    state: ObservedResource<pl_protocol::studio::StudioSettingsSnapshot>,
 ) -> BridgeSettingsStateSnapshot {
     concrete_observed!(
         state,
         |settings| BridgeSettingsStateData {
-            settings: bridge_settings(settings),
+            model_catalog_revision: settings.model_catalog_revision,
+            settings: bridge_settings(settings.settings),
         },
         BridgeSettingsStateSnapshot
     )

@@ -5,6 +5,8 @@ mod id;
 mod provider;
 mod route;
 
+pub use pl_protocol::ModelDescriptor;
+
 pub use catalog::*;
 pub use id::*;
 pub use provider::*;

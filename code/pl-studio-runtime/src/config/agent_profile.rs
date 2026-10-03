@@ -208,16 +208,24 @@ fn system_profile(role: StudioRole, config: &StudioConfig) -> Result<AgentProfil
             include_str!("../prompts/reviewer.md"),
         ),
     };
-    let route = config.resolve_role(role)?;
+    let route = config
+        .models
+        .routes
+        .get(&role.id())
+        .ok_or_else(|| PureError::ConfigError("system Profile route is missing".into()))?;
+    config.models.route_availability(route)?;
     let snapshot = AgentProfileSnapshot {
         profile_id: role.key().to_string(),
         display_name: role.display_name().to_string(),
         description: description.to_string(),
         when_to_use: when_to_use.to_string(),
         system_instructions: instructions.to_string(),
-        provider_id: route.provider_id.as_str().to_string(),
-        model: route.model.slug,
-        effort: route.effort.map(|effort| effort.as_str().to_string()),
+        provider_id: route.provider.as_str().to_string(),
+        model: route.model.clone(),
+        effort: route
+            .effort
+            .as_ref()
+            .map(|effort| effort.as_str().to_string()),
         source: "studio-builtin".to_string(),
         revision: SYSTEM_PROFILE_REVISION.to_string(),
         content_hash: String::new(),
@@ -252,7 +260,12 @@ fn load_user_profile(
     let content = fs::read_to_string(path)?;
     let profile: UserAgentProfile = toml::from_str(&content)
         .map_err(|_| PureError::ConfigError(format!("invalid Agent Profile TOML: {profile_id}")))?;
-    validate_user_profile(profile_id, &profile, config)?;
+    validate_user_profile_fields(profile_id, &profile)?;
+    config.models.route_availability(&ModelRouteConfig {
+        provider: profile.provider.clone(),
+        model: profile.model.clone(),
+        effort: profile.effort.clone(),
+    })?;
     if !profile.enabled && !include_disabled {
         return Ok(None);
     }
@@ -280,6 +293,21 @@ fn validate_user_profile(
     profile: &UserAgentProfile,
     config: &StudioConfig,
 ) -> Result<()> {
+    validate_user_profile_fields(profile_id, profile)?;
+    config
+        .models
+        .resolve_route(
+            pl_model::config::AgentRoleId::new(profile_id)?,
+            &ModelRouteConfig {
+                provider: profile.provider.clone(),
+                model: profile.model.clone(),
+                effort: profile.effort.clone(),
+            },
+        )
+        .map(|_| ())
+}
+
+fn validate_user_profile_fields(profile_id: &str, profile: &UserAgentProfile) -> Result<()> {
     for (field, value) in [
         ("display_name", profile.display_name.as_str()),
         ("description", profile.description.as_str()),
@@ -293,17 +321,7 @@ fn validate_user_profile(
             )));
         }
     }
-    let mut models = config.models.clone();
-    let role = pl_model::config::AgentRoleId::new(profile_id)?;
-    models.routes.insert(
-        role.clone(),
-        ModelRouteConfig {
-            provider: profile.provider.clone(),
-            model: profile.model.clone(),
-            effort: profile.effort.clone(),
-        },
-    );
-    models.resolve(&role).map(|_| ())
+    Ok(())
 }
 
 fn validate_profile_id(profile_id: &str) -> Result<()> {

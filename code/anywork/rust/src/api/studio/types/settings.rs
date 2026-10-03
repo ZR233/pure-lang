@@ -231,6 +231,8 @@ pub struct BridgeModeModelSettingsDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeProviderSettingsDto {
+    pub effective_models: Vec<BridgeModelDescriptor>,
+    pub model_catalog: BridgeModelCatalogStatusDto,
     pub pricing_enabled: bool,
     pub id: String,
     pub template_kind: String,
@@ -249,6 +251,99 @@ pub struct BridgeProviderSettingsDto {
     pub model_connection_modes: Vec<BridgeModelConnectionSettingsDto>,
     pub model_auto_compact_limits: Vec<BridgeModelAutoCompactSettingsDto>,
     pub catalog_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeModelCatalogStatusDto {
+    pub supported: bool,
+    pub source: BridgeModelCatalogSource,
+    pub probing: bool,
+    pub last_success_at: Option<i64>,
+    pub checked_at: Option<i64>,
+    pub error: Option<BridgeModelCatalogError>,
+    pub cache_warning: Option<BridgeModelCatalogCacheWarning>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeModelCatalogSource {
+    Default,
+    Cached,
+    Online,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum BridgeModelCatalogError {
+    Unsupported,
+    Configuration,
+    Timeout,
+    Transport {
+        #[serde(rename = "httpStatus")]
+        http_status: Option<u16>,
+    },
+    Http {
+        status: u16,
+    },
+    TooLarge,
+    Protocol,
+    CacheIdentity,
+    UnexpectedNotModified,
+    CacheWrite,
+    Closing,
+    Stale,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeModelCatalogCacheWarning {
+    Read,
+    Schema,
+    Identity,
+    Declaration,
+}
+
+impl From<pl_protocol::studio::StudioModelCatalogStatus> for BridgeModelCatalogStatusDto {
+    fn from(status: pl_protocol::studio::StudioModelCatalogStatus) -> Self {
+        use pl_protocol::studio::{
+            StudioModelCatalogCacheWarning as Warning, StudioModelCatalogError as Error,
+            StudioModelCatalogSource as Source,
+        };
+        Self {
+            supported: status.supported,
+            source: match status.source {
+                Source::Default => BridgeModelCatalogSource::Default,
+                Source::Cached => BridgeModelCatalogSource::Cached,
+                Source::Online => BridgeModelCatalogSource::Online,
+            },
+            probing: status.probing,
+            last_success_at: status.last_success_at,
+            checked_at: status.checked_at,
+            error: status.error.map(|error| match error {
+                Error::Unsupported => BridgeModelCatalogError::Unsupported,
+                Error::Configuration => BridgeModelCatalogError::Configuration,
+                Error::Timeout => BridgeModelCatalogError::Timeout,
+                Error::Transport { http_status } => {
+                    BridgeModelCatalogError::Transport { http_status }
+                }
+                Error::Http { status } => BridgeModelCatalogError::Http { status },
+                Error::TooLarge => BridgeModelCatalogError::TooLarge,
+                Error::Protocol => BridgeModelCatalogError::Protocol,
+                Error::CacheIdentity => BridgeModelCatalogError::CacheIdentity,
+                Error::UnexpectedNotModified => BridgeModelCatalogError::UnexpectedNotModified,
+                Error::CacheWrite => BridgeModelCatalogError::CacheWrite,
+                Error::Closing => BridgeModelCatalogError::Closing,
+                Error::Stale => BridgeModelCatalogError::Stale,
+            }),
+            cache_warning: status.cache_warning.map(|warning| match warning {
+                Warning::Read => BridgeModelCatalogCacheWarning::Read,
+                Warning::Schema => BridgeModelCatalogCacheWarning::Schema,
+                Warning::Identity => BridgeModelCatalogCacheWarning::Identity,
+                Warning::Declaration => BridgeModelCatalogCacheWarning::Declaration,
+            }),
+        }
+    }
 }
 
 /// Provider 配置中由用户定义的模型，不复制内置 catalog 元数据。
@@ -406,14 +501,16 @@ pub struct BridgeWebSearchProviderCapabilitiesDescriptor {
     pub standalone: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeModelTransportDescriptor {
     pub protocol: String,
     pub connection_modes: Vec<BridgeProviderConnectionModeDescriptor>,
     pub default_connection_mode: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeProviderConnectionModeDescriptor {
     pub id: String,
     pub display_name: String,
@@ -425,7 +522,8 @@ pub struct BridgeModelCatalogDescriptor {
     pub models: Vec<BridgeModelDescriptor>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeModelDescriptor {
     pub id: String,
     pub display_name: String,
@@ -439,7 +537,8 @@ pub struct BridgeModelDescriptor {
     pub pricing: Option<BridgeModelPricing>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeModelCapabilities {
     pub input: Vec<BridgeModelInputCapability>,
     pub output: Vec<BridgeModelModality>,
@@ -483,7 +582,8 @@ pub struct BridgeModelInputCapability {
     pub media_types: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeModelReasoningDescriptor {
     pub parameter: String,
     pub label: String,
@@ -491,7 +591,8 @@ pub struct BridgeModelReasoningDescriptor {
     pub candidates: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeModelPricing {
     pub currency: String,
     pub tiers: Vec<BridgeModelPriceTier>,
@@ -499,7 +600,8 @@ pub struct BridgeModelPricing {
     pub verified_at: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeModelPriceTier {
     pub label: String,
     pub input_per_mtok: f64,

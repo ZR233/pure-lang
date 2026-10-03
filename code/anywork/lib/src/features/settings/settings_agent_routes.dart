@@ -56,20 +56,17 @@ class _AgentRouteConfiguration {
     final selectedModel =
         option?.model ??
         (hasConfiguredRoute ? configuredRole.model : 'default');
-    final canonicalEffort = configuredRole?.effort;
+    final storedEffort = configuredRole?.effort;
+    final canonicalEffort = storedEffort?.isNotEmpty == true
+        ? storedEffort
+        : null;
     final efforts = option?.reasoningEfforts ?? const <String>[];
     final defaultEffort = option == null
         ? null
         : option.defaultReasoningEffort.isNotEmpty
         ? option.defaultReasoningEffort
         : option.reasoningEfforts.firstOrNull;
-    final selectedEffort =
-        hasConfiguredRoute &&
-            option != null &&
-            canonicalEffort != null &&
-            efforts.contains(canonicalEffort)
-        ? canonicalEffort
-        : defaultEffort;
+    final selectedEffort = hasConfiguredRoute ? canonicalEffort : defaultEffort;
 
     return _RoleSettingsRow(
       role: role,
@@ -117,15 +114,7 @@ class _AgentRouteConfiguration {
     return buildModelSelectionOptions(
       providers,
       modelsForProvider: (provider) {
-        final models = provider.models.isEmpty
-            ? [
-                ProviderModelView(
-                  slug: provider.defaultModel,
-                  displayName: provider.defaultModel,
-                  reasoningEfforts: const [],
-                ),
-              ]
-            : provider.models;
+        final models = provider.models;
         return models.where((model) => model.slug.isNotEmpty).toList();
       },
     );
@@ -214,6 +203,12 @@ class _RoleSettingsRow extends StatelessWidget {
       selectorKey: StudioDriverKeys.settingsRoleEffort(role),
       label: context.l10n.statusReasoningEffort,
       value: selectedEffort,
+      unresolvedLabel:
+          selectedEffort != null && !efforts.contains(selectedEffort)
+          ? context.l10n.settingsAgentRouteUnavailable(selectedEffort!)
+          : selectedEffort == null && efforts.isNotEmpty
+          ? context.l10n.statusModelRouteUnavailable
+          : null,
       options: [
         for (final effort in efforts)
           _RoleSelectOption(
@@ -258,21 +253,22 @@ class _RoleSelectField extends StatelessWidget {
     required this.value,
     required this.options,
     required this.onChanged,
+    this.unresolvedLabel,
   });
 
   final Key selectorKey;
   final String label;
   final String? value;
+  final String? unresolvedLabel;
   final List<_RoleSelectOption> options;
   final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
     final enabled = onChanged != null && options.isNotEmpty;
-    final selectedLabel = options
-        .where((option) => option.value == value)
-        .firstOrNull
-        ?.label;
+    final selectedLabel =
+        options.where((option) => option.value == value).firstOrNull?.label ??
+        unresolvedLabel;
     return MenuAnchor(
       menuChildren: [
         for (final option in options)

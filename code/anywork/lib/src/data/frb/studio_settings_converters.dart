@@ -1,5 +1,71 @@
 part of 'studio_api.dart';
 
+ModelCatalogStatusView _modelCatalogStatusFromFrb(
+  frb.BridgeModelCatalogStatusDto status,
+) => ModelCatalogStatusView(
+  supported: status.supported,
+  source: switch (status.source) {
+    frb.BridgeModelCatalogSource.default_ =>
+      ModelCatalogSource.defaultDefinition,
+    frb.BridgeModelCatalogSource.cached => ModelCatalogSource.cached,
+    frb.BridgeModelCatalogSource.online => ModelCatalogSource.online,
+  },
+  probing: status.probing,
+  lastSuccessAt: status.lastSuccessAt?.toInt(),
+  checkedAt: status.checkedAt?.toInt(),
+  error: switch (status.error) {
+    null => null,
+    frb.BridgeModelCatalogError_Unsupported() => const ModelCatalogErrorView(
+      ModelCatalogFailure.unsupported,
+    ),
+    frb.BridgeModelCatalogError_Configuration() => const ModelCatalogErrorView(
+      ModelCatalogFailure.configuration,
+    ),
+    frb.BridgeModelCatalogError_Timeout() => const ModelCatalogErrorView(
+      ModelCatalogFailure.timeout,
+    ),
+    frb.BridgeModelCatalogError_Transport(:final httpStatus) =>
+      ModelCatalogErrorView(
+        ModelCatalogFailure.transport,
+        httpStatus: httpStatus,
+      ),
+    frb.BridgeModelCatalogError_Http(:final status) => ModelCatalogErrorView(
+      ModelCatalogFailure.http,
+      httpStatus: status,
+    ),
+    frb.BridgeModelCatalogError_TooLarge() => const ModelCatalogErrorView(
+      ModelCatalogFailure.tooLarge,
+    ),
+    frb.BridgeModelCatalogError_Protocol() => const ModelCatalogErrorView(
+      ModelCatalogFailure.protocol,
+    ),
+    frb.BridgeModelCatalogError_CacheIdentity() => const ModelCatalogErrorView(
+      ModelCatalogFailure.cacheIdentity,
+    ),
+    frb.BridgeModelCatalogError_UnexpectedNotModified() =>
+      const ModelCatalogErrorView(ModelCatalogFailure.unexpectedNotModified),
+    frb.BridgeModelCatalogError_CacheWrite() => const ModelCatalogErrorView(
+      ModelCatalogFailure.cacheWrite,
+    ),
+    frb.BridgeModelCatalogError_Closing() => const ModelCatalogErrorView(
+      ModelCatalogFailure.closing,
+    ),
+    frb.BridgeModelCatalogError_Stale() => const ModelCatalogErrorView(
+      ModelCatalogFailure.stale,
+    ),
+  },
+  cacheWarning: switch (status.cacheWarning) {
+    null => null,
+    frb.BridgeModelCatalogCacheWarning.read => ModelCatalogCacheWarning.read,
+    frb.BridgeModelCatalogCacheWarning.schema =>
+      ModelCatalogCacheWarning.schema,
+    frb.BridgeModelCatalogCacheWarning.identity =>
+      ModelCatalogCacheWarning.identity,
+    frb.BridgeModelCatalogCacheWarning.declaration =>
+      ModelCatalogCacheWarning.declaration,
+  },
+);
+
 ProviderSettingsView _providerSettingsFromFrb(
   frb.BridgeProviderSettingsDto value,
 ) {
@@ -22,6 +88,7 @@ ProviderSettingsView _providerSettingsFromFrb(
   };
 
   return ProviderSettingsView(
+    modelCatalog: _modelCatalogStatusFromFrb(value.modelCatalog),
     pricingEnabled: value.pricingEnabled,
     id: value.id,
     templateKind: value.templateKind,
@@ -32,7 +99,7 @@ ProviderSettingsView _providerSettingsFromFrb(
     hasBearerToken: value.hasBearerToken,
     credentialRequired: value.credentialRequired,
     defaultModel: value.defaultModel,
-    models: const [],
+    models: value.effectiveModels.map(_providerModelFromCatalog).toList(),
     customModels: customModels,
     modelConnectionModes: connectionModes,
     autoCompactLimits: autoCompactLimits,
@@ -40,7 +107,7 @@ ProviderSettingsView _providerSettingsFromFrb(
         ? 'ready'
         : 'missingCredential',
     usageLabel: value.defaultModel,
-    modelCount: '${customModels.length}',
+    modelCount: '${value.effectiveModels.length}',
     updatedAt: 'Loaded',
     catalogId: value.catalogId ?? '',
     capabilitySource: value.capabilitySource,

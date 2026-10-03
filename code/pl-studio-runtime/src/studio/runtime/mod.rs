@@ -15,6 +15,7 @@ mod history;
 mod lifecycle;
 mod lsp_state;
 mod mcp_health;
+mod model_catalog;
 mod model_performance;
 mod model_refresh;
 mod prompt_runner;
@@ -139,6 +140,7 @@ pub struct StudioRuntime {
     thread_observations: thread_observation::ThreadObservations,
     settings_updates: tokio::sync::watch::Sender<crate::config::ConfigRuntimeSnapshot>,
     settings_refresh: background_task::BackgroundTaskSlot,
+    model_catalog_tasks: model_catalog::ModelCatalogTasks,
     tool_refresh: background_task::BackgroundTaskSlot,
     rejected_tools: rejected_tools::RejectedToolOwners,
     tool_catalog_updates: std::sync::Arc<tokio::sync::Notify>,

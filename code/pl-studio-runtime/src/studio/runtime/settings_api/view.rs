@@ -18,9 +18,16 @@ use pl_model::config::{ProviderCapabilitySelection, ProviderModelCatalogConfig};
 use pl_tool::search::{WebSearchAvailability, WebSearchBackendKind};
 
 pub(crate) fn settings_snapshot(state: ConfigRuntimeSnapshot) -> Result<StudioSettingsSnapshot> {
-    let settings = settings_view(&state.config, StudioRole::Executor)?;
+    let mut settings = settings_view(&state.config, StudioRole::Executor)?;
+    for provider in &mut settings.providers {
+        let id = pl_model::config::ProviderId::new(provider.id.clone())?;
+        if let Some(status) = state.model_catalogs.get(&id) {
+            provider.model_catalog = status.clone();
+        }
+    }
     Ok(StudioSettingsSnapshot {
         revision: state.revision,
+        model_catalog_revision: state.model_catalog_revision,
         updated_at: state.updated_at,
         settings,
     })
@@ -50,6 +57,19 @@ fn settings_view(
                 ProviderModelCatalogConfig::Explicit { .. } => None,
             };
             Ok(StudioProviderSettings {
+                effective_models: models
+                    .iter()
+                    .map(pl_model::config::model_descriptor)
+                    .collect(),
+                model_catalog: pl_protocol::studio::StudioModelCatalogStatus {
+                    supported: provider.supports_model_discovery(),
+                    source: pl_protocol::studio::StudioModelCatalogSource::Default,
+                    probing: false,
+                    last_success_at: None,
+                    checked_at: None,
+                    error: None,
+                    cache_warning: None,
+                },
                 pricing_enabled: provider.pricing_mode == pl_protocol::PricingMode::Catalog,
                 id: id.to_string(),
                 template_kind: provider
@@ -257,6 +277,48 @@ fn search_settings(
     config: &crate::StudioConfig,
     role: StudioRole,
 ) -> Result<(StudioWebSearchSettings, StudioDeepSeekWebSearchSettings)> {
+    let selector = config
+        .models
+        .routes
+        .get(&role.id())
+        .context("missing search role")?;
+    if !matches!(
+        config.models.route_availability(selector)?,
+        pl_model::config::ModelRouteAvailability::Available
+    ) {
+        let location = config.web_search.location.as_ref();
+        return Ok((
+            StudioWebSearchSettings {
+                configured_mode: web_search_mode_label(config.web_search.mode).into(),
+                effective_mode: "disabled".into(),
+                availability: "modelUnavailable".into(),
+                selected: false,
+                context_size: config.web_search.context_size.map(|size| {
+                    match size {
+                        WebSearchContextSize::Low => "low",
+                        WebSearchContextSize::Medium => "medium",
+                        WebSearchContextSize::High => "high",
+                    }
+                    .into()
+                }),
+                allowed_domains: config.web_search.allowed_domains.clone(),
+                country: location.and_then(|location| location.country.clone()),
+                region: location.and_then(|location| location.region.clone()),
+                city: location.and_then(|location| location.city.clone()),
+                timezone: location.and_then(|location| location.timezone.clone()),
+                provider_id: Some(selector.provider.to_string()),
+                model: Some(selector.model.clone()),
+            },
+            StudioDeepSeekWebSearchSettings {
+                configured_enabled: config.deepseek_web_search.enabled,
+                effective_enabled: false,
+                availability: "modelUnavailable".into(),
+                selected: false,
+                provider_id: Some(selector.provider.to_string()),
+                model: Some(selector.model.clone()),
+            },
+        ));
+    }
     let route = config.resolve_role(role)?;
     let plans = pl_tool::search::plan_web_searches(
         &config.models,

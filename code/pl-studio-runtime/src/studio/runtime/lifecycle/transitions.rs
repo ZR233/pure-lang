@@ -35,6 +35,8 @@ impl StudioRuntime {
                 expected_revision: current.revision,
                 at: unix_seconds(),
             })?;
+        // Fence publication and join all non-abortable commits before closing any store.
+        let catalog_shutdown = self.stop_model_catalog_probes().await;
         let shutdown = async {
             // 阶段 1：订阅方自行消费进度流后由 bridge 取消订阅。
             self.shutdown_progress
@@ -102,6 +104,14 @@ impl StudioRuntime {
             Ok::<_, anyhow::Error>(())
         }
         .await;
+        // A failed catalog task must still allow the remaining owners to close.
+        let shutdown = match (shutdown, catalog_shutdown) {
+            (Ok(()), result) => result,
+            (Err(error), Ok(())) => Err(error),
+            (Err(error), Err(catalog_error)) => Err(error.context(format!(
+                "model catalog shutdown also failed: {catalog_error:#}"
+            ))),
+        };
         // Remote processes must lose their lease even when an earlier shutdown stage fails.
         let remote_shutdown = self.ssh_manager.shutdown().await;
         let shutdown = match (shutdown, remote_shutdown) {

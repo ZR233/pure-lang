@@ -154,11 +154,53 @@ impl StudioRuntime {
             return;
         }
         let mut updates = self.settings_updates.subscribe();
+        let mut catalogs = self.config_runtime.subscribe_model_catalogs();
         let runtime = self.clone();
         *slot = Some(BackgroundTask::new(tokio::spawn(async move {
-            while updates.changed().await.is_ok() {
-                let revision = updates.borrow_and_update().revision;
+            loop {
+                let affected = tokio::select! {
+                    result = updates.changed() => {
+                        if result.is_err() { break; }
+                        updates.borrow_and_update();
+                        None
+                    }
+                    change = catalogs.recv() => {
+                        match change {
+                            Ok(change) => {
+                                if let Err(error) = runtime.publish_model_catalog_state(change.snapshot) { tracing::error!(%error, "could not publish model catalog snapshot"); }
+                                Some(change.affected)
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                let Ok(snapshot) = runtime.config_runtime.read() else { continue; };
+                                let ids = snapshot.config.models.providers.keys().cloned().collect();
+                                let _ = runtime.publish_model_catalog_state(snapshot);
+                                Some(ids)
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                };
+                let Ok(watermarks) = runtime.config_runtime.read() else {
+                    continue;
+                };
+                let revision = format!(
+                    "{}:{}",
+                    watermarks.revision, watermarks.model_catalog_revision
+                );
                 for (id, thread) in runtime.threads.observed_threads() {
+                    if let Some(affected) = &affected {
+                        let state = thread.snapshot();
+                        let selector = crate::studio::model_route::route_record(
+                            &state,
+                            state
+                                .extensions
+                                .contains_key(crate::studio::model_route::AGENT_PROFILE_EXTENSION),
+                        );
+                        if !matches!(selector, Ok(Some((_, ref selector))) if affected.contains(&selector.provider))
+                        {
+                            continue;
+                        }
+                    }
                     let (precondition, binding) = runtime.model_binding(&id, &thread).await;
                     let result = match binding {
                         Ok((route, config)) => {

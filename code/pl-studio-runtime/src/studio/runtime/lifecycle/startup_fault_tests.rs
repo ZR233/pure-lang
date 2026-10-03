@@ -136,7 +136,7 @@ async fn known_configuration_migration_and_cold_sessions_survive_initialization(
     let home = temp.path();
     let paths = seed(home).await?;
     let store = crate::config::ConfigStore::new(paths.config_paths());
-    let mut config = crate::config::StudioConfig::default_config();
+    let mut config = crate::config::StudioConfig::default_config().expect("bundled defaults");
     config.instructions.user = "preserved user instructions".into();
     store.save(&config)?;
     let mut value: toml::Value =

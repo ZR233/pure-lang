@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 10;
 
 /// 无敏感信息、可供 Web 与桌面端直接渲染的 Provider 目录快照。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
 pub struct ProviderCatalogSnapshot {
     pub schema_version: u32,
     pub revision: String,
@@ -15,7 +15,7 @@ pub struct ProviderCatalogSnapshot {
 }
 
 /// 一个可创建 Provider 实例的内置预设。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct ProviderPresetDescriptor {
     pub pricing_enabled: bool,
     pub id: String,
@@ -30,7 +30,7 @@ pub struct ProviderPresetDescriptor {
 }
 
 /// 无敏感信息的 Provider 外部服务能力。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct ProviderServiceCapabilitiesDescriptor {
     pub web_search: WebSearchProviderCapabilitiesDescriptor,
     #[serde(default)]
@@ -40,7 +40,7 @@ pub struct ProviderServiceCapabilitiesDescriptor {
 }
 
 /// UI 可直接渲染的 Web Search 服务能力。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct WebSearchProviderCapabilitiesDescriptor {
     pub hosted_responses: bool,
     pub hosted_dialect: String,
@@ -48,7 +48,7 @@ pub struct WebSearchProviderCapabilitiesDescriptor {
 }
 
 /// 当前角色 Web Search configured/effective 路径的无密钥投影。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct WebSearchResolutionDescriptor {
     pub configured_mode: String,
     pub effective_mode: String,
@@ -59,28 +59,28 @@ pub struct WebSearchResolutionDescriptor {
 }
 
 /// UI 可直接渲染的模型连接模式选项。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct ProviderConnectionModeDescriptor {
     pub id: String,
     pub display_name: String,
 }
 
 /// Provider 凭证输入提示；不包含真实 secret。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct CredentialDescriptorDto {
     pub label: String,
     pub env_var: Option<String>,
 }
 
 /// 一组共享同一 provider 模型语义的内置目录。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
 pub struct ModelCatalogDescriptor {
     pub id: String,
     pub models: Vec<ModelDescriptor>,
 }
 
 /// UI 和外部宿主需要的模型元数据投影。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
 pub struct ModelDescriptor {
     pub id: String,
     pub display_name: String,
@@ -95,7 +95,7 @@ pub struct ModelDescriptor {
 }
 
 /// UI 可直接渲染的模型 API 协议与连接策略。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct ModelTransportDescriptor {
     pub protocol: String,
     pub connection_modes: Vec<ProviderConnectionModeDescriptor>,
@@ -103,7 +103,7 @@ pub struct ModelTransportDescriptor {
 }
 
 /// UI 可直接判断的模型能力摘要。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct ModelCapabilitiesDto {
     pub input: Vec<ModelInputCapabilityDto>,
     pub output: Vec<ModelModalityDto>,
@@ -148,7 +148,7 @@ pub struct ModelInputCapabilityDto {
 }
 
 /// reasoning/effort 下拉的完整动态描述。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 pub struct ModelReasoningDescriptor {
     pub parameter: String,
     pub label: String,
@@ -157,7 +157,7 @@ pub struct ModelReasoningDescriptor {
 }
 
 /// Display projection of all applicable catalog price bands, per million tokens.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPricingDto {
     pub currency: String,
@@ -167,7 +167,7 @@ pub struct ModelPricingDto {
 }
 
 /// A complete display row; clients format these rates without calculating multipliers.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPriceTierDto {
     pub label: String,

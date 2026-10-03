@@ -106,7 +106,7 @@ pub struct StudioAgentDirectoryData {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioSettingsStateSnapshot {
-    pub state: ObservedResource<pl_protocol::studio::StudioSettings>,
+    pub state: ObservedResource<pl_protocol::studio::StudioSettingsSnapshot>,
 }
 
 /// 产品级会话费用与模型性能快照。

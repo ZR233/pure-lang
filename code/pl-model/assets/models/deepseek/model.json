@@ -316,6 +316,6 @@
     }
   ],
   "schemaVersion": 1,
-  "suggestedEffort": "low",
+  "suggestedEffort": "high",
   "suggestedModel": "deepseek-flash"
 }

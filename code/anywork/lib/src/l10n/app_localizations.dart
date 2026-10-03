@@ -4696,6 +4696,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Unrecoverable data was backed up and initial settings restored. Backup location:'**
   String get startupRecoveredNotice;
+
+  /// No description provided for @settingsModelCatalogRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh models'**
+  String get settingsModelCatalogRefresh;
+
+  /// No description provided for @settingsModelCatalogDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Bundled models'**
+  String get settingsModelCatalogDefault;
+
+  /// No description provided for @settingsModelCatalogCached.
+  ///
+  /// In en, this message translates to:
+  /// **'Last successful model list'**
+  String get settingsModelCatalogCached;
+
+  /// No description provided for @settingsModelCatalogOnline.
+  ///
+  /// In en, this message translates to:
+  /// **'Models from this provider'**
+  String get settingsModelCatalogOnline;
+
+  /// No description provided for @settingsModelCatalogChecked.
+  ///
+  /// In en, this message translates to:
+  /// **'Last checked'**
+  String get settingsModelCatalogChecked;
+
+  /// No description provided for @settingsModelCatalogFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not refresh models. The previous list is still available.'**
+  String get settingsModelCatalogFailed;
+
+  /// No description provided for @settingsModelCatalogCacheWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'The saved model list could not be loaded. Showing bundled models.'**
+  String get settingsModelCatalogCacheWarning;
+
+  /// No description provided for @settingsModelCatalogEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'This provider returned no models.'**
+  String get settingsModelCatalogEmpty;
 }
 
 class _AppLocalizationsDelegate

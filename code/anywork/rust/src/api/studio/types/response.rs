@@ -324,6 +324,7 @@ pub enum BridgeSettingsStateSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BridgeSettingsStateData {
+    pub model_catalog_revision: u64,
     pub settings: BridgeStudioSettingsDto,
 }
 

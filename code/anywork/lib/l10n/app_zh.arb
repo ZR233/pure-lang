@@ -961,5 +961,13 @@
   "startupBackingUp": "正在备份无法恢复的数据…",
   "startupResetting": "正在重建初始配置…",
   "startupServices": "正在启动服务…",
-  "startupRecoveredNotice": "已备份无法恢复的数据，并恢复初始配置。备份位置："
+  "startupRecoveredNotice": "已备份无法恢复的数据，并恢复初始配置。备份位置：",
+  "settingsModelCatalogRefresh": "刷新模型",
+  "settingsModelCatalogDefault": "内置模型列表",
+  "settingsModelCatalogCached": "上次成功的模型列表",
+  "settingsModelCatalogOnline": "供应商返回的模型列表",
+  "settingsModelCatalogChecked": "上次检查",
+  "settingsModelCatalogFailed": "模型刷新失败，继续使用原有列表。",
+  "settingsModelCatalogCacheWarning": "无法加载已保存的模型列表，当前使用内置列表。",
+  "settingsModelCatalogEmpty": "供应商未返回任何模型。"
 }

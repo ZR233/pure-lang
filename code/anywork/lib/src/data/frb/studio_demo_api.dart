@@ -2158,6 +2158,11 @@ class DemoStudioApi
   }
 
   @override
+  Future<SettingsStateSnapshot> refreshModelCatalog(String providerId) async {
+    throw UnsupportedError('Model discovery is unavailable in demo mode');
+  }
+
+  @override
   Future<SettingsStateSnapshot> saveRuntimePermissionMode(
     int expectedSettingsRevision,
     PermissionMode mode,

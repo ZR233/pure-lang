@@ -447,7 +447,7 @@ impl StudioRuntime {
             effort,
         )?;
         config.mode_model_routes.insert(mode, next_route);
-        config.validate()?;
+        config.validate_declarations()?;
         Ok(self.config_runtime.replace(current.revision, config)?)
     }
 
@@ -478,7 +478,7 @@ impl StudioRuntime {
             effort,
         )?;
         config.models.routes.insert(role.id(), next_route);
-        config.validate()?;
+        config.validate_declarations()?;
         Ok(self.config_runtime.replace(current.revision, config)?)
     }
 }

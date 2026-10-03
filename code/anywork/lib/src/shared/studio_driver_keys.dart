@@ -40,6 +40,7 @@ abstract final class StudioDriverKeys {
   static const model = ValueKey<String>('model-selector');
   static const reasoningEffort = ValueKey<String>('reasoning-effort-selector');
   static const providerUsageCheck = ValueKey<String>('provider-usage-check');
+  static const modelCatalogRefresh = ValueKey<String>('model-catalog-refresh');
   static const skillsDiscover = ValueKey<String>('skills-discover');
   static const mcpRefresh = ValueKey<String>('mcp-refresh');
   static const mcpResetAll = ValueKey<String>('mcp-reset-all');

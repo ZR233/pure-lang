@@ -287,6 +287,9 @@ impl StudioRuntime {
                 .observe_persistence(writer.subscribe_state()),
         ));
         self.start_model_refresh().await;
+        self.start_model_catalog_probes()
+            .await
+            .map_err(|error| internal("start_model_catalogs", error))?;
         self.start_tool_refresh().await;
         self.start_mcp_health_watcher().await;
         self.start_lsp_state_watcher().await;
@@ -305,6 +308,7 @@ impl StudioRuntime {
     }
 
     async fn dispose_startup(&self) -> Result<(), StudioStartupError> {
+        let catalogs = self.stop_model_catalog_probes().await;
         // All independent cleanup runs even when one task reports an error.
         let results = tokio::join!(
             self.stop_recovery_scan(),
@@ -324,6 +328,7 @@ impl StudioRuntime {
             None => Ok(()),
         };
         let storage = self.store.close().await;
+        catalogs.map_err(|error| internal("stop_model_catalogs", error))?;
         for result in [
             results.0, results.1, results.2, results.3, results.4, results.5,
         ] {

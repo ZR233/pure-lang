@@ -6,6 +6,7 @@ import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
 import 'settings_provider_model_readout.dart';
 import 'settings_provider_usage.dart';
+import 'settings_model_catalog.dart';
 
 class ProviderDetails extends StatelessWidget {
   const ProviderDetails({
@@ -17,6 +18,8 @@ class ProviderDetails extends StatelessWidget {
     required this.onBack,
     required this.onEdit,
     required this.onRefreshUsage,
+    required this.onRefreshCatalog,
+    required this.catalogRefreshing,
   });
 
   final ProviderSettingsView? provider;
@@ -26,6 +29,8 @@ class ProviderDetails extends StatelessWidget {
   final VoidCallback onBack;
   final ValueChanged<ProviderSettingsView> onEdit;
   final VoidCallback? onRefreshUsage;
+  final VoidCallback? onRefreshCatalog;
+  final bool catalogRefreshing;
 
   @override
   Widget build(BuildContext context) {
@@ -126,6 +131,14 @@ class ProviderDetails extends StatelessWidget {
         SettingsSectionPanel(
           title: context.l10n.settingsProviderModelsTitle,
           children: [
+            if (provider.modelCatalog.supported)
+              ModelCatalogReadout(
+                status: provider.modelCatalog,
+                refreshing: catalogRefreshing,
+                onRefresh: onRefreshCatalog,
+              ),
+            if (provider.allModels.isEmpty)
+              Text(context.l10n.settingsModelCatalogEmpty),
             for (final model in provider.allModels)
               ProviderModelReadout(
                 model: model,

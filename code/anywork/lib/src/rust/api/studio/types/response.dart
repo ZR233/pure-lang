@@ -783,18 +783,23 @@ class BridgeSessionCostSnapshot {
 }
 
 class BridgeSettingsStateData {
+  final BigInt modelCatalogRevision;
   final BridgeStudioSettingsDto settings;
 
-  const BridgeSettingsStateData({required this.settings});
+  const BridgeSettingsStateData({
+    required this.modelCatalogRevision,
+    required this.settings,
+  });
 
   @override
-  int get hashCode => settings.hashCode;
+  int get hashCode => modelCatalogRevision.hashCode ^ settings.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeSettingsStateData &&
           runtimeType == other.runtimeType &&
+          modelCatalogRevision == other.modelCatalogRevision &&
           settings == other.settings;
 }
 

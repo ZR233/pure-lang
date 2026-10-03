@@ -10,6 +10,7 @@ pub struct BundledModelDefinition {
     pub schema_version: u32,
     pub catalog: String,
     pub suggested_model: String,
+    /// Initial route recommendation, independent of the model's weakest default effort.
     pub suggested_effort: Option<String>,
     pub models: Vec<ModelInfo>,
 }
@@ -59,7 +60,12 @@ impl BundledModelDefinition {
             .iter()
             .find(|m| m.slug == definition.suggested_model)
             .ok_or(ModelDefinitionError::Recommendation)?;
-        if definition.suggested_effort != suggested.default_effort() {
+        let supported_efforts = suggested.supported_efforts();
+        let valid_recommendation = match &definition.suggested_effort {
+            Some(effort) => supported_efforts.contains(effort),
+            None => supported_efforts.is_empty(),
+        };
+        if !valid_recommendation {
             return Err(ModelDefinitionError::Recommendation);
         }
         Ok(definition)

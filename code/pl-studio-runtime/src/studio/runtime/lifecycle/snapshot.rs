@@ -14,7 +14,24 @@ impl StudioRuntime {
                 state: pl_protocol::ObservedResource::ready(
                     canonical.revision,
                     canonical.updated_at,
-                    canonical.settings,
+                    canonical,
+                ),
+            },
+        );
+        Ok(())
+    }
+
+    pub(in crate::studio::runtime) fn publish_model_catalog_state(
+        &self,
+        settings: ConfigRuntimeSnapshot,
+    ) -> Result<()> {
+        let canonical = super::super::settings_api::settings_snapshot(settings)?;
+        self.agent_facility.product_events.emit_settings_state(
+            crate::StudioSettingsStateSnapshot {
+                state: pl_protocol::ObservedResource::ready(
+                    canonical.revision,
+                    canonical.updated_at,
+                    canonical,
                 ),
             },
         );

@@ -10,7 +10,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'settings.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `bridge_input_source`, `bridge_modality`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`
 
 /// Provider 配置中由用户定义的模型，不复制内置 catalog 元数据。
 class BridgeCustomModelSettingsDto {
@@ -345,6 +345,8 @@ class BridgeModelCapabilities {
           freeformTools == other.freeformTools;
 }
 
+enum BridgeModelCatalogCacheWarning { read, schema, identity, declaration }
+
 class BridgeModelCatalogDescriptor {
   final String id;
   final List<BridgeModelDescriptor> models;
@@ -361,6 +363,80 @@ class BridgeModelCatalogDescriptor {
           runtimeType == other.runtimeType &&
           id == other.id &&
           models == other.models;
+}
+
+@freezed
+sealed class BridgeModelCatalogError with _$BridgeModelCatalogError {
+  const BridgeModelCatalogError._();
+
+  const factory BridgeModelCatalogError.unsupported() =
+      BridgeModelCatalogError_Unsupported;
+  const factory BridgeModelCatalogError.configuration() =
+      BridgeModelCatalogError_Configuration;
+  const factory BridgeModelCatalogError.timeout() =
+      BridgeModelCatalogError_Timeout;
+  const factory BridgeModelCatalogError.transport({int? httpStatus}) =
+      BridgeModelCatalogError_Transport;
+  const factory BridgeModelCatalogError.http({required int status}) =
+      BridgeModelCatalogError_Http;
+  const factory BridgeModelCatalogError.tooLarge() =
+      BridgeModelCatalogError_TooLarge;
+  const factory BridgeModelCatalogError.protocol() =
+      BridgeModelCatalogError_Protocol;
+  const factory BridgeModelCatalogError.cacheIdentity() =
+      BridgeModelCatalogError_CacheIdentity;
+  const factory BridgeModelCatalogError.unexpectedNotModified() =
+      BridgeModelCatalogError_UnexpectedNotModified;
+  const factory BridgeModelCatalogError.cacheWrite() =
+      BridgeModelCatalogError_CacheWrite;
+  const factory BridgeModelCatalogError.closing() =
+      BridgeModelCatalogError_Closing;
+  const factory BridgeModelCatalogError.stale() = BridgeModelCatalogError_Stale;
+}
+
+enum BridgeModelCatalogSource { default_, cached, online }
+
+class BridgeModelCatalogStatusDto {
+  final bool supported;
+  final BridgeModelCatalogSource source;
+  final bool probing;
+  final PlatformInt64? lastSuccessAt;
+  final PlatformInt64? checkedAt;
+  final BridgeModelCatalogError? error;
+  final BridgeModelCatalogCacheWarning? cacheWarning;
+
+  const BridgeModelCatalogStatusDto({
+    required this.supported,
+    required this.source,
+    required this.probing,
+    this.lastSuccessAt,
+    this.checkedAt,
+    this.error,
+    this.cacheWarning,
+  });
+
+  @override
+  int get hashCode =>
+      supported.hashCode ^
+      source.hashCode ^
+      probing.hashCode ^
+      lastSuccessAt.hashCode ^
+      checkedAt.hashCode ^
+      error.hashCode ^
+      cacheWarning.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelCatalogStatusDto &&
+          runtimeType == other.runtimeType &&
+          supported == other.supported &&
+          source == other.source &&
+          probing == other.probing &&
+          lastSuccessAt == other.lastSuccessAt &&
+          checkedAt == other.checkedAt &&
+          error == other.error &&
+          cacheWarning == other.cacheWarning;
 }
 
 /// Provider 实例对 canonical catalog 模型的连接方式覆盖。
@@ -756,6 +832,8 @@ class BridgeProviderServiceCapabilitiesDescriptor {
 
 /// 不含 secret 的 Provider canonical 设置视图。
 class BridgeProviderSettingsDto {
+  final List<BridgeModelDescriptor> effectiveModels;
+  final BridgeModelCatalogStatusDto modelCatalog;
   final bool pricingEnabled;
   final String id;
   final String templateKind;
@@ -776,6 +854,8 @@ class BridgeProviderSettingsDto {
   final String? catalogId;
 
   const BridgeProviderSettingsDto({
+    required this.effectiveModels,
+    required this.modelCatalog,
     required this.pricingEnabled,
     required this.id,
     required this.templateKind,
@@ -798,6 +878,8 @@ class BridgeProviderSettingsDto {
 
   @override
   int get hashCode =>
+      effectiveModels.hashCode ^
+      modelCatalog.hashCode ^
       pricingEnabled.hashCode ^
       id.hashCode ^
       templateKind.hashCode ^
@@ -822,6 +904,8 @@ class BridgeProviderSettingsDto {
       identical(this, other) ||
       other is BridgeProviderSettingsDto &&
           runtimeType == other.runtimeType &&
+          effectiveModels == other.effectiveModels &&
+          modelCatalog == other.modelCatalog &&
           pricingEnabled == other.pricingEnabled &&
           id == other.id &&
           templateKind == other.templateKind &&

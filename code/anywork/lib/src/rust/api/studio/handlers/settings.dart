@@ -41,6 +41,12 @@ Future<BridgeSettingsStateSnapshot> saveDeepseekWebSearchSettings({
 Future<BridgeSettingsStateSnapshot> readSettingsState() =>
     RustLib.instance.api.crateApiStudioHandlersSettingsReadSettingsState();
 
+Future<BridgeSettingsStateSnapshot> refreshModelCatalog({
+  required String providerId,
+}) => RustLib.instance.api.crateApiStudioHandlersSettingsRefreshModelCatalog(
+  providerId: providerId,
+);
+
 Future<BridgeSettingsStateSnapshot> reloadSettingsFromDisk({
   required BigInt expectedSettingsRevision,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsReloadSettingsFromDisk(

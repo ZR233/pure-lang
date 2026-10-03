@@ -274,11 +274,17 @@ pub(crate) fn valid_discovery_transport(
     let expected = discovery_transport(adapter);
     profile.protocol == expected.protocol
         && profile.default_connection_mode == expected.default_connection_mode
-        && profile.supported_connection_modes.len() == expected.supported_connection_modes.len()
-        && expected
+        && profile
+            .supported_connection_modes
+            .contains(&profile.default_connection_mode)
+        && profile
             .supported_connection_modes
             .iter()
-            .all(|mode| profile.supported_connection_modes.contains(mode))
+            .enumerate()
+            .all(|(index, mode)| {
+                expected.supported_connection_modes.contains(mode)
+                    && !profile.supported_connection_modes[..index].contains(mode)
+            })
 }
 
 fn query_transport_error(error: reqwest::Error) -> ModelCatalogQueryError {

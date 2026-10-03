@@ -1,3 +1,5 @@
+import 'model_catalog.dart';
+
 enum ModelModalityView { text, image, audio, video, file }
 
 enum ModelInputSourceView { local, remoteUrl }
@@ -219,6 +221,7 @@ class ProviderModelAutoCompactView {
 class ProviderSettingsView {
   const ProviderSettingsView({
     this.pricingEnabled = false,
+    this.modelCatalog = const ModelCatalogStatusView(),
     required this.id,
     this.templateKind = '',
     required this.name,
@@ -250,6 +253,7 @@ class ProviderSettingsView {
   });
 
   final bool pricingEnabled;
+  final ModelCatalogStatusView modelCatalog;
   final String id;
   final String templateKind;
   final String name;
@@ -280,10 +284,7 @@ class ProviderSettingsView {
   final String? iconKey;
 
   List<ProviderModelView> get allModels {
-    if (models.isNotEmpty) {
-      return models;
-    }
-    return [...defaultModels, ...customModels];
+    return models;
   }
 
   ProviderSettingsView withModelConnection(String slug, String mode) {
@@ -316,6 +317,7 @@ class ProviderSettingsView {
   }
 
   ProviderSettingsView copyWith({
+    ModelCatalogStatusView? modelCatalog,
     bool? pricingEnabled,
     String? id,
     String? templateKind,
@@ -347,6 +349,7 @@ class ProviderSettingsView {
     Object? iconKey = _providerSettingsUnset,
   }) {
     return ProviderSettingsView(
+      modelCatalog: modelCatalog ?? this.modelCatalog,
       pricingEnabled: pricingEnabled ?? this.pricingEnabled,
       id: id ?? this.id,
       templateKind: templateKind ?? this.templateKind,
@@ -504,18 +507,19 @@ ProviderSettingsView providerWithCatalogMetadata(
   ProviderCatalogView catalog,
 ) {
   final preset = catalog.preset(provider.templateKind);
-  final bundledModels = preset == null
-      ? const <ProviderModelView>[]
-      : catalog.modelsFor(preset.modelCatalogId);
   ProviderModelView applyConnectionMode(ProviderModelView model) =>
       model.copyWith(
         connectionMode:
             provider.modelConnectionModes[model.slug] ??
             model.defaultConnectionMode,
       );
-  final defaultModels = bundledModels.map(applyConnectionMode).toList();
+  final customSlugs = provider.customModels.map((model) => model.slug).toSet();
+  final defaultModels = provider.models
+      .where((model) => !customSlugs.contains(model.slug))
+      .map(applyConnectionMode)
+      .toList();
   final customModels = provider.customModels.map(applyConnectionMode).toList();
-  final effectiveModels = [...defaultModels, ...customModels];
+  final effectiveModels = provider.models.map(applyConnectionMode).toList();
   return provider.copyWith(
     subtitle: provider.subtitle.isEmpty && preset != null
         ? preset.description

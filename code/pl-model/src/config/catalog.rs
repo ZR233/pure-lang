@@ -1,15 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use pl_protocol::{
-    CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
-    ModelInputCapabilityDto, ModelInputSourceDto, ModelModalityDto, ModelReasoningDescriptor,
-    ModelTransportDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION, ProviderCatalogSnapshot,
-    ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
-    ProviderServiceCapabilitiesDescriptor, PureError, Result,
+    CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelInputCapabilityDto,
+    ModelInputSourceDto, ModelModalityDto, ModelReasoningDescriptor, ModelTransportDescriptor,
+    PROVIDER_CATALOG_SCHEMA_VERSION, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
+    ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor, PureError, Result,
     WebSearchProviderCapabilitiesDescriptor,
 };
 
-use super::{ModelCatalogId, ProviderConfig, ProviderPresetId};
+use super::{ModelCatalogId, ModelDescriptor, ProviderConfig, ProviderPresetId};
 use crate::model::{
     ModelInfo, ModelModality, bundled_model_definition, default_models, mimo_default_model_slugs,
     zhipu_default_model_slugs, zhipu_responses_default_model_slugs, zhipu_responses_models,
@@ -371,7 +370,11 @@ fn connection_mode_label(mode: ProviderConnectionMode) -> &'static str {
     }
 }
 
-fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
+/// Project a model into a secret-free display DTO shared by catalog and Settings snapshots.
+///
+/// This projection must not be used to resolve routes or write configuration: it omits
+/// runtime binding details. Unknown budgets and pricing remain `None`.
+pub fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
     let capabilities = &model.capabilities;
     let reasoning = model
         .effort_parameter()

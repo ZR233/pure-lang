@@ -13,13 +13,14 @@ use pl_protocol::ThreadModeId;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, CreateThreadRequest,
     ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest, OpenProjectRequest,
-    RenameThreadRequest, ResolveInteractionRequest, SearchSkillsRequest, SetModeModelRouteRequest,
-    SetModelRoleRequest, SetThreadModeRequest, SetThreadModelRouteRequest,
-    StudioAttachmentAdmissionContext, StudioAttachmentDraftSource, StudioError,
-    StudioSettingsSnapshot, SubmitPromptRequest, ThreadModelRouteUpdateResponse, ThreadPageQuery,
-    TimelinePageQuery, UpdateDeepSeekWebSearchSettingsRequest, UpdateGeneralSettingsRequest,
-    UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest, UpdatePermissionSettingsRequest,
-    UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest, UpdateWebSearchSettingsRequest,
+    RefreshModelCatalogRequest, RenameThreadRequest, ResolveInteractionRequest,
+    SearchSkillsRequest, SetModeModelRouteRequest, SetModelRoleRequest, SetThreadModeRequest,
+    SetThreadModelRouteRequest, StudioAttachmentAdmissionContext, StudioAttachmentDraftSource,
+    StudioError, StudioSettingsSnapshot, SubmitPromptRequest, ThreadModelRouteUpdateResponse,
+    ThreadPageQuery, TimelinePageQuery, UpdateDeepSeekWebSearchSettingsRequest,
+    UpdateGeneralSettingsRequest, UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest,
+    UpdatePermissionSettingsRequest, UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest,
+    UpdateWebSearchSettingsRequest,
 };
 use tokio::io::AsyncWriteExt;
 use utoipa::{IntoResponses, OpenApi};
@@ -146,6 +147,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(provider_catalog))
         .routes(routes!(read_settings))
         .routes(routes!(reload_settings))
+        .routes(routes!(refresh_model_catalog))
         .routes(routes!(save_web_search_settings))
         .routes(routes!(save_deepseek_web_search_settings))
         .routes(routes!(save_permission_settings))
@@ -739,6 +741,20 @@ async fn reload_settings(
         state
             .runtime
             .reload_settings(request.expected_revision)
+            .await
+            .map_err(ApiError::from)?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/settings/model-catalog/refresh", operation_id = "settings.refreshModelCatalog", request_body = RefreshModelCatalogRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
+async fn refresh_model_catalog(
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<RefreshModelCatalogRequest>,
+) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .refresh_model_catalog(request)
             .await
             .map_err(ApiError::from)?,
     ))

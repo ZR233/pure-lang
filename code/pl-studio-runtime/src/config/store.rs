@@ -111,7 +111,7 @@ impl ConfigStore {
 
     pub fn load_or_default(&self) -> Result<StudioConfig> {
         if self.config_absent()? {
-            let mut config = StudioConfig::default_config();
+            let mut config = StudioConfig::default_config()?;
             self.hydrate_credentials(&mut config)?;
             return Ok(config);
         }
@@ -130,7 +130,7 @@ impl ConfigStore {
     /// 也不替换为默认配置；已知 18/19 版本走数据保全式迁移路径。
     pub(crate) fn load_for_startup(&self) -> Result<StudioConfig> {
         if self.config_absent()? {
-            let mut config = StudioConfig::default_config();
+            let mut config = StudioConfig::default_config()?;
             self.hydrate_credentials(&mut config)?;
             return Ok(config);
         }
@@ -217,7 +217,7 @@ impl ConfigStore {
             (ThreadModeId::task(), planner_route),
         ]);
         config.schema_version = super::STUDIO_CONFIG_SCHEMA_VERSION;
-        config.validate()?;
+        config.validate_declarations()?;
         let persisted = serialize_persisted_config(&config)?;
         // Provider identities do not change. Read credentials before committing; never rewrite them.
         self.hydrate_credentials(&mut config)?;
@@ -242,7 +242,7 @@ impl ConfigStore {
     }
 
     pub fn save(&self, config: &StudioConfig) -> Result<()> {
-        config.validate()?;
+        config.validate_declarations()?;
         let persisted_provider_ids = self.persisted_provider_ids()?;
         let content = serialize_persisted_config(config)?;
         fs::create_dir_all(self.paths.config_dir())?;
@@ -263,7 +263,7 @@ impl ConfigStore {
                 self.paths.config_file().display()
             )));
         }
-        let config = StudioConfig::default_config();
+        let config = StudioConfig::default_config()?;
         self.save(&config)?;
         Ok(config)
     }
@@ -363,7 +363,7 @@ fn parse_startup_config(content: &[u8]) -> Result<StudioConfig> {
 fn parse_config(content: &str) -> Result<StudioConfig> {
     let config = parse_typed_config(content)?;
     reject_inline_credentials(&config)?;
-    config.validate()?;
+    config.validate_declarations()?;
     Ok(config)
 }
 

@@ -16,7 +16,7 @@ pub(crate) fn bridge_settings_snapshot(
     super::runtime::bridge_settings_state(pl_protocol::ObservedResource::ready(
         snapshot.revision,
         snapshot.updated_at,
-        snapshot.settings,
+        snapshot,
     ))
 }
 
@@ -29,6 +29,12 @@ pub(crate) fn bridge_settings(
             .providers
             .into_iter()
             .map(|provider| BridgeProviderSettingsDto {
+                effective_models: provider
+                    .effective_models
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                model_catalog: provider.model_catalog.into(),
                 pricing_enabled: provider.pricing_enabled,
                 id: provider.id,
                 template_kind: provider.template_kind,

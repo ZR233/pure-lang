@@ -38,6 +38,24 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
   bool _showDetails = false;
   bool _saving = false;
   String? _draftError;
+  String? _refreshingCatalog;
+
+  Future<void> _refreshCatalog(String providerId) async {
+    setState(() => _refreshingCatalog = providerId);
+    try {
+      await ref
+          .read(studioControllerProvider.notifier)
+          .refreshModelCatalog(providerId);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.settingsModelCatalogFailed)),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _refreshingCatalog = null);
+    }
+  }
 
   @override
   void didUpdateWidget(covariant ProvidersTab oldWidget) {
@@ -109,6 +127,10 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       usageError: selected == null ? null : usageState?.errorFor(selected.id),
       onBack: () => setState(() => _showDetails = false),
       onEdit: _startEdit,
+      catalogRefreshing: selected != null && _refreshingCatalog == selected.id,
+      onRefreshCatalog: selected == null
+          ? null
+          : () => _refreshCatalog(selected.id),
       onRefreshUsage: selected == null
           ? null
           : () => _refreshUsages(providerId: selected.id),

@@ -10,6 +10,7 @@ mod credential;
 mod execution;
 pub mod mcp;
 pub use execution::RuntimeConfig;
+pub(crate) mod model_catalog;
 mod runtime;
 mod store;
 
@@ -50,7 +51,6 @@ pub const STUDIO_CONFIG_DIR_NAME: &str = ".anywork";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 
 const DEFAULT_PROVIDER_ID: &str = "deepseek";
-const DEFAULT_MODEL_ID: &str = "deepseek-flash";
 const STUDIO_USER_SKILLS_DIR: &str = "~/.anywork/skills";
 const STUDIO_CHILD_ROLES: [&str; 4] = ["explorer", "executor", "worktree_executor", "reviewer"];
 
@@ -226,14 +226,15 @@ pub struct StudioConfig {
 }
 
 impl StudioConfig {
-    pub fn default_config() -> Self {
+    pub fn default_config() -> Result<Self> {
+        let definition = pl_model::model::bundled_model_definition(DEFAULT_PROVIDER_ID)?;
         let provider_id =
             ProviderId::new(DEFAULT_PROVIDER_ID).expect("Studio 内置 provider id 必须有效");
         let provider = ProviderConfig::deepseek_preset();
         let route = ModelRouteConfig {
             provider: provider_id.clone(),
-            model: DEFAULT_MODEL_ID.to_string(),
-            effort: Some(ReasoningEffort::new("high")),
+            model: definition.suggested_model,
+            effort: definition.suggested_effort.map(ReasoningEffort::new),
         };
         let routes = STUDIO_CHILD_ROLES
             .into_iter()
@@ -249,7 +250,7 @@ impl StudioConfig {
             ..SkillsConfig::default()
         };
 
-        Self {
+        Ok(Self {
             schema_version: STUDIO_CONFIG_SCHEMA_VERSION,
             models: AgentModelConfig {
                 providers: BTreeMap::from([(provider_id, provider)]),
@@ -268,17 +269,27 @@ impl StudioConfig {
             mcp: StudioMcpConfig::default(),
             lsp: StudioLspConfig::default(),
             ui: StudioUiConfig::default(),
-        }
+        })
     }
 
     pub fn validate(&self) -> Result<()> {
+        self.validate_declarations()?;
+        self.models.validate()?;
+        for route in self.mode_model_routes.values() {
+            self.models.resolve_route(StudioRole::Planner.id(), route)?;
+        }
+        Ok(())
+    }
+
+    /// Validates desired integrity while retaining externally unavailable selections.
+    pub fn validate_declarations(&self) -> Result<()> {
         if self.schema_version != STUDIO_CONFIG_SCHEMA_VERSION {
             return Err(PureError::ConfigError(format!(
                 "unsupported Studio config schema version: {}",
                 self.schema_version
             )));
         }
-        self.models.validate()?;
+        self.models.validate_declarations()?;
         if let Some(profile_id) = self
             .disabled_system_agents
             .iter()
@@ -289,7 +300,11 @@ impl StudioConfig {
             )));
         }
         for role in STUDIO_CHILD_ROLES {
-            self.models.resolve(&AgentRoleId::new(role)?)?;
+            let role = AgentRoleId::new(role)?;
+            let route = self.models.routes.get(&role).ok_or_else(|| {
+                PureError::ConfigError(format!("missing model route for role: {role}"))
+            })?;
+            self.models.route_availability(route)?;
         }
         if let Some(role) = self.models.routes.keys().find(|role| {
             !STUDIO_CHILD_ROLES
@@ -307,14 +322,8 @@ impl StudioConfig {
                 "mode_model_routes must define mode.simple and mode.task".to_string(),
             ));
         }
-        for (mode, route) in &self.mode_model_routes {
-            self.models
-                .resolve_route(StudioRole::Planner.id(), route)
-                .map_err(|error| {
-                    PureError::ConfigError(format!(
-                        "invalid model route for Thread Mode {mode}: {error}"
-                    ))
-                })?;
+        for route in self.mode_model_routes.values() {
+            self.models.route_availability(route)?;
         }
         pl_tool::skill::validate_skills_config(&self.skills)?;
         crate::config::mcp::validate_mcp_servers(&self.mcp.servers)?;
@@ -342,12 +351,6 @@ impl StudioConfig {
     ) -> Result<pl_model::config::ResolvedModelRoute> {
         self.models
             .resolve_route(StudioRole::Planner.id(), self.mode_model_route(mode)?)
-    }
-}
-
-impl Default for StudioConfig {
-    fn default() -> Self {
-        Self::default_config()
     }
 }
 

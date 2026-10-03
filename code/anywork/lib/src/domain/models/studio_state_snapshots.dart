@@ -170,6 +170,7 @@ abstract class ObservedStateSnapshot<T> {
 
 class SettingsStateData {
   const SettingsStateData({
+    this.modelCatalogRevision = 0,
     this.providers = const [],
     this.defaultProviderId,
     this.modeModelRoutes = const [],
@@ -182,6 +183,7 @@ class SettingsStateData {
     this.deepSeekWebSearch = const DeepSeekWebSearchSettingsView(),
     this.permissionMode = PermissionMode.requestApproval,
   });
+  final int modelCatalogRevision;
   final List<ProviderSettingsView> providers;
   final String? defaultProviderId;
   final List<ModeModelRouteView> modeModelRoutes;
@@ -210,11 +212,13 @@ class SettingsStateSnapshot extends ObservedStateSnapshot<SettingsStateData> {
         const DeepSeekWebSearchSettingsView(),
     PermissionMode permissionMode = PermissionMode.requestApproval,
     int revision = 0,
+    int modelCatalogRevision = 0,
   }) : state = ReadyObservedResource<SettingsStateData>(
          revision: revision,
          updatedAt: 0,
          lastCheckedAt: null,
          value: SettingsStateData(
+           modelCatalogRevision: modelCatalogRevision,
            providers: providers,
            defaultProviderId: defaultProviderId,
            modeModelRoutes: modeModelRoutes,
@@ -234,6 +238,7 @@ class SettingsStateSnapshot extends ObservedStateSnapshot<SettingsStateData> {
   @override
   final ObservedResource<SettingsStateData> state;
   SettingsStateData get _data => state.value ?? const SettingsStateData();
+  int get modelCatalogRevision => _data.modelCatalogRevision;
   List<ProviderSettingsView> get providers => _data.providers;
   String? get defaultProviderId => _data.defaultProviderId;
   List<ModeModelRouteView> get modeModelRoutes => _data.modeModelRoutes;

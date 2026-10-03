@@ -84,6 +84,7 @@ impl StudioRuntime {
             thread_observations,
             settings_updates,
             settings_refresh: Default::default(),
+            model_catalog_tasks: Default::default(),
             tool_refresh: Default::default(),
             rejected_tools: Default::default(),
             tool_catalog_updates: Default::default(),

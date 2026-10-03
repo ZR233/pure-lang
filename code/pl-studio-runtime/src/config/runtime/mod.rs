@@ -1,10 +1,16 @@
+mod catalog;
+
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::studio::unix_seconds;
 use crate::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
+use super::model_catalog::{self, Observation};
 use super::{ConfigStore, StudioConfig};
+use pl_model::config::ProviderId;
+use pl_protocol::studio::StudioModelCatalogStatus;
+use std::collections::BTreeMap;
 
 /// Settings desired state 的唯一进程内 owner。
 ///
@@ -13,7 +19,21 @@ use super::{ConfigStore, StudioConfig};
 pub struct ConfigRuntime {
     store: ConfigStore,
     command_lock: Arc<Mutex<()>>,
-    state: Arc<RwLock<ConfigRuntimeSnapshot>>,
+    state: Arc<RwLock<RuntimeState>>,
+    catalog_updates: tokio::sync::broadcast::Sender<CatalogChange>,
+}
+
+struct RuntimeState {
+    desired: StudioConfig,
+    snapshot: ConfigRuntimeSnapshot,
+    observations: BTreeMap<ProviderId, Observation>,
+    closing: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct CatalogChange {
+    pub snapshot: ConfigRuntimeSnapshot,
+    pub affected: Vec<ProviderId>,
 }
 
 /// 已校验 Studio 配置及其单调 revision。
@@ -21,6 +41,8 @@ pub struct ConfigRuntime {
 #[serde(rename_all = "camelCase")]
 pub struct ConfigRuntimeSnapshot {
     pub revision: u64,
+    pub model_catalog_revision: u64,
+    pub model_catalogs: BTreeMap<ProviderId, StudioModelCatalogStatus>,
     pub updated_at: i64,
     pub config: StudioConfig,
 }
@@ -70,15 +92,27 @@ impl From<ConfigRuntimeError> for PureError {
 impl ConfigRuntime {
     /// 从磁盘加载并校验初始 desired config。
     pub fn initialize(store: ConfigStore) -> ConfigRuntimeResult<Self> {
-        let config = store.load_for_startup()?;
+        let desired = store.load_for_startup()?;
+        let observations = model_catalog::reconcile(store.paths(), &desired, &BTreeMap::new())?;
+        let config = model_catalog::effective(&desired, &observations)?;
+        config.validate_declarations()?;
         super::AgentProfileCatalog::validate_for_startup(store.paths(), &config)?;
+        let (catalog_updates, _) = tokio::sync::broadcast::channel(64);
         Ok(Self {
             store,
             command_lock: Arc::new(Mutex::new(())),
-            state: Arc::new(RwLock::new(ConfigRuntimeSnapshot {
-                revision: 1,
-                updated_at: unix_seconds(),
-                config,
+            catalog_updates,
+            state: Arc::new(RwLock::new(RuntimeState {
+                desired,
+                closing: false,
+                snapshot: ConfigRuntimeSnapshot {
+                    revision: 1,
+                    model_catalog_revision: 1,
+                    model_catalogs: statuses(&observations),
+                    updated_at: unix_seconds(),
+                    config,
+                },
+                observations,
             })),
         })
     }
@@ -87,7 +121,7 @@ impl ConfigRuntime {
     pub fn read(&self) -> ConfigRuntimeResult<ConfigRuntimeSnapshot> {
         self.state
             .read()
-            .map(|state| state.clone())
+            .map(|state| state.snapshot.clone())
             .map_err(|_| config_runtime_poisoned())
     }
 
@@ -160,9 +194,9 @@ impl ConfigRuntime {
         let next = ConfigRuntimeSnapshot {
             revision: current.revision.saturating_add(1),
             updated_at: unix_seconds(),
-            config: current.config,
+            ..current
         };
-        *state = next.clone();
+        state.snapshot = next.clone();
         Ok(next)
     }
 
@@ -187,18 +221,41 @@ impl ConfigRuntime {
             .map_err(|_| config_runtime_poisoned())?;
         let current = self.read()?;
         ensure_revision(expected_revision, current.revision)?;
-        let next_config = edit(&current.config)?;
-        next_config.validate()?;
+        let (desired, observations) = {
+            let state = self.state.read().map_err(|_| config_runtime_poisoned())?;
+            if state.closing {
+                return Err(PureError::ConfigError("settings owner is closing".into()).into());
+            }
+            (state.desired.clone(), state.observations.clone())
+        };
+        let mut next_config = edit(&desired)?;
+        for provider in next_config.models.providers.values_mut() {
+            provider.clear_model_catalog_overlay();
+        }
+        let next_observations =
+            model_catalog::reconcile(self.store.paths(), &next_config, &observations)?;
+        let effective = model_catalog::effective(&next_config, &next_observations)?;
+        effective.validate_declarations()?;
+        validate_changed_selections(&desired, &effective)?;
 
         // 文件和 credential IO 不持有 state lock；command lock 只负责串行化 Settings 命令。
         self.store.save(&next_config)?;
 
         let next = ConfigRuntimeSnapshot {
             revision: current.revision.saturating_add(1),
+            model_catalog_revision: current.model_catalog_revision.saturating_add(u64::from(
+                statuses(&next_observations) != current.model_catalogs
+                    || effective.models.providers != current.config.models.providers,
+            )),
+            model_catalogs: statuses(&next_observations),
             updated_at: unix_seconds(),
-            config: next_config,
+            config: effective,
         };
-        *self.state.write().map_err(|_| config_runtime_poisoned())? = next.clone();
+        invalidate_observations(&observations, &next_observations);
+        let mut state = self.state.write().map_err(|_| config_runtime_poisoned())?;
+        state.desired = next_config;
+        state.observations = next_observations;
+        state.snapshot = next.clone();
         Ok(next)
     }
 
@@ -213,15 +270,102 @@ impl ConfigRuntime {
             .map_err(|_| config_runtime_poisoned())?;
         let current = self.read()?;
         ensure_revision(expected_revision, current.revision)?;
-        let config = self.store.load_or_default()?;
+        let desired = self.store.load_or_default()?;
+        let observations = self
+            .state
+            .read()
+            .map_err(|_| config_runtime_poisoned())?
+            .observations
+            .clone();
+        let next_observations =
+            model_catalog::reconcile(self.store.paths(), &desired, &observations)?;
+        let config = model_catalog::effective(&desired, &next_observations)?;
+        config.validate_declarations()?;
+        super::AgentProfileCatalog::validate_for_startup(self.store.paths(), &config)?;
         let next = ConfigRuntimeSnapshot {
             revision: current.revision.saturating_add(1),
+            model_catalog_revision: current.model_catalog_revision.saturating_add(1),
+            model_catalogs: statuses(&next_observations),
             updated_at: unix_seconds(),
             config,
         };
-        *self.state.write().map_err(|_| config_runtime_poisoned())? = next.clone();
+        invalidate_observations(&observations, &next_observations);
+        let mut state = self.state.write().map_err(|_| config_runtime_poisoned())?;
+        state.desired = desired;
+        state.observations = next_observations;
+        state.snapshot = next.clone();
         Ok(next)
     }
+}
+
+fn statuses(
+    observations: &BTreeMap<ProviderId, Observation>,
+) -> BTreeMap<ProviderId, StudioModelCatalogStatus> {
+    observations
+        .iter()
+        .map(|(id, observation)| (id.clone(), observation.status.clone()))
+        .collect()
+}
+
+fn invalidate_observations(
+    old: &BTreeMap<ProviderId, Observation>,
+    next: &BTreeMap<ProviderId, Observation>,
+) {
+    for (id, observation) in old {
+        if next
+            .get(id)
+            .is_none_or(|next| next.generation != observation.generation)
+        {
+            observation.cancellation.cancel();
+        }
+    }
+}
+
+fn validate_changed_selections(old: &StudioConfig, next: &StudioConfig) -> Result<()> {
+    for (role, route) in &next.models.routes {
+        if old.models.routes.get(role) != Some(route) {
+            next.models.resolve_route(role.clone(), route)?;
+        }
+    }
+    for (mode, route) in &next.mode_model_routes {
+        if old.mode_model_routes.get(mode) != Some(route) {
+            next.models
+                .resolve_route(super::StudioRole::Planner.id(), route)?;
+        }
+    }
+    for (id, provider) in &next.models.providers {
+        let models = provider.effective_models()?;
+        for (slug, mode) in provider.connection_overrides() {
+            if old
+                .models
+                .providers
+                .get(id)
+                .and_then(|old| old.connection_overrides().get(slug))
+                == Some(mode)
+            {
+                continue;
+            }
+            let model = models
+                .iter()
+                .find(|model| model.slug == *slug)
+                .ok_or_else(|| {
+                    PureError::ConfigError(
+                        "new connection override references unavailable model".into(),
+                    )
+                })?;
+            if !model
+                .binding
+                .transport
+                .supported_connection_modes
+                .contains(mode)
+            {
+                return Err(PureError::ConfigError(
+                    "new connection override is unsupported".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn ensure_revision(expected: u64, actual: u64) -> ConfigRuntimeResult<()> {

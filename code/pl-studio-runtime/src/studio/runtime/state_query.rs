@@ -52,7 +52,7 @@ impl StudioRuntime {
                 state: pl_protocol::ObservedResource::ready(
                     settings.revision,
                     settings.updated_at,
-                    settings.settings,
+                    settings,
                 ),
             },
             recovery,

@@ -1355,5 +1355,13 @@
   "startupBackingUp": "Backing up unrecoverable data…",
   "startupResetting": "Rebuilding initial settings…",
   "startupServices": "Starting services…",
-  "startupRecoveredNotice": "Unrecoverable data was backed up and initial settings restored. Backup location:"
+  "startupRecoveredNotice": "Unrecoverable data was backed up and initial settings restored. Backup location:",
+  "settingsModelCatalogRefresh": "Refresh models",
+  "settingsModelCatalogDefault": "Bundled models",
+  "settingsModelCatalogCached": "Last successful model list",
+  "settingsModelCatalogOnline": "Models from this provider",
+  "settingsModelCatalogChecked": "Last checked",
+  "settingsModelCatalogFailed": "Could not refresh models. The previous list is still available.",
+  "settingsModelCatalogCacheWarning": "The saved model list could not be loaded. Showing bundled models.",
+  "settingsModelCatalogEmpty": "This provider returned no models."
 }

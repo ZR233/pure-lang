@@ -86,6 +86,7 @@ SettingsStateSnapshot _settingsStateFromFrb(
   SettingsStateData convert(frb.BridgeSettingsStateData data) {
     final settings = data.settings;
     return SettingsStateData(
+      modelCatalogRevision: data.modelCatalogRevision.toInt(),
       providers: settings.providers.map(_providerSettingsFromFrb).toList(),
       defaultProviderId: settings.defaultProviderId,
       modeModelRoutes: settings.modeModelRoutes
