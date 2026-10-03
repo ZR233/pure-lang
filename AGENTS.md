@@ -35,6 +35,8 @@
 - 自动版本计算统一递增 minor，`fix:` 也不自动递增 patch；`!` / `BREAKING CHANGE:`
   不自动递增 major，但必须保留真实的破坏性变更标记和发行说明。发布契约见
   [发布与更新](design/23-release-update.md#231-版本与发布流)。
+- 普通 `docs:` / `chore:` 不进入发行说明，仅含这些提交的批次不触发 Release PR；
+  真实破坏性变更说明和显式 `Release-As` 人工版本决定不受普通分类隐藏影响。
 - major 只能在维护者明确决定后，用最终落入 `main` 的提交正文 `Release-As: x.y.z`
   指定目标稳定版本。例如 subject 为 `chore(studio): release 7.0.0`，正文为
   `Release-As: 7.0.0`；这只是操作示例，不授权 agent 自行提交或选择大版本。
