@@ -54,8 +54,12 @@ Release 状态修改。解析 draft 时，其页面必须是同仓库生成的 u
 稳定 Release 固定包含：Windows 安装器与便携包、各自的 `.minisig` 签名、`latest.json`
 更新清单与 `SHA256SUMS.txt`。发布不执行 crate 发布，GitHub Release 是唯一正式分发渠道。
 Flutter 版本由 workflow 固定；Rust toolchain 由仓库统一固定，本地构建、质量检查、RC 与正式
-发布使用同一版本，Flutter 检查中的 Rust 生成工具也遵循该约束。第三方 Action 固定到完整
-commit SHA，并使用最小 token 权限、单实例 concurrency 与 build provenance attestation。
+发布使用同一版本，Flutter 检查中的 Rust 生成工具也遵循该约束。恢复旧 draft 时，publisher
+从不可变 tag 提交的 `rust-toolchain.toml` 读取精确稳定版本；引入该文件前的 tag 则读取该
+提交 publisher workflow 的一致精确版本。缺失、浮动或冲突的版本直接失败，不使用当前
+main 的工具链替代历史版本；helper、GUI 构建、签名与独立 verify 采用同一解析结果。
+第三方 Action 固定到完整 commit SHA，并使用最小 token 权限、单实例 concurrency 与
+build provenance attestation。
 
 ## 23.2 Windows 包边界
 
