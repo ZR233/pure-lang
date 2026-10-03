@@ -57,7 +57,7 @@ impl ToolWorkspace {
             WorkspaceMutability::ReadOnly => b"read-only",
             WorkspaceMutability::ReadWrite => b"read-write",
         });
-        match self.workspace.project_writable_paths() {
+        match self.workspace.writable_paths() {
             None => part(b"all-project-paths"),
             Some(paths) => {
                 part(b"selected-project-paths");

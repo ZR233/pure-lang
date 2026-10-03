@@ -29,6 +29,13 @@ review 默认 pending，由观察者阅读过程、结果和产物后另行记�
 设置 `ANYWORK_OBSERVATION_PROVIDER` 与 `ANYWORK_OBSERVATION_MODEL` 可在隔离副本中选择所有角色的模型；未选中的供应商不参与此次配置校验，原配置保持不变。
 可用真实任务观察 patch、LSP、跨轮历史、压缩与协作，不再维护固定通过标记。
 
+设置 `ANYWORK_OBSERVATION_WORKSPACE_MODE=worktree` 可创建临时 Git 仓库并通过正常 Studio
+命令启动 worktree 根会话；默认 `local` 保持普通隔离目录。worktree 场景可在任务中分别派发
+`executor`（带 workspace-relative `writablePaths`）与 `worktree_executor`，观察内置文件
+写入、patch、读取与越界拒绝。`root-thread.json`、各 Thread 的事件、timeline、Turn 与 snapshot
+以及 `workspace-path.txt` 指向的物理仓库共同构成证据；checkout 保留供检查，runtime 正常关闭。
+供应商选择会同步更新隔离配置的 root Mode 与 child 路由，不改用户配置或凭据。
+
 GUI 真实任务通过 `cargo xtask run-gui --driver` 启动，由观察者使用 Flutter Driver
 提交任务、查看流、截图和产物，并人工记录结论。自动 Rust 测试仅保留在
 `pl-core` 和 `pl-model` 两库；此处不再承诺配置迁移、恢复或

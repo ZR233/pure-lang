@@ -48,6 +48,11 @@ child 的 writablePaths 只约束内置 mutation 工具；worktree child 与会�
   workspace root 解析，不依赖进程 cwd。SSH `exec.cwd` 是例外，只接受 workspace-relative 路径，
   workspace 根目录使用 `.`。
 - 执行前统一解析为规范化绝对路径，并复用同一解析结果做审批预判和实际执行。
+- directory 的写目录相对该 Agent 实际 workspace root 解释，而不是 canonical Project
+  目录。本地写策略与文件解析使用相同的路径归一化，Windows 普通路径与等价 verbatim
+  路径不会因文本前缀不同被误拒绝；目录前缀仍按完整路径组件匹配。
+- 本地文件工具的 `cwd` 同样允许 workspace 内的绝对目录；confined 模式仍拒绝越界 cwd，
+  不通过截断或重解释越界路径放宽限制。SSH 保持仅接受 workspace-relative cwd。
 - 解析后路径必须位于 workspace root 内。
 - 越界拒绝覆盖 `..`、Windows drive-relative 路径、越界绝对路径、越界 UNC / verbatim 路径与符号
   链接越界；符号链接目标不可确认或越界时拒绝。

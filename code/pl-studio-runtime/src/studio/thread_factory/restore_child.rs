@@ -8,7 +8,7 @@ use crate::{
 };
 use pl_core::context::{OpaquePayload, ResourceAccess};
 use pl_model::config::{AgentRoleId, ModelRouteConfig};
-use pl_tool::workspace::{AgentWorkspace, ToolWorkspace};
+use pl_tool::workspace::ToolWorkspace;
 use std::{collections::BTreeMap, path::PathBuf};
 
 impl StudioThreadFactory {
@@ -133,26 +133,11 @@ impl StudioThreadFactory {
                 "saved child workspace has a different project root".into(),
             ));
         }
-        let workspace = match assignment.mode {
+        match assignment.mode {
             pl_protocol::AgentWorkspaceMode::Unrestricted
+            | pl_protocol::AgentWorkspaceMode::Directory
                 if std::path::Path::new(&assignment.root) == session_root
-                    && assignment.worktree.is_none() =>
-            {
-                AgentWorkspace::host_permitted(root, session_root, None)
-            }
-            pl_protocol::AgentWorkspaceMode::Directory
-                if std::path::Path::new(&assignment.root) == session_root
-                    && assignment.worktree.is_none() =>
-            {
-                AgentWorkspace::host_permitted(
-                    root,
-                    session_root,
-                    assignment
-                        .writable_paths
-                        .as_ref()
-                        .map(|paths| paths.iter().map(PathBuf::from).collect()),
-                )
-            }
+                    && assignment.worktree.is_none() => {}
             pl_protocol::AgentWorkspaceMode::Worktree => {
                 let receipt = assignment
                     .worktree
@@ -163,7 +148,6 @@ impl StudioThreadFactory {
                     })?;
                 self.ensure_restored_child_worktree(receipt, &thread, &project)
                     .await?;
-                AgentWorkspace::worktree(root, PathBuf::from(&receipt.path))
             }
             pl_protocol::AgentWorkspaceMode::Unrestricted
             | pl_protocol::AgentWorkspaceMode::Directory => {
@@ -171,12 +155,13 @@ impl StudioThreadFactory {
                     "invalid saved child workspace assignment".into(),
                 ));
             }
-        };
+        }
         if profile.workspace_mode != assignment.mode {
             return Err(ThreadAssemblyError::Identity(
                 "saved child Profile conflicts with its workspace assignment".into(),
             ));
         }
+        let workspace = super::child_resources::assigned_workspace(&assignment, workspace_mode);
 
         let resources = FileResourceStore::new(self.services.store.session_resources_dir(id));
         let prepared = self

@@ -34,6 +34,10 @@ child Profile 的工作区有三种模式，其中的 root 指该 child 所属�
   Project 仓库的 `HEAD`，不是父会话 worktree；主工作区未提交内容不复制过去，成果不会自动
   合并。
 
+根会话使用 `worktree` 时，共享会话 checkout 的 unrestricted/directory child 同样继承
+该会话的 Confined 路径边界；directory 再叠加目录写策略。创建、冷恢复与工具刷新必须保持
+同一边界，不能因 Profile 不独立创建 worktree 而恢复 host-permitted 访问。
+
 ## 12.2 用户 Profile 与系统预设
 
 用户 Profile 位于 Studio home 的 `agents/` 目录，默认路径是
@@ -108,10 +112,16 @@ root 与所有 child 共用可见进展合同：非平凡任务首次工具调�
 等待和阻塞时输出 1–3 句 commentary，说明已确认进展和下一步。长任务持续提供有信息量
 的更新，不为每批工具机械重复播报；隐藏推理和最终答复不替代执行期间的可见进展。
 
-`spawn_agent` 接收可选 `writablePaths`。只有 directory Profile 接受该字段：省略表示整个项目
-可写，空数组表示项目内只读；条目是项目相对目录前缀。runtime 拒绝绝对路径、`..`、非法分隔
+`spawn_agent` 接收可选 `writablePaths`。只有 directory Profile 接受该字段：省略表示整个工作区
+可写，空数组表示工作区内只读；条目是该 child 实际工作区相对目录前缀。runtime 拒绝绝对路径、
+`..`、非法分隔
 以及解析后越界或经过不安全 symlink 的路径，规范化和去重后冻结。其他模式传入该字段直接
 返回参数错误，避免形成虚假隔离预期。
+
+canonical Project 路径只标识项目，不充当 directory 写入的路径基准：本地与 SSH 的目标和
+可写目录均以实际 workspace root 判定；本地使用文件工具的安全路径解析统一 Windows
+路径表示及最近存在父目录，不要求被授权的新目录已存在。目录外写入仍拒绝，Project 主
+checkout 和其他会话/child checkout 不因此成为可写目录。
 
 模型可见的 `spawn_agent` schema 必须从本轮启用的 Profile 快照动态生成对象联合（oneOf），
 而不是在一个公共对象上暴露所有模式字段。每个分支以 `profileId` 常量绑定一个 Profile：

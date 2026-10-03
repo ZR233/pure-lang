@@ -49,33 +49,10 @@ impl LocalWorkspaceFileBackend {
         let Some(cwd) = cwd.filter(|cwd| !cwd.trim().is_empty() && *cwd != ".") else {
             return Ok(path.to_string());
         };
-        let cwd_ref = Path::new(cwd);
-        if self.paths.allows_host_access() {
-            return Ok(cwd_ref.join(path_ref).to_string_lossy().into_owned());
-        }
-        if cwd_ref.is_absolute() {
-            return Err(tool_error(
-                "file",
-                "cwd must be a workspace-relative path for local file tools",
-            ));
-        }
-        let mut joined = PathBuf::new();
-        for component in cwd_ref.components() {
-            match component {
-                std::path::Component::CurDir => {}
-                std::path::Component::Normal(part) => joined.push(part),
-                std::path::Component::ParentDir
-                | std::path::Component::RootDir
-                | std::path::Component::Prefix(_) => {
-                    return Err(tool_error(
-                        "file",
-                        "cwd must not escape the workspace for local file tools",
-                    ));
-                }
-            }
-        }
-        joined.push(path_ref);
-        Ok(joined.to_string_lossy().into_owned())
+        // Resolve the joined target through the same path policy as every other input.
+        // This accepts absolute cwd inside a confined checkout without relaxing escape
+        // or link checks, and still permits a missing relative directory for new files.
+        Ok(Path::new(cwd).join(path_ref).to_string_lossy().into_owned())
     }
 
     async fn resolve_existing(&self, cwd: Option<&str>, path: &str) -> Result<PathBuf> {

@@ -25,7 +25,7 @@ pub struct AgentSpawn {
     pub task_summary: AgentTaskSummary,
     /// Full self-contained task: goals, approved contract, facts, interfaces, steps, ownership and verification. No application length limit; include pseudocode when useful.
     pub message: String,
-    /// Optional project-relative write directories, accepted only by directory Profiles.
+    /// Optional workspace-relative write directories, accepted only by directory Profiles.
     pub writable_paths: Option<Vec<String>>,
     /// Product-owned creation metadata; never interpreted as framework permissions.
     #[serde(default)]

@@ -1,5 +1,5 @@
 //! Host-supplied workspace and file mutation boundaries.
-use super::path_policy::path_is_inside_workspace;
+use super::{ToolPathPolicy, path_policy::path_is_inside_workspace};
 use std::path::PathBuf;
 
 /// Agent workspace 是否允许宿主权限策略访问 root 之外的路径。
@@ -35,7 +35,7 @@ pub struct AgentWorkspace {
     project_root: PathBuf,
     boundary: WorkspaceBoundary,
     mutability: WorkspaceMutability,
-    project_writable_paths: Option<Vec<PathBuf>>,
+    writable_paths: Option<Vec<PathBuf>>,
 }
 
 impl AgentWorkspace {
@@ -46,7 +46,7 @@ impl AgentWorkspace {
 
     /// 构造仅由 Pure 内置文件 mutation 工具实施目录写策略的 workspace。
     ///
-    /// `None` 表示整个项目可写，`Some([])` 表示项目内只读。该策略不约束 shell、Git 或 MCP。
+    /// `None` 表示整个工作区可写，`Some([])` 表示工作区内只读。该策略不约束 shell、Git 或 MCP。
     pub fn directory(
         project_root: impl Into<PathBuf>,
         writable_paths: Option<Vec<PathBuf>>,
@@ -58,8 +58,8 @@ impl AgentWorkspace {
     /// 构造 root 与 canonical Project 路径分离的 host-permitted workspace。
     ///
     /// 会话工作区根（例如 `ThreadWorkspaceMode = worktree` 的会话自身 worktree）可能位于
-    /// canonical Project 路径之内：命令 cwd、Git 与 LSP 消费 `root`，而项目相对写策略与
-    /// 授权身份继续以 canonical `project_root` 为基准。`Confined` 边界仍只能用
+    /// canonical Project 路径之内：命令 cwd、Git、LSP 与目录写策略均消费 `root`，
+    /// `project_root` 只保留 canonical 项目身份。`Confined` 边界仍只能用
     /// [`Self::worktree`] 表达。
     pub fn host_permitted(
         project_root: impl Into<PathBuf>,
@@ -71,7 +71,7 @@ impl AgentWorkspace {
             project_root: project_root.into(),
             boundary: WorkspaceBoundary::HostPermitted,
             mutability: WorkspaceMutability::ReadWrite,
-            project_writable_paths: writable_paths,
+            writable_paths,
         }
     }
 
@@ -82,7 +82,7 @@ impl AgentWorkspace {
             project_root: project_root.into(),
             boundary: WorkspaceBoundary::Confined,
             mutability: WorkspaceMutability::ReadWrite,
-            project_writable_paths: None,
+            writable_paths: None,
         }
     }
 
@@ -93,7 +93,7 @@ impl AgentWorkspace {
             root,
             boundary: WorkspaceBoundary::Confined,
             mutability,
-            project_writable_paths: None,
+            writable_paths: None,
         }
     }
 
@@ -113,8 +113,15 @@ impl AgentWorkspace {
         &self.project_root
     }
 
-    pub fn project_writable_paths(&self) -> Option<&[PathBuf]> {
-        self.project_writable_paths.as_deref()
+    /// Overlays a directory mutation policy on this workspace's existing path boundary.
+    /// Paths are absolute directory prefixes within `root`; `None` permits all workspace paths.
+    pub fn with_writable_paths(mut self, paths: Option<Vec<PathBuf>>) -> Self {
+        self.writable_paths = paths;
+        self
+    }
+
+    pub fn writable_paths(&self) -> Option<&[PathBuf]> {
+        self.writable_paths.as_deref()
     }
 
     /// Validates a resolved write target against the assigned workspace boundary.
@@ -125,30 +132,27 @@ impl AgentWorkspace {
                 error: "agent workspace is read-only".to_string(),
             });
         }
-        let Some(writable_paths) = &self.project_writable_paths else {
+        let Some(writable_paths) = &self.writable_paths else {
             return Ok(());
         };
-        let project_root = dunce::canonicalize(&self.project_root).map_err(|error| {
-            pl_protocol::PureError::ToolExecutionFailed {
-                tool: "workspace".to_string(),
-                error: format!("failed to resolve Agent project root: {error}"),
-            }
-        })?;
-        if !path_is_inside_workspace(path, &project_root) {
+        let policy = ToolPathPolicy::new(self.root.clone(), false, "workspace")?;
+        if !path_is_inside_workspace(path, policy.root()) {
             return Ok(());
         }
-        let is_allowed = writable_paths.iter().any(|allowed| {
-            allowed
-                .strip_prefix(&self.project_root)
-                .is_ok_and(|relative| path_is_inside_workspace(path, &project_root.join(relative)))
-        });
-        if is_allowed {
-            return Ok(());
+        for allowed in writable_paths {
+            // Use the same physical resolver as file tools, including missing directories,
+            // Windows verbatim paths and link/reparse rejection. Textual strip_prefix on
+            // the canonical Project path cannot describe a session checkout's write scope.
+            let allowed =
+                policy.resolve_existing_or_parent_path(allowed, &allowed.to_string_lossy())?;
+            if path_is_inside_workspace(path, &allowed) {
+                return Ok(());
+            }
         }
         Err(pl_protocol::PureError::ToolExecutionFailed {
             tool: "workspace".to_string(),
             error: format!(
-                "project path '{}' is outside the directory Agent writablePaths boundary",
+                "workspace path '{}' is outside the directory Agent writablePaths boundary",
                 path.display()
             ),
         })
@@ -166,17 +170,17 @@ impl AgentWorkspace {
                 error: "agent workspace is read-only".to_string(),
             });
         }
-        let Some(writable_paths) = &self.project_writable_paths else {
+        let Some(writable_paths) = &self.writable_paths else {
             return Ok(());
         };
         let relative = normalize_workspace_relative_path(cwd, path)?;
-        let project_root = comparable_policy_path(&self.project_root);
+        let workspace_root = comparable_policy_path(&self.root);
         let target = if relative == "." {
-            project_root.clone()
-        } else if project_root == "/" {
+            workspace_root.clone()
+        } else if workspace_root == "/" {
             format!("/{relative}")
         } else {
-            format!("{project_root}/{relative}")
+            format!("{workspace_root}/{relative}")
         };
         let allowed = writable_paths.iter().any(|path| {
             let path = comparable_policy_path(path);
@@ -191,7 +195,7 @@ impl AgentWorkspace {
         Err(pl_protocol::PureError::ToolExecutionFailed {
             tool: "workspace".to_string(),
             error: format!(
-                "project path '{relative}' is outside the directory Agent writablePaths boundary"
+                "workspace path '{relative}' is outside the directory Agent writablePaths boundary"
             ),
         })
     }
@@ -207,7 +211,7 @@ fn normalize_workspace_relative_path(cwd: Option<&str>, path: &str) -> pl_protoc
         if source.starts_with('/') || source.contains('\\') {
             return Err(pl_protocol::PureError::ToolExecutionFailed {
                 tool: "workspace".to_string(),
-                error: "workspace mutation paths must be project-relative".to_string(),
+                error: "workspace mutation paths must be workspace-relative".to_string(),
             });
         }
         for component in source.split('/') {

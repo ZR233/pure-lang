@@ -62,23 +62,9 @@ impl StudioChildResources for StudioThreadFactory {
             .await
             .map_err(|error| resource_error("prepare child workspace", error))?;
         check_cancelled(request)?;
-        let workspace = ToolWorkspace::new(match assignment.mode {
-            pl_protocol::AgentWorkspaceMode::Unrestricted => {
-                AgentWorkspace::host_permitted(&assignment.project_root, &assignment.root, None)
-            }
-            pl_protocol::AgentWorkspaceMode::Directory => AgentWorkspace::host_permitted(
-                &assignment.project_root,
-                &assignment.root,
-                assignment
-                    .writable_paths
-                    .as_ref()
-                    .map(|paths| paths.iter().map(PathBuf::from).collect()),
-            ),
-            pl_protocol::AgentWorkspaceMode::Worktree => {
-                AgentWorkspace::worktree(&assignment.project_root, &assignment.root)
-            }
-        })
-        .with_lsp_runtime(Some(self.services.lsp_runtime.clone()));
+        let workspace =
+            ToolWorkspace::new(assigned_workspace(&assignment, root_thread.workspace_mode))
+                .with_lsp_runtime(Some(self.services.lsp_runtime.clone()));
         let store = FileResourceStore::new(self.services.store.session_resources_dir(&request.id));
         let prepared_tools = self
             .prepare_thread_tools(super::thread_tools::ThreadToolAssembly {
@@ -272,6 +258,29 @@ impl StudioChildResources for StudioThreadFactory {
                 .map_err(|error| resource_error("record abandoned child", error))?;
         }
         Ok(())
+    }
+}
+
+/// Creation and cold restoration share the session boundary and directory policy.
+pub(super) fn assigned_workspace(
+    assignment: &pl_protocol::AgentWorkspaceAssignmentSnapshot,
+    session_mode: pl_protocol::ThreadWorkspaceMode,
+) -> AgentWorkspace {
+    let writable_paths = if assignment.mode == pl_protocol::AgentWorkspaceMode::Directory {
+        assignment
+            .writable_paths
+            .as_ref()
+            .map(|paths| paths.iter().map(PathBuf::from).collect())
+    } else {
+        None
+    };
+    if session_mode == pl_protocol::ThreadWorkspaceMode::Worktree
+        || assignment.mode == pl_protocol::AgentWorkspaceMode::Worktree
+    {
+        AgentWorkspace::worktree(&assignment.project_root, &assignment.root)
+            .with_writable_paths(writable_paths)
+    } else {
+        AgentWorkspace::host_permitted(&assignment.project_root, &assignment.root, writable_paths)
     }
 }
 

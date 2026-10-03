@@ -44,10 +44,6 @@ impl ToolPathPolicy {
         policy
     }
 
-    pub(crate) fn allows_host_access(&self) -> bool {
-        self.allow_workspace_escape
-    }
-
     pub fn root(&self) -> &Path {
         &self.root_canonical
     }

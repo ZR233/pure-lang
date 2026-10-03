@@ -34,10 +34,6 @@ impl WorkspacePaths {
         }
     }
 
-    pub(crate) fn allows_host_access(&self) -> bool {
-        self.policy.allows_host_access()
-    }
-
     pub fn root(&self) -> &Path {
         self.policy.root()
     }
