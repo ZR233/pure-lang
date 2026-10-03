@@ -63,6 +63,8 @@ commit SHA，并使用最小 token 权限、单实例 concurrency 与 build prov
 完全一致，不接受带 `v`、prerelease 或 build metadata 的形式。stage 复用 GUI 构建生成
 per-user Inno Setup 安装器和便携 zip；安装器使用稳定 AppId，默认安装到 LocalAppData，
 声明 CloseApplications/RestartApplications。打包输入排除 PDB，包含 LICENSE 与第三方声明。
+打包的第三方声明读取 `code/pl-studio-runtime/THIRD_PARTY_NOTICES.md` 并放入 bundle 根目录；
+该源码文件与预置技能一起维护，不要求仓库根目录存在第二份声明。
 安装器的标准安装向导、错误提示与卸载界面支持英语和简体中文；首次安装根据系统界面语言
 选择默认语言，用户可以手动切换，后续安装沿用已保存的语言选择。简体中文资源随源码固定，
 本地与发布构建使用同一份翻译，不依赖编译器安装目录是否附带中文资源。

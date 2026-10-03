@@ -29,7 +29,7 @@ pub(super) fn stage(workspace_root: &Path, release_dir: &Path, version: &Version
     fs::copy(workspace_root.join("LICENSE"), bundle_dir.join("LICENSE"))
         .context("failed to add LICENSE to release bundle")?;
     fs::copy(
-        workspace_root.join("THIRD_PARTY_NOTICES.md"),
+        workspace_root.join("code/pl-studio-runtime/THIRD_PARTY_NOTICES.md"),
         bundle_dir.join("THIRD_PARTY_NOTICES.md"),
     )
     .context("failed to add third-party notices to release bundle")?;
