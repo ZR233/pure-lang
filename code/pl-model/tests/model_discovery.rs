@@ -141,7 +141,7 @@ async fn current_endpoint_prefix_query_auth_and_safe_identity_are_used() {
     assert!(!model.capabilities.temperature);
     assert!(!model.capabilities.tools.function_calling);
     assert!(
-        !model
+        model
             .capabilities
             .supports_input_modality(ModelModality::Image)
     );
@@ -217,7 +217,10 @@ fn server_url_for_identity() -> &'static str {
 #[tokio::test]
 async fn rich_envelopes_drive_real_inference_wire_and_unknown_pricing_preserves_usage() {
     use pl_model::{
-        completion::{CompletionRequest, Message, MessageContent, MessageRole, ReasoningConfig},
+        completion::{
+            AttachmentInput, AttachmentModality, AttachmentSource, CompletionRequest, ContentPart,
+            Message, MessageContent, MessageRole, ReasoningConfig,
+        },
         runtime::{ModelInvocationContext, ModelRuntime},
     };
     use pl_protocol::{PricingOutcome, UnpricedReason};
@@ -225,12 +228,12 @@ async fn rich_envelopes_drive_real_inference_wire_and_unknown_pricing_preserves_
     for (adapter, body, effort_path) in [
         (
             ProviderAdapterKind::DeepSeek,
-            json!({"data":[{"id":"future-model","name":"Future","context_window":64000,"max_output_tokens":8000,"input_modalities":["text","image"],"effort":{"supported_levels":["gentle","new-ultra"],"default_level":"new-ultra"},"pricing":{"input":0},"supports_function_calling":true}]}),
+            json!({"data":[{"id":"future-model","name":"Future","context_window":64000,"max_output_tokens":8000,"effort":{"supported_levels":["gentle","new-ultra"],"default_level":"new-ultra"},"pricing":{"input":0},"supports_function_calling":true}]}),
             "reasoning_effort",
         ),
         (
             ProviderAdapterKind::OpenAi,
-            json!({"models":[{"slug":"future-model","display_name":"Future","description":"independent metadata","context_window":64000,"max_context_window":128000,"auto_compact_token_limit":12000,"supported_reasoning_levels":[{"effort":"gentle","description":"less"},{"effort":"new-ultra","description":"more"}],"default_reasoning_level":"new-ultra","input_modalities":["text","image"],"base_instructions":"DO NOT IMPORT","shell_type":"powershell","supports_temperature":false}]}),
+            json!({"models":[{"slug":"future-model","display_name":"Future","description":"independent metadata","context_window":64000,"max_context_window":128000,"auto_compact_token_limit":12000,"supported_reasoning_levels":[{"effort":"gentle","description":"less"},{"effort":"new-ultra","description":"more"}],"default_reasoning_level":"new-ultra","base_instructions":"DO NOT IMPORT","shell_type":"powershell","supports_temperature":false}]}),
             "reasoning",
         ),
     ] {
@@ -280,15 +283,38 @@ async fn rich_envelopes_drive_real_inference_wire_and_unknown_pricing_preserves_
         model.binding.transport.default_connection_mode =
             pl_model::provider::ProviderConnectionMode::Http;
         let runtime = ModelRuntime::new(endpoint, model).unwrap();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(1, 1)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
         let request = CompletionRequest::builder()
             .messages(vec![Message {
                 role: MessageRole::User,
-                content: MessageContent::text("hello"),
+                content: MessageContent::new(vec![
+                    ContentPart::Text {
+                        text: "hello".into(),
+                    },
+                    ContentPart::Attachment {
+                        attachment_id: "pixel".into(),
+                        modality: AttachmentModality::Image,
+                        media_type: "image/png".into(),
+                        filename: None,
+                    },
+                ]),
                 reasoning_content: None,
                 tool_calls: None,
                 tool_result: None,
                 metadata: Default::default(),
                 presentation: Default::default(),
+            }])
+            .attachments(vec![AttachmentInput {
+                attachment_id: "pixel".into(),
+                modality: AttachmentModality::Image,
+                media_type: "image/png".into(),
+                filename: None,
+                source: AttachmentSource::Bytes {
+                    bytes: std::sync::Arc::from(png.into_inner()),
+                },
             }])
             .reasoning(Some(ReasoningConfig {
                 effort: Some("new-ultra".into()),
@@ -323,6 +349,15 @@ async fn rich_envelopes_drive_real_inference_wire_and_unknown_pricing_preserves_
             assert_eq!(records[0].body["thinking"]["type"], "enabled");
         }
         assert!(records[0].body.get("temperature").is_none());
+        for record in &records {
+            assert_eq!(record.body["input"][0]["content"][1]["type"], "input_image");
+            assert!(
+                record.body["input"][0]["content"][1]["image_url"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("data:image/png;base64,")
+            );
+        }
     }
 }
 
@@ -341,6 +376,7 @@ async fn missing_metadata_uses_exact_success_then_default_but_explicit_empty_and
         http(200,"", &json!({"data":[{"id":known.slug}]}).to_string()),
         http(200,"", &json!({"models":[{"slug":known.slug,"supported_reasoning_levels":[],"input_modalities":[],"output_modalities":[],"supports_streaming":false,"supports_function_calling":false}]}).to_string()),
         http(200,"", &json!({"data":[{"id":"cached-only"}]}).to_string()),
+        http(200,"", &json!({"data":[{"id":"cached-only","capabilities":{"input":[{"modality":"text","sources":[]}]}}]}).to_string()),
     ]).await;
     let query =
         ModelCatalogQuery::for_provider(&provider(&server.url, ProviderAdapterKind::OpenAi))
@@ -358,6 +394,8 @@ async fn missing_metadata_uses_exact_success_then_default_but_explicit_empty_and
     let mut cached = first[0].clone();
     cached.slug = "cached-only".into();
     cached.context_window = Some(12345);
+    cached.capabilities.input = vec![pl_model::model::ModelInputCapability::text()];
+    cached.binding.request.media.clear();
     let cache = ModelCatalogQueryCache {
         identity: query.identity().into(),
         etag: None,
@@ -366,6 +404,18 @@ async fn missing_metadata_uses_exact_success_then_default_but_explicit_empty_and
     let third = updated(query.execute(Some(&cache)).await.unwrap());
     assert_eq!(third[0].context_window, Some(12345));
     assert_eq!(third[0].pricing, ModelPricing::Unknown);
+    assert!(
+        third[0]
+            .capabilities
+            .supports_input_modality(ModelModality::Image)
+    );
+    let fourth = updated(query.execute(Some(&cache)).await.unwrap());
+    assert!(
+        !fourth[0]
+            .capabilities
+            .supports_input_modality(ModelModality::Image)
+    );
+    assert!(fourth[0].binding.request.media.is_empty());
     server.finish().await;
 }
 
@@ -388,6 +438,9 @@ async fn gpt61_id_only_inventory_and_old_fallback_cache_enable_real_image_input(
     .await
     .remove(0);
     old.slug = slug.into();
+    // Persisted skeleton from the previous text-only normalization rule.
+    old.capabilities.input = vec![pl_model::model::ModelInputCapability::text()];
+    old.binding.request.media.clear();
     let description = old.description.clone();
     let server = Server::responses(vec![
         http(200, "", &json!({"data":[{"id":slug,"display_name":"GPT-6.1 Sol","created":1790640000,"object":"model","owned_by":"openai","type":"model"}]}).to_string()),
@@ -614,6 +667,7 @@ async fn availability_preserves_removed_choice_without_weakening_strict_edits_or
     let server = Server::json(json!({"models":[{
         "slug": narrowed.slug,
         "binding": narrowed.binding,
+        "input_modalities": ["text"],
         "context_window": 64000
     }]}))
     .await;
@@ -938,7 +992,7 @@ async fn discovery_profile_validity_is_independent_of_connection_mode_order() {
     let mut model = cached_model("profile-order", ProviderAdapterKind::OpenAi);
     model.binding.transport.supported_connection_modes.reverse();
     let models = discover(
-        json!({"data":[{"id":model.slug,"binding":model.binding}]}),
+        json!({"data":[{"id":model.slug,"binding":model.binding,"input_modalities":["text"]}]}),
         ProviderAdapterKind::OpenAi,
     )
     .await;
@@ -969,7 +1023,7 @@ async fn discovery_profile_validity_is_independent_of_connection_mode_order() {
         http(
             200,
             "ETag: \"narrowed\"\r\n",
-            &json!({"models":[{"slug":model.slug,"binding":model.binding}]}).to_string(),
+            &json!({"models":[{"slug":model.slug,"binding":model.binding,"input_modalities":["text"]}]}).to_string(),
         ),
         http(304, "", ""),
         http(200, "", &json!({"data":[{"id":model.slug}]}).to_string()),
@@ -1025,7 +1079,7 @@ async fn discovery_profile_validity_is_independent_of_connection_mode_order() {
 
     let deepseek = cached_model("deepseek-profile", ProviderAdapterKind::DeepSeek);
     let observed = discover(
-        json!({"models":[{"slug":deepseek.slug,"binding":deepseek.binding}]}),
+        json!({"models":[{"slug":deepseek.slug,"binding":deepseek.binding,"input_modalities":["text"]}]}),
         ProviderAdapterKind::DeepSeek,
     )
     .await;

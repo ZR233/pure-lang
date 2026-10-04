@@ -18,6 +18,7 @@ use super::{ConfigPaths, StudioConfig};
 use crate::Result;
 
 const CACHE_BYTES_LIMIT: usize = 8 * 1024 * 1024;
+const NORMALIZATION_REVISION: u32 = 1;
 
 #[derive(Clone)]
 pub(super) struct Observation {
@@ -32,6 +33,8 @@ pub(super) struct Observation {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SuccessCache {
     schema: u32,
+    #[serde(default)]
+    normalization_revision: u32,
     identity: String,
     pub success_at: i64,
     pub checked_at: i64,
@@ -57,11 +60,26 @@ impl SuccessCache {
     ) -> Self {
         Self {
             schema: 1,
+            normalization_revision: NORMALIZATION_REVISION,
             identity: full_identity(provider, identity),
             success_at,
             checked_at: crate::studio::unix_seconds(),
             etag,
             models,
+        }
+    }
+    pub fn query_etag(&self) -> Option<&str> {
+        // A previous normalization cannot be upgraded from a bodyless 304. Keep
+        // its snapshot for failures but fetch the body under the current rules.
+        (self.normalization_revision == NORMALIZATION_REVISION)
+            .then_some(self.etag.as_deref())
+            .flatten()
+    }
+    pub fn not_modified(&self, etag: Option<String>) -> Self {
+        Self {
+            checked_at: crate::studio::unix_seconds(),
+            etag,
+            ..self.clone()
         }
     }
     pub fn persist(
@@ -71,9 +89,16 @@ impl SuccessCache {
         identity: &str,
     ) -> Result<()> {
         let path = cache_path(paths, provider, identity);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        let parent = path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("model cache path has no parent"))?;
+        fs::create_dir_all(parent)?;
+        // On Windows canonicalization supplies the verbatim path prefix needed
+        // by the atomic writer's native move, including its longer temporary name.
+        let path = parent.canonicalize()?.join(
+            path.file_name()
+                .ok_or_else(|| std::io::Error::other("model cache path has no filename"))?,
+        );
         let bytes = serde_json::to_vec(self).map_err(|_| {
             pl_protocol::PureError::ConfigError("could not encode model observation".into())
         })?;
@@ -181,7 +206,11 @@ fn read_cache(
         return Err(CacheWarning::Schema);
     }
     let cache: SuccessCache = serde_json::from_slice(&bytes).map_err(|_| CacheWarning::Schema)?;
-    if cache.schema != 1 || cache.success_at <= 0 || cache.checked_at < cache.success_at {
+    if cache.schema != 1
+        || cache.normalization_revision > NORMALIZATION_REVISION
+        || cache.success_at <= 0
+        || cache.checked_at < cache.success_at
+    {
         return Err(CacheWarning::Schema);
     }
     if cache.identity != full_identity(provider_id, identity) {

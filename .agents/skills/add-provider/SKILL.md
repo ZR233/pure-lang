@@ -30,7 +30,7 @@ factory dispatch 或兼容 wrapper。
 ### 1. `code/pl-model/src/model/catalog/` — canonical 模型目录
 
 - OpenAI/DeepSeek 的默认名单、推荐模型和已记录价格只来自各自嵌入的 `assets/models/<catalog>/model.json`，复用 `ModelInfo`；不在 Rust slug 数组、preset 或初始角色路由复制名单。其他静态目录优先复用 `ModelFamily`。
-- 在线发现始终查询配置 `base_url` 的路径前缀 `/models`，不插入额外 `/v1` 或固定 Codex 后端。typed 适配支持 `data/id` 与 `models/slug`；ID-only 缺失参数保持未知，仅同精确 ID 可补已有声明，显式空候选不补回。
+- 在线发现始终查询配置 `base_url` 的路径前缀 `/models`，不插入额外 `/v1` 或固定 Codex 后端。typed 适配支持 `data/id` 与 `models/slug`；缺失输入模态参照 Codex 默认文本与图片，明确模态与空列表优先。其他 ID-only 缺失参数保持未知，仅同精确 ID 可补已有声明，显式空候选不补回。
 - 成功名单替换 API 名单，不把未列出的默认模型补回；手工附加模型保留优先权，explicit 目录不自动转为在线目录。API 价格一律忽略，价格按 provider 绑定目录内大小写敏感精确 ID 关联，缺价用 `Unknown` 保留用量而非零费用。
 - 用 `ModelTransportProfile` 声明 protocol、支持的连接模式与默认连接模式。
 - 用 `ModelRequestProfile`、`ModelParameter` 和 `ParameterWire` 表达 body/header/effort 差异。

@@ -244,30 +244,19 @@ fn normalize(
     if let Some(value) = record.supports_reasoning {
         model.capabilities.reasoning = value;
     }
-    if let Some(modalities) = record.input_modalities {
-        model.capabilities.input = modalities
-            .into_iter()
-            .map(|modality| match modality {
-                ModelModality::Text => ModelInputCapability::text(),
-                modality => ModelInputCapability::media(
-                    modality,
-                    vec![ModelInputSource::Local, ModelInputSource::RemoteUrl],
-                ),
-            })
-            .collect();
+    // Match Codex: an absent declaration defaults to text + image. An explicit
+    // capability list (including an empty one) must never be replaced by this default.
+    let input_modalities = record
+        .input_modalities
+        .or_else(|| (!supplied_media_profile).then(default_input_modalities));
+    if let Some(modalities) = input_modalities {
+        model.capabilities.input = input_capabilities(modalities);
         if !explicit_binding {
             model.binding.request.media = if model
                 .capabilities
                 .supports_input_modality(ModelModality::Image)
             {
-                image_media_profiles(
-                    MediaWireFormat::ResponsesInputImage,
-                    if adapter == ProviderAdapterKind::DeepSeek {
-                        MediaSendOrder::ProviderFileFirst
-                    } else {
-                        MediaSendOrder::RemoteUrlFirst
-                    },
-                )
+                default_image_media(adapter)
             } else {
                 Vec::new()
             };
@@ -343,7 +332,8 @@ fn normalize(
 }
 
 fn minimal(slug: &str, adapter: ProviderAdapterKind) -> ModelInfo {
-    // Responses streaming is the provider protocol baseline, not a promise of tools/vision/embedding support.
+    // Responses streaming and text/image are discovery defaults, not a verified
+    // provider capability or a promise of tools/embedding support.
     ModelInfo {
         slug: slug.into(),
         display_name: slug.into(),
@@ -357,14 +347,17 @@ fn minimal(slug: &str, adapter: ProviderAdapterKind) -> ModelInfo {
         parameters: Vec::new(),
         binding: ModelBinding {
             transport: super::discovery_transport(adapter),
-            request: ModelRequestProfile::responses(),
+            request: ModelRequestProfile {
+                media: default_image_media(adapter),
+                ..ModelRequestProfile::responses()
+            },
         },
         capabilities: ModelCapabilities {
             streaming: true,
             temperature: false,
             reasoning: false,
             web_search: false,
-            input: vec![ModelInputCapability::text()],
+            input: input_capabilities(default_input_modalities()),
             output: vec![ModelModality::Text],
             tools: ToolCapabilities::default(),
             interleaved: None,
@@ -373,6 +366,34 @@ fn minimal(slug: &str, adapter: ProviderAdapterKind) -> ModelInfo {
         truncation_policy: TruncationPolicy::default(),
         base_instructions: String::new(),
     }
+}
+
+fn default_input_modalities() -> Vec<ModelModality> {
+    vec![ModelModality::Text, ModelModality::Image]
+}
+
+fn input_capabilities(modalities: Vec<ModelModality>) -> Vec<ModelInputCapability> {
+    modalities
+        .into_iter()
+        .map(|modality| match modality {
+            ModelModality::Text => ModelInputCapability::text(),
+            modality => ModelInputCapability::media(
+                modality,
+                vec![ModelInputSource::Local, ModelInputSource::RemoteUrl],
+            ),
+        })
+        .collect()
+}
+
+fn default_image_media(adapter: ProviderAdapterKind) -> Vec<ModelMediaInputProfile> {
+    image_media_profiles(
+        MediaWireFormat::ResponsesInputImage,
+        if adapter == ProviderAdapterKind::DeepSeek {
+            MediaSendOrder::ProviderFileFirst
+        } else {
+            MediaSendOrder::RemoteUrlFirst
+        },
+    )
 }
 
 /// Presentation fields on a same-ID skeleton do not declare capabilities or budgets.
@@ -384,10 +405,28 @@ pub(crate) fn enrich_unknown_model_fallback(
     let mut skeleton = minimal(&model.slug, adapter);
     skeleton.display_name.clone_from(&model.display_name);
     skeleton.description.clone_from(&model.description);
-    if *model != skeleton {
-        return None;
+    let uses_current_default = *model == skeleton;
+    if !uses_current_default {
+        // Only the complete historical skeleton is eligible for same-ID metadata
+        // enrichment; richer explicit declarations keep their existing precedence.
+        skeleton.capabilities.input = vec![ModelInputCapability::text()];
+        skeleton.binding.request.media.clear();
+        if *model != skeleton {
+            return None;
+        }
     }
     let mut enriched = current.clone();
+    if uses_current_default {
+        enriched
+            .capabilities
+            .input
+            .clone_from(&model.capabilities.input);
+        enriched
+            .binding
+            .request
+            .media
+            .clone_from(&model.binding.request.media);
+    }
     if model.display_name != model.slug {
         enriched.display_name.clone_from(&model.display_name);
     }

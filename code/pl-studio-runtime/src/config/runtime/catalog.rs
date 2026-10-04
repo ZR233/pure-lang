@@ -73,7 +73,7 @@ impl ConfigRuntime {
             previous: observation.cache.as_ref().map(|cache| {
                 pl_model::provider::discovery::ModelCatalogQueryCache {
                     identity: query.identity().to_owned(),
-                    etag: cache.etag.clone(),
+                    etag: cache.query_etag().map(str::to_owned),
                     models: cache.models.clone(),
                 }
             }),
@@ -133,13 +133,7 @@ impl ConfigRuntime {
                     return Ok(());
                 }
                 match &old.cache {
-                    Some(cache) => Ok(SuccessCache::new(
-                        &probe.provider,
-                        &identity,
-                        etag,
-                        cache.models.clone(),
-                        cache.success_at,
-                    )),
+                    Some(cache) => Ok(cache.not_modified(etag)),
                     None => Err(StudioModelCatalogError::UnexpectedNotModified),
                 }
             }

@@ -344,13 +344,16 @@ token、带凭据 URL 或无界正文。
 typed 适配边界接受 OpenAI-compatible 的 `data`/`id` 与 Codex 富声明的 `models`/`slug`。
 归一化名称、描述、上下文/输出/压缩预算、模态和 effort；候选及 wire 继续数据驱动，不使用固定
 effort 枚举。服务端默认 effort 如有提供须属于候选，但不改写既有 route 或内部摘要的最弱选择。
-API 明确字段优先，缺失字段只按同一精确 ID 使用已有成功/默认声明补全，显式空值域和否定不补回。
+API 明确字段优先，显式空值域和否定不补回。输入模态参照 Codex 的默认契约：当前 API 未声明
+`input_modalities`，也未声明 `capabilities.input` 时默认文本与图片，并提供对应 Responses 图片输入编码；
+该默认与模型名称无关，不表示真实供应商已验证支持。当前显式模态声明仍优先，包括仅文本与空列表。
+其他缺失字段只按同一精确 ID 使用已有成功/默认声明补全。
 旧成功缓存中除显示名、描述外与未知 ID 默认骨架完全相同的记录不代表能力否定；
 若新二进制已收录该精确 ID，查询补全与有效目录解析均使用当前内置定义升级该骨架，
 保留服务端已有显示名与描述。其他缓存声明保留，当前 API 明确字段
 仍优先；不添加 API 名单外的模型，也不修改手工定义。GPT‑6.1 Sol 的图片输入、预算与 effort
 依据 [官方模型说明](https://developers.openai.com/api/docs/models/gpt-6.1-sol) 收录。
-未知预算保持未知，不把 ID-only 列表称为完整参数声明，不凭名字补图片、窗口或 reasoning 能力；
+未知预算保持未知，不把 ID-only 列表称为完整参数声明，不凭名字推断窗口或 reasoning 能力；
 媒体能力还须满足已有 binding/profile 校验。Codex 的产品指令、shell 与工具权限不进入模型声明。
 重复/空 ID、错误 envelope、无效预算或 profile 明确失败；合法空名单是成功声明，不伪装为失败。
 
