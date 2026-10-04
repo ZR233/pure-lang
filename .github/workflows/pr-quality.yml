@@ -44,6 +44,15 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Validate superseded Release policy against immutable tags
+        shell: pwsh
+        run: |
+          . (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/studio-superseded-releases.ps1')
+          $superseded = Get-StudioSupersededReleases -WorkspaceRoot $env:GITHUB_WORKSPACE
+          Write-Host "Validated $($superseded.Count) superseded Studio Releases"
 
       - name: Validate workflows with actionlint
         uses: reviewdog/action-actionlint@50842263c20a7c46bd0065b9e624d3c569db061e # v1

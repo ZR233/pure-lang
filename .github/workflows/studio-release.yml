@@ -22,6 +22,11 @@ jobs:
       hasDraft: ${{ steps.draft.outputs.hasDraft }}
       releaseId: ${{ steps.draft.outputs.releaseId }}
     steps:
+      - name: Check out release policy and repository history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
       - name: Find resumable stable draft
         id: draft
         shell: pwsh
@@ -31,15 +36,32 @@ jobs:
           if ($env:GITHUB_REF -cne 'refs/heads/main') {
             throw "Studio Release must run from main, not $env:GITHUB_REF"
           }
+          . (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/studio-superseded-releases.ps1')
+          $superseded = Get-StudioSupersededReleases -WorkspaceRoot $env:GITHUB_WORKSPACE
           $releases = @(gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json)
           if ($LASTEXITCODE -ne 0) {
             throw 'Failed to inspect existing GitHub Releases'
           }
-          $drafts = @(
+          $stableDrafts = @(
             $releases | Where-Object {
               $_.draft -and
               -not $_.prerelease -and
               $_.tag_name -match '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+            }
+          )
+          $drafts = @(
+            foreach ($draft in $stableDrafts) {
+              if ($draft.url -cne "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/$($draft.id)") {
+                throw "Draft Release $($draft.id) belongs to an unexpected repository"
+              }
+              if ($superseded.ContainsKey($draft.tag_name)) {
+                $record = $superseded[$draft.tag_name]
+                $message = "Preserving superseded draft $($draft.tag_name) (Release $($draft.id), commit $($record.sha)): $($record.reason)"
+                Write-Host $message
+                $message | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+                continue
+              }
+              $draft
             }
           )
           if ($drafts.Count -gt 1) {
@@ -51,9 +73,6 @@ jobs:
           }
 
           $draft = $drafts[0]
-          if ($draft.url -cne "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/$($draft.id)") {
-            throw "Draft Release $($draft.id) belongs to an unexpected repository"
-          }
           'hasDraft=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "releaseId=$($draft.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 

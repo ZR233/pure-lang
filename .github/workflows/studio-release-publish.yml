@@ -100,6 +100,12 @@ jobs:
             throw "Release target $($release.target_commitish) does not identify main or tag commit $sha"
           }
 
+          . (Join-Path $env:GITHUB_WORKSPACE '.github/scripts/studio-superseded-releases.ps1')
+          $superseded = Get-StudioSupersededReleases -WorkspaceRoot $env:GITHUB_WORKSPACE
+          if ($release.draft -and $superseded.ContainsKey($tag)) {
+            throw "Draft $tag has been superseded: $($superseded[$tag].reason). Prepare the next Release PR instead."
+          }
+
           $rootVersion = (git show "${sha}:studio-version.txt").Trim()
           if ($LASTEXITCODE -ne 0 -or $rootVersion -cne $version) {
             throw "Tag $tag does not contain matching studio-version.txt"

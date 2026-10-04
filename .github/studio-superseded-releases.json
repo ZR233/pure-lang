@@ -1,0 +1,7 @@
+[
+  {
+    "tag": "v6.1.0",
+    "sha": "f2524d53a7e96fd13e76e3741c6a4b1014b9c59a",
+    "reason": "Immutable source fails Rust 1.99 Clippy and stages third-party notices from a missing path; subsequent main commits contain the fixes."
+  }
+]

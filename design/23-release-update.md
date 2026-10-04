@@ -42,9 +42,15 @@ publisher 分为 helper、GUI 构建与发布三阶段。Linux helper job 从 ta
 artifact 并按 Release ID 对账：draft 可为空或只含部分资产，但任何已有资产的名称、长度
 与 SHA-256 digest 必须和本地文件完全一致；只允许补传缺失资产，不得覆盖不同字节。全部
 资产一致后才能取消 draft 并标记 latest。failed job 重跑复用原 artifact 继续补传；完整
-draft 与已发布 Release 重跑均幂等成功。若存在尚未完成的稳定 draft，发布 workflow 优先
-恢复该 publisher，而不创建下一版 Release PR；publisher 保留带精确 Release ID 的手动
-入口，仅用于故障恢复。
+draft 与已发布 Release 重跑均幂等成功。若存在尚未完成且未被取代的稳定 draft，发布
+workflow 优先恢复该 publisher，而不创建下一版 Release PR；publisher 保留带精确
+Release ID 的手动入口，仅用于故障恢复。
+
+若 draft 的不可变源码存在只能通过后续提交修复的缺陷，可在主线维护明确的取代记录，
+以稳定 tag、精确提交 SHA 和原因标识该次未完成发布。记录必须与真实 tag 一致且属于
+主线历史，否则发现与发布均失败。被取代的 draft 保留原有 Release、资产和 tag，但不再
+阻止 Release Please 准备下一版 Release PR，也不能通过手动 publisher 发布。取代记录
+不影响已公开 Release 的验证，不自动决定版本、合并 Release PR 或发布后续版本。
 
 权限分离：draft Release 只对具备仓库 push 权限的身份可见，因此负责发现和解析 draft 的
 job 使用写权限但只执行读取；构建 job 保持只读，只有最终 publish job 执行资产上传和
