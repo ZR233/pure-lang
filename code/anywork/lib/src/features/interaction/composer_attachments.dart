@@ -19,7 +19,7 @@ class _AttachmentMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasAny =
         localCapabilities.isNotEmpty || remoteCapabilities.isNotEmpty;
-    return PopupMenuButton<String>(
+    return StudioIconMenu<String>(
       key: StudioDriverKeys.attachmentEntry,
       tooltip: hasAny
           ? context.l10n.composerAttachmentAddTooltip
@@ -32,18 +32,18 @@ class _AttachmentMenu extends StatelessWidget {
       },
       itemBuilder: (context) => [
         if (localCapabilities.isNotEmpty)
-          PopupMenuItem(
-            key: StudioDriverKeys.attachmentLocal,
+          StudioMenuItem<String>(
             value: 'local',
+            itemKey: StudioDriverKeys.attachmentLocal,
             child: ListTile(
               leading: const Icon(Icons.folder_open_outlined),
               title: Text(context.l10n.composerAttachmentPickLocal),
             ),
           ),
         if (remoteCapabilities.isNotEmpty)
-          PopupMenuItem(
-            key: StudioDriverKeys.attachmentUrl,
+          StudioMenuItem<String>(
             value: 'url',
+            itemKey: StudioDriverKeys.attachmentUrl,
             child: ListTile(
               leading: const Icon(Icons.link),
               title: Text(context.l10n.composerAddUrlTitle),

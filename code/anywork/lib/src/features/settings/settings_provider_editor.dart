@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_form_select.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
 import 'settings_provider_auto_compact.dart';
@@ -68,7 +69,7 @@ class ProviderEditor extends StatelessWidget {
                   children: [
                     SettingsResponsiveFieldGrid(
                       children: [
-                        DropdownButtonFormField<String>(
+                        StudioFormSelectField<String>(
                           key: StudioDriverKeys.providerPreset,
                           initialValue: provider.templateKind,
                           decoration: InputDecoration(
@@ -82,7 +83,7 @@ class ProviderEditor extends StatelessWidget {
                               (template) =>
                                   template.id == provider.templateKind,
                             ))
-                              DropdownMenuItem<String>(
+                              StudioFormSelectItem<String>(
                                 value: provider.templateKind,
                                 enabled: false,
                                 child: Text(
@@ -94,7 +95,7 @@ class ProviderEditor extends StatelessWidget {
                                 ),
                               ),
                             for (final template in presets)
-                              DropdownMenuItem(
+                              StudioFormSelectItem<String>(
                                 value: template.id,
                                 child: Text(template.displayName),
                               ),
@@ -147,7 +148,7 @@ class ProviderEditor extends StatelessWidget {
                       ),
                     ],
                     const SizedBox(height: 10),
-                    DropdownButtonFormField<String>(
+                    StudioFormSelectField<String>(
                       isExpanded: true,
                       initialValue: provider.defaultModel.isNotEmpty
                           ? provider.defaultModel
@@ -162,7 +163,7 @@ class ProviderEditor extends StatelessWidget {
                             !models.any(
                               (model) => model.slug == provider.defaultModel,
                             ))
-                          DropdownMenuItem(
+                          StudioFormSelectItem<String>(
                             value: provider.defaultModel,
                             child: Text(
                               context.l10n.settingsAgentRouteUnavailable(
@@ -173,7 +174,7 @@ class ProviderEditor extends StatelessWidget {
                             ),
                           ),
                         for (final model in models)
-                          DropdownMenuItem(
+                          StudioFormSelectItem<String>(
                             value: model.slug,
                             child: Text(
                               '${model.displayName} (${model.slug})',
@@ -378,19 +379,19 @@ class _CustomModelEditor extends StatelessWidget {
                 onChanged: (value) =>
                     onChanged(model.copyWith(displayName: value)),
               ),
-              DropdownButtonFormField<String>(
+              StudioFormSelectField<String>(
                 initialValue: model.wireProtocol,
                 decoration: InputDecoration(
                   labelText: context.l10n.settingsProtocolType,
                 ),
                 items: [
-                  DropdownMenuItem(
+                  StudioFormSelectItem<String>(
                     value: 'chat_completions',
                     child: Text(
                       context.l10n.settingsProtocolChatCompletionsHttp,
                     ),
                   ),
-                  DropdownMenuItem(
+                  StudioFormSelectItem<String>(
                     value: 'responses',
                     child: Text(context.l10n.settingsProtocolResponsesHttp),
                   ),

@@ -14,7 +14,8 @@ import '../../platform/clipboard_image_reader.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
 import '../../shared/studio_driver_state.dart';
-import '../../shared/upward_popup_menu.dart';
+import '../../shared/studio_menu.dart';
+import '../../shared/studio_menu_label.dart';
 import '../status/session_selectors.dart';
 import 'interaction_payload.dart';
 import 'plan_confirmation_dock.dart';
@@ -800,14 +801,14 @@ class _PermissionSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return UpwardPopupMenu<PermissionMode>(
+    return StudioMenu<PermissionMode>(
       tooltip: context.l10n.permissionModeTooltip,
-      initialValue: mode,
       onSelected: ref.read(studioControllerProvider.notifier).setPermissionMode,
       itemBuilder: (context) => [
         for (final option in PermissionMode.values)
-          PopupMenuItem(
+          StudioMenuItem<PermissionMode>(
             value: option,
+            selected: option == mode,
             child: SizedBox(
               width: 136,
               height: 36,

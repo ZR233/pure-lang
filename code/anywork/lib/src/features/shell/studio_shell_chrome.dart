@@ -118,12 +118,13 @@ String _purposeLabel(BuildContext context, String? purpose) =>
       String value => value,
     };
 
+/// 工作区菜单的三个外部入口目标。
+enum _WorkspaceTarget { vsCode, zed, terminal }
+
 /// 会话顶栏「打开工作区」菜单：并列 VS Code、Zed 与终端三个外部入口。
 ///
 /// 有当前会话及所属项目即显示入口，不以编辑器安装情况控制整个入口；
 /// 三项各自探测可用性，不可用时禁用并说明原因。三个入口的目标都由会话
-/// canonical `workspacePath` 决定，GUI 不推导工作树布局；菜单图标读取
-/// 宿主应用图标。远端项目复用 `~/.ssh/config` 的 Host 别名。
 class _SessionOpenWorkspaceMenu extends ConsumerStatefulWidget {
   const _SessionOpenWorkspaceMenu({required this.state});
 
@@ -136,7 +137,15 @@ class _SessionOpenWorkspaceMenu extends ConsumerStatefulWidget {
 
 class _SessionOpenWorkspaceMenuState
     extends ConsumerState<_SessionOpenWorkspaceMenu> {
-  final MenuController _menuController = MenuController();
+  final FocusNode _triggerFocusNode = FocusNode(
+    debugLabel: 'session-open-workspace-menu',
+  );
+
+  @override
+  void dispose() {
+    _triggerFocusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -156,10 +165,8 @@ class _SessionOpenWorkspaceMenuState
     final targetDescription = alias == null
         ? thread.workspacePath
         : '$alias:${thread.workspacePath}';
-    return MenuAnchor(
-      controller: _menuController,
-      alignmentOffset: const Offset(0, 6),
-      menuChildren: [
+    return StudioMenu<_WorkspaceTarget>.custom(
+      itemBuilder: (context) => [
         _menuItem(
           key: StudioDriverKeys.sessionOpenWorkspaceVsCode,
           icon: _appIcon(HostAppIcon.vsCode, Icons.code),
@@ -167,7 +174,7 @@ class _SessionOpenWorkspaceMenuState
           targetDescription: targetDescription,
           available: vsCodeAvailable,
           unavailableReason: context.l10n.sessionVsCodeUnavailable,
-          onPressed: () => _openVsCode(project, thread),
+          value: _WorkspaceTarget.vsCode,
         ),
         _menuItem(
           key: StudioDriverKeys.sessionOpenWorkspaceZed,
@@ -176,7 +183,7 @@ class _SessionOpenWorkspaceMenuState
           targetDescription: targetDescription,
           available: zedAvailable,
           unavailableReason: context.l10n.sessionZedUnavailable,
-          onPressed: () => _openZed(project, thread),
+          value: _WorkspaceTarget.zed,
         ),
         _menuItem(
           key: StudioDriverKeys.sessionOpenWorkspaceTerminal,
@@ -185,17 +192,27 @@ class _SessionOpenWorkspaceMenuState
           targetDescription: targetDescription,
           available: terminalAvailable,
           unavailableReason: _terminalUnavailableReason(context),
-          onPressed: () => _openTerminal(project, thread),
+          value: _WorkspaceTarget.terminal,
         ),
       ],
-      builder: (context, controller, child) {
+      onSelected: (target) {
+        switch (target) {
+          case _WorkspaceTarget.vsCode:
+            _openVsCode(project, thread);
+          case _WorkspaceTarget.zed:
+            _openZed(project, thread);
+          case _WorkspaceTarget.terminal:
+            _openTerminal(project, thread);
+        }
+      },
+      childFocusNode: _triggerFocusNode,
+      triggerBuilder: (context, controller, canOpen) {
         return Tooltip(
           message: '$label\n$targetDescription',
           child: TextButton(
             key: StudioDriverKeys.sessionOpenWorkspaceMenu,
-            onPressed: () => _menuController.isOpen
-                ? _menuController.close()
-                : _menuController.open(),
+            onPressed: canOpen ? controller.toggle : null,
+            focusNode: _triggerFocusNode,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -221,31 +238,33 @@ class _SessionOpenWorkspaceMenuState
   }
 
   /// 单行条目按内容自然收紧；完整目标与不可用原因由提示和读屏说明承载。
-  Widget _menuItem({
+  StudioMenuItem<_WorkspaceTarget> _menuItem({
     required Key key,
     required Widget icon,
     required String label,
     required String targetDescription,
     required bool available,
     required String unavailableReason,
-    required VoidCallback onPressed,
+    required _WorkspaceTarget value,
   }) {
     // 覆盖整个按钮（包括禁用项），并保留 Tooltip 默认的读屏说明。
     final tooltipMessage = available
         ? '$label\n$targetDescription'
         : '$label\n$targetDescription\n$unavailableReason';
-    return Tooltip(
-      message: tooltipMessage,
-      child: MenuItemButton(
-        key: key,
-        leadingIcon: icon,
-        onPressed: available
-            ? () {
-                _menuController.close();
-                onPressed();
-              }
-            : null,
-        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+    return StudioMenuItem<_WorkspaceTarget>(
+      value: value,
+      enabled: available,
+      itemKey: key,
+      tooltip: tooltipMessage,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          icon,
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        ],
       ),
     );
   }
@@ -407,12 +426,23 @@ class _AgentSwitcher extends ConsumerStatefulWidget {
 }
 
 class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
-  final MenuController _menuController = MenuController();
+  final FocusNode _triggerFocusNode = FocusNode(debugLabel: 'agent-switcher');
   Timer? _hoverTimer;
+  StudioMenuController? _menu;
+  bool _hadTriggerFocus = false;
+  bool _pointerOnTrigger = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _triggerFocusNode.addListener(_handleTriggerFocus);
+  }
 
   @override
   void dispose() {
     _hoverTimer?.cancel();
+    _triggerFocusNode.removeListener(_handleTriggerFocus);
+    _triggerFocusNode.dispose();
     super.dispose();
   }
 
@@ -434,114 +464,92 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
     final menuHeight = (viewport.height - 96)
         .clamp(0.0, _agentMenuMaxHeight)
         .toDouble();
-    final contentWidth = (menuWidth - 116).clamp(140.0, 244.0).toDouble();
-    return MenuAnchor(
-      controller: _menuController,
-      style: MenuStyle(
-        alignment: AlignmentDirectional.bottomEnd,
-        minimumSize: WidgetStatePropertyAll(Size(menuWidth, 0)),
-        maximumSize: WidgetStatePropertyAll(Size(menuWidth, menuHeight)),
+    return StudioMenu<String>.custom(
+      menuConstraints: BoxConstraints(
+        minWidth: menuWidth,
+        maxWidth: menuWidth,
+        maxHeight: menuHeight,
       ),
-      alignmentOffset: const Offset(0, 6),
-      menuChildren: [
+      childFocusNode: _triggerFocusNode,
+      onSelected: (threadId) => ref
+          .read(studioControllerProvider.notifier)
+          .selectAgentThread(threadId),
+      itemBuilder: (context) => [
         for (final thread in threads)
-          MenuItemButton(
-            key: StudioDriverKeys.agentRow(thread.id),
-            leadingIcon: Padding(
-              padding: EdgeInsets.only(left: _agentDepth(thread, threads) * 12),
-              child: Icon(
-                _agentForThread(widget.state, thread.id)?.error != null
-                    ? Icons.error_outline
-                    : Icons.circle,
-                size: _agentForThread(widget.state, thread.id)?.error != null
-                    ? 16
-                    : 9,
-                color: _agentForThread(widget.state, thread.id)?.error != null
-                    ? Theme.of(context).colorScheme.error
-                    : _statusColor(context, widget.state, thread),
-              ),
-            ),
-            trailingIcon: thread.id == widget.state.selectedThreadId
-                ? const Icon(Icons.check, size: 18)
-                : null,
-            onPressed: () {
-              _menuController.close();
-              ref
-                  .read(studioControllerProvider.notifier)
-                  .selectAgentThread(thread.id);
-            },
-            child: SizedBox(
-              width: contentWidth,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Tooltip(
-                          message: _agentDisplayName(context, thread),
-                          child: Text(
-                            _agentDisplayName(context, thread),
-                            key: StudioDriverKeys.agentTaskSummary(thread.id),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (thread.role.trim().isNotEmpty)
-                          Text(
-                            thread.isRetiredAgent
-                                ? context.l10n.agentRoleRetired
-                                : context.roleLabel(thread.role),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: context.colors.onSurfaceVariant,
-                                ),
-                          ),
-                      ],
+          StudioMenuItem<String>(
+            value: thread.id,
+            selected: thread.id == widget.state.selectedThreadId,
+            itemKey: StudioDriverKeys.agentRow(thread.id),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // 真实层级深度逐级缩进，不设固定深度上限；宽度不足时
+                // 先压缩间距、再整体缩放，任何有限正行宽都不产生
+                // RenderFlex overflow。
+                final indent = _agentDepth(thread, threads) * 12.0;
+                final width = constraints.maxWidth;
+                if (width.isFinite && width < _agentRowCompactFixedContent) {
+                  // 极窄：整行按紧凑最小宽整体缩放（缩放而非裁剪；
+                  // 此宽度下层级缩进让位给内容本身）。
+                  return FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: SizedBox(
+                      width: _agentRowCompactFixedContent,
+                      child: _agentRow(
+                        context,
+                        thread,
+                        threads,
+                        gap: 4,
+                        indent: 0,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  ConstrainedBox(
-                    // 长状态或错误文本必须行内省略，不能撑破固定宽度的菜单行。
-                    constraints: BoxConstraints(
-                      maxWidth: contentWidth * _agentStatusWidthFraction,
-                    ),
-                    child: Text(
-                      _agentForThread(widget.state, thread.id)?.error ??
-                          _agentShortStatus(context, thread),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall
-                          ?.copyWith(color: context.colors.onSurfaceVariant),
-                    ),
-                  ),
-                ],
-              ),
+                  );
+                }
+                // 正常宽度用完整间距，紧凑区间把间距压到 4；图标、
+                // 正文、状态与选中勾全部保留，缩进只裁剪到行宽减去
+                // 对应固定内容预算，不产生负 padding。
+                final compact = width.isFinite && width < _agentRowFixedContent;
+                final gap = compact ? 4.0 : 12.0;
+                var budget = width.isFinite
+                    ? width -
+                          (compact
+                              ? _agentRowCompactFixedContent
+                              : _agentRowFixedContent)
+                    : indent;
+                if (budget < 0) {
+                  budget = 0;
+                }
+                return _agentRow(
+                  context,
+                  thread,
+                  threads,
+                  gap: gap,
+                  indent: indent > budget ? budget : indent,
+                );
+              },
             ),
           ),
       ],
-      builder: (context, controller, child) {
+      triggerBuilder: (context, controller, canOpen) {
+        _menu = controller;
         return MouseRegion(
           onEnter: (_) {
             _hoverTimer?.cancel();
             _hoverTimer = Timer(const Duration(milliseconds: 250), () {
-              if (mounted && !_menuController.isOpen) {
-                _menuController.open();
+              // 悬停打开不抢走正在输入的焦点。
+              if (mounted && !controller.isOpen) {
+                controller.open(focusTrigger: false);
               }
             });
           },
           onExit: (_) => _hoverTimer?.cancel(),
-          child: Focus(
-            onFocusChange: (focused) {
-              if (focused && !_menuController.isOpen) {
-                _menuController.open();
-              }
-            },
+          child: Listener(
+            onPointerDown: (_) => _pointerOnTrigger = true,
+            onPointerUp: (_) => _pointerOnTrigger = false,
+            onPointerCancel: (_) => _pointerOnTrigger = false,
             child: TextButton(
               key: StudioDriverKeys.agentSwitcher,
+              focusNode: _triggerFocusNode,
+              onPressed: canOpen ? controller.toggle : null,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -552,22 +560,132 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                   const Icon(Icons.keyboard_arrow_down, size: 14),
                 ],
               ),
-              onPressed: () => _menuController.isOpen
-                  ? _menuController.close()
-                  : _menuController.open(),
             ),
           ),
         );
       },
     );
   }
+
+  /// One agent row with parameterized in-row spacing, shared by the normal
+  /// and compact width branches of the row builder above.
+  Widget _agentRow(
+    BuildContext context,
+    StudioThread thread,
+    List<StudioThread> threads, {
+    required double gap,
+    required double indent,
+  }) {
+    final hasError = _agentForThread(widget.state, thread.id)?.error != null;
+    return Row(
+      children: [
+        Padding(
+          padding: EdgeInsetsDirectional.only(start: indent),
+          child: Icon(
+            hasError ? Icons.error_outline : Icons.circle,
+            size: hasError ? 16 : 9,
+            color: hasError
+                ? Theme.of(context).colorScheme.error
+                : _statusColor(context, widget.state, thread),
+          ),
+        ),
+        SizedBox(width: gap),
+        Expanded(
+          // 正文与状态按固定比例分配行内空间，两者行内省略，
+          // 窄视口不再依赖固定像素宽度。
+          flex: 11,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Tooltip(
+                message: _agentDisplayName(context, thread),
+                child: Text(
+                  _agentDisplayName(context, thread),
+                  key: StudioDriverKeys.agentTaskSummary(thread.id),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (thread.role.trim().isNotEmpty)
+                Text(
+                  thread.isRetiredAgent
+                      ? context.l10n.agentRoleRetired
+                      : context.roleLabel(thread.role),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(color: context.colors.onSurfaceVariant),
+                ),
+            ],
+          ),
+        ),
+        SizedBox(width: gap),
+        Flexible(
+          flex: 9,
+          child: Text(
+            _agentForThread(widget.state, thread.id)?.error ??
+                _agentShortStatus(context, thread),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall
+                ?.copyWith(color: context.colors.onSurfaceVariant),
+          ),
+        ),
+        if (thread.id == widget.state.selectedThreadId) ...[
+          SizedBox(width: gap),
+          const Icon(Icons.check, size: 18),
+        ],
+      ],
+    );
+  }
+
+  void _handleTriggerFocus() {
+    final focused = _triggerFocusNode.hasFocus;
+    if (focused == _hadTriggerFocus) {
+      return;
+    }
+    _hadTriggerFocus = focused;
+    if (!focused) {
+      return;
+    }
+    // 点击按下产生的焦点增益不属于键盘进入：同一点击的 onPressed toggle
+    // 负责开关，这里再自动开会在 click 后立刻把刚打开的菜单关回去。
+    if (_pointerOnTrigger) {
+      return;
+    }
+    final menu = _menu;
+    if (menu == null) {
+      return;
+    }
+    // 选中条目后共享菜单会把焦点恢复到触发器；这次恢复不视为键盘进入，
+    // 消费一次性抑制，避免立刻自动重开。
+    if (menu.consumeAutoOpenSuppression()) {
+      return;
+    }
+    if (mounted && !menu.isOpen) {
+      menu.open();
+    }
+  }
 }
 
 /// `n agents` 菜单最多占用的高度，超出部分滚动查看。
 const double _agentMenuMaxHeight = 320;
 
-/// 菜单行内状态标签最多占用的行宽比例，超出部分行内省略。
-const double _agentStatusWidthFraction = 0.45;
+/// agent 行内固定内容的最小保留预算：状态图标（最大 16）＋两个 12 的
+/// 间距＋选中勾 18。极端层级深度把缩进裁剪到行宽减去该预算，保证
+/// 条目不溢出且正文仍由 flex/ellipsis 收敛；这不是深度上限，正常
+/// 深度完全按真实层级缩进。
+/// Widest fixed content an agent row can carry: the error icon (16), the
+/// spacing after the icon (12) and after the body (12), the spacing before
+/// the selected check mark (12) and the check itself (18). Selected normal
+/// rows only need 63; error rows with the check need the full 70.
+const double _agentRowFixedContent = 16 + 12 + 12 + 12 + 18;
+
+/// Compact fixed-content budget once the real row width drops below
+/// [_agentRowFixedContent]: the same error icon (16) and check (18) with
+/// the three in-row gaps squeezed to 4.
+const double _agentRowCompactFixedContent = 16 + 4 + 4 + 4 + 18;
 
 /// 宽屏顶栏 actions 最多占用的横向比例，其余横向空间留给会话标题。
 const double _headerActionsWidthFraction = 0.7;

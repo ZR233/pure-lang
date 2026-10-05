@@ -1,10 +1,7 @@
-import 'dart:async';
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../app/theme/studio_tokens.dart';
+import '../../shared/studio_anchored_panel.dart';
 
 class StatusBarItem extends StatefulWidget {
   const StatusBarItem({
@@ -39,26 +36,15 @@ class StatusBarItem extends StatefulWidget {
 }
 
 class _StatusBarItemState extends State<StatusBarItem> {
-  final GlobalKey _targetKey = GlobalKey();
-  final Object _tapRegionGroup = Object();
-  OverlayEntry? _entry;
-  Timer? _hideTimer;
   bool _hovering = false;
   bool _focused = false;
-
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    _hideDetail();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final foreground = widget.enabled
         ? context.colors.onSurfaceVariant
         : context.colors.onSurfaceVariant;
-    var row = Row(
+    final row = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (widget.icon != null) ...[
@@ -91,33 +77,8 @@ class _StatusBarItemState extends State<StatusBarItem> {
         ],
       ],
     );
-    final detailBuilder = widget.detailBuilder;
-    if (detailBuilder != null) {
-      row = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          MouseRegion(
-            onEnter: (_) {
-              setState(() => _hovering = true);
-              _showDetail();
-            },
-            onExit: (_) {
-              setState(() => _hovering = false);
-              _scheduleHideDetail();
-            },
-            child: Listener(
-              behavior: HitTestBehavior.translucent,
-              onPointerDown: (_) => _handlePointerDown(),
-              onPointerHover: (_) => _showDetail(),
-              child: row,
-            ),
-          ),
-        ],
-      );
-    }
     final highlighted = (_hovering || _focused) && widget.enabled;
     final content = AnimatedContainer(
-      key: _targetKey,
       duration: const Duration(milliseconds: 120),
       height: 26,
       padding: const EdgeInsets.symmetric(horizontal: 7),
@@ -136,172 +97,40 @@ class _StatusBarItemState extends State<StatusBarItem> {
             child: content,
           )
         : content;
-    final interactive = widget.interactive && detailBuilder != null
-        ? Semantics(
-            container: true,
-            label: widget.semanticsLabel ?? widget.label,
-            value: widget.label,
-            button: true,
-            focusable: true,
-            onTap: _toggleDetail,
-            child: FocusableActionDetector(
-              onFocusChange: _handleFocusChange,
-              shortcuts: const {
-                SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-                SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-                SingleActivator(LogicalKeyboardKey.escape):
-                    _DismissStatusBarDetailIntent(),
-              },
-              actions: {
-                ActivateIntent: CallbackAction<ActivateIntent>(
-                  onInvoke: (_) {
-                    _toggleDetail();
-                    return null;
-                  },
-                ),
-                _DismissStatusBarDetailIntent:
-                    CallbackAction<_DismissStatusBarDetailIntent>(
-                      onInvoke: (_) {
-                        _hideDetail();
-                        return null;
-                      },
-                    ),
-              },
-              child: hoverable,
-            ),
-          )
-        : Focus(onFocusChange: _handleFocusChange, child: hoverable);
+    final detailBuilder = widget.detailBuilder;
+    final Widget interactive;
+    if (detailBuilder != null) {
+      // 详情弹层的锚定、悬停显隐、点击钉住与键盘入口由共享面板承担；
+      // 本组件只跟踪悬停/焦点状态用于高亮。
+      interactive = StudioAnchoredPanel(
+        width: widget.detailWidth,
+        enabled: widget.enabled,
+        showOnFocus: true,
+        pinOpenOnTap: widget.interactive,
+        panelIgnoresPointer: !widget.interactive,
+        semanticsLabel: widget.interactive
+            ? (widget.semanticsLabel ?? widget.label)
+            : null,
+        semanticsValue: widget.label,
+        onHoverChange: (hovering) => setState(() => _hovering = hovering),
+        onFocusChange: (focused) => setState(() => _focused = focused),
+        panelBuilder: detailBuilder,
+        child: hoverable,
+      );
+    } else {
+      interactive = Focus(
+        onFocusChange: (focused) => setState(() => _focused = focused),
+        child: hoverable,
+      );
+    }
     final chip = Padding(
       padding: const EdgeInsets.only(right: 2),
       child: interactive,
     );
-    final groupedChip = widget.interactive && detailBuilder != null
-        ? TapRegion(groupId: _tapRegionGroup, child: chip)
-        : chip;
     final tooltip = widget.tooltip;
     if (tooltip == null || tooltip.isEmpty) {
-      return groupedChip;
+      return chip;
     }
-    return Tooltip(message: tooltip, child: groupedChip);
+    return Tooltip(message: tooltip, child: chip);
   }
-
-  void _toggleDetail() {
-    if (_entry == null) {
-      _showDetail();
-    } else {
-      _hideDetail();
-    }
-  }
-
-  void _handleFocusChange(bool focused) {
-    setState(() => _focused = focused);
-    if (focused && widget.detailBuilder != null) {
-      _showDetail();
-    } else if (!focused) {
-      _scheduleHideDetail();
-    }
-  }
-
-  void _handlePointerDown() {
-    if (widget.interactive && _hovering && _entry != null) {
-      _cancelHideDetail();
-      return;
-    }
-    _toggleDetail();
-  }
-
-  void _showDetail() {
-    _hideTimer?.cancel();
-    if (_entry != null || widget.detailBuilder == null) {
-      return;
-    }
-    final overlay = Overlay.of(context);
-    final target = _targetKey.currentContext?.findRenderObject();
-    final overlayRenderObject = overlay.context.findRenderObject();
-    if (target is! RenderBox || overlayRenderObject is! RenderBox) {
-      return;
-    }
-    final targetTopLeft = target.localToGlobal(
-      Offset.zero,
-      ancestor: overlayRenderObject,
-    );
-    final overlaySize = overlayRenderObject.size;
-    final maxLeft = math.max(8.0, overlaySize.width - widget.detailWidth - 8);
-    final left = targetTopLeft.dx.clamp(8.0, maxLeft).toDouble();
-    final bottom = math.max(8.0, overlaySize.height - targetTopLeft.dy + 8);
-    final maxDetailHeight = math.max(0.0, targetTopLeft.dy - 16);
-    final theme = Theme.of(context);
-    final detailBuilder = widget.detailBuilder!;
-    final interactive = widget.interactive;
-    _entry = OverlayEntry(
-      builder: (context) {
-        final card = _detailCard(theme, detailBuilder, maxDetailHeight);
-        final positioned = Positioned(
-          left: left,
-          bottom: bottom,
-          width: widget.detailWidth,
-          child: interactive
-              ? MouseRegion(
-                  onEnter: (_) => _cancelHideDetail(),
-                  onExit: (_) => _scheduleHideDetail(),
-                  child: TapRegion(
-                    groupId: _tapRegionGroup,
-                    onTapOutside: (_) => _hideDetail(),
-                    child: card,
-                  ),
-                )
-              : IgnorePointer(child: card),
-        );
-        return Theme(
-          data: theme,
-          child: Positioned.fill(child: Stack(children: [positioned])),
-        );
-      },
-    );
-    overlay.insert(_entry!);
-  }
-
-  void _cancelHideDetail() {
-    _hideTimer?.cancel();
-    _hideTimer = null;
-  }
-
-  void _scheduleHideDetail() {
-    _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(milliseconds: 120), _hideDetail);
-  }
-
-  void _hideDetail() {
-    _entry?.remove();
-    _entry = null;
-  }
-
-  Widget _detailCard(
-    ThemeData theme,
-    WidgetBuilder detailBuilder,
-    double maxHeight,
-  ) {
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: maxHeight),
-      child: Material(
-        color: Colors.transparent,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerLowest,
-            border: Border.all(color: theme.colorScheme.outlineVariant),
-            borderRadius: BorderRadius.circular(StudioRadii.md),
-            boxShadow: StudioShadows.lifted(theme.colorScheme.shadow),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: SingleChildScrollView(child: detailBuilder(context)),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DismissStatusBarDetailIntent extends Intent {
-  const _DismissStatusBarDetailIntent();
 }

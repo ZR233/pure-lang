@@ -5,6 +5,7 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_menu.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'context_usage_readout.dart';
 import 'session_selectors.dart';
@@ -326,17 +327,15 @@ class _StatusOverflow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<_StatusOverflowAction>(
+    return StudioIconMenu<_StatusOverflowAction>(
       key: const ValueKey('status-overflow'),
       tooltip: MaterialLocalizations.of(context).moreButtonTooltip,
-      position: PopupMenuPosition.over,
       icon: const Icon(Icons.more_horiz, size: 18),
       padding: EdgeInsets.zero,
       onSelected: (action) => _showDetail(context, action),
       itemBuilder: (context) => [
         if (effort case final value?)
-          PopupMenuItem<_StatusOverflowAction>(
-            enabled: false,
+          StudioMenuItem<_StatusOverflowAction>.header(
             child: Text(
               '${context.l10n.statusReasoningEffort}: $value',
               maxLines: 1,
@@ -344,7 +343,7 @@ class _StatusOverflow extends StatelessWidget {
             ),
           ),
         if (capabilities.isNotEmpty)
-          PopupMenuItem<_StatusOverflowAction>(
+          StudioMenuItem<_StatusOverflowAction>(
             value: _StatusOverflowAction.capabilities,
             child: Text(
               capabilities,
@@ -353,9 +352,9 @@ class _StatusOverflow extends StatelessWidget {
             ),
           ),
         if (lspServers.isNotEmpty)
-          PopupMenuItem<_StatusOverflowAction>(
-            key: StudioDriverKeys.lspActivityOverflow(),
+          StudioMenuItem<_StatusOverflowAction>(
             value: _StatusOverflowAction.lsp,
+            itemKey: StudioDriverKeys.lspActivityOverflow(),
             child: Text(
               _lspOverflowSummary(context, lspServers),
               maxLines: 2,

@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../domain/models/studio_models.dart';
 import '../l10n/studio_l10n.dart';
+import 'studio_menu.dart';
 import 'studio_driver_keys.dart';
-import 'upward_popup_menu.dart';
+import 'studio_menu_label.dart';
 
 /// A catalog model paired with its provider-instance identity for selection.
 ///
@@ -114,15 +115,15 @@ class ModelRouteSelector extends StatelessWidget {
     final selectedLabel = selected?.displayName ?? unresolvedLabel ?? model;
     final canSelect = enabled && options.isNotEmpty;
     final menuSize = _menuSize(context);
-    final contentWidth = math.max(0.0, menuSize.width - 40);
+    final contentWidth = math.max(0.0, menuSize.width - 32);
 
-    return UpwardPopupMenu<ModelSelectionOption>(
+    return StudioMenu<ModelSelectionOption>(
       key: selectorKey,
       tooltip: tooltip ?? fieldLabel,
-      initialValue: selected,
       enabled: canSelect,
       onBlockedTap: canSelect ? null : onBlockedTap,
-      constraints: BoxConstraints(
+      menuConstraints: BoxConstraints(
+        minWidth: menuSize.width,
         maxWidth: menuSize.width,
         maxHeight: menuSize.height,
       ),
@@ -137,17 +138,15 @@ class ModelRouteSelector extends StatelessWidget {
     );
   }
 
-  List<PopupMenuEntry<ModelSelectionOption>> _popupItems(
+  List<StudioMenuItem<ModelSelectionOption>> _popupItems(
     BuildContext context, {
     required double contentWidth,
     required ModelSelectionOption? selected,
   }) {
-    final items = <PopupMenuEntry<ModelSelectionOption>>[];
+    final items = <StudioMenuItem<ModelSelectionOption>>[];
     if (showUnresolvedOption && selected == null && unresolvedLabel != null) {
       items.add(
-        PopupMenuItem<ModelSelectionOption>(
-          enabled: false,
-          height: 42,
+        StudioMenuItem<ModelSelectionOption>.header(
           child: SizedBox(
             width: contentWidth,
             child: _unresolvedEntry(context, unresolvedLabel!),
@@ -157,9 +156,7 @@ class ModelRouteSelector extends StatelessWidget {
     }
     for (final group in _groups()) {
       items.add(
-        PopupMenuItem<ModelSelectionOption>(
-          enabled: false,
-          height: 38,
+        StudioMenuItem<ModelSelectionOption>.header(
           child: SizedBox(
             width: contentWidth,
             child: _providerHeading(context, group.name),
@@ -168,10 +165,10 @@ class ModelRouteSelector extends StatelessWidget {
       );
       for (final option in group.options) {
         items.add(
-          PopupMenuItem<ModelSelectionOption>(
-            key: _optionKey(option),
+          StudioMenuItem<ModelSelectionOption>(
             value: option,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            selected: option == selected,
+            itemKey: _optionKey(option),
             child: SizedBox(
               width: contentWidth,
               child: _modelOptionContents(

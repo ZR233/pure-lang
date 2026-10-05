@@ -1,12 +1,13 @@
-import 'dart:async';
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../app/theme/studio_tokens.dart';
+import '../../shared/studio_anchored_panel.dart';
 
-class StatusDetailPopover extends StatefulWidget {
+/// 状态读数的悬停/点击详情弹层。
+///
+/// 锚定、开合、键盘入口与打开期间的 canonical 刷新由共享
+/// [StudioAnchoredPanel] 承担；本组件只补充状态语义标签。
+class StatusDetailPopover extends StatelessWidget {
   const StatusDetailPopover({
     required this.child,
     required this.detailBuilder,
@@ -25,204 +26,16 @@ class StatusDetailPopover extends StatefulWidget {
   final double width;
 
   @override
-  State<StatusDetailPopover> createState() => _StatusDetailPopoverState();
-}
-
-class _StatusDetailPopoverState extends State<StatusDetailPopover> {
-  final GlobalKey _targetKey = GlobalKey();
-  OverlayEntry? _entry;
-  Timer? _hideTimer;
-  bool _focused = false;
-  bool _refreshScheduled = false;
-
-  @override
-  void didUpdateWidget(StatusDetailPopover oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // The open overlay is built from a closure over `widget`; rebuild it so a
-    // canonical snapshot update refreshes the detail without reopening. The
-    // entry is not a descendant of this subtree, so it can only be marked
-    // after the current build completes.
-    if (_entry == null || _refreshScheduled) {
-      return;
-    }
-    _refreshScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refreshScheduled = false;
-      _entry?.markNeedsBuild();
-    });
-  }
-
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    _hide();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return Semantics(
-      container: true,
-      label: widget.semanticsLabel,
-      value: widget.semanticsValue,
-      button: true,
-      focusable: true,
-      focused: _focused,
-      onTap: _toggle,
-      child: FocusableActionDetector(
-        onFocusChange: _handleFocusChange,
-        shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-          SingleActivator(LogicalKeyboardKey.escape):
-              _DismissStatusDetailIntent(),
-        },
-        actions: {
-          ActivateIntent: CallbackAction<ActivateIntent>(
-            onInvoke: (_) {
-              _toggle();
-              return null;
-            },
-          ),
-          _DismissStatusDetailIntent:
-              CallbackAction<_DismissStatusDetailIntent>(
-                onInvoke: (_) {
-                  _hide();
-                  return null;
-                },
-              ),
-        },
-        child: KeyedSubtree(
-          key: _targetKey,
-          child: Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerDown: (_) => _toggle(),
-            onPointerHover: (_) => _show(),
-            child: MouseRegion(
-              onEnter: (_) => _show(),
-              onExit: (_) => _scheduleHide(),
-              child: widget.child,
-            ),
-          ),
-        ),
-      ),
+    return StudioAnchoredPanel(
+      width: width,
+      semanticsLabel: semanticsLabel,
+      semanticsValue: semanticsValue,
+      onFocusChange: onFocusChange,
+      panelBuilder: detailBuilder,
+      child: child,
     );
   }
-
-  void _handleFocusChange(bool focused) {
-    setState(() => _focused = focused);
-    widget.onFocusChange?.call(focused);
-    if (focused) {
-      _cancelHide();
-    } else {
-      _scheduleHide();
-    }
-  }
-
-  void _toggle() {
-    if (_entry == null) {
-      _show();
-    } else {
-      _hide();
-    }
-  }
-
-  void _show() {
-    _cancelHide();
-    if (_entry != null) {
-      return;
-    }
-    final overlay = Overlay.of(context);
-    final target = _targetKey.currentContext?.findRenderObject();
-    final overlayRenderObject = overlay.context.findRenderObject();
-    if (target is! RenderBox || overlayRenderObject is! RenderBox) {
-      return;
-    }
-    final targetTopLeft = target.localToGlobal(
-      Offset.zero,
-      ancestor: overlayRenderObject,
-    );
-    final overlaySize = overlayRenderObject.size;
-    final effectiveWidth = math.max(
-      0.0,
-      math.min(widget.width, overlaySize.width - 16),
-    );
-    final maxLeft = math.max(8.0, overlaySize.width - effectiveWidth - 8);
-    final left = targetTopLeft.dx.clamp(8.0, maxLeft).toDouble();
-    final bottom = math.max(8.0, overlaySize.height - targetTopLeft.dy + 8);
-    final maxDetailHeight = math.max(96.0, targetTopLeft.dy - 24.0);
-    final theme = Theme.of(context);
-    _entry = OverlayEntry(
-      builder: (context) {
-        return Theme(
-          data: theme,
-          child: Positioned.fill(
-            child: Stack(
-              children: [
-                Positioned(
-                  left: left,
-                  bottom: bottom,
-                  width: effectiveWidth,
-                  child: MouseRegion(
-                    onEnter: (_) => _cancelHide(),
-                    onExit: (_) => _scheduleHide(),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxHeight: maxDetailHeight),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainerLowest,
-                            border: Border.all(
-                              color: theme.colorScheme.outlineVariant,
-                            ),
-                            borderRadius: BorderRadius.circular(StudioRadii.md),
-                            boxShadow: StudioShadows.lifted(
-                              theme.colorScheme.shadow,
-                            ),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: SingleChildScrollView(
-                              child: widget.detailBuilder(context),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-    overlay.insert(_entry!);
-  }
-
-  void _scheduleHide() {
-    if (_focused) {
-      _cancelHide();
-      return;
-    }
-    _cancelHide();
-    _hideTimer = Timer(const Duration(milliseconds: 120), _hide);
-  }
-
-  void _cancelHide() {
-    _hideTimer?.cancel();
-    _hideTimer = null;
-  }
-
-  void _hide() {
-    _entry?.remove();
-    _entry = null;
-  }
-}
-
-class _DismissStatusDetailIntent extends Intent {
-  const _DismissStatusDetailIntent();
 }
 
 class StatusDetailPanel extends StatelessWidget {

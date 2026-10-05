@@ -5,8 +5,9 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/model_route_selector.dart';
+import '../../shared/studio_menu.dart';
 import '../../shared/studio_driver_keys.dart';
-import '../../shared/upward_popup_menu.dart';
+import '../../shared/studio_menu_label.dart';
 
 /// 根会话的模式选择器；起始页传新会话草稿，状态栏传当前 Thread 的 mode。
 class SessionModeSelector extends ConsumerWidget {
@@ -34,19 +35,19 @@ class SessionModeSelector extends ConsumerWidget {
         .where((descriptor) => descriptor.id == mode.id)
         .firstOrNull
         ?.displayName;
-    return UpwardPopupMenu<ThreadModeId>(
+    return StudioMenu<ThreadModeId>(
       key: StudioDriverKeys.sessionMode,
       tooltip: enabled
           ? context.l10n.statusSessionMode
           : context.l10n.statusSessionModeLocked,
-      initialValue: mode,
       enabled: enabled,
       onSelected: onSelected,
       itemBuilder: (context) => [
         for (final option in options)
-          PopupMenuItem<ThreadModeId>(
-            key: StudioDriverKeys.sessionModeOption(option.name),
+          StudioMenuItem<ThreadModeId>(
             value: option,
+            selected: option == mode,
+            itemKey: StudioDriverKeys.sessionModeOption(option.name),
             child: Row(
               children: [
                 Icon(sessionModeIcon(option), size: 18),
@@ -90,14 +91,14 @@ class SessionWorkspaceModeSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
-    return UpwardPopupMenu<ThreadWorkspaceMode>(
+    return StudioMenu<ThreadWorkspaceMode>(
       key: StudioDriverKeys.sessionWorkspaceMode,
       tooltip: l10n.composerWorkspaceModeLabel,
-      initialValue: mode,
       onSelected: onSelected,
       itemBuilder: (context) => [
-        PopupMenuItem<ThreadWorkspaceMode>(
-          key: StudioDriverKeys.sessionWorkspaceModeOption(
+        StudioMenuItem<ThreadWorkspaceMode>(
+          selected: !mode.isWorktree,
+          itemKey: StudioDriverKeys.sessionWorkspaceModeOption(
             ThreadWorkspaceMode.local.id,
           ),
           value: ThreadWorkspaceMode.local,
@@ -106,8 +107,9 @@ class SessionWorkspaceModeSelector extends ConsumerWidget {
             label: l10n.composerWorkspaceModeLocal,
           ),
         ),
-        PopupMenuItem<ThreadWorkspaceMode>(
-          key: StudioDriverKeys.sessionWorkspaceModeOption(
+        StudioMenuItem<ThreadWorkspaceMode>(
+          selected: mode.isWorktree,
+          itemKey: StudioDriverKeys.sessionWorkspaceModeOption(
             ThreadWorkspaceMode.worktree.id,
           ),
           value: ThreadWorkspaceMode.worktree,
@@ -295,10 +297,9 @@ class ReasoningEffortSelector extends StatelessWidget {
         : selectedEffort;
     final enabled =
         currentModel != null && efforts.isNotEmpty && blockedReason == null;
-    return UpwardPopupMenu<String>(
+    return StudioMenu<String>(
       key: StudioDriverKeys.reasoningEffort,
       tooltip: blockedReason ?? context.l10n.statusReasoningEffort,
-      initialValue: selectedEffort,
       enabled: enabled,
       onBlockedTap: blockedReason == null
           ? null
@@ -306,9 +307,10 @@ class ReasoningEffortSelector extends StatelessWidget {
       onSelected: (nextEffort) => onSelected(providerId, model, nextEffort),
       itemBuilder: (context) => [
         for (final effort in efforts)
-          PopupMenuItem(
-            key: StudioDriverKeys.reasoningEffortOption(effort),
+          StudioMenuItem<String>(
             value: effort,
+            selected: effort == selectedEffort,
+            itemKey: StudioDriverKeys.reasoningEffortOption(effort),
             child: Row(
               children: [
                 const Icon(Icons.schedule_outlined, size: 18),

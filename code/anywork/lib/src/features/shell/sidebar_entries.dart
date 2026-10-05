@@ -104,7 +104,7 @@ class _ProjectTile extends ConsumerWidget {
                         : null,
                     icon: const Icon(Icons.add, size: 18),
                   ),
-                  PopupMenuButton<String>(
+                  StudioIconMenu<String>(
                     key: ValueKey('project-menu-${project.id}'),
                     tooltip: context.l10n.sidebarProjects,
                     icon: const Icon(Icons.more_horiz, size: 18),
@@ -125,7 +125,7 @@ class _ProjectTile extends ConsumerWidget {
                       }
                     },
                     itemBuilder: (_) => [
-                      PopupMenuItem(
+                      StudioMenuItem<String>(
                         value: 'pin',
                         child: Text(
                           ref
@@ -139,13 +139,13 @@ class _ProjectTile extends ConsumerWidget {
                               : context.l10n.sidebarPin,
                         ),
                       ),
-                      PopupMenuItem(
+                      StudioMenuItem<String>(
                         value: 'copy',
                         child: Text(context.l10n.sidebarCopyPath),
                       ),
-                      PopupMenuItem(
-                        key: ValueKey('project-close-${project.id}'),
+                      StudioMenuItem<String>(
                         value: 'close',
+                        itemKey: ValueKey('project-close-${project.id}'),
                         child: Text(context.l10n.sidebarCloseProject),
                       ),
                     ],
@@ -233,7 +233,7 @@ class _ThreadTile extends ConsumerWidget {
               onNavigate?.call();
             }
           : null,
-      trailing: PopupMenuButton<String>(
+      trailing: StudioIconMenu<String>(
         key: ValueKey('thread-menu-${thread.id}'),
         icon: const Icon(Icons.more_horiz, size: 18),
         onSelected: (action) async {
@@ -254,12 +254,12 @@ class _ThreadTile extends ConsumerWidget {
         },
         itemBuilder: (_) => [
           if (issue?.canRetry == true)
-            PopupMenuItem(
-              key: StudioDriverKeys.retryRecoveryIssue(issue!.id),
+            StudioMenuItem<String>(
               value: 'retry',
+              itemKey: StudioDriverKeys.retryRecoveryIssue(issue!.id),
               child: Text(context.l10n.runtimeFatalRetry),
             ),
-          PopupMenuItem(
+          StudioMenuItem<String>(
             value: 'pin',
             child: Text(
               ref
@@ -273,15 +273,15 @@ class _ThreadTile extends ConsumerWidget {
                   : context.l10n.sidebarPin,
             ),
           ),
-          PopupMenuItem(
-            key: StudioDriverKeys.renameThread(thread.id),
+          StudioMenuItem<String>(
             value: 'rename',
+            itemKey: StudioDriverKeys.renameThread(thread.id),
             enabled: !blocked,
             child: Text(context.l10n.sidebarRenameSession),
           ),
-          PopupMenuItem(
-            key: StudioDriverKeys.archiveThread(thread.id),
+          StudioMenuItem<String>(
             value: 'archive',
+            itemKey: StudioDriverKeys.archiveThread(thread.id),
             enabled: !blocked,
             child: Text(context.l10n.sidebarArchiveSession),
           ),

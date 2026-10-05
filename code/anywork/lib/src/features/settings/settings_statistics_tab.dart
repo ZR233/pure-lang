@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_form_select.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
 
@@ -347,18 +348,23 @@ class _HistoryHeader extends StatelessWidget {
         final filter = SizedBox(
           key: StudioDriverKeys.statisticsFilter,
           width: filterWidth,
-          child: DropdownButtonFormField<String?>(
-            key: ValueKey(value),
-            initialValue: value,
+          child: StudioFormSelectField<String?>(
+            // Caller-owned canonical selection, not a draft edit: the field
+            // follows [value] without a value-driven key, so choosing a
+            // filter never remounts the field's state and its real trigger
+            // focus node survives the parent rebuild (an explicit null —
+            // "all models" — stays a legitimate controlled value).
+            value: value,
             isExpanded: true,
             decoration: const InputDecoration(isDense: true),
             items: [
-              DropdownMenuItem<String?>(
+              StudioFormSelectItem<String?>(
+                value: null,
                 child: Text(context.l10n.settingsStatisticsAllModels),
               ),
               for (final sample in history)
                 if (seen.add(sample.filterKey))
-                  DropdownMenuItem<String?>(
+                  StudioFormSelectItem<String?>(
                     value: sample.filterKey,
                     child: Text(
                       _formatPerformanceIdentity(
@@ -373,7 +379,7 @@ class _HistoryHeader extends StatelessWidget {
                   ),
               for (final summary in summaries)
                 if (seen.add(summary.filterKey))
-                  DropdownMenuItem<String?>(
+                  StudioFormSelectItem<String?>(
                     value: summary.filterKey,
                     child: Text(
                       _formatPerformanceIdentity(

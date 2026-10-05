@@ -5,6 +5,7 @@ import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_form_select.dart';
 import 'settings_common.dart';
 
 /// Canonical web-search modes the settings card can edit. Any other runtime
@@ -164,7 +165,7 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                 children: [
                   SizedBox(
                     width: fieldWidth,
-                    child: DropdownButtonFormField<String>(
+                    child: StudioFormSelectField<String>(
                       initialValue: _knownWebSearchModes.contains(_mode)
                           ? _mode
                           : null,
@@ -176,7 +177,7 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                       ),
                       items: [
                         for (final mode in _knownWebSearchModes)
-                          DropdownMenuItem(
+                          StudioFormSelectItem<String>(
                             value: mode,
                             child: Text(_modeLabel(context, mode)),
                           ),
@@ -188,7 +189,7 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                   ),
                   SizedBox(
                     width: fieldWidth,
-                    child: DropdownButtonFormField<String>(
+                    child: StudioFormSelectField<String>(
                       initialValue: contextSizeIsKnown ? sizeValue : null,
                       hint: contextSizeIsKnown
                           ? null
@@ -197,12 +198,12 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                         labelText: context.l10n.settingsWebSearchContextSize,
                       ),
                       items: [
-                        DropdownMenuItem(
+                        StudioFormSelectItem<String>(
                           value: '',
                           child: Text(context.l10n.settingsServiceDefault),
                         ),
                         for (final size in _knownWebSearchContextSizes)
-                          DropdownMenuItem(
+                          StudioFormSelectItem<String>(
                             value: size,
                             child: Text(_contextSizeLabel(context, size)),
                           ),

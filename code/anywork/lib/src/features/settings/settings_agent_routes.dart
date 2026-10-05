@@ -5,6 +5,7 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/model_route_selector.dart';
+import '../../shared/studio_form_select.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
 
@@ -199,25 +200,35 @@ class _RoleSettingsRow extends StatelessWidget {
         ),
       ],
     );
-    final effortSelector = _RoleSelectField(
-      selectorKey: StudioDriverKeys.settingsRoleEffort(role),
-      label: context.l10n.statusReasoningEffort,
+    final effortUnresolvedLabel =
+        selectedEffort != null && !efforts.contains(selectedEffort)
+        ? context.l10n.settingsAgentRouteUnavailable(selectedEffort!)
+        : selectedEffort == null && efforts.isNotEmpty
+        ? context.l10n.statusModelRouteUnavailable
+        : null;
+    final effortSelector = StudioFormSelectField<String>(
+      key: StudioDriverKeys.settingsRoleEffort(role),
       value: selectedEffort,
-      unresolvedLabel:
-          selectedEffort != null && !efforts.contains(selectedEffort)
-          ? context.l10n.settingsAgentRouteUnavailable(selectedEffort!)
-          : selectedEffort == null && efforts.isNotEmpty
-          ? context.l10n.statusModelRouteUnavailable
-          : null,
-      options: [
+      hint: effortUnresolvedLabel == null ? null : Text(effortUnresolvedLabel),
+      decoration: InputDecoration(
+        labelText: context.l10n.statusReasoningEffort,
+        isDense: true,
+      ),
+      items: [
         for (final effort in efforts)
-          _RoleSelectOption(
-            key: StudioDriverKeys.settingsRoleEffortOption(role, effort),
+          StudioFormSelectItem<String>(
             value: effort,
-            label: effort,
+            itemKey: StudioDriverKeys.settingsRoleEffortOption(role, effort),
+            child: Text(effort, overflow: TextOverflow.ellipsis),
           ),
       ],
-      onChanged: efforts.isEmpty ? null : onEffortChanged,
+      onChanged: efforts.isEmpty
+          ? null
+          : (effort) {
+              if (effort != null) {
+                onEffortChanged(effort);
+              }
+            },
     );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -244,76 +255,4 @@ class _RoleSettingsRow extends StatelessWidget {
       ),
     );
   }
-}
-
-class _RoleSelectField extends StatelessWidget {
-  const _RoleSelectField({
-    required this.selectorKey,
-    required this.label,
-    required this.value,
-    required this.options,
-    required this.onChanged,
-    this.unresolvedLabel,
-  });
-
-  final Key selectorKey;
-  final String label;
-  final String? value;
-  final String? unresolvedLabel;
-  final List<_RoleSelectOption> options;
-  final ValueChanged<String>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onChanged != null && options.isNotEmpty;
-    final selectedLabel =
-        options.where((option) => option.value == value).firstOrNull?.label ??
-        unresolvedLabel;
-    return MenuAnchor(
-      menuChildren: [
-        for (final option in options)
-          MenuItemButton(
-            key: option.key,
-            onPressed: enabled ? () => onChanged!(option.value) : null,
-            child: Text(option.label, overflow: TextOverflow.ellipsis),
-          ),
-      ],
-      builder: (context, controller, child) {
-        return InkWell(
-          key: selectorKey,
-          onTap: enabled
-              ? () => controller.isOpen ? controller.close() : controller.open()
-              : null,
-          borderRadius: BorderRadius.circular(4),
-          child: InputDecorator(
-            isEmpty: selectedLabel == null,
-            isFocused: controller.isOpen,
-            decoration: InputDecoration(
-              labelText: label,
-              isDense: true,
-              enabled: enabled,
-              suffixIcon: const Icon(Icons.arrow_drop_down),
-            ),
-            child: Text(
-              selectedLabel ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _RoleSelectOption {
-  const _RoleSelectOption({
-    required this.key,
-    required this.value,
-    required this.label,
-  });
-
-  final Key key;
-  final String value;
-  final String label;
 }

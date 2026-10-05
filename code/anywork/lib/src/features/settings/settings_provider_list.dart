@@ -4,6 +4,7 @@ import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
+import '../../shared/studio_menu.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
 import 'settings_provider_drafts.dart';
@@ -483,11 +484,10 @@ class _ProviderRowMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<_ProviderRowAction>(
+    return StudioIconMenu<_ProviderRowAction>(
       tooltip: context.l10n.settingsProviderActions,
       icon: const Icon(Icons.more_horiz),
       iconSize: 20,
-      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
       onSelected: (action) {
         switch (action) {
           case _ProviderRowAction.setDefault:
@@ -501,7 +501,7 @@ class _ProviderRowMenu extends StatelessWidget {
         }
       },
       itemBuilder: (context) => [
-        PopupMenuItem(
+        StudioMenuItem<_ProviderRowAction>(
           value: _ProviderRowAction.setDefault,
           enabled: !isDefault,
           child: _ProviderMenuLabel(
@@ -513,14 +513,14 @@ class _ProviderRowMenu extends StatelessWidget {
                 : context.l10n.settingsSetAsDefaultProvider,
           ),
         ),
-        PopupMenuItem(
+        StudioMenuItem<_ProviderRowAction>(
           value: _ProviderRowAction.refresh,
           child: _ProviderMenuLabel(
             icon: Icons.refresh,
             label: context.l10n.settingsRefreshUsage,
           ),
         ),
-        PopupMenuItem(
+        StudioMenuItem<_ProviderRowAction>(
           value: _ProviderRowAction.edit,
           child: _ProviderMenuLabel(
             icon: Icons.edit_outlined,
@@ -528,7 +528,7 @@ class _ProviderRowMenu extends StatelessWidget {
           ),
         ),
         if (onDelete != null)
-          PopupMenuItem(
+          StudioMenuItem<_ProviderRowAction>(
             value: _ProviderRowAction.delete,
             child: _ProviderMenuLabel(
               icon: Icons.delete_outline,

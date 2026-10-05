@@ -22,6 +22,7 @@ import '../../platform/terminal_launcher.dart';
 import '../../platform/vscode_launcher.dart';
 import '../../platform/zed_launcher.dart';
 import '../../shared/studio_chrome.dart';
+import '../../shared/studio_menu.dart';
 import '../../shared/studio_driver_keys.dart';
 import '../../shared/studio_driver_state.dart';
 import '../update/studio_update_controller.dart';

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/model_route_selector.dart';
+import '../../shared/studio_form_select.dart';
 import 'agent_workspace_mode_label.dart';
 import 'settings_common.dart';
 
@@ -180,24 +181,24 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
                   },
                 ),
                 const SizedBox(height: 10),
-                DropdownButtonFormField<String?>(
+                StudioFormSelectField<String?>(
                   key: ValueKey('agent-profile-effort-$_providerId-$_model'),
                   initialValue: _effort,
                   decoration: InputDecoration(
                     labelText: l10n.statusReasoningEffort,
                   ),
                   items: [
-                    DropdownMenuItem<String?>(
+                    StudioFormSelectItem<String?>(
                       value: null,
                       child: Text(l10n.settingsAgentProfileEffortDefault),
                     ),
                     if (_effortUnavailable)
-                      DropdownMenuItem<String?>(
+                      StudioFormSelectItem<String?>(
                         value: _effort,
                         child: Text(_effort!),
                       ),
                     for (final effort in _efforts)
-                      DropdownMenuItem<String?>(
+                      StudioFormSelectItem<String?>(
                         value: effort,
                         child: Text(effort),
                       ),
@@ -205,7 +206,7 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
                   onChanged: (effort) => setState(() => _effort = effort),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<AgentWorkspaceMode>(
+                StudioFormSelectField<AgentWorkspaceMode>(
                   key: const ValueKey('agent-profile-workspace-mode'),
                   initialValue: _workspaceMode,
                   decoration: InputDecoration(
@@ -213,7 +214,7 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
                   ),
                   items: AgentWorkspaceMode.values
                       .map(
-                        (mode) => DropdownMenuItem(
+                        (mode) => StudioFormSelectItem<AgentWorkspaceMode>(
                           value: mode,
                           child: Text(agentWorkspaceModeLabel(context, mode)),
                         ),
