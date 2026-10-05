@@ -5,6 +5,30 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.2.0](https://github.com/ZR233/pure-lang/compare/v6.1.0...v6.2.0) (2026-10-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **agent-runtime:** 模型观察和展示身份接口新增恢复代次；TurnState::Failed 新增 可选模型失败事实；工具刷新诊断使用 ToolCatalog/Retry。调用方须同步新类型。 既有 v2 数据缺省为首次代次及无结构化失败事实，历史身份与正文保持不变。
+* **studio:** Settings 快照及观察事件增加 modelCatalogRevision、effectiveModels 和 typed modelCatalog 状态；消费者须同步 typed DTO 和双水位 reducer。StudioConfig::default_config 改为返回 Result，移除 Default 以传播内置目录错误。
+* **studio:** 内置模型目录与 Studio 模板构造接口改为返回 Result；调用方须传播目录装配错误，并从嵌入定义读取模型，不再使用旧的 OpenAI/DeepSeek slug 名单接口。
+
+### Features
+
+* **studio:** 完成 OpenAI 与 DeepSeek 动态模型目录 ([fc9d349](https://github.com/ZR233/pure-lang/commit/fc9d3498d80ffba11b69204c5c34cf556eabb831))
+
+
+### Bug Fixes
+
+* **agent-runtime:** 完善模型调用恢复并解除工具目录诊断的会话阻塞 ([35d4399](https://github.com/ZR233/pure-lang/commit/35d43998c2100fcecc210f2902da9dddeab864e0))
+* **release:** 修复第三方声明的打包来源路径 ([a1671fe](https://github.com/ZR233/pure-lang/commit/a1671fe77d85f52a2424e46c46e4ee2c062efd8f))
+* **release:** 解除不可恢复的旧草稿发布阻塞 ([ddce00c](https://github.com/ZR233/pure-lang/commit/ddce00c80fab9f61715c2926215fee43191cd5d6))
+* **studio:** 修复 GPT-6.1 Sol 动态目录的视觉能力识别 ([1072e62](https://github.com/ZR233/pure-lang/commit/1072e629c4a9aa65ead507e1b1e67df9fc4e5ef6))
+* **studio:** 参照 Codex 补全默认输入模态 ([ec27cc3](https://github.com/ZR233/pure-lang/commit/ec27cc356ca1038cbf7242082ebc704812840ca1))
+* **studio:** 补全带 API 显示信息的旧模型缓存 ([b671eb4](https://github.com/ZR233/pure-lang/commit/b671eb41ad1f2cb330736fa826383beeb5556cbb))
+* **studio:** 适配 Rust 1.99 并修复模型目录与 GUI 构建 ([c797cc9](https://github.com/ZR233/pure-lang/commit/c797cc9c7392d2595135957767a4d2543464e5d2))
+
 ## [6.1.0](https://github.com/ZR233/pure-lang/compare/v6.0.0...v6.1.0) (2026-10-03)
 
 
