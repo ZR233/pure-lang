@@ -8,7 +8,11 @@
 //! OS-polls the real business pids.
 
 use anyhow::{Context, Result};
+// `fs` and `Path` are only exercised by the Linux `/proc` helpers below; gating
+// them keeps the Windows build free of unused-import warnings under `-D warnings`.
+#[cfg(target_os = "linux")]
 use std::fs;
+#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
