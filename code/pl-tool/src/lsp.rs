@@ -1,5 +1,9 @@
 //! Language-service input contracts and workspace-bound Thread tools.
+#[cfg(target_os = "linux")]
+mod host;
 mod thread;
+#[cfg(target_os = "linux")]
+pub use host::LocalLspHostBackend;
 use pl_lsp::query::LspQueryOperation;
 use schemars::JsonSchema;
 use serde::Deserialize;

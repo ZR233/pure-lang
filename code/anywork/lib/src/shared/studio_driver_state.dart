@@ -10,6 +10,12 @@ abstract final class StudioDriverState {
   static ThreadHistoryWindow _history = const ThreadHistoryWindow();
   static Map<String, ThreadWorkspace> _workspacesByThread = const {};
   static final List<StudioShutdownProgress> _shutdownProgress = [];
+  static StudioShutdownReport? _shutdownReport;
+  static int? _nativeExitRemainingMs;
+  static int? _nativeCleanupBudgetMs;
+  static int _exitRequests = 0;
+  static String? _startupFailureCode;
+  static String? _startupFailureCorrelationId;
   static List<String> _sidebarDirectoryIds = const [];
   static List<StudioThread> _currentRootThreads = const [];
   static bool _sidebarDirectoryHasMore = false;
@@ -193,6 +199,83 @@ abstract final class StudioDriverState {
   static List<StudioShutdownProgress> get shutdownProgress =>
       List.unmodifiable(_shutdownProgress);
 
+  /// 上一次 typed 退出报告（只读诊断投影，不是第二份业务状态）。
+  static void publishShutdownReport(StudioShutdownReport? report) {
+    _shutdownReport = report;
+  }
+
+  /// native 首次期限的剩余毫秒与派生出的清理预算；null 表示尚未武装。
+  static void publishNativeExitBudget({
+    required int remainingMs,
+    required int cleanupBudgetMs,
+  }) {
+    _nativeExitRemainingMs = remainingMs;
+    _nativeCleanupBudgetMs = cleanupBudgetMs;
+  }
+
+  /// 记录一次退出请求（窗口关闭 / ServicesBinding / Driver / dispose）。
+  static void markExitRequested() {
+    _exitRequests++;
+  }
+
+  /// 记录启动致命失败（如第二实例 instanceBusy）的 typed code 与 correlation，供
+  /// Driver-only 验收可靠判定，而不是从 UI 文本猜测。
+  static void publishStartupFailure(StudioFailure failure) {
+    _startupFailureCode = failure.code.name;
+    _startupFailureCorrelationId = failure.correlationId;
+  }
+
+  /// Driver-only 只读退出诊断：native 剩余期限、清理预算、退出请求次数、typed 报告与
+  /// 已观察阶段。验收据此对齐 remaining/stage，无需从长请求的断开推断。
+  static Map<String, Object?> exitDiagnosticsJson() => <String, Object?>{
+    'nativeExit': _nativeExitJson(),
+    'shutdownReport': _shutdownReportJson(),
+    'shutdownPhases': _shutdownPhasesJson(),
+    'startup': _startupJson(),
+  };
+
+  static Map<String, Object?> _startupJson() => <String, Object?>{
+    'failureCode': _startupFailureCode,
+    'correlationId': _startupFailureCorrelationId,
+  };
+
+  static Map<String, Object?> _nativeExitJson() => <String, Object?>{
+    'remainingMs': _nativeExitRemainingMs,
+    'cleanupBudgetMs': _nativeCleanupBudgetMs,
+    'requests': _exitRequests,
+  };
+
+  static List<String> _shutdownPhasesJson() => <String>[
+    for (final progress in _shutdownProgress)
+      '${progress.phase.name}:${switch (progress) {
+        FlushingPersistenceProgress(:final pendingCommits) => pendingCommits,
+        StoppingSubscriptionsProgress() || CancellingTurnsProgress() || StoppingAgentsProgress() || StoppingMcpProgress() || StoppingLspProgress() || StoppedProgress() => 0,
+      }}',
+  ];
+
+  static Map<String, Object?>? _shutdownReportJson() {
+    final report = _shutdownReport;
+    if (report == null) return null;
+    return <String, Object?>{
+      'outcome': report.outcome.name,
+      'persistence': switch (report.persistence) {
+        UnknownStudioPendingPersistence() => 'unknown',
+        PendingStudioPendingPersistence(:final count) => 'pending:$count',
+        DrainedStudioPendingPersistence() => 'drained',
+      },
+      'issues': [
+        for (final issue in report.issues)
+          {
+            'stage': issue.stage,
+            'code': issue.code,
+            'message': issue.message,
+            'retryable': issue.retryable,
+            'correlationId': issue.correlationId,
+          },
+      ],
+    };
+  }
+
   static String snapshotJson() {
     final workspace = _workspace;
     final lastTurn = workspace?.lastTurn;
@@ -297,13 +380,10 @@ abstract final class StudioDriverState {
           ],
         },
       },
-      'shutdownPhases': <String>[
-        for (final progress in _shutdownProgress)
-          '${progress.phase.name}:${switch (progress) {
-            FlushingPersistenceProgress(:final pendingCommits) => pendingCommits,
-            StoppingSubscriptionsProgress() || CancellingTurnsProgress() || StoppingAgentsProgress() || StoppingMcpProgress() || StoppingLspProgress() || StoppedProgress() => 0,
-          }}',
-      ],
+      'shutdownPhases': _shutdownPhasesJson(),
+      // typed 退出报告与 native 期限预算：只读诊断投影，供验收断言真实结局（不伪 Stopped）。
+      'shutdownReport': _shutdownReportJson(),
+      'nativeExit': _nativeExitJson(),
       'settings': {
         'revision': _settingsRevision,
         'modelCatalogRevision': _modelCatalogRevision,

@@ -81,6 +81,10 @@ Timeline 首窗在订阅建立后由 HistoryReader 查询；产品交互回答�
 GUI 首个可用画面之后若已选中 Thread，复用普通打开命令激活该 Thread，不遍历其他 Thread，
 也不自动继续模型或工具执行。
 
+启动关闭终止闩是单向事实：退出开始后本进程余下生命周期内拒绝任何迟到的 runtime 安装，
+从而迟到安装无法在退出期间重新发布运行时；闩不因重复退出或启动重试复位，也不通过复位触发
+新的初始化。正常启动而未进入退出的进程不受该闩影响。
+
 创建根会话是可失败的类型化命令，请求同时携带 Mode 与会话工作区模式。`worktree` 模式在发布
 Thread 之前完成仓库解析、worktree 创建与 lease 落库；任一阶段失败都让命令失败、不留下已发布
 Thread，GUI 保留输入草稿并显示失败原因。激活时工作区资源缺失或身份不符只显式失败并发布该
@@ -99,11 +103,145 @@ canonical snapshot，Flutter 原子替换 Settings 领域，不只修改本地 d
 
 ## 18.5 Shutdown
 
-shutdown 命令阻止新 mutation，停止/等待活动 Turn，flush 所有 Thread checkpoint，关闭
-Agent、MCP、LSP 与订阅，最后发布 Stopped。前序阶段失败仍须执行 SSH 连接收束并合并
-错误。GUI 只有收到该终态才可正常销毁 engine；远端 helper 的停止由单向关闭及 30 秒
-心跳租约保证，不把等待 SSH 失联作为 GUI 退出条件。Driver harness 仍须确认本地原生
-子进程树已退出。
+关闭只有一套阶段编排，按 reason 区分调用方：应用退出、更新安装与进程内服务关闭。所有调用方
+复用同一编排，旧严格业务 API 保留但语义不同，只在这套编排上复用，不维护并行的第二套实现。
+严格调用方（进程内 server 关闭与更新安装）要求报告为真实 Clean 才继续，degraded 或超时都算
+失败，不把超时当成功、不启动后续安装或移交；桌面应用退出接受 Clean 或 Degraded，并按退出
+期限终止进程。
+
+关闭按固定依赖 DAG 推进：封闭准入并拒绝新 mutation → 取消当前代次与在途执行 → 有界收束已
+启动资源（Thread 与 title 任务、审计、MCP、LSP、订阅，以及依赖它们的 SSH transport）→ flush
+所有 Thread checkpoint 并等待固定可靠水位 → 仅在保存已收束后关闭 writer 与数据库 → 释放实例
+锁。彼此独立的收束不在依赖上互相等待，因此按同一期限并发推进同一依赖层内的多个阶段。这里只有
+两条真实的有向边：一条是写入链「生产者停止 ACK → 保存 drain / writer 停止 → 关闭数据库 / 释放
+实例锁」；另一条是把远端 MCP / LSP / 工具当作 SSH transport 的依赖——SSH transport 承载它们的
+通信，其真实关闭（关闭连接即终止本地 SSH 子进程）必须发生在这些远端服务的停止请求与结果处理、
+以及驱动远端工具的生产者（Turn / Agent 等）停止 ACK **之后**，否则会先切断通信、把健康远端资源
+的正常退出误判为失败。SSH transport 的关闭仍与写入链并发，不等与它无关的持久化 / 数据库提交；
+依赖停止超时或失败时按有界降级照样请求 SSH 回收，只放弃等待其 ACK、owner 仍由常驻槽位保留。
+前序阶段失败仍继续执行后续彼此独立的安全清理并合并
+错误；单阶段不可用不得阻断其余阶段。每个阶段有稳定的诊断标签（含开始 / 完成耗时、资源与关联
+标识，SSH 的依赖等待与真正的 transport stop 分别计时），只用于诊断边界，不替代既有 typed
+progress。
+同一 `agentFramework` 阶段内部的 Thread 关闭遵循同一原则：assembler 先封闭组装准入并广播
+所有 preparation 取消，然后按真实依赖**局部化**并发推进——每个独立森林 / 分支 / 兄弟节点只等待
+自身需要的子 entry、未发布子资源与自身 preparation，某个 root 的卡住子分支或准备过程只阻塞它
+自己（真实依赖），不会被无关 root 的关闭等待；子关闭确认先于需要它的父关闭，任一分支失败只累计
+并保留其 owner，不阻止其他独立资源收到 close/discard。封闭准入后不再准入任何新的创建 / 子准备
+owner；`close_all` 只在**全部**已准入 `creating` / `preparing_children` owner 真实排空后才成功返回，
+覆盖完全处于创建、尚无 entry 的 root 与未被树快照覆盖的准备过程，这份全局最终 ACK 与上述局部化
+收束**并发**推进，绝不前置阻塞独立 close；排空后才可见的迟到 entry / 未发布资源由同一编排继续收束，
+失败清理保留 owner 并计入报告，不因根集合为空或阶段超时而伪报 Clean / `Stopped`。
+本地原生子进程树在退出或强杀后必须被回收；
+远端 helper 的停止由单向关闭及 30 秒心跳租约保证，不把等待 SSH 失联作为退出条件，也不等待
+远端退出确认。Driver harness 仍须确认本地原生子进程树已退出。
+
+封闭准入后，收束的独立 owner（后台 watcher、title 任务、MCP、LSP 与订阅）先各自收到
+一次取消 / abort 广播，再做受总期限约束的有界 join；SSH transport 的回收在同一编排内、在依赖
+它的远端服务与生产者停止 ACK 之后才请求（见上一条有向边）。上述独立 owner **并发**发起与并发等待：
+它们共享同一首次绝对期限的剩余预算（原生 30 秒总期限、桌面 28 秒清理上限共用一份剩余时间），
+不逐个串行等待，任一 owner 的收束等待都不会抢占其他 owner 尚未开始的等待预算；某个 owner 的
+收束超时只放弃等待并记录诊断，绝不丢弃在途的存储、writer 或 JoinHandle 所有者。写入链保持有向
+顺序——后台任务 / Turn / Agent / title 等生产者的停止 ACK 先于可靠保存 drain 与 writer 停止，
+writer 真实 ack 先于关闭数据库与释放实例锁——但整条写入链与上述彼此独立的 owner 并发收束。
+统一编排内的阶段进度只反映并发在途，不作为串行的调用契约。退出编排本身运行在独立 owned 任务上，
+即使等待方超时或全部离开也会被继续 poll 到结束。
+
+严格调用方（更新安装）也把 bridge 持有的订阅等外部 owner 取消结果注入同一编排：空闲原子检查
+在任何取消之前完成，随后 adapter hook 在同一编排内（提交之后、收尾之前）取消并等待这些外部
+owner，其 ACK 与 runtime 阶段共享同一成功前置条件；hook 的收束与 runtime 阶段**并发**进行，
+共享同一首次绝对期限的剩余预算，hook 不会抢在 runtime 独立资源之前耗尽期限。hook 内部彼此
+独立的 owner 组（bridge 持有的订阅与其他在途更新操作）同样并发观测，一组 owner 的 join 阻塞
+不得让另一组尚未被取消或观测。任何一侧未确认都使本次关闭停在 `Failed`，
+不发布 `Stopped`、不释放实例锁，也不存在“先 `Stopped` 释锁、再补写降级”的两段式路径。服务关闭
+job 在 runtime 中只启动一次并常驻保留，等待超时不丢 owner 或句柄，严格重试只重新观测同一 job
+而不重启停止。
+
+### 18.5.1 报告形状
+
+应用退出报告是冻结的最低接口形状（对外 camelCase，内部 snake_case）。它是 CQS 边界上的 typed
+命令结果，不新增平行可选字段或第二个 status enum：
+
+- `StudioShutdownOutcome`：`NotStarted | Clean | Degraded`。未安装 runtime 为 `NotStarted`；
+  所有阶段成功且持久化为 `Drained` 才是 `Clean`；其余为 `Degraded`。
+- `StudioPendingPersistence`：`Unknown | Pending { count } | Drained`。`count` 是尚无 durable
+  确认的待保存事实数量；无法确定时为 `Unknown`，绝不用 `Drained` 掩盖未知。
+- `StudioShutdownIssue`：`stage`、`code`、`message`、`retryable`、`correlation_id`。`stage`
+  是已知阶段的稳定诊断标签；`code` 是稳定诊断码（字符串），不是 typed 错误 enum，typed 失败
+  原因仍由既有进度与错误通道承载；`correlation_id` 关联同步日志与诊断。
+- `StudioShutdownReport`：`outcome`、`issues`、`persistence`。
+
+最终报告是 runtime 阶段、bridge 侧以及调用方（native / Dart）在进入 runtime 之前已确定的
+订阅/更新取消结果的**同一编排**聚合，不是两套 cleanup 的事后合并，也不是先释锁再补写第二份
+结论。已知的外部 issue 在 runtime 收束前作为这次关闭的成功前置条件播种：任一侧存在 issue 时
+整体不得为 `Clean`；`Clean`、发布 `Stopped` 与释放实例锁都只有当 bridge 与 runtime 两侧全部
+确认真实收束才可达，绝不以 `Clean` 掩盖未收束的 owner。
+
+报告只表达诊断与退出结果，不伪造 `Stopped`，也不宣称持久化成功；只有真实 `Clean` 才发布
+`Stopped`，degraded 与超时都不得发布 `Stopped`，也不得声称保存或实例锁已安全收束。
+
+### 18.5.2 持久化收束与实例所有权
+
+保存收束以 writer ack 为准：writer 确认之前保留 owner 与句柄；只要仍有运行中的 writer，就不得
+关闭数据库，也不得释放实例锁。报告携带的保存 fence 与 `StudioPendingPersistence` 只反映真实
+进度；runtime 侧的 degraded 或超时都不释放实例锁，锁的最终释放由进程退出时的 OS 语义兜底，
+避免下一个实例与仍在写库的 writer 竞争。实例锁与数据库的释放只由同一关闭编排的最终成功判定
+决定：writer 真实 ack、store 确实关闭、待保存排空**且** bridge 与调用方已知的所有外部取消都
+已确认，缺一不可。任何 `Degraded`（无论来自 runtime 阶段还是桥端/调用方已确定的外部 issue）
+都不得发布 `Stopped`，也不得提前释放实例锁。
+
+### 18.5.3 应用退出期限
+
+应用退出有单一总期限 30 秒。native 宿主在首次 close 之前武装独立线程持有该期限，重复关闭或
+重试都不延长；前 28 秒用于正常清理，余下 2 秒用于诊断退出，到期强制结束本进程并以退出码 1，
+正常完成退出码为 0。清理不得被日志 IO、Dart 或 bridge 挂起阻断：期限由独立线程推进，不依赖
+Dart 或 bridge 返回；写日志也不得延误退出期限。退出入口的剩余预算由 native 宿主剩余清理时间
+决定且上限 28 秒（见 [19](./19-studio-ui.md)）。
+
+bridge 在首个退出入口同步封闭单向退出闩，并在任何 await 之前固定同一首个绝对期限；闩、生命周期
+门、订阅与更新取消、runtime 阶段和诊断收尾全部扣除同一期限，重复退出不延长。退出入口在接受
+native 剩余预算的同时，接收调用方（native / Dart）已完成并观测到的 typed 取消 issue（含关机
+进度订阅），bridge 再并入自身取消结果，一并作为同一编排的成功前置条件。安装的「发布」与退出
+的「封闭」由**单一 linearization 事实源**原子决定，二者互相排斥：关闭胜出后任何安装都不再发布，
+安装先胜出的 runtime 必被早期入口与最终退出入口观察并纳入同一编排收束。该判定只在无 await、
+无 IO 的极短临界区内完成，从不在初始化或任何 await 期间持有，因此即使被竞争也是有界等待，
+不拖住 native 期限。初始化仍在进行时不得伪报 `NotStarted`；迟到安装即使已创建资源也必须被
+拒绝发布，其 owner 由统一 bridge 生命周期强持有至真实 `Clean` ACK 或当前进程终止，并由同一
+owned 关闭编排、同一首个绝对期限的剩余预算收束；它不作为已发布 runtime 对上层可见，也不被
+推进为 active/ready。只要报告为 `Degraded`，实例锁与 writer/数据库/外部 service owner 就继续
+保留、不释放，避免「清理期间保留、降级返回后又丢失 owner」；确曾创建资源而未能收束时报告
+`Degraded` 并给出 `Unknown` 待保存状态。
+
+native 首次 close 先进入轻量的早期退出入口，再执行 Dart 侧有界的自身取消收束，最后才进入统一
+`shutdown_runtime(remaining_ms, external_issues)`。早期入口立即同步封闭单向退出闩、固定同一
+首个绝对期限，并对已安装的 runtime 同步封闭 domain 准入（拒绝新 mutation 与 turn）并向**所有**
+独立的在途 owner 广播一次取消——既含后台 watcher、title 任务与持久化 observer，也含每个驻留
+Thread 当前执行代次（活动 Turn、模型与工具）经既有纯取消入口的取消。它只发信号：
+绝不触发初始化、绝不启动 MCP/LSP/SSH 的真正 stop 或 join、绝不 close Thread、绝不关闭数据库 /
+释放实例锁，也不发布 `Stopped`；真正收束仍由后续唯一阶段完成，因此不重复 close。早期入口同时
+预先广播 bridge 侧的订阅取消（内容流，不含自持 token 的关机进度流）与更新操作取消，附带真实
+错误与相关诊断，交由同一 collector 作为成功前置条件。因此早期 arm 绝不被误认为最终终态，真正
+的收束与 finalize 只由随后的同一编排完成；早期观测到的诊断既不吞错也不伪成功。这样即使 Dart
+侧取消长时间不返回，runtime 的准入与全部独立取消（含 Turn）也已在 native 期限一开始完成，
+迟到安装无法在退出期间发布运行时。早期入口本身有界：它不在生命周期门、快照、订阅或 title
+任何锁上无界等待；原生 30 秒强制退出不依赖 Dart 或 bridge 返回。
+
+### 18.5.4 诊断收尾
+
+诊断收尾独立于 runtime 初始化状态：即使 runtime 从未安装或安装失败，也有独立命令回收诊断
+资源，Dart 在安全 dispose 之前或退出之前调用。退出错误聚合真实原因（`code`、`correlation_id`、
+待保存事实与保存 fence），不包含凭据或正文；错误通过同步日志、临时应急文件与 stderr 兜底
+（Windows 另有 debug 输出兜底）记录，写入不得延误退出期限。诊断收尾与退出错误的落盘细节见
+[17](./17-studio-storage.md) 与 [23](./23-release-update.md)。
+
+### 18.5.5 子树归属
+
+本地原生子进程树必须随退出收束：Windows 通过统一后台进程工厂的 per-child Job 工厂回收本地
+工具；Linux 本地 MCP/LSP 复用既有 worker 监督路径（LSP 通过既有 host 注入入口挂载到 runtime，
+不新增第二套 supervisor），GUI 被强杀时由 control EOF 触发回收。远端 helper 由单向关闭及
+30 秒心跳租约保证，不阻塞 GUI 退出确认。进程工厂与策略归属见 [05](./05-conventions.md) §5.5，
+MCP 与 LSP 的监督契约见 [09](./09-tool-runtime.md) 与 [21](./21-lsp.md)，SSH helper 分发与
+回收见 [22](./22-ssh-remote.md)。
 
 ## 18.6 自动 title 生命周期
 

@@ -193,6 +193,108 @@ pub(super) fn run_resident(command: &mut Command, display: &str) -> Result<()> {
     }
 }
 
+/// Runs the resident command and returns its real termination without judging it.
+///
+/// The direct child is the process this harness started, so its `waitpid`
+/// status is authoritative. When the child exits, the harness first records the
+/// adopted descendant set (`descendants_at_root_exit`) and then waits a bounded
+/// natural window so the started process's own supervisor can TERM/KILL its
+/// subtree without this harness preempting it. Only descendants that are *still*
+/// alive after that window are recorded as `reclaimed_descendants` and
+/// force-killed, so the caller can distinguish a process that supervised its own
+/// subtree from one that leaked.
+pub(super) fn run_resident_reporting(
+    command: &mut Command,
+    display: &str,
+) -> Result<super::ResidentExit> {
+    let _owner = RESIDENT_OWNER
+        .lock()
+        .map_err(|_| anyhow::anyhow!("resident owner poisoned"))?;
+    SIGNALS
+        .get_or_init(|| {
+            ctrlc::set_handler(|| CANCELLED.store(true, Ordering::Release))
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|error| anyhow::anyhow!(error.clone()))?;
+    CANCELLED.store(false, Ordering::Release);
+    super::print_command_context(command, display);
+    let mut tree = ProcessTree::start(command)?;
+    eprintln!(
+        "resident command started: pid={}, command={display}",
+        tree.child.id()
+    );
+    // The window the started process's own supervisor gets to reclaim its
+    // subtree before this harness escalates. The product TERM/KILLs within ~2s,
+    // so 3s leaves margin for scheduling while still bounding the wait.
+    const RECLAIM_GRACE: Duration = Duration::from_secs(3);
+    let mut term_sent = BTreeSet::new();
+    let mut root_reaped_at: Option<Instant> = None;
+    let mut descendants_at_root_exit: Vec<u32> = Vec::new();
+    let mut reclaimed_descendants: Vec<u32> = Vec::new();
+    let mut observed_descendants = false;
+    loop {
+        let empty = tree.reap(&mut term_sent)?;
+        if empty {
+            let status = tree.root_status.context("resident root was not reaped")?;
+            tree.finish()?;
+            let cancelled = CANCELLED.load(Ordering::Acquire);
+            eprintln!(
+                "resident command exited: pid={}, status={status}",
+                tree.child.id()
+            );
+            return Ok(super::ResidentExit {
+                pid: tree.child.id(),
+                status,
+                descendants_at_root_exit,
+                reclaimed_descendants,
+                cancelled,
+            });
+        }
+        if tree.root_status.is_some() && !observed_descendants {
+            // Snapshot the subtree the moment the root has been reaped and start
+            // the natural reclamation window: this is exactly the child set the
+            // started process's own supervisor is responsible for.
+            observed_descendants = true;
+            root_reaped_at = Some(Instant::now());
+            descendants_at_root_exit = children()?.into_iter().map(|pid| pid as u32).collect();
+        }
+        if CANCELLED.load(Ordering::Acquire) {
+            // Cancellation is an explicit harness request: do not wait out the
+            // natural window, escalate immediately.
+            if reclaimed_descendants.is_empty() {
+                reclaimed_descendants = children()?.into_iter().map(|pid| pid as u32).collect();
+            }
+            tree.signal_children(libc::SIGKILL, &mut BTreeSet::new())?;
+            ensure!(
+                root_reaped_at.is_none_or(|started| started.elapsed() < Duration::from_secs(6)),
+                "resident process-tree cleanup timed out"
+            );
+        } else if let Some(started) = root_reaped_at {
+            let elapsed = started.elapsed();
+            if elapsed < RECLAIM_GRACE {
+                // Natural window: give the started process's own supervisor room
+                // to finish without this harness signalling anything.
+            } else if elapsed < RECLAIM_GRACE + Duration::from_secs(3) {
+                if reclaimed_descendants.is_empty() {
+                    reclaimed_descendants = children()?.into_iter().map(|pid| pid as u32).collect();
+                }
+                tree.signal_children(libc::SIGTERM, &mut term_sent)?;
+            } else {
+                if reclaimed_descendants.is_empty() {
+                    reclaimed_descendants = children()?.into_iter().map(|pid| pid as u32).collect();
+                }
+                tree.signal_children(libc::SIGKILL, &mut BTreeSet::new())?;
+                ensure!(
+                    elapsed < RECLAIM_GRACE + Duration::from_secs(6),
+                    "resident process-tree cleanup timed out"
+                );
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn children() -> Result<Vec<libc::pid_t>> {
     let mut children = Vec::new();
     // Include the spawn thread and the process leader: Linux adopts orphaned descendants onto

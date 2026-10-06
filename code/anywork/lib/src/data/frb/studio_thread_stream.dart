@@ -1033,15 +1033,53 @@ abstract final class JsonLeafDecoder {
   }
 }
 
+/// 把任意错误统一包装成 typed [StudioFailure]。
+///
+/// 保留桥错误已有的 `code`/`message`/`correlationId`（含关闭路径）；已知变体通过穷尽
+/// switch 映射，未知桥变体不再触发 `values.byName` 抛出的 `ArgumentError`，非桥错误也
+/// 统一为 typed 失败而不是漏出未包装的分支。
 Object _studioFailure(Object error) {
-  if (error is! frb.BridgeError) return error;
-  return StudioFailure(
-    code: StudioFailureCode.values.byName(error.code.name),
-    message: error.message,
-    retryable: error.retryable,
-    correlationId: error.correlationId,
-    detailsJson: error.detailsJson,
-  );
+  return switch (error) {
+    // 已是领域错误：保持身份与堆栈，不二次包装。
+    final StudioFailure failure => failure,
+    final frb.BridgeError bridge => StudioFailure(
+      code: _studioFailureCode(bridge.code),
+      message: bridge.message,
+      retryable: bridge.retryable,
+      correlationId: bridge.correlationId,
+      detailsJson: bridge.detailsJson,
+    ),
+    _ => StudioFailure(
+      code: StudioFailureCode.internal,
+      message: error.toString(),
+      retryable: false,
+      correlationId: newStudioCorrelationId(),
+    ),
+  };
+}
+
+/// 传输中立错误码到领域错误码的完整映射；每个桥变体都必须显式落位。
+StudioFailureCode _studioFailureCode(frb.BridgeErrorCode code) {
+  return switch (code) {
+    frb.BridgeErrorCode.notInitialized => StudioFailureCode.notInitialized,
+    frb.BridgeErrorCode.runtimeStopped => StudioFailureCode.runtimeStopped,
+    frb.BridgeErrorCode.instanceBusy => StudioFailureCode.instanceBusy,
+    frb.BridgeErrorCode.invalidArgument => StudioFailureCode.invalidArgument,
+    frb.BridgeErrorCode.notFound => StudioFailureCode.notFound,
+    frb.BridgeErrorCode.busy => StudioFailureCode.busy,
+    frb.BridgeErrorCode.conflict => StudioFailureCode.conflict,
+    frb.BridgeErrorCode.staleRevision => StudioFailureCode.staleRevision,
+    frb.BridgeErrorCode.permissionDenied => StudioFailureCode.permissionDenied,
+    frb.BridgeErrorCode.cancelled => StudioFailureCode.cancelled,
+    frb.BridgeErrorCode.cancellationTooLate =>
+      StudioFailureCode.cancellationTooLate,
+    frb.BridgeErrorCode.overloaded => StudioFailureCode.overloaded,
+    frb.BridgeErrorCode.unavailable => StudioFailureCode.unavailable,
+    frb.BridgeErrorCode.protocol => StudioFailureCode.protocol,
+    frb.BridgeErrorCode.storage => StudioFailureCode.storage,
+    frb.BridgeErrorCode.update => StudioFailureCode.update,
+    frb.BridgeErrorCode.internal => StudioFailureCode.internal,
+  };
 }
 
 frb.BridgeInteractionResolution _interactionResolutionFromDomain(

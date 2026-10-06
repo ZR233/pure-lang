@@ -21,6 +21,40 @@ mod windows;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// A resident command's real termination, observed by its direct parent.
+///
+/// Unlike the platform launch tools, the engineering entrypoint waits on the
+/// process it started itself, so [`status`](Self::status) is the genuine
+/// `waitpid` status of that process rather than a launcher's exit code.
+/// After the root is reaped the harness first gives the started process's own
+/// supervisor a bounded window to reclaim its subtree before this harness
+/// escalates, so a real product supervision failure is distinguished from one
+/// this harness caused itself.
+///
+/// * `descendants_at_root_exit` is the descendant set still present when the
+///   root was reaped (the subtree the started process was responsible for).
+/// * `reclaimed_descendants` is the subset that was *still* alive after the
+///   natural reclamation window and therefore had to be force-killed by this
+///   harness. Empty means the started process supervised its own subtree; a
+///   non-empty list means it leaked and this harness reclaimed it.
+#[derive(Debug)]
+pub struct ResidentExit {
+    /// The direct child's OS process id, captured before it exited.
+    pub pid: u32,
+    /// The direct child's real exit status from `waitpid`.
+    pub status: ExitStatus,
+    /// Descendants still present when the root was reaped, before the natural
+    /// reclamation window. Non-empty means the root had a live subtree to
+    /// supervise; the product supervisor is expected to reclaim it.
+    pub descendants_at_root_exit: Vec<u32>,
+    /// Descendants still alive after the natural reclamation window and thus
+    /// force-killed by this harness. Empty means the started process supervised
+    /// its own subtree; a non-empty list means it leaked.
+    pub reclaimed_descendants: Vec<u32>,
+    /// Whether the resident run was interrupted by the cancellation handler.
+    pub cancelled: bool,
+}
+
 /// 为需要驻留和进程树托管的子进程应用后台配置。
 ///
 /// Windows 上设置 `CREATE_NO_WINDOW`：从非控制台环境（IDE Run 按钮、
@@ -130,6 +164,49 @@ pub fn run_resident_checked(command: &mut Command, display: &str) -> Result<()> 
             child.id()
         );
         ensure_success(status, display)
+    }
+}
+
+/// Runs a resident [command] and returns its real termination without judging it.
+///
+/// Used by acceptance launchers that must observe the started process's own
+/// exit status (and any child tree it left behind) instead of a launcher exit
+/// code. The command's stdin is kept open for its whole lifetime and descendant
+/// adoption is enabled so rerouting and process-group changes cannot hide a
+/// leaked grandchild. A non-zero exit status is returned to the caller, never
+/// turned into a harness failure here.
+///
+/// # Errors
+/// Returns an error when descendant adoption or the command start fails, or
+/// when the reaping loop fails; the returned status itself is never an error.
+pub fn run_resident_reporting(command: &mut Command, display: &str) -> Result<ResidentExit> {
+    #[cfg(target_os = "linux")]
+    {
+        unix::run_resident_reporting(command, display)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        configure_background_command(command);
+        print_command_context(command, display);
+        own_current_process_tree()
+            .with_context(|| format!("failed to own resident command process tree: {display}"))?;
+        command.stdin(Stdio::piped());
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("failed to start command from PATH: {display}"))?;
+        let pid = child.id();
+        eprintln!("resident command started: pid={pid}, command={display}");
+        let status = child
+            .wait()
+            .with_context(|| format!("failed to wait for resident command: {display}"))?;
+        eprintln!("resident command exited: pid={pid}, status={status}");
+        Ok(ResidentExit {
+            pid,
+            status,
+            descendants_at_root_exit: Vec::new(),
+            reclaimed_descendants: Vec::new(),
+            cancelled: false,
+        })
     }
 }
 

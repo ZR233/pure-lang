@@ -734,9 +734,19 @@ impl StudioThreadAssembler {
         Ok(())
     }
 
-    /// Seals assembly, drains preparing owners and closes descendants before parents.
+    /// Seals shared admission, broadcasts cancellation, then closes every independent
+    /// forest/branch concurrently while a global final ACK confirms all admitted preparations
+    /// actually drained.
+    ///
+    /// 与旧实现的区别：全局 preparation 等待不再是**前置** barrier——它与独立森林/分支的关闭并发
+    /// （`futures::join!`），所以某个 root 的卡住子分支/准备只阻塞它自己之外，独立资源仍立即
+    /// close；但本方法**绝不**在还有已准入 `creating`/`preparing_children` 未真实排空时返回成功，
+    /// 因此不会让严格关闭误判生产者已停而停止 writer / 关库 / 发布 `Stopped`。父子依赖（子关闭
+    /// 确认先于需要它的父关闭）与 owner 保留规则不变：失败累计、entry 保留、可重试。
+    ///
     /// Failures retain their entries and can be retried with this method or `close`.
     pub async fn close_all(&self) -> Vec<(String, ThreadAssemblyError)> {
+        // 共享准入先封闭，所有准备过程 cancellation 先广播；此处不等待它们排空。
         let preparing = {
             let mut state = self.0.state();
             state.closing = true;
@@ -755,6 +765,138 @@ impl StudioThreadAssembler {
         for cancellation in preparing {
             cancellation.cancel();
         }
+
+        let mut covered: BTreeSet<String> = BTreeSet::new();
+        let mut failures = Vec::new();
+
+        // 第一轮：独立森林/orphan 关闭与「全部已准入 creating/preparing 真实排空」的全局最终 ACK
+        // 并发推进——独立资源先开始自身 close，不被全局 ACK 前置阻塞；全局 ACK 又保证最终成功前
+        // 不存在仍在清理/持有资源的准备 owner。
+        let (roots, orphan_unpublished) = self.select_uncovered_roots(&covered);
+        self.mark_covered(&mut covered, &roots, &orphan_unpublished);
+        let (first_failures, ()) = futures::join!(
+            self.close_independent_batch(roots, orphan_unpublished),
+            self.await_all_preparations_drained(),
+        );
+        failures.extend(first_failures);
+
+        // 迟到 owner：准备排空后才可见、第一轮快照未覆盖的 entries/unpublished（例如 closing 前
+        // 已准入、快照之后才插入 entry、setup 失败后 cleanup 也失败而保留 owner），用同一局部化
+        // 方式收尾。此刻不会再有新的 assembly / child preparation，集合只会收缩，循环终止。
+        loop {
+            let (roots, orphan_unpublished) = self.select_uncovered_roots(&covered);
+            if roots.is_empty() && orphan_unpublished.is_empty() {
+                break;
+            }
+            self.mark_covered(&mut covered, &roots, &orphan_unpublished);
+            let batch_failures = self
+                .close_independent_batch(roots, orphan_unpublished)
+                .await;
+            failures.extend(batch_failures);
+        }
+        failures
+    }
+
+    /// 选取当前尚未负责（`covered` 之外）的独立森林根与 orphan unpublished 子资源。
+    ///
+    /// 根 = 父 entry 不在册，或父 entry 已在 `covered`（其自身 close 不会再等待该子项）。orphan =
+    /// 父 entry 不在册，或父 entry 已在 `covered`。这样迟到 owner 也有归属、不被漏关。
+    fn select_uncovered_roots(&self, covered: &BTreeSet<String>) -> (Vec<String>, Vec<String>) {
+        let state = self.0.state();
+        let mut roots = Vec::new();
+        for (id, entry) in state.entries.iter() {
+            if covered.contains(id) {
+                continue;
+            }
+            let parent_present = entry
+                .parent_id
+                .as_deref()
+                .is_some_and(|parent| state.entries.contains_key(parent));
+            let parent_covered = entry
+                .parent_id
+                .as_deref()
+                .is_some_and(|parent| covered.contains(parent));
+            if !parent_present || parent_covered {
+                roots.push(id.clone());
+            }
+        }
+        let mut orphan_unpublished = Vec::new();
+        for (id, child) in state.unpublished_children.iter() {
+            if covered.contains(id) {
+                continue;
+            }
+            if !state.entries.contains_key(&child.parent) || covered.contains(&child.parent) {
+                orphan_unpublished.push(id.clone());
+            }
+        }
+        (roots, orphan_unpublished)
+    }
+
+    /// 把一批根及其可达子树、以及 orphan 子资源标记为已负责，避免后续批次重复 close。
+    fn mark_covered(
+        &self,
+        covered: &mut BTreeSet<String>,
+        roots: &[String],
+        orphan_unpublished: &[String],
+    ) {
+        let state = self.0.state();
+        let mut stack = roots.to_vec();
+        while let Some(id) = stack.pop() {
+            if !covered.insert(id.clone()) {
+                continue;
+            }
+            for (child, entry) in state.entries.iter() {
+                if entry.parent_id.as_deref() == Some(id.as_str()) {
+                    stack.push(child.clone());
+                }
+            }
+        }
+        for id in orphan_unpublished {
+            covered.insert(id.clone());
+        }
+    }
+
+    /// 并发关闭一批独立森林根与 orphan unpublished，返回累计失败（`join_all` 保序，顺序确定）。
+    async fn close_independent_batch(
+        &self,
+        roots: Vec<String>,
+        orphan_unpublished: Vec<String>,
+    ) -> Vec<(String, ThreadAssemblyError)> {
+        let mut root_futures = Vec::with_capacity(roots.len());
+        for root in roots {
+            root_futures.push(self.close_entry_tree(root));
+        }
+        let mut orphan_futures = Vec::with_capacity(orphan_unpublished.len());
+        for child in orphan_unpublished {
+            orphan_futures.push(async move {
+                // 只有该子资源自身的创建准备排空后才可 discard（`close_thread` 会拒绝 preparing 者）。
+                self.await_own_preparations_drained(&child).await;
+                match self.discard_unpublished_child(&child).await {
+                    Ok(()) => Vec::new(),
+                    Err(error) => vec![(child, error)],
+                }
+            });
+        }
+        let (tree_failures, orphan_failures) = futures::join!(
+            futures::future::join_all(root_futures),
+            futures::future::join_all(orphan_futures),
+        );
+        let mut failures = Vec::new();
+        for group in tree_failures {
+            failures.extend(group);
+        }
+        for group in orphan_failures {
+            failures.extend(group);
+        }
+        failures
+    }
+
+    /// 全局最终 ACK：等待**全部**已准入的 `creating`/`preparing_children` owner 真实排空。
+    ///
+    /// 与独立树关闭并发进行，不是前置 barrier；但 close_all 成功返回前必须等到它完成，避免仍在
+    /// 清理/持有资源的准备 owner 被误判为已停（否则严格关闭会停 writer / 关库 / 发布 `Stopped`）。
+    /// 取消已广播，`closing` 保证不会新增准备 owner，因此集合只会收缩。
+    async fn await_all_preparations_drained(&self) {
         loop {
             let changed = self.0.changed.notified();
             tokio::pin!(changed);
@@ -768,52 +910,110 @@ impl StudioThreadAssembler {
             }
             changed.await;
         }
-        let unpublished = {
-            self.0
-                .state()
-                .unpublished_children
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        let mut failures = Vec::new();
-        for id in unpublished {
-            if let Err(error) = self.discard_unpublished_child(&id).await {
-                failures.push((id, error));
-            }
-        }
-        let mut ids = {
-            let state = self.0.state();
-            state
-                .entries
-                .keys()
-                .map(|id| {
-                    let mut depth = 0;
-                    let mut cursor = state
-                        .entries
-                        .get(id)
-                        .and_then(|entry| entry.parent_id.as_ref());
-                    while let Some(parent) = cursor {
-                        depth += 1;
-                        if depth > state.entries.len() {
-                            break;
-                        }
-                        cursor = state
-                            .entries
-                            .get(parent)
-                            .and_then(|entry| entry.parent_id.as_ref());
+    }
+
+    /// 递归关闭一个在册 entry 及其整棵依赖子树，只等待自身需要的子资源与准备过程。
+    ///
+    /// 依赖：该 entry 的每个子 entry（`parent_id == id`）、它自己的 unpublished 子资源，以及它
+    /// 自己的 creating/preparing 子过程。它们彼此独立，因此并发收束；全部就绪后才 `close(id)`。
+    /// 只等待自身依赖，绝不等待其他森林/分支。失败累计并保留 owner，返回本子树全部失败（含 id
+    /// 自身）。通过 boxed future 递归，避免 async fn 的无限类型。
+    fn close_entry_tree<'a>(
+        &'a self,
+        id: String,
+    ) -> futures::future::BoxFuture<'a, Vec<(String, ThreadAssemblyError)>> {
+        Box::pin(async move {
+            let mut failures = Vec::new();
+
+            // 一次持锁快照自身直接子依赖，不跨 await。
+            let (child_entries, child_unpublished) = {
+                let state = self.0.state();
+                let mut child_entries = Vec::new();
+                let mut child_unpublished = Vec::new();
+                for (child, entry) in state.entries.iter() {
+                    if entry.parent_id.as_deref() == Some(id.as_str()) {
+                        child_entries.push(child.clone());
                     }
-                    (depth, id.clone())
-                })
-                .collect::<Vec<_>>()
-        };
-        ids.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
-        for (_, id) in ids {
+                }
+                for (child, unpublished) in state.unpublished_children.iter() {
+                    if unpublished.parent == id {
+                        child_unpublished.push(child.clone());
+                    }
+                }
+                (child_entries, child_unpublished)
+            };
+
+            let mut child_futures: Vec<
+                futures::future::BoxFuture<'a, Vec<(String, ThreadAssemblyError)>>,
+            > = Vec::with_capacity(child_entries.len());
+            for child in child_entries {
+                child_futures.push(self.close_entry_tree(child));
+            }
+            let mut unpublished_futures = Vec::with_capacity(child_unpublished.len());
+            for child in child_unpublished {
+                unpublished_futures.push(async move {
+                    // 该子资源自身的创建准备排空后才可 discard（`discard_unpublished_child` 会拒绝
+                    // preparing 者）。
+                    self.await_own_preparations_drained(&child).await;
+                    let outcome = self.discard_unpublished_child(&child).await;
+                    (child, outcome)
+                });
+            }
+            // 自身的 creating/preparing 子过程：取消已由 `close_all` 全局广播，这里只对自身这部分
+            // 有界等待，不等待其他分支。
+            let own_preparations = self.await_own_preparations_drained(&id);
+            let (child_failures, unpublished_outcomes, ()) = futures::join!(
+                futures::future::join_all(child_futures),
+                futures::future::join_all(unpublished_futures),
+                own_preparations,
+            );
+            for group in child_failures {
+                failures.extend(group);
+            }
+            for (child, outcome) in unpublished_outcomes {
+                if let Err(error) = outcome {
+                    failures.push((child, error));
+                }
+            }
+
+            // 依赖就绪后才关闭自身：原 `close` 的真实父子保护与 incarnation/owner 保留规则不变，
+            // 子关闭未确认（失败保留）时 `close` 返回对应错误并被累计，绝不早释放。
             if let Err(error) = self.close(&id).await {
                 failures.push((id, error));
             }
+            failures
+        })
+    }
+
+    /// 等待并只等待某个节点的自身依赖型准备过程排空。
+    ///
+    /// 覆盖两类真实依赖：节点**自身**的创建准备（`creating`/`preparing_children` 含该 id），以及
+    /// 节点**子项**的创建准备（`creating` 的 parent/`preparing_children` 的 parent 指向该 id）。
+    /// 取消已由 `close_all` 全局广播；这里只在该节点确有对应准备过程时等待其真实离开注册表，不等待
+    /// 任何其他分支或全局集合。`closing`/`entry.ready=false` 保证等待期间不会产生新的子过程。
+    async fn await_own_preparations_drained(&self, id: &str) {
+        loop {
+            let changed = self.0.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let blocked = {
+                let state = self.0.state();
+                state.creating.contains_key(id)
+                    || state.preparing_children.contains_key(id)
+                    || state
+                        .creating
+                        .values()
+                        .any(|preparation| preparation.parent_id.as_deref() == Some(id))
+                    || state
+                        .preparing_children
+                        .values()
+                        .any(|child| child.parent == id)
+            };
+            if !blocked {
+                break;
+            }
+            changed.await;
         }
-        failures
     }
 }
 

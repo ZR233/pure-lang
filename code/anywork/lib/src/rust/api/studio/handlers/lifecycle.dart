@@ -7,16 +7,76 @@ import '../../../frb_generated.dart';
 import '../types/error.dart';
 import '../types/response.dart';
 import '../types/runtime.dart';
+import '../types/shutdown.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `publish_startup_stage`, `shutdown_runtime_for_update`
+// These functions are ignored because they are not marked as `pub`: `bridge_early_issues_slot`, `bridge_issue`, `publish_startup_stage`, `record_bridge_early_issues`, `record_shutdown_report`, `remaining_ms_u32`, `shutdown_runtime_for_update`, `take_bridge_early_issues`
 
 Future<RuntimeSnapshot> startStudioRuntime() =>
     RustLib.instance.api.crateApiStudioHandlersLifecycleStartStudioRuntime();
 
-Future<RuntimeSnapshot> shutdownRuntime() =>
-    RustLib.instance.api.crateApiStudioHandlersLifecycleShutdownRuntime();
+/// Early application-exit entry: seal the one-way exit latch and fence the installed runtime
+/// **before** the caller performs its own bounded cancellations.
+///
+/// The native host owns the single 30s deadline. When the first close arrives it must call this
+/// entry first so that Rust stops admitting new work immediately, instead of waiting until the
+/// Dart-side product/Thread/progress cancellations have all settled before the first
+/// `shutdown_runtime` call. This entry:
+///
+/// - arms the bridge exit latch synchronously (never waiting on the lifecycle gate), so a late
+///   `start_studio_runtime` can never publish a runtime once exit has begun;
+/// - fixes the single first deadline from the caller's remaining cleanup budget, so a later
+///   `shutdown_runtime` never extends it;
+/// - when a runtime is already installed, synchronously fences domain admission and broadcasts
+///   cancellation to the runtime's independent owners.
+///
+/// It never triggers initialization (an uninstalled runtime stays `NotStarted` for the final
+/// report), never runs the real service stops/joins, never publishes `Stopped` and never releases
+/// the instance lock. Those remain the job of the single `shutdown_runtime` orchestration, which
+/// folds the same bridge/external issues into the same collector. Failures observed here are kept
+/// on the runtime's early-exit slot and logged; they are neither swallowed nor faked as success.
+///
+/// `remaining_ms` is the caller's remaining cleanup budget (native's single deadline minus the
+/// time already spent), not a fresh window.
+Future<void> beginRuntimeExit({required int remainingMs}) => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersLifecycleBeginRuntimeExit(remainingMs: remainingMs);
+
+/// Application-exit shutdown with a caller-supplied cleanup budget in milliseconds.
+///
+/// The desktop host owns the single 30s deadline and passes its remaining cleanup time; this
+/// entry caps it at 28s, never extends the deadline, and returns a typed report even when the
+/// run is `Degraded` or times out.
+///
+/// The one-way exit latch is closed synchronously before any await, so a late install can never
+/// publish a runtime even if initialization is hanging and the lifecycle gate cannot be taken.
+/// Every exit step (latch, gate observation, subscription/update cancellation, runtime stages and
+/// diagnostics) shares this single first deadline; repeated close never extends it.
+///
+/// `external_issues` carries the cancellations the caller (native host / Dart) already performed
+/// and observed before this call — bridge- and Dart-owned subscriptions (including the shutdown
+/// progress stream) and update operations whose owner did not confirm. They are fed into the
+/// **same** runtime shutdown orchestration as success preconditions, so the runtime itself refuses
+/// `Clean`, never publishes `Stopped` and never releases the instance lock when any owner is
+/// unresolved. There is no post-hoc report merge and no second cleanup path.
+Future<BridgeShutdownReport> shutdownRuntime({
+  required int remainingMs,
+  required List<BridgeShutdownIssue> externalIssues,
+}) => RustLib.instance.api.crateApiStudioHandlersLifecycleShutdownRuntime(
+  remainingMs: remainingMs,
+  externalIssues: externalIssues,
+);
+
+/// Finalizes diagnostics independent of runtime initialization.
+///
+/// Idempotent and safe without an installed runtime; the GUI calls it before a safe dispose or
+/// before exiting so diagnostics are flushed even when startup never completed. The synchronous
+/// flush (which joins the non-blocking log worker) runs on the blocking pool so it cannot hold a
+/// Tokio worker or the cleanup deadline while runtime owners are still being polled.
+Future<void> finishShutdownDiagnostics() => RustLib.instance.api
+    .crateApiStudioHandlersLifecycleFinishShutdownDiagnostics();
 
 Future<ProjectDto> openProject({required String path}) =>
     RustLib.instance.api.crateApiStudioHandlersLifecycleOpenProject(path: path);

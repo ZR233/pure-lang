@@ -82,8 +82,13 @@ impl LspRuntimeRegistry {
             server.availability_message = Some(message);
             server.client.take()
         };
-        if let Some(client) = client {
-            client.shutdown().await;
+        if let Some(client) = client
+            && let Err(error) = client.shutdown().await
+        {
+            tracing::warn!(
+                %error,
+                "LSP client did not confirm closure after being marked unavailable"
+            );
         }
         self.emit_update();
     }

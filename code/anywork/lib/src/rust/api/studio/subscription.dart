@@ -18,9 +18,10 @@ import 'types/thread_stream.dart';
 import 'types/updater.dart';
 part 'subscription.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bridge_shutdown_progress`, `cancel_all`, `cancel_and_wait`, `new`, `next_id`, `register`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeSubscriptionInner`, `BridgeSubscriptionKind`, `BridgeTaskRegistry`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `bridge_shutdown_progress`, `broadcast_cancel`, `cancel_and_wait`, `is_settled`, `is_settled`, `join_cancelled`, `new`, `next_id`, `owned_completion`, `register`, `shutdown_issue`, `signal_cancel`, `unregister`, `wait_stopped`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeSubscriptionInner`, `BridgeSubscriptionKind`, `BridgeTaskRegistry`, `PendingSubscriptionCancellation`, `SubscriptionCompletionFacts`, `SubscriptionOwner`, `SubscriptionStop`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`
 
 /// 订阅一个 Thread 的**状态流**：Turn、活动、交互、运行时与 lagged 帧。
 ///
@@ -40,11 +41,21 @@ Future<BridgeEventSubscription> createProductSubscription() =>
 ///
 /// The caller cancels this handle before cancelling its Dart stream, so failed shutdown
 /// does not leave stream cancellation waiting for a future progress event.
+///
+/// When no runtime is installed yet, this returns an immediately-closed (empty) stream without
+/// triggering initialization or surfacing a spurious `NotInitialized`. A second instance whose
+/// startup failed has no owner and must observe a benign "no progress" stream, not a fake error.
 Future<BridgeEventSubscription> subscribeShutdownProgress() =>
     RustLib.instance.api.crateApiStudioSubscriptionSubscribeShutdownProgress();
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeEventSubscription>>
 abstract class BridgeEventSubscription implements RustOpaqueInterface {
+  /// Cancels this subscription and reports the *real* stop result.
+  ///
+  /// A panicked producer/sink task is surfaced as a typed `BridgeError` instead of being hidden
+  /// behind a clean `Future<void>`, so the caller's `onError` path observes the same failure the
+  /// exit report carries. Only a subscription that really stopped is removed from its registry
+  /// strong owner; a failure keeps the owner so a later exit pass still observes it.
   Future<void> cancel();
 
   Stream<BridgeProductStreamEnvelope> productStream();

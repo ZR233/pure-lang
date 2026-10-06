@@ -1,10 +1,17 @@
+// Driver-only 故障注入复用既有 @visibleForTesting 初始化 override，不新增生产 fault API。
+// ignore_for_file: invalid_use_of_visible_for_testing_member
+
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:anywork/main.dart' as studio;
+import 'package:anywork/src/app/studio_host_lifecycle.dart';
 import 'package:anywork/src/app/studio_shutdown.dart';
+import 'package:anywork/src/data/frb/studio_api.dart';
 import 'package:anywork/src/data/repositories/studio_repository.dart';
 import 'package:anywork/src/domain/models/studio_models.dart';
+import 'package:anywork/src/platform/error_log.dart';
 import 'package:anywork/src/shared/studio_driver_state.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -36,11 +43,35 @@ void main() {
   );
   SchedulerBinding.instance.addTimingsCallback(_recordFrameTimings);
   _container = ProviderContainer();
+  _applyShutdownFaultOverride();
   studio.bootstrapStudio(container: _container);
+  // 与窗口关闭共用同一退出协调器：native -> Dart 的 requestExit 也进入该协调器。
+  StudioExitCoordinator.install(
+    StudioExitCoordinator(
+      _container.read(studioApiProvider),
+      _container.read(studioShutdownProgressStateProvider.notifier).update,
+    ),
+  );
+}
+
+/// Driver-only 初始化故障注入：`ANYWORK_DRIVER_SHUTDOWN_FAULT` 取值
+/// `pending-init`（初始化永久挂住）或 `bridge-load-error`（初始化显式抛错）。
+///
+/// 复用既有 [FrbStudioApi.debugOverrideInitialization]，不新增生产 fault 接口；订阅
+/// 故障由验收侧独立 Driver 入口/装饰器提供（见 ui-handoff-r3.txt）。
+void _applyShutdownFaultOverride() {
+  final fault = Platform.environment['ANYWORK_DRIVER_SHUTDOWN_FAULT'];
+  if (fault == 'pending-init') {
+    FrbStudioApi.debugOverrideInitialization(() => Completer<void>().future);
+  } else if (fault == 'bridge-load-error') {
+    FrbStudioApi.debugOverrideInitialization(() async {
+      throw StateError('driver-injected bridge load failure');
+    });
+  }
 }
 
 late final ProviderContainer _container;
-Future<void>? _shutdownTask;
+Future<StudioShutdownReport>? _shutdownTask;
 bool _recordingFrames = false;
 int _frameCount = 0;
 int _slowFrames = 0;
@@ -195,24 +226,111 @@ Future<String> _handleDriverData(String? message) async {
       return _handleSearchMcpState();
     case 'shutdown':
       try {
-        await (_shutdownTask ??= _runShutdown());
-        return jsonEncode({'shutdown': 'completed'});
+        final report = await (_shutdownTask ??= _runShutdown());
+        // typed 清理 ack：成功才返 completed；degraded 如实上报，绝不伪 Stopped。
+        return jsonEncode({
+          'shutdown': report.allowsCleanExit ? 'completed' : 'degraded',
+          ..._shutdownReportJson(report),
+        });
       } on Object catch (error, stackTrace) {
-        debugPrint('driver_shutdown_error=$error\n$stackTrace');
+        // 失败与堆栈不能只 debugPrint：落盘到 canonical 诊断日志。
+        recordDartError(error, stackTrace);
         _shutdownTask = null;
         return jsonEncode({'shutdown': 'failed'});
       }
+    case 'request-app-exit':
+      // 先回复 exit_requested，再调度同一中央退出（arm deadline + 有界清理 + finishExit）。
+      StudioDriverState.markExitRequested();
+      Timer.run(() {
+        unawaited(
+          StudioExitCoordinator.requestExit().catchError((Object _) {}),
+        );
+      });
+      return jsonEncode({'exit': 'exit_requested'});
+    case 'arm-exit':
+      // Driver-only：只固定 native 首次期限（beginExit），不清理、不退出。用于第一次
+      // arm 后隔 5s 再 begin/repeat 再 hang，核对第一次 deadline 未被刷新。
+      final armExitRemainingMs = await StudioHostLifecycle.beginExit();
+      return jsonEncode({
+        'armed': true,
+        'remainingMs': armExitRemainingMs,
+        'pid': pid,
+      });
+    case 'request-app-exit-twice':
+      // 先武装 native 单期限并回报剩余，再间隔触发两次同一中央退出请求：第一次锚定
+      // Dart 期限，第二次只复用同一 shared future；remaining 只减不增即证明不刷新。
+      final twiceArmedRemainingMs = await StudioHostLifecycle.beginExit();
+      StudioDriverState.markExitRequested();
+      unawaited(StudioExitCoordinator.requestExit().catchError((Object _) {}));
+      Timer(const Duration(milliseconds: 500), () {
+        StudioDriverState.markExitRequested();
+        unawaited(
+          StudioExitCoordinator.requestExit().catchError((Object _) {}),
+        );
+      });
+      return jsonEncode({
+        'exit': 'exit_requested_twice',
+        'armedRemainingMs': twiceArmedRemainingMs,
+      });
+    case 'shutdown-hang':
+      // 仅 Driver 构建：先 arm deadline 并更新阶段，再阻塞 Dart isolate 并不返回 ack，
+      // 验证 native 期限线程不依赖 Dart/bridge/mainloop 也能在到期强制结束本进程。
+      // 验收以 OS pid 在 ~30s 内消失为证据，不依赖 requestData 是否拿到回复。
+      await StudioHostLifecycle.beginExit();
+      await StudioHostLifecycle.updateExitDiagnostics(stage: 'driver-hang');
+      await StudioHostLifecycle.updateExitDiagnostics(
+        stage: 'driver-hang-blocked',
+      );
+      sleep(const Duration(minutes: 5));
+      return jsonEncode({'shutdown': 'hang-finished-unexpectedly'});
+    case 'exit-status':
+      // Driver-only 只读：暴露 native 剩余期限/清理预算/退出请求次数、typed 报告与
+      // 已观察阶段、typed startup 状态/失败 code/correlation，供验收对齐 remaining/stage
+      // 与 second-instance busy 判定，不触发任何退出动作。
+      final diagnostics = StudioDriverState.exitDiagnosticsJson();
+      final startup = diagnostics['startup'];
+      return jsonEncode({
+        ...diagnostics,
+        'startup': {
+          if (startup is Map<String, Object?>) ...startup,
+          'phase': FrbStudioApi.startupProgress.value.name,
+          'ownerPresent': FrbStudioApi.runtimeOwnerPresent,
+        },
+      });
     default:
       return jsonEncode({'error': 'unsupported driver request'});
   }
 }
 
-Future<void> _runShutdown() async {
+Future<StudioShutdownReport> _runShutdown() async {
   final api = _container.read(studioApiProvider);
   final progress = _container.read(
     studioShutdownProgressStateProvider.notifier,
   );
-  await runStudioShutdown(api, progress.update);
+  final coordinator = StudioExitCoordinator(api, progress.update);
+  // arm native 首次期限并执行 typed 清理，返回真实报告；不结束进程。
+  return coordinator.cleanupOnly();
+}
+
+Map<String, Object?> _shutdownReportJson(StudioShutdownReport report) {
+  return {
+    'outcome': report.outcome.name,
+    'persistence': switch (report.persistence) {
+      UnknownStudioPendingPersistence() => 'unknown',
+      PendingStudioPendingPersistence(:final count) => 'pending:$count',
+      DrainedStudioPendingPersistence() => 'drained',
+    },
+    'issues': [
+      for (final issue in report.issues)
+        {
+          'stage': issue.stage,
+          'code': issue.code,
+          'message': issue.message,
+          'retryable': issue.retryable,
+          'correlationId': issue.correlationId,
+        },
+    ],
+  };
 }
 
 // ---------------------------------------------------------------------------

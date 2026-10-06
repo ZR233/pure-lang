@@ -80,6 +80,28 @@ pub(crate) struct RunGuiOptions {
     /// Override RUST_LOG with a process-wide tracing level.
     #[arg(long, value_enum, value_name = "LEVEL")]
     pub(crate) log_level: Option<LogLevel>,
+    /// Build the debug/profile Driver bundle and launch the native artifact
+    /// directly so this process is its real parent.
+    ///
+    /// The platform launch tool always reports exit code 0 for the app it
+    /// started (`resident_runner.appFinished`), so a native process that exited
+    /// non-zero is otherwise indistinguishable from a clean one. Direct launch
+    /// makes the true wait status observable and keeps the VM service available
+    /// through engine switches. Driver-only.
+    #[arg(long, requires = "driver")]
+    pub(crate) native_launch: bool,
+    /// Write a structured JSON exit report for the `--native-launch` process.
+    #[arg(long, value_name = "PATH", requires = "native_launch")]
+    pub(crate) native_exit_report: Option<std::path::PathBuf>,
+    /// Driver entrypoint to build and launch with `--native-launch`.
+    ///
+    /// Defaults to `test_driver/driver_main.dart`. The shutdown acceptance
+    /// selects a dedicated Driver-only fault entrypoint here; the path is
+    /// resolved relative to the anywork app directory (or used as-is when
+    /// absolute). It must be a real file and is passed to the Flutter build as
+    /// its `-t` target.
+    #[arg(long, value_name = "PATH", requires = "native_launch")]
+    pub(crate) native_launch_driver_target: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

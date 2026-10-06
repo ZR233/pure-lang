@@ -42,12 +42,26 @@ impl LspRuntimeRegistry {
             }
             targets
         };
-        for (workspace_root, server_id, resolved, driver, diagnostics, host, previous) in targets {
-            let restart = previous.is_some();
-            if let Some(client) = previous {
-                client.shutdown().await;
+        // Stop every previous client concurrently: they are independent owners and one slow
+        // server must not consume the budget of the others. Each replacement still starts only
+        // after every previous owner is stopped.
+        let stop_outcomes = futures::future::join_all(
+            targets
+                .iter()
+                .filter_map(|(_, _, _, _, _, _, previous)| previous.clone())
+                .map(|client| async move { client.shutdown().await }),
+        )
+        .await;
+        for outcome in stop_outcomes {
+            if let Err(error) = outcome {
+                tracing::warn!(
+                    %error,
+                    "LSP client did not confirm closure while resetting"
+                );
             }
-            if !restart {
+        }
+        for (workspace_root, server_id, resolved, driver, diagnostics, host, previous) in targets {
+            if previous.is_none() {
                 continue;
             }
             let sink = DiagnosticSink::new(
@@ -65,7 +79,12 @@ impl LspRuntimeRegistry {
                 .get_mut(&workspace_root)
                 .and_then(|workspace| workspace.servers.get_mut(&server_id))
             else {
-                client.shutdown().await;
+                if let Err(error) = client.shutdown().await {
+                    tracing::warn!(
+                        %error,
+                        "LSP client did not confirm closure while resetting"
+                    );
+                }
                 continue;
             };
             match start_result {

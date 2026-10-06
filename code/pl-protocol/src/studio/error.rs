@@ -32,6 +32,31 @@ pub enum StudioErrorCode {
     Internal,
 }
 
+impl StudioErrorCode {
+    /// Stable camelCase label shared by logs, diagnostics and shutdown reports.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NotInitialized => "notInitialized",
+            Self::RuntimeStopped => "runtimeStopped",
+            Self::InstanceBusy => "instanceBusy",
+            Self::InvalidArgument => "invalidArgument",
+            Self::NotFound => "notFound",
+            Self::Busy => "busy",
+            Self::Conflict => "conflict",
+            Self::StaleRevision => "staleRevision",
+            Self::PermissionDenied => "permissionDenied",
+            Self::Cancelled => "cancelled",
+            Self::CancellationTooLate => "cancellationTooLate",
+            Self::Overloaded => "overloaded",
+            Self::Unavailable => "unavailable",
+            Self::Protocol => "protocol",
+            Self::Storage => "storage",
+            Self::Update => "update",
+            Self::Internal => "internal",
+        }
+    }
+}
+
 /// A redacted API error. Internal diagnostics are correlated through `correlation_id` only.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, thiserror::Error, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

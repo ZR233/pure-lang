@@ -109,7 +109,17 @@ class DemoStudioApi
   }
 
   @override
-  Future<void> shutdownRuntime() async {
+  Future<void> beginRuntimeExit({required int remainingMs}) async {
+    // demo 无 native runtime owner：与 public StudioApi 契约一致，早期封闭是无副作用的
+    // no-op。真正的早期封闭由 FrbStudioApi 调 native `begin_runtime_exit`；这里不声称任何
+    // raw demo 结果验证过 Rust。
+  }
+
+  @override
+  Future<StudioShutdownReport> shutdownRuntime({
+    required int remainingMs,
+    List<StudioShutdownIssue> externalIssues = const [],
+  }) async {
     for (final phase in StudioShutdownPhase.values) {
       await Future<void>.delayed(shutdownPhaseDelay);
       if (phase == StudioShutdownPhase.flushingPersistence) {
@@ -125,6 +135,20 @@ class DemoStudioApi
       _emitShutdownProgress(_demoShutdownProgress(phase));
     }
     await _shutdownEvents.close();
+    // Demo 的确定性结局：所有阶段成功且持久化已排空。外部（Dart）取消 issue 是本次关闭
+    // 的最终成功前置条件，只要存在就如实为 Degraded，绝不伪 Clean。
+    if (externalIssues.isEmpty) {
+      return const StudioShutdownReport(
+        outcome: StudioShutdownOutcome.clean,
+        issues: [],
+        persistence: DrainedStudioPendingPersistence(),
+      );
+    }
+    return StudioShutdownReport(
+      outcome: StudioShutdownOutcome.degraded,
+      issues: externalIssues,
+      persistence: const DrainedStudioPendingPersistence(),
+    );
   }
 
   void _emitShutdownProgress(StudioShutdownProgress progress) {

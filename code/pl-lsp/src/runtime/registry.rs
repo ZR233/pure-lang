@@ -2,7 +2,7 @@
 //!
 //! 其他 runtime 模块围绕这里的 owner 状态实现单一职责的编排步骤。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ use crate::host::LspHostBackend;
 use crate::query::{LspDiagnostic, LspQuery, LspQueryResult};
 
 use super::server::ResolvedLspServer;
-use super::{LspActivityKind, LspAvailabilityKind, LspResult, LspServerSnapshot};
+use super::{LspActivityKind, LspAvailabilityKind, LspResult, LspRuntimeError, LspServerSnapshot};
 
 /// 进程内 LSP runtime 的唯一 owner；clone 共享同一份状态。
 /// 工作区路径必须由宿主预先解析；registry 不使用本地文件系统重解释远程身份。
@@ -67,24 +67,76 @@ impl LspRuntimeRegistry {
         self.query_in_workspace(workspace_root, query).await
     }
 
-    pub async fn shutdown(&self) {
-        self.state.lock().await.closed = true;
-        let _lifecycle_guard = self.lifecycle.write().await;
-        let clients = {
+    /// 关闭全部 workspace 的 language-server client 并确认整树回收。
+    ///
+    /// 独立 service 的关闭并发发出，任一 hang 不会阻止其它 service 收到 cancel；只有
+    /// 确认回收的 client owner 才从 registry 移除。未确认的 owner 保留在 registry 中，
+    /// 其进程由 `LspHostProcess` 自有 future / supervisor 租约在任务结束时兜底回收。
+    /// 返回 typed `Result`，让 runtime 报告真实失败而不是当作 clean。
+    pub async fn shutdown(&self) -> LspResult<()> {
+        {
             let mut state = self.state.lock().await;
-            let clients = state
-                .workspaces
-                .values_mut()
-                .flat_map(|workspace| workspace.servers.values_mut())
-                .filter_map(|server| server.client.take())
-                .collect::<Vec<_>>();
-            state.workspaces.clear();
+            state.closed = true;
+        }
+        let _lifecycle_guard = self.lifecycle.write().await;
+        // Snapshot clients before closing; workspaces stay intact so unconfirmed owners
+        // are not dropped before the close attempt.
+        let clients: Vec<Arc<LspClient>> = {
+            let state = self.state.lock().await;
+            let mut seen = BTreeSet::new();
+            let mut clients = Vec::new();
+            for workspace in state.workspaces.values() {
+                for server in workspace.servers.values() {
+                    if let Some(client) = &server.client
+                        && seen.insert(Arc::as_ptr(client) as usize)
+                    {
+                        clients.push(client.clone());
+                    }
+                }
+            }
             clients
         };
-        for client in clients {
-            client.shutdown().await;
+        let outcomes = futures::future::join_all(
+            clients
+                .iter()
+                .cloned()
+                .map(|client| async move { client.shutdown().await }),
+        )
+        .await;
+        let mut reclaimed = BTreeSet::new();
+        let mut failures = Vec::new();
+        for (client, outcome) in clients.iter().zip(outcomes) {
+            match outcome {
+                Ok(()) => {
+                    reclaimed.insert(Arc::as_ptr(client) as usize);
+                }
+                Err(error) => failures.push(error.to_string()),
+            }
+        }
+        {
+            let mut state = self.state.lock().await;
+            for workspace in state.workspaces.values_mut() {
+                for server in workspace.servers.values_mut() {
+                    let reclaimable = server
+                        .client
+                        .as_ref()
+                        .is_some_and(|client| reclaimed.contains(&(Arc::as_ptr(client) as usize)));
+                    if reclaimable {
+                        server.client = None;
+                    }
+                }
+            }
         }
         self.emit_update();
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(LspRuntimeError::Unavailable(format!(
+                "{} LSP client(s) did not confirm process-tree reclamation: {}",
+                failures.len(),
+                failures.join("; ")
+            )))
+        }
     }
 
     pub(crate) fn emit_update(&self) {

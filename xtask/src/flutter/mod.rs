@@ -97,6 +97,37 @@ impl DesktopTarget {
                 .join("bundle"),
         }
     }
+
+    /// Directory of the `flutter build` bundle for a debug or profile mode.
+    fn native_bundle_dir(self, app_dir: &Path, profile: bool) -> PathBuf {
+        match self {
+            Self::Windows => app_dir
+                .join("build")
+                .join("windows")
+                .join("x64")
+                .join("runner")
+                .join(if profile { "Profile" } else { "Debug" }),
+            Self::Macos => app_dir
+                .join("build")
+                .join("macos")
+                .join("Build")
+                .join("Products")
+                .join(if profile { "Profile" } else { "Debug" }),
+            Self::Linux => app_dir
+                .join("build")
+                .join("linux")
+                .join("x64")
+                .join(if profile { "profile" } else { "debug" })
+                .join("bundle"),
+        }
+    }
+
+    fn executable_name(self) -> &'static str {
+        match self {
+            Self::Windows => "anywork.exe",
+            Self::Macos | Self::Linux => "anywork",
+        }
+    }
 }
 
 pub(crate) fn generate_gui() -> Result<()> {
@@ -192,6 +223,9 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
         );
         return process::run_resident_checked(&mut command, "anywork release");
     }
+    if options.native_launch {
+        return run_gui_native_launch(&workspace_root, &app_dir, target, options);
+    }
     let app_version = studio_version::read(&app_dir)?;
     let version_define = format!("--dart-define=ANYWORK_VERSION={app_version}");
     print_context(&workspace_root, &app_dir);
@@ -259,6 +293,219 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
             log_level: options.log_level,
         },
     )
+}
+
+/// Builds the Driver bundle and launches the native artifact directly.
+///
+/// The platform launch tool reports exit code 0 for whatever the app does
+/// (`resident_runner.dart` `appFinished`/`_serviceDisconnected` complete `0`),
+/// so it cannot prove a native exit. Launching the built bundle here makes this
+/// process the artifact's real parent: its `waitpid` status is authoritative,
+/// and a SIGTERM-ignoring grandchild the product failed to supervise shows up as
+/// a reclaimed descendant instead of being silently masked. The VM service is
+/// re-enabled through the same engine switches the launch tool uses, so the
+/// Flutter Driver still connects to the real bridge and native host.
+fn run_gui_native_launch(
+    workspace_root: &Path,
+    app_dir: &Path,
+    target: DesktopTarget,
+    options: RunGuiOptions,
+) -> Result<()> {
+    ensure!(
+        options.driver,
+        "--native-launch requires a Driver build so the artifact still exposes the Driver requests"
+    );
+    let app_version = studio_version::read(app_dir)?;
+    let version_define = format!("--dart-define=ANYWORK_VERSION={app_version}");
+    print_context(workspace_root, app_dir);
+    ensure_desktop_build_environment(target)?;
+    ensure_flutter_dependencies(workspace_root, app_dir)?;
+    let demo_mode = if options.demo {
+        DemoMode::Demo
+    } else {
+        DemoMode::Native
+    };
+    let remote_helper_bundle_dir = prepare_remote_helpers(workspace_root, demo_mode)?;
+    let driver_attachment_define = options
+        .driver_attachment
+        .as_ref()
+        .map(|path| {
+            let path = path
+                .canonicalize()
+                .with_context(|| format!("Driver attachment does not exist: {}", path.display()))?;
+            ensure!(
+                path.is_file(),
+                "Driver attachment is not a file: {}",
+                path.display()
+            );
+            Ok::<_, anyhow::Error>(format!(
+                "--dart-define=ANYWORK_DRIVER_ATTACHMENT_PATH={}",
+                path.to_string_lossy()
+            ))
+        })
+        .transpose()?;
+    // The Driver entrypoint the build targets: the frozen default, or the
+    // acceptance-selected Driver-only fault entrypoint. It must be a real file
+    // so a typo fails the launch instead of silently building lib/main.dart.
+    let driver_target = match options.native_launch_driver_target.as_deref() {
+        Some(path) => {
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                app_dir.join(path)
+            };
+            ensure!(
+                path.is_file(),
+                "native-launch Driver target does not exist: {}",
+                path.display()
+            );
+            path.to_string_lossy().into_owned()
+        }
+        None => "test_driver/driver_main.dart".to_owned(),
+    };
+    let build_args = run_native_launch_args(
+        target,
+        &version_define,
+        options.profile,
+        &driver_target,
+        driver_attachment_define.as_deref(),
+    );
+    let bridge_artifacts = prepare_bridge_artifacts(
+        workspace_root,
+        demo_mode,
+        if options.profile {
+            BridgeConfiguration::Profile
+        } else {
+            BridgeConfiguration::Debug
+        },
+    )?;
+    run_flutter_with_process_mode(
+        workspace_root,
+        app_dir,
+        &build_args,
+        FlutterInvocation {
+            demo_mode,
+            process_mode: FlutterProcessMode::Batch,
+            bridge_artifacts: bridge_artifacts.as_ref(),
+            remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
+            log_level: options.log_level,
+        },
+    )?;
+
+    let bundle_dir = target.native_bundle_dir(app_dir, options.profile);
+    let executable = bundle_dir.join(target.executable_name());
+    ensure!(
+        executable.is_file(),
+        "native-launch artifact is missing after build: {}",
+        executable.display()
+    );
+    let mut command = Command::new(&executable);
+    command.current_dir(&bundle_dir);
+    configure_flutter_environment(
+        &mut command,
+        FlutterInvocation {
+            demo_mode,
+            process_mode: FlutterProcessMode::ResidentDriver,
+            bridge_artifacts: bridge_artifacts.as_ref(),
+            remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
+            log_level: options.log_level,
+        },
+    );
+    configure_native_engine_environment(&mut command);
+    let program = executable.to_string_lossy().into_owned();
+    let display = process::display_command(&program, &[]);
+    let exit = process::run_resident_reporting(&mut command, &display)?;
+    let report = NativeExitReport::from_exit(&exit);
+    if let Some(path) = options.native_exit_report.as_deref() {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        fs::write(path, serde_json::to_vec_pretty(&report)?)
+            .with_context(|| format!("failed to write native exit report {}", path.display()))?;
+    }
+    println!(
+        "native_exit pid={} status={} reclaimed_descendants={}",
+        report.pid,
+        report.status,
+        report.reclaimed_descendants.len()
+    );
+    Ok(())
+}
+
+/// Structured, machine-readable record of a native artifact's real exit.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeExitReport {
+    schema: &'static str,
+    pid: u32,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    status: String,
+    /// Subtree present when the native host was reaped, before the natural
+    /// reclamation window (the set the product's own supervisor must reclaim).
+    descendants_at_root_exit: Vec<u32>,
+    /// Subtree still alive after the natural window and force-killed by the
+    /// harness. Empty means the product supervised its own subtree.
+    reclaimed_descendants: Vec<u32>,
+    cancelled: bool,
+}
+
+impl NativeExitReport {
+    fn from_exit(exit: &process::ResidentExit) -> Self {
+        #[cfg(unix)]
+        let signal = {
+            use std::os::unix::process::ExitStatusExt;
+            exit.status.signal()
+        };
+        #[cfg(not(unix))]
+        let signal = None;
+        Self {
+            schema: "anywork-native-exit/1",
+            pid: exit.pid,
+            exit_code: exit.status.code(),
+            signal,
+            status: exit.status.to_string(),
+            descendants_at_root_exit: exit.descendants_at_root_exit.clone(),
+            reclaimed_descendants: exit.reclaimed_descendants.clone(),
+            cancelled: exit.cancelled,
+        }
+    }
+}
+
+/// Enables the VM service for a directly launched debug/profile artifact.
+///
+/// The launch tool delivers these to the engine through `FLUTTER_ENGINE_SWITCH_*`
+/// rather than command-line arguments (`desktop_device.dart`
+/// `_computeEnvironment`), so the Driver can still reach the real native host.
+fn configure_native_engine_environment(command: &mut Command) {
+    command.env("FLUTTER_ENGINE_SWITCHES", "3");
+    command.env("FLUTTER_ENGINE_SWITCH_1", "enable-dart-profiling=true");
+    command.env("FLUTTER_ENGINE_SWITCH_2", "disable-service-auth-codes=true");
+    command.env("FLUTTER_ENGINE_SWITCH_3", "enable-checked-mode=true");
+}
+
+fn run_native_launch_args<'a>(
+    target: DesktopTarget,
+    version_define: &'a str,
+    profile: bool,
+    driver_target: &'a str,
+    driver_attachment_define: Option<&'a str>,
+) -> Vec<&'a str> {
+    let mut args = vec![
+        "build",
+        target.flutter_name(),
+        if profile { "--profile" } else { "--debug" },
+        version_define,
+        "--no-pub",
+        "-t",
+        driver_target,
+        "--dart-define=ANYWORK_DRIVER=true",
+    ];
+    if let Some(define) = driver_attachment_define {
+        args.push(define);
+    }
+    args
 }
 
 fn run_gui_args<'a>(

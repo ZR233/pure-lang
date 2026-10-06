@@ -492,7 +492,7 @@ while True:
         .await?;
     assert!(result.success);
     assert!(result.result.contains("remote_symbol"));
-    registry.shutdown().await;
+    registry.shutdown().await?;
     Ok(())
 }
 

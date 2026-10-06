@@ -70,6 +70,108 @@ Plan 恢复使用显式 `plan-recovery` 原生 GUI 人工场景：在同一隔�
 已回答计划不重新弹出。场景保存截图、快照、请求和生命周期日志，人工结论独立于脚本
 退出状态记录；不以直接写入数据库或伪造 UI 状态代替真实 `plan_submit`。
 
+应用关闭使用显式 `shutdown` 原生 GUI 人工场景（当前为 Linux 原生）。场景复用正常 bridge、
+隔离 `ANYWORK_HOME`、Flutter Driver 与进程所有权，按 phase 保存互不覆盖的证据，并由
+`coverage.json` 逐项记录已执行与未覆盖的验收要求，未覆盖分支不得写成通过。phase 至少覆盖：
+真实保存后正常退出并等待 OS 进程回收、进程退出码 0；同一隔离数据根重开并核对原会话与已提交
+历史；在同一数据根启动第二实例记录实例锁拒绝（真实 widget 文案“已有实例在运行”加日志、
+无 `ArgumentError`、有 bridge 错误关联），真正关闭第二实例（以真实 OS exit 证明）后第一实例
+仍能在同一 Thread 继续提交并保存，再重开该新 Turn；重复退出请求不重置 30 秒总期限（首次
+arm 后延迟数秒再重复同一 close/request，总耗时从首次 arm 起算并在 30 秒内结束；重复请求由
+Driver-only `request-app-exit-twice` 在同一 shared future 上再次 `beginExit`，其回报的剩余只
+减不增即证明首次期限未被刷新；该 phase 复用既有 Driver-only 订阅故障入口
+`shutdown_fault_driver.dart`——其 progress 订阅报错、cancel 挂起直到协调器的有界 2 秒截止，
+使唯一一次中央清理真实跨过两次请求之间约 500ms 的间隔，第二次请求确实送达同一预算；以
+Driver-only `exit-status` 的 `nativeExit.requests` 只读投影轮询到 `requests>=2` 并作为硬判定
+（缺读即失败，不得当通过），同时按该故障真实要求断言本 phase 的实际退出码为 Degraded 的 1、
+并记录 typed report；正常 exit 0 由 normal/reopen/busy 独立覆盖）；Driver 挂起时由 native 在
+30 秒到期强制退出码 1
+并保留 PID/阶段日志；runtime 真实初始化失败（隔离数据根不可创建）时渲染真实致命 widget 并
+仍能关闭留日志；持久化拒写/SQLite 锁故障复用既有 history-fault/history-lock 机制，强制退出
+后重开核对已提交记录、`PRAGMA quick_check` 与可打开的数据库；外部模拟服务被真实冻结（不响应）
+时不阻塞退出。退出判定以 `os process wait` 与实际退出码为准：Driver 请求返回或 VM 断开只表示
+“已请求退出”，超时只用于防止永久挂起，不作为成功判据。
+严格 fixture 的完成校验以“所有 required 脚本步骤都被消费”为准（服务端 `remaining_optional` 为真
+且无拒绝请求，否则以非零退出结束），不得用“已接受请求数达到下限”的计数代理掩盖未消费的必需步骤
+（如并发 Turn 的 receipt continuation）。
+
+原生退出必须由真实 OS 进程证据确认，而不是 `cargo`/Flutter launcher 的退出码。平台 launch tool
+对 app 退出统一上报 `0`（`resident_runner.dart` 的 `appFinished`/`_serviceDisconnected` 都以 `0`
+完成），因此 `run-gui --driver` 增加 Driver-only 的 `--native-launch`：它构建 debug/profile
+Driver bundle 并直接启动原生 artifact，使验收入口成为其直接父进程，`--native-exit-report`
+写出结构化退出报告（真实 `waitpid` 状态、原生 PID 与未被产品自身回收的孙进程 PID 集合），
+并通过 `FLUTTER_ENGINE_SWITCH_*` 保持 VM service 可用。验收侧再用 Driver `pid` 请求取得原生 PID，
+自读 `/proc/<pid>/stat` 的 starttime 作为 PID 复用防护并轮询其真实退出；规范化诊断从
+`ANYWORK_HOME/studio/logs` 复制进证据，核对 PID/阶段/耗时/错误码/correlation/持久化事实/未回收
+owner。pl-dev-support 的 resident 运行新增结构化退出报告（`run_resident_reporting`），
+`cargo xtask run-gui --driver --native-launch --native-exit-report <PATH>` 是对外接口。
+
+MCP/工具子树回收由场景自有的 stdio MCP 服务证明：隔离数据根的 `[mcp.servers.shutdown-fixture]`
+指向 `pl-provider-fixture --mcp-stdio`，该服务完成真实 `initialize`/`tools/list` 握手并 `spawn`
+一个忽略 `SIGTERM`、独立进程组的孙进程，把自己与孙进程的 pid/starttime 记入协调文件。真实
+turn 使线程取得 MCP lease 后产品以自身监督 worker 启动它。宿主先解析真实原生 PID 与该协调文件里的
+业务 pid/starttime，实证两个业务 PID 在**任何关闭请求之前**确实存活，并预先启动独立监测线程，随后
+才通过私有信号文件放行 Driver 请求；Driver 侧用既有 `shutdown-hang` 武装单一 30 秒期限并阻塞
+isolate，由原生宿主在 30 秒到期强制退出码 1（首次 deadline 固定，实测 delta ≤1 秒）。强制退出后
+由产品经 control-EOF 先 TERM/KILL 回收整棵子树，验收轮询每个业务 PID 真实消失，再以
+`--native-exit-report` 的空 `reclaimedDescendants` 证明产品先于 harness 完成回收（harness 的强杀
+只作最后兜底并单独记录），不使用全局 `pkill`、宽泛 PID 扫描或伪造计数。`run_resident_reporting`
+在 root 被 reap 后先给产品自身 supervisor 一个有界自然回收窗口，再升级自身 TERM/KILL，因此严格
+判定不依赖 harness 强杀；普通 `run_resident` 的默认清理语义不变。
+
+LSP 子树回收由同一个 fixture bin 以 `--lsp-stdio` 模式证明：隔离数据根 `[lsp.servers.shutdown-lsp-fixture]`
+指向它（`language_ids` 用非内置的唯一 id，避免与内置 rust-analyzer 冲突），真实 `lsp_query`
+工具 turn 让 runtime 经自身监督 worker 启动该 server；server 完成真实
+`initialize`/`initialized`/`shutdown`/`exit` 握手并 `spawn` 同样忽略 `SIGTERM`、独立进程组的孙进程，
+记录自身与孙进程 pid/starttime；顺序、强制退出方式（阻塞 isolate → 原生 30 秒退出码 1）与判据均与
+MCP 相同：先实证业务 PID 存活并启动监测，再放行 Driver 强制退出，最后核对业务 PID 全部消失且
+产品先于 harness 回收整棵子树。
+工具子树回收由真实后台 `exec` turn 证明：脚本命令运行同一 fixture bin 的 `--tool-peer`，它同样
+`spawn` 忽略 `SIGTERM` 的独立进程组孙进程并记录 pid；命令刻意长于前台窗口，使 Turn 停留在后台
+任务而工具子树仍然存活；与 MCP 相同的“先实证业务 PID 存活并启动监测、再放行 Driver 阻塞并等原生
+30 秒强制退出码 1”顺序保证后，产品须回收整棵子树。
+资源并发关闭由 `concurrent-stop` phase 证明：隔离数据根同时声明场景自有 stdio MCP 服务，并由脚本
+让单个后台 `exec` turn 启动 `--tool-peer`，因此一个 Turn 同时启动两个独立监督资源（MCP 经线程服务
+租约、工具经真实工具 worker）。宿主等到两个 peer 各自写入 pid/starttime 后，先实证两组业务 PID
+（各自进程及其忽略 `SIGTERM` 的孙进程）都存活，再等严格 fixture 的实时计数器确认该 Turn 必需的
+receipt continuation 已被真正接受（`remaining_optional=true` 且无拒绝请求，此时 Turn 仍处于其
+paced 流式窗口），才获取该数据根的 SQLite 排他写锁并放行 Driver 的真实退出请求；只看到已启动的
+peer 就放行会让 Turn 在 receipt 处被取消、脚本缺步却被“已接受请求数”掩盖，因此 continuation 的接受
+事实先于写锁与关闭。持锁期间该 Turn 的末期保存无法提交，是有意的“人为阻塞的独立关闭链”。判定不看
+总耗时，而是看真实 OS pid 时序：两组业务 PID 必须在原生进程真正退出之前、且在写锁
+仍持有的窗口内由产品自身回收；每棵资源的完成时刻取其进程与忽略 `SIGTERM` 的孙进程两者停止时刻的
+较晚者（逐 PID 记录自退出请求前的独立监测时钟与原始时序，且都显著早于单一 30 秒期限），任一 PID
+未被观测到即不能确认完整回收、phase 失败；宿主强杀集合为空、`reclaimedDescendants` 为空。被阻塞的
+保存链使关闭在 28 秒清理预算处协调降级并以 `finishExit(1)` 立即结束：原生硬期限 30 秒只是上界，
+30 秒 watchdog 仅用于 Dart/桥/引擎无响应，故判据是 exit1、无宿主强杀、耗时不超过 30 秒加既有测量
+容差且确实到达 28 秒清理预算附近，而非要求恰好 30 秒。原生 canonical 诊断
+`anywork-exit-diagnostics.log` 必须证明这是一次非 Clean、`pending` 未知或仍待写的终态
+（`cleanExit` 或 `pending=0` 即判锁未生效），并区分 28 秒协调降级完成（`finish`）与 30 秒 watchdog
+强退（`final` + `exitDeadlineImminent`）；Driver 挂起专用 phase 保留其 30 秒原生强退的严格判据。
+重开该数据根后 `PRAGMA quick_check` 为 `ok`、实例锁时序保持。任一资源只能随原生退出一起消失，即为
+串行停止被误记为并发，phase 失败而非记为通过。第二实例的原生退出改用真实窗口管理器协议：
+第二实例被钉在场景自有 `Xvfb` 上（`DISPLAY` 指向它，并强制 `GDK_BACKEND=x11`、移除继承的
+`WAYLAND_DISPLAY`，避免 GTK 改走 Wayland 而在该 display 上没有窗口），随后以 ctypes/libX11
+发送 `WM_DELETE_WINDOW`：工程脚本读取第二实例真实原生 PID（Driver `pid` 请求写入的身份文件）
+并优先使用该主进程 `/proc/<pid>/environ` 中的真实 `DISPLAY`，只向 `_NET_WM_PID` 等于该 PID 且
+声明 `WM_DELETE_WINDOW` 的窗口投递，读取的 `_NET_WM_PID` 与 launcher 记录一致并以 starttime
+防护，配合 `--native-exit-report` 的退出码 0 判定；失败时脚本把候选窗口（pid/协议/名称/几何）
+与所用 display、原因写入 `shutdown-busy-second-x11.json`。第一实例随后仍在同一 Thread 继续提交
+保存；Flutter Driver 无法覆盖窗口管理器协议，故该步由工程脚本触发，不影响用户桌面。
+
+init 中关闭、bridge 不可用与订阅故障由 Driver-only 注入执行：`ANYWORK_DRIVER_SHUTDOWN_FAULT`
+取值 `pending-init`（初始化永久挂起，关闭须报 Degraded + Unknown 且强制退出 1）或
+`bridge-load-error`（初始化显式失败、无 runtime owner，关闭须报 NotStarted 且退出 0）；二者
+复用既有 `FrbStudioApi.debugOverrideInitialization`，不新增生产 fault API，证据中明确标注这是
+Driver-only 注入而非真实 `dlopen` 失败。订阅故障由专用 Driver 入口（`run-gui --native-launch
+--native-launch-driver-target test_driver/shutdown_fault_driver.dart`）在首帧后把同一
+`StudioExitCoordinator` 安装在只覆写 `subscribeShutdownProgress` 的真实 `FrbStudioApi` 子类上：
+进度流错误与取消挂起必须成为 typed `progress` diagnostic 并使退出为非零，绝不伪 `Stopped`。
+`ANYWORK_HOME/studio` 不可写时（普通文件占位）`recordDartError` 须回落到隔离 `TMPDIR`，证据
+复制并机器校验 stage/correlation/stack（Dart logger 无 pid 字段，PID 取场景记录的 OS PID）。
+人工验收结论独立于脚本退出状态，默认待评审；模拟供应商、Linux 单平台结果不外推为真实供应商
+兼容或跨平台通过；Windows 以 `notrun` 记录，不是 Linux 缺口。
+
 现有 `pl-model/tests/provider_wire.rs` 从公开入口核对 Responses HTTP/WS、Chat、原生
 OpenAI cache 选项、文本与推理流、function/custom/programmatic 工具、托管搜索、图片、
 DeepSeek 上传与搜索方言、智谱 Chat 与 Coding Plan、远程压缩、使用量/价格、错误与取消、

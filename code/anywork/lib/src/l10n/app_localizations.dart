@@ -146,17 +146,29 @@ abstract class AppLocalizations {
   /// **'Shutting down safely'**
   String get shutdownTitle;
 
-  /// No description provided for @shutdownFailed.
+  /// No description provided for @shutdownFinalizing.
   ///
   /// In en, this message translates to:
-  /// **'Shutdown failed'**
-  String get shutdownFailed;
+  /// **'Finishing up'**
+  String get shutdownFinalizing;
 
-  /// No description provided for @shutdownRetryExit.
+  /// No description provided for @shutdownFinalizingHint.
   ///
   /// In en, this message translates to:
-  /// **'Retry exit'**
-  String get shutdownRetryExit;
+  /// **'Necessary diagnostics were recorded; the app will exit automatically.'**
+  String get shutdownFinalizingHint;
+
+  /// No description provided for @startupInstanceBusy.
+  ///
+  /// In en, this message translates to:
+  /// **'Another instance is already running'**
+  String get startupInstanceBusy;
+
+  /// No description provided for @startupInstanceBusyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Close the other anywork window, then start again.'**
+  String get startupInstanceBusyHint;
 
   /// No description provided for @shutdownPhaseStoppingSubscriptions.
   ///

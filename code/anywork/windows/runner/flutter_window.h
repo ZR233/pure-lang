@@ -34,6 +34,10 @@ class FlutterWindow : public Win32Window {
   // Hosts the host-apps method channel used by the Studio UI.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       host_apps_channel_;
+
+  // Hosts the native-host lifecycle channel: exit deadline + redacted diagnostics.
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      lifecycle_channel_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

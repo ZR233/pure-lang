@@ -16,6 +16,7 @@ mod initialization;
 mod project;
 mod recovery;
 mod recovery_task;
+pub(crate) mod shutdown;
 mod snapshot;
 #[cfg(test)]
 mod startup_fault_tests;

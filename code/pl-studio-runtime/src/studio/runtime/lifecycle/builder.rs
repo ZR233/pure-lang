@@ -17,13 +17,29 @@ use super::super::{
 };
 
 impl StudioRuntime {
-    pub(super) fn assemble(
+    pub(super) async fn assemble(
         store: StudioStore,
         config_runtime: ConfigRuntime,
         system_skills_dir: std::path::PathBuf,
         helper_source: crate::worker_assets::RemoteHelperSource,
     ) -> Result<Self> {
         let (settings_updates, _) = tokio::sync::watch::channel(config_runtime.read()?);
+        // Resolve the supervised local worker *before* creating any store-derived owner, so a
+        // helper resolution failure can never leave partially-constructed owners (writer, updater,
+        // attachment drafts, ...) behind. Resolution is deliberately non-fatal: a host with no
+        // local stdio MCP server must still boot, and the connector fails loudly at connect time
+        // when the supervisor is missing — there is no bare shell/PATH fallback.
+        #[cfg(target_os = "linux")]
+        let stdio_worker = match crate::worker_assets::local_worker(helper_source.clone()).await {
+            Ok(worker) => Some(worker),
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "local MCP worker is unavailable; local stdio servers will fail to start until the helper is installed"
+                );
+                None
+            }
+        };
         // 进程级共享 writer 先于所有 owner 构造：ProductEventBus 与
         // ThreadRepository 共用同一 write-behind 队列。
         let writer = ThreadWriteBehindWriter::new(store.clone());
@@ -40,6 +56,18 @@ impl StudioRuntime {
         let attachment_drafts = AttachmentDraftRuntime::new(store.attachment_drafts_dir())?;
         let thread_modes = crate::mode::ThreadModeManager::default();
         crate::studio::thread::register_builtins(&thread_modes)?;
+        // Linux stdio MCP servers have no unsupervised fallback: when the host resolved the same
+        // supervised worker resource used by local tool exec, inject it; otherwise the connector
+        // fails loud for any local stdio server (and empty MCP hosts still boot).
+        #[cfg(target_os = "linux")]
+        let mcp = {
+            let mut connector = McpConnector::default();
+            if let Some(worker) = stdio_worker {
+                connector = connector.with_stdio_worker(worker);
+            }
+            McpRuntime::new(connector).handle()
+        };
+        #[cfg(not(target_os = "linux"))]
         let mcp = McpRuntime::new(McpConnector::default()).handle();
         let lsp = pl_lsp::runtime::LspRuntimeRegistry::new();
         let skills = SkillCatalogRuntime::new(product_events.clone(), system_skills_dir);
@@ -54,7 +82,7 @@ impl StudioRuntime {
                 skills: skills.clone(),
                 thread_modes: thread_modes.clone(),
                 ssh_manager: ssh_manager.clone(),
-                helper_source,
+                helper_source: helper_source.clone(),
             },
         );
         let threads = crate::thread_assembler::StudioThreadAssembler::default();
@@ -120,8 +148,13 @@ impl StudioRuntime {
             activation: Default::default(),
             attachment_drafts,
             ssh_manager,
+            service_stops: Default::default(),
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+            shutdown_latch: Default::default(),
+            shutdown_run: Default::default(),
+            early_exit_issues: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             title_tasks: Default::default(),
+            helper_source,
         })
     }
 }

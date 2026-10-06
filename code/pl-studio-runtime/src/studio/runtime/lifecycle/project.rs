@@ -116,10 +116,27 @@ impl StudioRuntime {
             .lsp_state
             .begin(pl_protocol::StateOperation::Activate)
             .await?;
-        self.external_runtimes
-            .lsp
-            .reconcile_workspace_membership(&workspace_root)
-            .await;
+        // Linux local workspaces run their language servers under the same supervised worker
+        // resource used by local tool exec; there is no unsupervised PATH/shell fallback.
+        #[cfg(target_os = "linux")]
+        {
+            let lsp_worker = crate::worker_assets::local_worker(self.helper_source.clone()).await?;
+            let host = Arc::new(pl_tool::lsp::LocalLspHostBackend::new(
+                workspace_root.clone(),
+                lsp_worker,
+            )?);
+            self.external_runtimes
+                .lsp
+                .reconcile_workspace_membership_with_host(&workspace_root, host)
+                .await;
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.external_runtimes
+                .lsp
+                .reconcile_workspace_membership(&workspace_root)
+                .await;
+        }
         self.external_runtimes
             .lsp
             .probe_lsp_server(&workspace_root)

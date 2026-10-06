@@ -38,6 +38,7 @@ mod thread_observation;
 mod thread_title;
 mod updater;
 
+pub use lifecycle::shutdown::ShutdownExternalHook;
 pub(crate) use model_performance::ModelPerformanceOwner;
 pub(crate) use provider_usage::ProviderUsageRuntime;
 pub use provider_usage::{ProviderUsageStateData, ProviderUsageStateSnapshot};
@@ -164,7 +165,18 @@ pub struct StudioRuntime {
     activation: ProjectActivationRuntime,
     attachment_drafts: attachment_drafts::AttachmentDraftRuntime,
     ssh_manager: std::sync::Arc<pl_tool::remote::SshManager>,
+    /// Remote helper source retained for on-demand local worker materialization (e.g. LSP host).
+    helper_source: crate::worker_assets::RemoteHelperSource,
+    /// 外部服务（MCP/LSP/SSH）关闭 job 的常驻槽位；跨阶段与跨重试保留，超时不丢句柄。
+    service_stops: lifecycle::shutdown::ServiceStopSlots,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
+    /// 单向关闭终止闩：commit 后拒绝迟到安装。
+    shutdown_latch: lifecycle::shutdown::ShutdownLatch,
+    /// 退出关闭运行的共享完成句柄；反复退出只 join 同一后台任务。
+    shutdown_run: lifecycle::shutdown::ShutdownRun,
+    /// native 首次 close 触发的早期退出封闭所观测到的诊断；由随后同一 `execute_shutdown`
+    /// 播种为成功前置条件，不吞、不伪成功。std `Mutex`，只在无 await 的短临界区内持有。
+    early_exit_issues: std::sync::Arc<std::sync::Mutex<Vec<crate::StudioShutdownIssue>>>,
     title_tasks: ThreadTitleTasks,
 }
 

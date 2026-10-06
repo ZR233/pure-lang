@@ -15,8 +15,10 @@ Timeline、重试或会话持久化；不监听端口、不 daemonize，也不�
 并进入既有自动重连；大文件帧仍在传输时不把控制帧的排队时间误判为失联。
 心跳与终止请求不占普通请求配额。helper 连续 30 秒没有收到心跳或其他入站数据（包括帧体读取
 进度）时封闭新请求并回收全部命令监督器及其后代。EOF、单向 shutdown、写入失败和租约
-过期走同一清理路径。正常 GUI 退出只尝试写入关闭帧，不等待远端确认或 SSH 失联。每个
-命令监督器先发 SIGTERM，2 秒后升级为 SIGKILL，并等待后代退出；helper 完成清理后退出。
+过期走同一清理路径。正常 GUI 退出只尝试写入关闭帧，不等待远端确认或 SSH 失联；GUI 被退出
+期限强杀时不写入关闭帧，远端 helper 由 control EOF 与 30 秒租约兜底回收，因此强制退出也不
+依赖远端确认。每个命令监督器先发 SIGTERM，2 秒后升级为 SIGKILL，并等待后代退出；helper
+完成清理后退出。
 
 ## 22.2 最小协议
 
@@ -122,7 +124,12 @@ developer 内容及其 prompt cache generation。
 SSH 连接、平台探测、helper 上传和协议握手都通过统一后台进程工厂启动系统 OpenSSH：Windows
 不弹出额外命令行窗口，并用关闭即终止进程树的 Job Object；Linux 使用独立进程组和父进程
 死亡信号。正常关闭停止心跳、尝试写入单向 shutdown，再关闭本地 transport 并有界回收
-本地 SSH 进程；关闭帧未送达时由远端心跳租约兜底。SSH 通道只承载标准输入
+本地 SSH 进程；关闭帧未送达时由远端心跳租约兜底。关闭编排把 SSH transport 的真实关闭排在对它
+有依赖的远端 MCP / LSP / 工具停止请求与结果处理（以及驱动远端工具的生产者停止 ACK）**之后**：
+管理器封闭连接准入后只跟踪 manager 交互 / 连接 / 浏览 / open_workspace 类 token，远端命令 /
+backend / worker 仍持有原始 client，因此 transport 关闭不能与依赖抢跑，否则会先切断通信、把
+健康远端资源的正常退出误判为失败；SSH 回收仍与写入链等无关资源并发，不等持久化 / 数据库提交，
+依赖停止超时或失败时有界降级并仍请求回收。SSH 通道只承载标准输入
 输出协议，因此固定关闭伪终端与 X11 转发，不打开交互式终端或图形会话；SSH 以 BatchMode
 运行，只接受 ssh-agent 与密钥等非交互认证，不注入密码或 askpass。
 
@@ -211,6 +218,9 @@ CMake 将资源安装到应用可执行文件旁的 `data/remote-helper/<target>
 非打包 Server、开发与观察入口显式使用外部 helper 模式，Linux 本地 worker 从 PATH 查找；
 随包模式下缺失、解压失败、目标或协议不匹配、内容摘要不符必须报告资源路径和失败原因，
 不得回退到 PATH、开发目录或网络下载。普通运行不依赖 xtask 的构建环境变量。
+helper 的随包解析不阻断与其无关的启动：资源缺失或损坏时，没有任何本地 stdio MCP server 的
+宿主仍可启动，只有真正需要本地 worker（Linux 本地 stdio MCP 或远端 helper）时才以带资源路径
+与失败原因的错误失败。这既不放宽“必须报告资源路径和失败原因”，也不引入裸 shell/PATH 后备。
 
 helper 资源与 bridge 是独立构建产物，在 Flutter 打包阶段汇合；资源路径与内容不作为 Rust
 编译输入，内容未变的 staging 不改写文件。仅 helper 资源更新不应重编译 runtime 或重链接

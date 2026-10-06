@@ -5,18 +5,18 @@ use clap::Parser;
 use pl_provider_fixture::{
     FixtureLiveStatus, FixtureOptions, FixtureServer, GUI_SCENARIOS, ReadyFile, WebSearchFault,
     WebSearchOptions, gui_history_fault_script, gui_history_lock_script, gui_plan_recovery_script,
-    gui_realtime_script, gui_script, gui_statistics_script, gui_stress_body_large_script,
-    gui_stress_body_script, gui_stress_script, gui_tool_scroll_script, gui_web_search_script,
-    gui_websocket_recovery_script,
+    gui_realtime_script, gui_script, gui_shutdown_script, gui_statistics_script,
+    gui_stress_body_large_script, gui_stress_body_script, gui_stress_script,
+    gui_tool_scroll_script, gui_web_search_script, gui_websocket_recovery_script,
 };
 use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
 struct Args {
     #[arg(long)]
-    scenario: String,
+    scenario: Option<String>,
     #[arg(long)]
-    ready_file: PathBuf,
+    ready_file: Option<PathBuf>,
     #[arg(long)]
     requests_file: Option<PathBuf>,
     #[arg(long)]
@@ -28,12 +28,75 @@ struct Args {
     /// Optional web-search fault so the operator can observe an error path.
     #[arg(long, value_name = "NAME")]
     fault: Option<String>,
+    /// Run the scenario-owned stdio MCP server instead of the HTTP fixture.
+    ///
+    /// The product starts this through its supervised worker; the server mimics
+    /// a real MCP peer and spawns a SIGTERM-ignoring grandchild so the shutdown
+    /// acceptance can prove the product reclaims its own subprocess subtree.
+    #[arg(long)]
+    mcp_stdio: bool,
+    /// Run the scenario-owned fake LSP server instead of the HTTP fixture.
+    ///
+    /// The product starts this through its supervised worker when a matching
+    /// `[lsp.servers.*]` entry is queried; the server speaks the LSP base
+    /// protocol and spawns a SIGTERM-ignoring grandchild so the shutdown
+    /// acceptance can prove the product reclaims its own subprocess subtree.
+    #[arg(long)]
+    lsp_stdio: bool,
+    /// Run the scenario-owned background tool instead of the HTTP fixture.
+    ///
+    /// The product starts this through the real supervised tool worker when the
+    /// scripted model issues the acceptance `exec` call; the peer spawns a
+    /// SIGTERM-ignoring grandchild and keeps running so the shutdown acceptance
+    /// can prove the product reclaims its own tool subtree.
+    #[arg(long)]
+    tool_peer: bool,
+    /// Coordination file the stdio peer records its pids into.
+    #[arg(long, value_name = "PATH")]
+    coord_file: Option<PathBuf>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // The catalog probe runs exactly `<program> --version`; answer it before clap
+    // (which would reject the unknown flag) so the configured server is marked
+    // available and a real language-service query can start it.
+    if std::env::args().skip(1).any(|arg| arg == "--version") {
+        println!("anywork-shutdown-lsp {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     let args = Args::parse();
-    let scenario = args.scenario.as_str();
+    if args.mcp_stdio {
+        let coord_file = args
+            .coord_file
+            .clone()
+            .context("--coord-file is required with --mcp-stdio")?;
+        return pl_provider_fixture::run_mcp_stdio(pl_provider_fixture::McpStdioOptions {
+            coord_file,
+        });
+    }
+    if args.lsp_stdio {
+        let coord_file = args
+            .coord_file
+            .clone()
+            .context("--coord-file is required with --lsp-stdio")?;
+        return pl_provider_fixture::run_lsp_stdio(pl_provider_fixture::LspStdioOptions {
+            coord_file,
+        });
+    }
+    if args.tool_peer {
+        let coord_file = args
+            .coord_file
+            .clone()
+            .context("--coord-file is required with --tool-peer")?;
+        return pl_provider_fixture::run_tool_peer(pl_provider_fixture::ToolPeerOptions {
+            coord_file,
+        });
+    }
+    let scenario = args
+        .scenario
+        .as_deref()
+        .context("--scenario is required without --mcp-stdio/--lsp-stdio/--tool-peer")?;
     ensure!(
         GUI_SCENARIOS.contains(&scenario),
         "unknown fixture scenario: {scenario}"
@@ -54,6 +117,7 @@ async fn main() -> Result<()> {
         "websocket-recovery" => gui_websocket_recovery_script(),
         "call-lifecycle-recovery" => pl_provider_fixture::gui_call_lifecycle_recovery_script(),
         "web-search" => gui_web_search_script(),
+        "shutdown" => gui_shutdown_script(),
         value => bail!("unknown fixture scenario: {value}"),
     };
     let fault = match args.fault.as_deref() {
@@ -95,9 +159,13 @@ async fn main() -> Result<()> {
     let ready = ReadyFile {
         base_url: fixture.base_url(),
         ws_url: fixture.ws_url(),
-        scenario: args.scenario,
+        scenario: scenario.to_owned(),
     };
-    write_json(&args.ready_file, &ready)?;
+    let ready_file = args
+        .ready_file
+        .as_ref()
+        .context("--ready-file is required without --mcp-stdio")?;
+    write_json(ready_file, &ready)?;
     wait_for_stop(&mut status_watch).await?;
     // Stop the read-only watcher first so the server can be unwrapped from its
     // Arc and shut down exactly once.

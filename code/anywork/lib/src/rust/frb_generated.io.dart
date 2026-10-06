@@ -27,6 +27,7 @@ import 'api/studio/types/history.dart';
 import 'api/studio/types/response.dart';
 import 'api/studio/types/runtime.dart';
 import 'api/studio/types/settings.dart';
+import 'api/studio/types/shutdown.dart';
 import 'api/studio/types/ssh.dart';
 import 'api/studio/types/thread_activity.dart';
 import 'api/studio/types/thread_stream.dart';
@@ -991,6 +992,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgePendingPersistence dco_decode_bridge_pending_persistence(dynamic raw);
+
+  @protected
   BridgePersistenceQueueSnapshot dco_decode_bridge_persistence_queue_snapshot(
     dynamic raw,
   );
@@ -1137,7 +1141,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeShutdownIssue dco_decode_bridge_shutdown_issue(dynamic raw);
+
+  @protected
+  BridgeShutdownOutcome dco_decode_bridge_shutdown_outcome(dynamic raw);
+
+  @protected
   BridgeShutdownProgress dco_decode_bridge_shutdown_progress(dynamic raw);
+
+  @protected
+  BridgeShutdownReport dco_decode_bridge_shutdown_report(dynamic raw);
 
   @protected
   BridgeSkillActivationCause dco_decode_bridge_skill_activation_cause(
@@ -1714,6 +1727,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeSessionCostSnapshot> dco_decode_list_bridge_session_cost_snapshot(
     dynamic raw,
   );
+
+  @protected
+  List<BridgeShutdownIssue> dco_decode_list_bridge_shutdown_issue(dynamic raw);
 
   @protected
   List<BridgeSkillsStateSnapshot> dco_decode_list_bridge_skills_state_snapshot(
@@ -3283,6 +3299,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgePendingPersistence sse_decode_bridge_pending_persistence(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgePersistenceQueueSnapshot sse_decode_bridge_persistence_queue_snapshot(
     SseDeserializer deserializer,
   );
@@ -3461,7 +3482,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeShutdownIssue sse_decode_bridge_shutdown_issue(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeShutdownOutcome sse_decode_bridge_shutdown_outcome(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeShutdownProgress sse_decode_bridge_shutdown_progress(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeShutdownReport sse_decode_bridge_shutdown_report(
     SseDeserializer deserializer,
   );
 
@@ -4170,6 +4206,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeSessionCostSnapshot> sse_decode_list_bridge_session_cost_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeShutdownIssue> sse_decode_list_bridge_shutdown_issue(
     SseDeserializer deserializer,
   );
 
@@ -6054,6 +6095,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_pending_persistence(
+    BridgePendingPersistence self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_persistence_queue_snapshot(
     BridgePersistenceQueueSnapshot self,
     SseSerializer serializer,
@@ -6270,8 +6317,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_shutdown_issue(
+    BridgeShutdownIssue self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_shutdown_outcome(
+    BridgeShutdownOutcome self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_shutdown_progress(
     BridgeShutdownProgress self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_shutdown_report(
+    BridgeShutdownReport self,
     SseSerializer serializer,
   );
 
@@ -7136,6 +7201,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_session_cost_snapshot(
     List<BridgeSessionCostSnapshot> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_shutdown_issue(
+    List<BridgeShutdownIssue> self,
     SseSerializer serializer,
   );
 

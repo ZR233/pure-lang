@@ -58,11 +58,17 @@ impl SshManager {
 
     /// Permanently seals connection admission and drains owned SSH connections.
     ///
+    /// Every connection is an independent owner: their closes are issued and observed
+    /// concurrently so one hanging or failing connection never delays the others. Only a
+    /// connection confirmed closed is removed; a failed one stays owned (retained in the
+    /// registry) and is retried by a later call.
+    ///
     /// Repeated calls reuse retained connections after a failure or canceled wait.
     /// Dependent remote tools and services must be stopped before calling this.
     ///
     /// # Errors
-    /// Returns a transport or process-wait failure without removing that connection.
+    /// Returns an aggregated transport or process-wait failure; every failed connection is
+    /// retained until it is confirmed closed.
     pub async fn shutdown(&self) -> Result<(), RemoteClientError> {
         {
             let mut accepting = self.admission.lock().await;
@@ -80,26 +86,37 @@ impl SshManager {
             .keys()
             .cloned()
             .collect::<Vec<_>>();
-        let mut first_error = None;
-        for server_id in connections {
-            let result = self.close_connection(&server_id).await;
-            match result {
-                Ok(()) => {}
-                Err(error) => {
-                    self.set_state(
-                        &server_id,
-                        SshConnectionState::Failed {
-                            code: "sshShutdownFailed".to_string(),
-                            message: error.to_string(),
-                        },
-                    )
-                    .await;
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                    }
-                }
+        // Admission is sealed and all operations are drained above, so no per-server
+        // serialization is needed: closing distinct connections concurrently is safe, and
+        // each `close_connection` still removes its own entry only after a confirmed close.
+        let outcomes = futures::future::join_all(
+            connections
+                .iter()
+                .map(|server_id| self.close_connection(server_id)),
+        )
+        .await;
+        let mut failures = Vec::new();
+        for (server_id, outcome) in connections.iter().zip(outcomes) {
+            if let Err(error) = outcome {
+                self.set_state(
+                    server_id,
+                    SshConnectionState::Failed {
+                        code: "sshShutdownFailed".to_string(),
+                        message: error.to_string(),
+                    },
+                )
+                .await;
+                failures.push(format!("{server_id}: {error}"));
             }
         }
-        first_error.map_or(Ok(()), Err)
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(RemoteClientError::Protocol(format!(
+                "{} SSH connection(s) did not confirm closure: {}",
+                failures.len(),
+                failures.join("; ")
+            )))
+        }
     }
 }

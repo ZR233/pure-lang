@@ -1,5 +1,6 @@
 mod context_replay_recovery;
 mod model_catalog;
+mod shutdown;
 mod web_search;
 mod websocket_recovery;
 
@@ -12,7 +13,7 @@ use pl_model::model::{
     ModelMediaInputProfile, ModelModality, ModelTransportProfile,
 };
 use pl_model::provider::ProviderEndpoint;
-use pl_studio_runtime::config::StudioConfig;
+use pl_studio_runtime::config::{McpServerTransport, StudioConfig, StudioMcpServerEntry};
 use sea_orm::sqlx::{
     Connection as _,
     sqlite::{SqliteConnectOptions, SqliteConnection},
@@ -36,8 +37,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub(crate) struct ManualGuiOptions {
     /// Run the regular, stress, single-item long-body stress (`stress-body`,
     /// `stress-body-large`), isolated call-statistics, realtime, paused
-    /// history-writer, history-fault retry/resume, or plan shutdown/restart
-    /// recovery (`plan-recovery`) acceptance journey.
+    /// history-writer, history-fault retry/resume, plan shutdown/restart
+    /// recovery (`plan-recovery`), or the 30-second application shutdown
+    /// acceptance journey (`shutdown`).
     #[arg(long, default_value = "gui", value_parser = pl_provider_fixture::GUI_SCENARIOS)]
     pub(crate) scenario: String,
     /// Directory for sanitized evidence (defaults to target/manual-gui/<timestamp>-<pid>).
@@ -443,6 +445,7 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             | "call-lifecycle-recovery"
             | "tool-scroll"
             | "web-search"
+            | "shutdown"
     ) {
         ensure!(
             io::stdin().is_terminal(),
@@ -532,6 +535,7 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             | "context-replay-recovery"
             | "websocket-recovery"
             | "call-lifecycle-recovery"
+            | "shutdown"
     ) {
         fixture_command.arg("--status-file").arg(&status_file);
     }
@@ -539,6 +543,22 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         && options.web_search_fault.as_deref() == Some("unstructured")
     {
         fixture_command.arg("--fault").arg("unstructured");
+    }
+    // The shutdown scenario's background-tool turns run the fixture binary in
+    // `--tool-peer` mode inside the opened project; the peer writes its business
+    // pids to these coordination files (absolute paths so the exec shell never
+    // depends on its working directory). Only the shutdown script reads them.
+    // The concurrent-stop turn writes its own file so a stale record from the
+    // earlier tool-reclamation turn can never be mistaken for the new subtree.
+    if options.scenario == "shutdown" {
+        fixture_command.env(
+            "ANYWORK_SHUTDOWN_TOOL_COORD",
+            working.path().join("shutdown-tool-coord.json"),
+        );
+        fixture_command.env(
+            "ANYWORK_SHUTDOWN_CONCURRENT_TOOL_COORD",
+            working.path().join("shutdown-concurrent-tool-coord.json"),
+        );
     }
     #[cfg(windows)]
     process::own_current_process_tree()?;
@@ -737,6 +757,23 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
                 output: &output,
                 fixture_log: &fixture_log_path,
                 requests_file: &requests_file,
+                interrupt: &interrupt_rx,
+            },
+            fixture,
+        );
+    }
+
+    if options.scenario == "shutdown" {
+        return shutdown::run(
+            &shutdown::ShutdownScenario {
+                workspace: &workspace,
+                app_dir: &app_dir,
+                home: &home,
+                working: working.path(),
+                output: &output,
+                fixture_log: &fixture_log_path,
+                requests_file: &requests_file,
+                status_file: &status_file,
                 interrupt: &interrupt_rx,
             },
             fixture,
@@ -1403,6 +1440,12 @@ fn validate_ready(ready: &FixtureReady) -> Result<()> {
     Ok(())
 }
 
+/// Writes the isolated [home]'s config, forwarding the operator-selected
+/// web-search fault to [`web_search::write_config`].
+///
+/// This is the single writer every scenario (including the descendant
+/// `shutdown` module) uses; the `web_search_fault` selector is only meaningful
+/// for the `web-search` scenario, so the other callers pass `None`.
 fn write_config(home: &Path, ready: &FixtureReady, web_search_fault: Option<&str>) -> Result<()> {
     if ready.scenario == "web-search" {
         let fault = match web_search_fault {
@@ -1425,6 +1468,151 @@ fn write_config_with_profile(
     ready: &FixtureReady,
     profile: ModelTransportProfile,
 ) -> Result<()> {
+    let config = fixture_config(home, ready, profile)?;
+    persist_config(home, &config)
+}
+
+/// Writes the isolated home's config with one scenario-owned stdio MCP server.
+///
+/// The shutdown acceptance points this at its own fixture MCP peer so the
+/// product starts it through the real supervised worker; the server itself
+/// spawns a SIGTERM-ignoring grandchild the product must reclaim.
+///
+/// Private to `manual_gui`: only the descendant `shutdown` module calls it, and
+/// keeping the visibility here means the private [`FixtureReady`] parameter does
+/// not leak past its own visibility.
+fn write_config_with_mcp_server(
+    home: &Path,
+    ready: &FixtureReady,
+    server_id: &str,
+    command: &Path,
+    args: &[String],
+) -> Result<()> {
+    let mut config = fixture_config(home, ready, ModelTransportProfile::responses_http())?;
+    config.runtime.active_mcp_servers.push(server_id.to_owned());
+    config.mcp.servers.insert(
+        server_id.to_owned(),
+        StudioMcpServerEntry {
+            enabled: true,
+            transport: McpServerTransport::Stdio,
+            command: Some(command.to_string_lossy().into_owned()),
+            args: args.to_vec(),
+            env: BTreeMap::new(),
+            cwd: None,
+            url: None,
+            bearer_token_env_var: None,
+            headers: BTreeMap::new(),
+            startup_timeout_secs: Some(30),
+            tool_timeout_secs: None,
+            enabled_tools: None,
+            disabled_tools: Vec::new(),
+        },
+    );
+    config.validate()?;
+    persist_config(home, &config)
+}
+
+/// One scenario-owned `[lsp.servers.<id>]` entry to declare in an isolated home.
+///
+/// A named spec instead of a long positional argument list: the writer stays a
+/// small call site and the fields carry their own meaning at construction.
+struct LspServerSpec<'a> {
+    /// The `[lsp.servers.<id>]` key; must be unique across the catalog.
+    id: &'a str,
+    /// Server program (the fixture binary in `--lsp-stdio` mode).
+    command: &'a Path,
+    /// Program arguments (the mode flag and coordination file path).
+    args: &'a [String],
+    /// The unique language id the server answers. Must not be a builtin id
+    /// (the builtin rust-analyzer already owns `rust`) or the merge fails loud.
+    language_id: &'a str,
+    /// Workspace detection rules; empty means "all workspaces".
+    detection: &'a [String],
+    /// File extensions the server claims; empty means none.
+    extensions: &'a [String],
+}
+
+/// Writes the isolated home's config with one scenario-owned `[lsp.servers.<id>]`
+/// entry.
+///
+/// The shutdown acceptance points this at its own fake LSP peer (the fixture
+/// binary in `--lsp-stdio` mode) so the product starts it through the real
+/// supervised worker when the model issues an `lsp_query`; the server itself
+/// spawns a SIGTERM-ignoring grandchild the product must reclaim.
+///
+/// The entry is injected into the serialized base config instead of naming
+/// `pl_lsp::catalog::LspUserServerConfig` directly, so this acceptance tool does
+/// not need a new crate dependency edge (and cannot drift a second LSP config
+/// fact source: `StudioConfig` remains the single typed owner).
+///
+/// Private to `manual_gui` (only the descendant `shutdown` module uses it) so
+/// the private [`FixtureReady`] parameter stays within its own visibility.
+fn write_config_with_lsp_server(
+    home: &Path,
+    ready: &FixtureReady,
+    spec: &LspServerSpec<'_>,
+) -> Result<()> {
+    let config = fixture_config(home, ready, ModelTransportProfile::responses_http())?;
+    // Round-trip through a `toml::Table` so the injected entry is identical to
+    // what `persist_config` / the runtime would read back from `config.toml`.
+    let mut table: toml::Table = toml::from_str(&toml::to_string(&config)?)
+        .context("failed to round-trip the isolated config for the LSP entry")?;
+    let lsp = table
+        .entry("lsp".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let lsp = lsp.as_table_mut().context("`lsp` is not a TOML table")?;
+    let servers = lsp
+        .entry("servers".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let servers = servers
+        .as_table_mut()
+        .context("`lsp.servers` is not a TOML table")?;
+    let mut entry = toml::Table::new();
+    entry.insert(
+        "command".to_owned(),
+        toml::Value::String(spec.command.to_string_lossy().into_owned()),
+    );
+    entry.insert(
+        "args".to_owned(),
+        toml::Value::Array(spec.args.iter().cloned().map(toml::Value::String).collect()),
+    );
+    entry.insert(
+        "language_ids".to_owned(),
+        toml::Value::Array(vec![toml::Value::String(spec.language_id.to_owned())]),
+    );
+    entry.insert(
+        "detection".to_owned(),
+        toml::Value::Array(
+            spec.detection
+                .iter()
+                .cloned()
+                .map(toml::Value::String)
+                .collect(),
+        ),
+    );
+    entry.insert(
+        "extensions".to_owned(),
+        toml::Value::Array(
+            spec.extensions
+                .iter()
+                .cloned()
+                .map(toml::Value::String)
+                .collect(),
+        ),
+    );
+    servers.insert(spec.id.to_owned(), toml::Value::Table(entry));
+    let config: StudioConfig = toml::from_str(&toml::to_string(&table)?)
+        .context("failed to rebuild the config with the LSP entry")?;
+    persist_config(home, &config)
+}
+
+/// Builds the isolated acceptance config without persisting it, so every writer
+/// shares one model/provider/route fact source.
+fn fixture_config(
+    home: &Path,
+    ready: &FixtureReady,
+    profile: ModelTransportProfile,
+) -> Result<StudioConfig> {
     let mut config = StudioConfig::default_config()?;
     let mut model = ModelInfo::compatible("fixture-model");
     model.display_name = "Local GUI fixture".into();
@@ -1470,9 +1658,14 @@ fn write_config_with_profile(
         route.effort = None;
     }
     config.skills.user_dir = home.join("skills").to_string_lossy().into_owned();
+    Ok(config)
+}
+
+/// Validates and persists an isolated config document.
+fn persist_config(home: &Path, config: &StudioConfig) -> Result<()> {
     config.validate()?;
     let file = home.join("config.toml");
-    fs::write(&file, toml::to_string_pretty(&config)?)
+    fs::write(&file, toml::to_string_pretty(config)?)
         .with_context(|| format!("failed to create isolated config: {}", file.display()))
 }
 
@@ -1488,8 +1681,13 @@ fn wait_for_vm(
         if let Some(url) = log
             .lines()
             .filter_map(|line| {
+                // The Flutter launch tool prints `available at:`; a directly
+                // launched debug/profile artifact prints the engine's own
+                // `The Dart VM service is listening on`. Either is the real VM
+                // service for the running host.
                 line.split("available at: http://127.0.0.1:")
                     .nth(1)
+                    .or_else(|| line.split("listening on http://127.0.0.1:").nth(1))
                     .map(|tail| {
                         format!(
                             "http://127.0.0.1:{}",
@@ -3742,6 +3940,30 @@ fn history_lock_watermark(database: &Path) -> Result<HistoryLockWatermark> {
     })
 }
 
+/// Runs `PRAGMA quick_check` on [database] through a read-only connection.
+///
+/// Proves the exact file committed before a forced exit still opens and passes
+/// SQLite's own integrity check after a reopen, rather than only that some file
+/// exists.
+fn history_lock_quick_check(database: &Path) -> Result<String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let database = database.to_owned();
+    let display = database.clone();
+    runtime.block_on(async move {
+        let options = SqliteConnectOptions::new()
+            .filename(&database)
+            .read_only(true);
+        let mut connection = SqliteConnection::connect_with(&options).await?;
+        let (result,): (String,) = sea_orm::sqlx::query_as("PRAGMA quick_check")
+            .fetch_one(&mut connection)
+            .await
+            .with_context(|| format!("failed to run quick_check on {}", display.display()))?;
+        Ok(result)
+    })
+}
+
 /// Counts one Turn's committed items and how many carry [answer].
 fn history_lock_turn_items(
     database: &Path,
@@ -4155,7 +4377,9 @@ fn write_sanitized_log(source: &Path, destination: &Path) -> Result<()> {
                     writeln!(output, "startup_stage={stage}")?;
                 }
             }
-        } else if line.contains("available at: http://127.0.0.1:") {
+        } else if line.contains("available at: http://127.0.0.1:")
+            || line.contains("listening on http://127.0.0.1:")
+        {
             writeln!(output, "vm_service=ready (address redacted)")?;
         } else if line.contains("resident command exited:") {
             writeln!(output, "gui_process=exited")?;

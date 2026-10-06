@@ -77,20 +77,27 @@ impl LspChild {
         }
     }
 
-    pub(crate) async fn kill(&mut self) -> Result<(), String> {
+    /// 请求终止并等待整棵进程树真实退出。
+    ///
+    /// `Ok(Some(issue))` 表示已确认回收但请求路径降级；`Ok(None)` 为完全优雅；
+    /// `Err` 表示无法确认回收，调用方必须保留 child owner 以便复用/重试。
+    pub(crate) async fn terminate_and_wait(&mut self) -> Result<Option<String>, String> {
         match self {
             Self::Local(child) => {
-                let kill = child.kill();
-                Pin::from(kill).await.map_err(|error| error.to_string())
+                let kill_issue = match Pin::from(child.kill()).await {
+                    Ok(()) => None,
+                    Err(error) => Some(format!("LSP process kill request failed: {error}")),
+                };
+                match child.wait().await {
+                    Ok(_status) => Ok(kill_issue),
+                    Err(error) => Err(error.to_string()),
+                }
             }
-            Self::Hosted(child) => child.terminate().await.map_err(|error| error.to_string()),
-        }
-    }
-
-    pub(crate) fn has_exited(&mut self) -> bool {
-        match self {
-            Self::Local(child) => child.try_wait().is_ok_and(|status| status.is_some()),
-            Self::Hosted(_) => false,
+            Self::Hosted(child) => child
+                .terminate()
+                .await
+                .map(|()| None)
+                .map_err(|error| error.to_string()),
         }
     }
 }

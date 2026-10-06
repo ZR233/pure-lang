@@ -10,9 +10,10 @@ import '../types/updater.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `cancel_all_update_operations`, `runtime_error`, `update_operations`, `wait`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeStudioUpdateOperationInner`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
+// These functions are ignored because they are not marked as `pub`: `broadcast_cancel_update_operations_excluding`, `broadcast_cancel_update_operations`, `into_issues`, `is_quiescent`, `is_quiescent`, `is_settled`, `is_settled`, `observe_update_operations`, `owned_completion`, `prune_settled`, `runtime_error`, `sink_ended`, `task_ended`, `update_issue_with_correlation`, `update_issue`, `update_operations`, `wait`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeStudioUpdateOperationInner`, `OperationCompletionFacts`, `OwnerTask`, `PendingUpdateOperations`, `UpdateObservation`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `drop`
+// These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`
 
 Future<BridgeUpdaterStateSnapshot> checkStudioUpdate() =>
     RustLib.instance.api.crateApiStudioHandlersUpdaterCheckStudioUpdate();
@@ -30,6 +31,11 @@ Future<BridgeStudioUpdateOperation> installStudioUpdate({
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeStudioUpdateOperation>>
 abstract class BridgeStudioUpdateOperation implements RustOpaqueInterface {
+  /// Cancels this operation and reports the *real* stop result.
+  ///
+  /// Both the cancellation request error (`CancellationTooLate` when the installer is already
+  /// launching) and any task failure are surfaced instead of being swallowed, so a caller cannot
+  /// receive a false "cancelled" acknowledgement while the operation keeps running.
   Future<void> cancel();
 
   /// Completes the actual process handoff; true tells the old GUI to exit.

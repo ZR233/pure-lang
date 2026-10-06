@@ -14,19 +14,110 @@
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <variant>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "studio_host_lifecycle.h"
 #include "utils.h"
 
 namespace {
 
 // Shared with host_app_icons.dart and the desktop application launchers.
 constexpr char kHostAppsChannel[] = "io.github.zr233.anywork/host_apps";
+// Shared with lib/src/app/studio_host_lifecycle.dart (native exit contract).
+constexpr char kHostLifecycleChannel[] =
+    "io.github.zr233.anywork/host_lifecycle";
 constexpr char kVsCodeExecutableMethod[] = "vsCodeExecutable";
 constexpr char kZedExecutableMethod[] = "zedExecutable";
+
+// Reads an optional string field from a channel argument map.
+std::string StringField(const flutter::EncodableMap& arguments,
+                        const char* key) {
+  const auto entry =
+      arguments.find(flutter::EncodableValue(std::string(key)));
+  if (entry == arguments.end()) return std::string();
+  if (const auto* value = std::get_if<std::string>(&entry->second)) {
+    return *value;
+  }
+  return std::string();
+}
+
+// Handles the native-host lifecycle method channel. Every method stays on the
+// platform thread; diagnostics writes never touch the independent deadline
+// thread, and finishExit terminates this instance without returning.
+void HandleHostLifecycleCall(
+    const flutter::MethodCall<flutter::EncodableValue>& call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  anywork::StudioHostLifecycle& lifecycle =
+      anywork::StudioHostLifecycle::Instance();
+  const std::string& method = call.method_name();
+  if (method == "beginExit") {
+    result->Success(flutter::EncodableValue(
+        static_cast<int64_t>(lifecycle.Arm())));
+    return;
+  }
+  if (method == "updateExitDiagnostics") {
+    anywork::StudioExitDiagnostics diagnostics;
+    if (const auto* arguments =
+            std::get_if<flutter::EncodableMap>(call.arguments())) {
+      diagnostics.stage = StringField(*arguments, "stage");
+      diagnostics.code = StringField(*arguments, "code");
+      diagnostics.correlation_id = StringField(*arguments, "correlationId");
+      const auto pending = arguments->find(
+          flutter::EncodableValue(std::string("pendingCommits")));
+      if (pending != arguments->end()) {
+        if (const auto* count =
+                std::get_if<int64_t>(&pending->second)) {
+          diagnostics.has_pending_commits = true;
+          diagnostics.pending_commits = static_cast<uint64_t>(*count);
+        } else if (const auto* small =
+                       std::get_if<int32_t>(&pending->second)) {
+          diagnostics.has_pending_commits = true;
+          diagnostics.pending_commits = static_cast<uint64_t>(*small);
+        }
+      }
+    }
+    lifecycle.UpdateDiagnostics(diagnostics);
+    result->Success();
+    return;
+  }
+  if (method == "configureDiagnostics") {
+    std::string directory;
+    if (const auto* arguments =
+            std::get_if<flutter::EncodableMap>(call.arguments())) {
+      directory = StringField(*arguments, "directory");
+    }
+    lifecycle.ConfigureDiagnostics(directory);
+    result->Success();
+    return;
+  }
+  if (method == "finishExit") {
+    // 缺失或异常退出码一律按失败处理；native Finish 只接受 0/1。
+    int exit_code = 1;
+    if (const auto* arguments =
+            std::get_if<flutter::EncodableMap>(call.arguments())) {
+      const auto value =
+          arguments->find(flutter::EncodableValue(std::string("exitCode")));
+      if (value != arguments->end()) {
+        if (const auto* code = std::get_if<int32_t>(&value->second);
+            code != nullptr && (*code == 0 || *code == 1)) {
+          exit_code = *code;
+        } else if (const auto* code64 = std::get_if<int64_t>(&value->second);
+                   code64 != nullptr && (*code64 == 0 || *code64 == 1)) {
+          exit_code = static_cast<int>(*code64);
+        }
+      }
+    }
+    lifecycle.Finish(exit_code);
+    result->Success();
+    return;
+  }
+  result->NotImplemented();
+}
 
 // Looks up the executable Windows associates with a URL protocol.
 bool QueryProtocolExecutable(const wchar_t* protocol,
@@ -240,6 +331,23 @@ bool FlutterWindow::OnCreate() {
         result->NotImplemented();
       });
 
+  lifecycle_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), kHostLifecycleChannel,
+          &flutter::StandardMethodCodec::GetInstance());
+  lifecycle_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        HandleHostLifecycleCall(call, std::move(result));
+      });
+  // The native close path asks Dart for the same coordinator; the callback stays
+  // on the platform thread and is cleared before the channel goes away.
+  anywork::StudioHostLifecycle::Instance().SetExitRequestCallback([this]() {
+    if (lifecycle_channel_) {
+      lifecycle_channel_->InvokeMethod("requestExit", nullptr);
+    }
+  });
+
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -255,6 +363,13 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  // Clear the native close callback before the channel disappears; the deadline
+  // thread keeps running so engine/window teardown cannot disarm the exit bound.
+  anywork::StudioHostLifecycle::Instance().ClearExitRequestCallback();
+  if (lifecycle_channel_) {
+    lifecycle_channel_->SetMethodCallHandler(nullptr);
+    lifecycle_channel_.reset();
+  }
   if (host_apps_channel_) {
     // The channel does not unregister its handler on destruction, so drop it
     // before the engine goes away.
@@ -272,6 +387,18 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // Intercept the close request before Flutter handles it: arm the native
+  // deadline and hand the close back to the same Dart exit coordinator.
+  if (message == WM_CLOSE) {
+    anywork::StudioHostLifecycle::Instance().RequestExit();
+    return 0;
+  }
+  // Keep the deadline armed across engine/window teardown; never disarm early.
+  if (message == WM_DESTROY || message == WM_ENDSESSION ||
+      message == WM_QUERYENDSESSION) {
+    anywork::StudioHostLifecycle::Instance().Arm();
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

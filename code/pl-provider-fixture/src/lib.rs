@@ -38,6 +38,17 @@ pub use web_search::{
     gui_web_search_script,
 };
 
+mod mcp_stdio;
+pub use mcp_stdio::{McpStdioOptions, run_mcp_stdio};
+
+mod stdio_peer;
+
+mod lsp_stdio;
+pub use lsp_stdio::{LspStdioOptions, run_lsp_stdio};
+
+mod tool_peer;
+pub use tool_peer::{ToolPeerOptions, run_tool_peer};
+
 /// The GUI script accepts exactly this user prompt for its sole completion step.
 pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
 
@@ -47,7 +58,7 @@ pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
 /// The coordinator's ready-file check, the fixture CLI parser and the script
 /// selection all read this single list, so a scenario can no longer be accepted
 /// by one of them and rejected by another.
-pub const GUI_SCENARIOS: [&str; 15] = [
+pub const GUI_SCENARIOS: [&str; 16] = [
     "gui",
     "storage-compaction",
     "stress",
@@ -63,6 +74,7 @@ pub const GUI_SCENARIOS: [&str; 15] = [
     "websocket-recovery",
     "call-lifecycle-recovery",
     "web-search",
+    "shutdown",
 ];
 
 /// Native compaction exhausts its budget, then a fresh input succeeds and waits
@@ -679,6 +691,146 @@ pub const GUI_PLAN_RECOVERY_REVISE_ANSWER: &str = "plan recovery revise answer c
 /// script and fails the run.
 pub const PLAN_RECOVERY_REQUIRED_STEPS: usize = 5;
 
+/// Shutdown-acceptance prompts, in the exact order the coordinator runs the
+/// phases that submit a real model turn.
+///
+/// Each phase uses a distinct prompt so the strict script keeps the phase order
+/// and can never accept a duplicated turn. The storage-lock phase consumes two:
+/// a durable prime that the forced exit must not lose, then a paced turn the
+/// held writer lock keeps from committing. The concurrent-stop phase consumes
+/// the background-tool turn (its reply is an `exec` call) on a home that also
+/// declares the scenario-owned stdio MCP server, so one turn starts two
+/// independent supervised resources; its receipt continuation is paced so the
+/// coordinator can take the exclusive writer lock after the peer records its
+/// pids, keeping the turn's terminal save from draining.
+pub const GUI_SHUTDOWN_PROMPTS: [&str; 11] = [
+    "Local GUI shutdown normal exit fixture",
+    "Local GUI shutdown second instance continue fixture",
+    "Local GUI shutdown duplicate request fixture",
+    "Local GUI shutdown dart hang fixture",
+    "Local GUI shutdown storage lock prime fixture",
+    "Local GUI shutdown storage lock blocked fixture",
+    "Local GUI shutdown unresponsive service fixture",
+    "Local GUI shutdown mcp reclamation fixture",
+    "Local GUI shutdown lsp reclamation fixture",
+    "Local GUI shutdown tool reclamation fixture",
+    "Local GUI shutdown concurrent stop fixture",
+];
+
+/// Deterministic answers for [`GUI_SHUTDOWN_PROMPTS`], aligned by index.
+///
+/// The reopen verification matches these committed assistant bodies byte for
+/// byte, so a restored session proves the saved turn, never a substring guess.
+pub const GUI_SHUTDOWN_ANSWERS: [&str; 11] = [
+    "shutdown normal exit answer",
+    "shutdown second instance answer",
+    "shutdown duplicate request answer",
+    "shutdown dart hang answer",
+    "shutdown storage lock prime answer",
+    "shutdown storage lock blocked answer",
+    "shutdown unresponsive service answer",
+    "shutdown mcp reclamation answer",
+    "shutdown lsp reclamation answer",
+    "shutdown tool reclamation answer",
+    "shutdown concurrent stop answer",
+];
+
+/// Index of the paced storage-lock turn inside [`GUI_SHUTDOWN_PROMPTS`].
+///
+/// Its reply is emitted as paced SSE frames so the model turn is still in flight
+/// when the coordinator takes the exclusive writer lock, which is the window the
+/// persistence-refusal acceptance observes.
+pub const GUI_SHUTDOWN_BLOCKED_STEP: usize = 5;
+
+/// Index of the paced unresponsive-service turn inside [`GUI_SHUTDOWN_PROMPTS`].
+///
+/// Its reply is emitted as paced SSE frames too, so the coordinator can freeze
+/// the provider (SIGSTOP) while the turn is genuinely mid-stream: the first
+/// deltas prove the request was accepted, and the remaining frames keep the
+/// turn in flight while the app is asked to exit.
+pub const GUI_SHUTDOWN_SERVICE_STEP: usize = 6;
+
+/// Index of the LSP language-service turn inside [`GUI_SHUTDOWN_PROMPTS`].
+///
+/// Its reply is a single `lsp_query` tool call, so the product starts the
+/// configured scenario-owned `[lsp.servers.*]` entry through its supervised
+/// worker; the following [`Step::tool_output`] step then matches the delivered
+/// result. The spawned language server (and its own-process-group grandchild)
+/// is the subtree the forced exit must reclaim.
+pub const GUI_SHUTDOWN_LSP_STEP: usize = 8;
+
+/// Language id of the scenario-owned fake LSP server. It must be unique across
+/// the catalog (the builtin rust-analyzer already owns `rust`) or
+/// `apply_user_servers` fails loud with `ConflictingLanguage`.
+pub const GUI_SHUTDOWN_LSP_LANGUAGE_ID: &str = "anywork-shutdown-fixture";
+
+/// Workspace-relative source file the `lsp_query` tool reads in the LSP turn.
+pub const GUI_SHUTDOWN_LSP_FILE: &str = "shutdown-lsp-probe.shutdownlsp";
+
+/// Item/call identity of the LSP tool call, shared with the tool-output step.
+const GUI_SHUTDOWN_LSP_TOOL_ITEM_ID: &str = "shutdown-lsp-query-item";
+const GUI_SHUTDOWN_LSP_TOOL_CALL_ID: &str = "shutdown-lsp-query-call";
+/// Item/call identity of the `discover_tools` call that reveals the deferred
+/// language-service declarations (`lsp_query` is deferred until discovered).
+const GUI_SHUTDOWN_LSP_DISCOVER_ITEM_ID: &str = "shutdown-lsp-discover-item";
+const GUI_SHUTDOWN_LSP_DISCOVER_CALL_ID: &str = "shutdown-lsp-discover-call";
+
+/// Scenario-owned text the committed `lsp_query` output must contain; it is the
+/// `hover` body the fake server returns (`default_result` in `lsp_stdio.rs`).
+const GUI_SHUTDOWN_LSP_TOOL_MARKER: &str = "shutdown lsp fixture hover";
+
+/// Index of the background-tool turn inside [`GUI_SHUTDOWN_PROMPTS`].
+///
+/// Its reply is a single `exec` call whose command runs the scenario-owned
+/// `--tool-peer` binary: the product starts it through the real supervised tool
+/// worker, and the peer spawns a SIGTERM-ignoring grandchild in its own process
+/// group. That subtree is what the forced exit must reclaim. The command
+/// deliberately outlives the runtime's foreground window, so it is a real
+/// background task and this is the final script step (no committed tool output).
+pub const GUI_SHUTDOWN_TOOL_STEP: usize = 9;
+
+/// Item/call identity of the background tool call.
+const GUI_SHUTDOWN_TOOL_ITEM_ID: &str = "shutdown-tool-item";
+const GUI_SHUTDOWN_TOOL_CALL_ID: &str = "shutdown-tool-call";
+
+/// Index of the concurrent-stop turn inside [`GUI_SHUTDOWN_PROMPTS`].
+///
+/// Its reply is a background `exec` call (the same scenario-owned `--tool-peer`
+/// as [`GUI_SHUTDOWN_TOOL_STEP`], but writing its own coordination file) and the
+/// isolated home also declares the scenario-owned stdio MCP server. One turn
+/// therefore starts two independent supervised resources. The coordinator takes
+/// the exclusive writer lock as soon as the peer records its pids and before the
+/// receipt continuation below can commit, so the turn's terminal save cannot
+/// drain; both resources must then be reclaimed on their own while that chain is
+/// still waiting, before the single 30-second deadline.
+pub const GUI_SHUTDOWN_CONCURRENT_STEP: usize = 10;
+
+/// Item/call identity of the concurrent-stop background tool call. Distinct
+/// from the tool-reclamation call so a duplicated turn can never be confused
+/// with the earlier direct reclamation.
+const GUI_SHUTDOWN_CONCURRENT_TOOL_ITEM_ID: &str = "shutdown-concurrent-tool-item";
+const GUI_SHUTDOWN_CONCURRENT_TOOL_CALL_ID: &str = "shutdown-concurrent-tool-call";
+
+/// Milliseconds the concurrent-stop receipt continuation waits before its first
+/// paced frame.
+///
+/// The coordinator takes the exclusive writer lock right after the background
+/// peer records its pids; that margin keeps the lock held before the
+/// continuation's terminal save. It is scenario timing only and never
+/// substitutes for a judgement: the OS pid reclamation and the real exit code
+/// decide the phase.
+const GUI_SHUTDOWN_CONCURRENT_HOLD_MS: u64 = 6_000;
+
+/// Non-optional steps in the shutdown fixture script.
+///
+/// One real model call per [`GUI_SHUTDOWN_PROMPTS`] entry, plus the LSP turn's
+/// second call (`lsp_query`) with its delivered `tool_output`, plus the
+/// background-tool turn's required receipt continuation, plus the
+/// concurrent-stop turn's required receipt continuation. The fixture verifies
+/// only after every one is consumed, so a run that skipped a phase can never
+/// report success.
+pub const SHUTDOWN_REQUIRED_STEPS: usize = 15;
+
 /// Final answers for each realtime scenario.
 ///
 /// `exec` is a background tool: a command that outlives the runtime's one-second
@@ -984,6 +1136,14 @@ pub struct FixtureLiveStatus {
     pub total: usize,
     pub consumed_steps: usize,
     pub expected_steps: usize,
+    /// Every step left at the cursor is optional, i.e. **every required step has
+    /// been consumed**. The `concurrent-stop` phase waits for this to flip before
+    /// it takes the writer lock, so the background-tool turn's required receipt
+    /// continuation is really accepted by the strict script before the close is
+    /// released; the final gate re-reads it so an unconsumed required step fails
+    /// the run instead of hiding behind an accepted-request count.
+    #[serde(default)]
+    pub remaining_optional: bool,
 }
 
 #[derive(Default)]
@@ -1301,6 +1461,7 @@ impl FixtureServer {
             total: state.requests.len(),
             consumed_steps: state.cursor,
             expected_steps: state.steps.len(),
+            remaining_optional: state.steps[state.cursor..].iter().all(|step| step.optional),
         }
     }
 
@@ -2192,6 +2353,275 @@ pub fn gui_plan_recovery_script() -> Vec<Step> {
     script.finish()
 }
 
+/// Shutdown-acceptance strict script.
+///
+/// Eleven real model turns, one per submitting GUI phase (normal exit,
+/// second-instance continue, duplicated exit request, Driver hang, storage
+/// prime, storage-lock blocked, unresponsive service, MCP reclamation, LSP
+/// reclamation, background-tool reclamation and concurrent stop). The LSP turn
+/// is two steps (`discover_tools` then the real `lsp_query`) and adds a matching
+/// `tool_output` step; the tool turn and the concurrent-stop turn each add a
+/// required receipt continuation, so [`SHUTDOWN_REQUIRED_STEPS`] counts fifteen
+/// non-optional steps. Each prompt has its own optional auto-title window, so a
+/// phase that issues no model request (the reopen and runtime-unavailable
+/// verifications) simply leaves the trailing optional steps behind. The strict
+/// ordinal match rejects any extra or duplicated turn, so the run fails closed
+/// instead of reinterpreting a wrong request. The storage-lock blocked and
+/// unresponsive-service replies are paced so a phase can act while the turn is
+/// genuinely in flight.
+pub fn gui_shutdown_script() -> Vec<Step> {
+    let mut script = RealtimeScript::new();
+    for (index, (prompt, answer)) in GUI_SHUTDOWN_PROMPTS
+        .iter()
+        .zip(GUI_SHUTDOWN_ANSWERS)
+        .enumerate()
+    {
+        let title = session_title_prompt(prompt);
+        script.optional_title(&title);
+        let reply = if index == GUI_SHUTDOWN_BLOCKED_STEP {
+            Reply::PacedEvents {
+                initial_delay_ms: 0,
+                step_millis: 900,
+                events: responses_text_chunks(
+                    &["shutdown storage ", "lock ", "blocked ", "answer"],
+                    "shutdown-storage-blocked",
+                    "fixture-model",
+                ),
+            }
+        } else if index == GUI_SHUTDOWN_SERVICE_STEP {
+            Reply::PacedEvents {
+                initial_delay_ms: 0,
+                step_millis: 900,
+                events: responses_text_chunks(
+                    &[
+                        "shutdown-service ",
+                        "unresponsive ",
+                        "answer ",
+                        "still ",
+                        "pending",
+                    ],
+                    "shutdown-service-blocked",
+                    "fixture-model",
+                ),
+            }
+        } else if index == GUI_SHUTDOWN_LSP_STEP {
+            // The language-service tools are deferred: the model must first
+            // reveal them through `discover_tools`. The revealed `lsp_query`
+            // step and the matching tool-output step follow below, so the real
+            // `[lsp.servers.*]` server is started and its process tree is what
+            // the forced exit must reclaim.
+            Reply::Sse(responses_tool_calls(
+                "shutdown-lsp-discover",
+                "fixture-model",
+                &[RealtimeToolCall {
+                    item_id: GUI_SHUTDOWN_LSP_DISCOVER_ITEM_ID,
+                    call_id: GUI_SHUTDOWN_LSP_DISCOVER_CALL_ID,
+                    name: TOOL_DISCOVER_NAME,
+                    arguments: json!({"query": "lsp"}).to_string(),
+                }],
+            ))
+        } else if index == GUI_SHUTDOWN_TOOL_STEP || index == GUI_SHUTDOWN_CONCURRENT_STEP {
+            // The background-tool turn is a single `exec` call whose command
+            // runs the scenario-owned `--tool-peer`. It outlives the foreground
+            // window, so the runtime answers with a task receipt while the real
+            // tool process (and its detached grandchild) keeps running; that
+            // subtree is what the forced exit must reclaim. The required
+            // continuation step below answers the post-receipt re-prompt so the
+            // model never waits on the still-running task.
+            //
+            // The concurrent-stop turn is the same shape but on a home that
+            // also declares the stdio MCP server, and it writes its own peer
+            // coordination file; its paced continuation (below) keeps the turn
+            // in flight while the exclusive writer lock blocks the terminal
+            // save.
+            let (item_id, call_id, stream_id, command) = if index == GUI_SHUTDOWN_CONCURRENT_STEP {
+                (
+                    GUI_SHUTDOWN_CONCURRENT_TOOL_ITEM_ID,
+                    GUI_SHUTDOWN_CONCURRENT_TOOL_CALL_ID,
+                    "shutdown-concurrent-tool-query",
+                    shutdown_concurrent_tool_command(),
+                )
+            } else {
+                (
+                    GUI_SHUTDOWN_TOOL_ITEM_ID,
+                    GUI_SHUTDOWN_TOOL_CALL_ID,
+                    "shutdown-tool-query",
+                    shutdown_tool_command(),
+                )
+            };
+            Reply::Sse(responses_tool_calls(
+                stream_id,
+                "fixture-model",
+                &[RealtimeToolCall {
+                    item_id,
+                    call_id,
+                    name: TOOL_EXEC_NAME,
+                    // The peer must outlive the force-exit window, so give the
+                    // background task a long timeout instead of the 60s default.
+                    arguments: json!({
+                        "command": command,
+                        "timeoutSeconds": 600,
+                    })
+                    .to_string(),
+                }],
+            ))
+        } else {
+            Reply::Sse(responses_text(
+                answer,
+                &format!("shutdown-response-{index}"),
+                "fixture-model",
+            ))
+        };
+        script.add(move |step| Step::prompt(Protocol::ResponsesHttp, *prompt, step, reply));
+        if index == GUI_SHUTDOWN_LSP_STEP {
+            // Once `discover_tools` revealed the deferred declarations, the
+            // runtime re-prompts the model, which now issues the real query.
+            script.add(move |step| {
+                Step::prompt(
+                    Protocol::ResponsesHttp,
+                    *prompt,
+                    step,
+                    Reply::Sse(responses_tool_calls(
+                        "shutdown-lsp-query",
+                        "fixture-model",
+                        &[RealtimeToolCall {
+                            item_id: GUI_SHUTDOWN_LSP_TOOL_ITEM_ID,
+                            call_id: GUI_SHUTDOWN_LSP_TOOL_CALL_ID,
+                            name: TOOL_LSP_QUERY_NAME,
+                            arguments: lsp_query_arguments(),
+                        }],
+                    )),
+                )
+            });
+            // The delivered `lsp_query` result carries the fake server's hover
+            // body; matching its call identity keeps this an identity check on a
+            // real language-service round trip.
+            let lsp_reply = Reply::Sse(responses_text(
+                answer,
+                &format!("shutdown-response-{index}"),
+                "fixture-model",
+            ));
+            script.add(move |step| {
+                Step::tool_output(
+                    Protocol::ResponsesHttp,
+                    GUI_SHUTDOWN_LSP_TOOL_CALL_ID,
+                    GUI_SHUTDOWN_LSP_TOOL_MARKER,
+                    step,
+                    lsp_reply,
+                )
+            });
+        }
+        if index == GUI_SHUTDOWN_TOOL_STEP || index == GUI_SHUTDOWN_CONCURRENT_STEP {
+            // The runtime answers the background `exec` call with a task receipt
+            // and re-prompts the model in the same Turn, so this request carries
+            // the original prompt again (the receipt is a `function_call_output`,
+            // not a user message). It must therefore be a *required* prompt step:
+            // the strict matcher only refuses a repeated prompt on an optional
+            // step, so an optional continuation could never match and the second
+            // model call would be rejected. Requiring it keeps the observation
+            // honest rather than letting a missing continuation (or a duplicated
+            // exec turn) pass. The model answers with plain text and stops while
+            // the real tool subtree keeps running for the reclamation window.
+            //
+            // For the concurrent-stop turn the continuation is paced with a
+            // margin so the coordinator's exclusive writer lock is in place
+            // before the terminal save: the model call is answered (so this
+            // required step is consumed), but the save cannot drain. That is the
+            // "artificially blocked chain" the two independent resources must
+            // outlive.
+            let continuation = if index == GUI_SHUTDOWN_CONCURRENT_STEP {
+                Reply::PacedEvents {
+                    initial_delay_ms: GUI_SHUTDOWN_CONCURRENT_HOLD_MS,
+                    step_millis: 900,
+                    events: responses_text_chunks(
+                        &[
+                            "shutdown concurrent ",
+                            "stop ",
+                            "answer ",
+                            "still ",
+                            "in flight",
+                        ],
+                        "shutdown-concurrent-continuation",
+                        "fixture-model",
+                    ),
+                }
+            } else {
+                Reply::Sse(responses_text(
+                    answer,
+                    "shutdown-tool-continuation",
+                    "fixture-model",
+                ))
+            };
+            script.add(move |step| {
+                Step::prompt(Protocol::ResponsesHttp, *prompt, step, continuation)
+            });
+        }
+        // The auto-title request is emitted only once the whole Turn is idle
+        // (`wait_for_initial_turn` waits on `thread_is_busy`), so for a Turn with
+        // more than one model call -- the LSP `discover_tools`/`lsp_query` pair
+        // and the background-tool receipt continuation -- the title lands after
+        // every one of those calls, not right after the first reply. Keeping this
+        // optional title slot at the END of the Turn's steps matches where the
+        // product actually emits it, without weakening the ordinal strictness:
+        // every mandatory call is still matched by identity above it.
+        script.optional_title(&title);
+    }
+    script.finish()
+}
+
+/// Arguments for the single scenario-owned `lsp_query` tool call.
+///
+/// `hover` needs a position and a workspace-relative file; the acceptance
+/// creates [`GUI_SHUTDOWN_LSP_FILE`] inside the opened project so the path policy
+/// resolves it without host-workspace approval.
+fn lsp_query_arguments() -> String {
+    json!({
+        "languageId": GUI_SHUTDOWN_LSP_LANGUAGE_ID,
+        "operation": "hover",
+        "filePath": GUI_SHUTDOWN_LSP_FILE,
+        "line": 1,
+        "character": 1,
+    })
+    .to_string()
+}
+
+/// The background command for the tool-reclamation turn.
+///
+/// It runs this same fixture binary in `--tool-peer` mode and points it at the
+/// coordination file the coordinator reads. The peer records the real business
+/// pids and then keeps running, so the coordinator can OS-poll the tool and its
+/// detached grandchild after forcing the exit. The absolute peer path comes from
+/// the running binary itself; the coordination file path comes from
+/// `ANYWORK_SHUTDOWN_TOOL_COORD` (set by the acceptance), with a path relative to
+/// the isolated project as a fallback.
+fn shutdown_tool_command() -> String {
+    shutdown_peer_command("ANYWORK_SHUTDOWN_TOOL_COORD", "../shutdown-tool-coord.json")
+}
+
+/// The background command for the concurrent-stop turn.
+///
+/// Identical to [`shutdown_tool_command`] except that it points the peer at its
+/// own coordination file (`ANYWORK_SHUTDOWN_CONCURRENT_TOOL_COORD`), so the
+/// concurrent subtree's pids can never be confused with the earlier
+/// tool-reclamation record.
+fn shutdown_concurrent_tool_command() -> String {
+    shutdown_peer_command(
+        "ANYWORK_SHUTDOWN_CONCURRENT_TOOL_COORD",
+        "../shutdown-concurrent-tool-coord.json",
+    )
+}
+
+/// The peer command for [coord_env], falling back to [fallback] relative to the
+/// isolated project when the acceptance did not export the variable.
+fn shutdown_peer_command(coord_env: &str, fallback: &str) -> String {
+    let peer = std::env::current_exe()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "pl-provider-fixture".to_owned());
+    let coord = std::env::var(coord_env).unwrap_or_else(|_| fallback.to_owned());
+    format!("'{peer}' --tool-peer --coord-file '{coord}'")
+}
+
 /// Appends steps with a positional index while keeping the script a single list.
 ///
 /// A `Vec` plus straight-line `push` calls would trip `clippy::vec_init_then_push`;
@@ -2221,6 +2651,14 @@ impl RealtimeScript {
 
 /// The `exec` tool identifier shared by the long-command, parallel and approval steps.
 const TOOL_EXEC_NAME: &str = "exec";
+
+/// The language-service tool the model uses in the shutdown LSP turn. It is the
+/// registered `pl_tool` LSP query tool name (`lsp_query`).
+const TOOL_LSP_QUERY_NAME: &str = "lsp_query";
+
+/// Registered `pl_tool` deferred-tool discovery name (`discover_tools`); the
+/// language-service tools are deferred, so the model must reveal them first.
+const TOOL_DISCOVER_NAME: &str = "discover_tools";
 
 /// The task-control tool the model uses to observe a background task receipt.
 const TOOL_WAIT_NAME: &str = "wait";

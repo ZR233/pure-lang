@@ -23,6 +23,7 @@ add_custom_command(
 add_executable(${BINARY_NAME}
   "main.cc"
   "my_application.cc"
+  "${CMAKE_SOURCE_DIR}/../runner_common/studio_host_lifecycle.cc"
   "${ANYWORK_RESOURCE_SOURCE}"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
@@ -39,3 +40,5 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+target_include_directories(${BINARY_NAME} PRIVATE
+  "${CMAKE_SOURCE_DIR}/../runner_common")

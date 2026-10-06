@@ -1,11 +1,130 @@
 #include "my_application.h"
 
+#include <cstdint>
+
 #include <flutter_linux/flutter_linux.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
+#include "studio_host_lifecycle.h"
+
+// Native -> Dart exit callback target. Holds a strong reference while the
+// engine lives, so the close path never dereferences a freed channel.
+static FlMethodChannel* g_lifecycle_channel = nullptr;
+
+static void respond_success(FlMethodCall* method_call) {
+  g_autoptr(FlMethodResponse) response =
+      FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  g_autoptr(GError) error = nullptr;
+  if (!fl_method_call_respond(method_call, response, &error)) {
+    g_warning("Failed to send lifecycle response: %s", error->message);
+  }
+}
+
+static void request_exit_cb() {
+  if (g_lifecycle_channel != nullptr) {
+    fl_method_channel_invoke_method(g_lifecycle_channel, "requestExit", nullptr,
+                                    nullptr, nullptr, nullptr);
+  }
+}
+
+// Intercept the window close before Dart: arm the native deadline and hand the
+// close back to the same Dart exit coordinator (which calls finishExit).
+static gboolean on_window_delete(GtkWidget* widget, GdkEvent* event,
+                                 gpointer user_data) {
+  (void)widget;
+  (void)event;
+  (void)user_data;
+  anywork::StudioHostLifecycle::Instance().RequestExit();
+  return TRUE;
+}
+
+// Handles the native-host lifecycle method channel. Every method stays on the
+// platform thread; diagnostics never touch the independent deadline thread.
+static void lifecycle_method_call_cb(FlMethodChannel* channel,
+                                     FlMethodCall* method_call,
+                                     gpointer user_data) {
+  (void)channel;
+  (void)user_data;
+  anywork::StudioHostLifecycle& lifecycle =
+      anywork::StudioHostLifecycle::Instance();
+  const gchar* method = fl_method_call_get_name(method_call);
+  if (g_strcmp0(method, "beginExit") == 0) {
+    g_autoptr(FlValue) value = fl_value_new_int(lifecycle.Arm());
+    g_autoptr(FlMethodResponse) response =
+        FL_METHOD_RESPONSE(fl_method_success_response_new(value));
+    g_autoptr(GError) error = nullptr;
+    if (!fl_method_call_respond(method_call, response, &error)) {
+      g_warning("Failed to send beginExit response: %s", error->message);
+    }
+    return;
+  }
+  if (g_strcmp0(method, "updateExitDiagnostics") == 0) {
+    anywork::StudioExitDiagnostics diagnostics;
+    FlValue* args = fl_method_call_get_args(method_call);
+    if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+      FlValue* stage = fl_value_lookup_string(args, "stage");
+      if (stage != nullptr && fl_value_get_type(stage) == FL_VALUE_TYPE_STRING) {
+        diagnostics.stage = fl_value_get_string(stage);
+      }
+      FlValue* code = fl_value_lookup_string(args, "code");
+      if (code != nullptr && fl_value_get_type(code) == FL_VALUE_TYPE_STRING) {
+        diagnostics.code = fl_value_get_string(code);
+      }
+      FlValue* correlation = fl_value_lookup_string(args, "correlationId");
+      if (correlation != nullptr &&
+          fl_value_get_type(correlation) == FL_VALUE_TYPE_STRING) {
+        diagnostics.correlation_id = fl_value_get_string(correlation);
+      }
+      FlValue* pending = fl_value_lookup_string(args, "pendingCommits");
+      if (pending != nullptr &&
+          fl_value_get_type(pending) == FL_VALUE_TYPE_INT) {
+        diagnostics.has_pending_commits = true;
+        diagnostics.pending_commits =
+            static_cast<uint64_t>(fl_value_get_int(pending));
+      }
+    }
+    lifecycle.UpdateDiagnostics(diagnostics);
+    respond_success(method_call);
+    return;
+  }
+  if (g_strcmp0(method, "configureDiagnostics") == 0) {
+    FlValue* args = fl_method_call_get_args(method_call);
+    if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+      FlValue* directory = fl_value_lookup_string(args, "directory");
+      if (directory != nullptr &&
+          fl_value_get_type(directory) == FL_VALUE_TYPE_STRING) {
+        lifecycle.ConfigureDiagnostics(fl_value_get_string(directory));
+      }
+    }
+    respond_success(method_call);
+    return;
+  }
+  if (g_strcmp0(method, "finishExit") == 0) {
+    // 缺失或异常退出码一律按失败处理；native Finish 只接受 0/1。
+    int exit_code = 1;
+    FlValue* args = fl_method_call_get_args(method_call);
+    if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+      FlValue* value = fl_value_lookup_string(args, "exitCode");
+      if (value != nullptr && fl_value_get_type(value) == FL_VALUE_TYPE_INT) {
+        const int64_t requested = fl_value_get_int(value);
+        if (requested == 0 || requested == 1) {
+          exit_code = static_cast<int>(requested);
+        }
+      }
+    }
+    lifecycle.Finish(exit_code);
+    return;
+  }
+  g_autoptr(FlMethodResponse) response =
+      FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  g_autoptr(GError) error = nullptr;
+  if (!fl_method_call_respond(method_call, response, &error)) {
+    g_warning("Failed to send lifecycle response: %s", error->message);
+  }
+}
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -185,6 +304,20 @@ static void my_application_activate(GApplication* application) {
   fl_method_channel_set_method_call_handler(
       host_apps_channel, host_apps_method_call_cb, nullptr, nullptr);
 
+  // Native-host lifecycle channel: exit deadline + redacted diagnostics. The
+  // messenger keeps the channel (and our extra ref) alive for the engine's life.
+  g_autoptr(FlStandardMethodCodec) lifecycle_codec =
+      fl_standard_method_codec_new();
+  g_autoptr(FlMethodChannel) lifecycle_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "io.github.zr233.anywork/host_lifecycle",
+      FL_METHOD_CODEC(lifecycle_codec));
+  fl_method_channel_set_method_call_handler(
+      lifecycle_channel, lifecycle_method_call_cb, nullptr, nullptr);
+  g_lifecycle_channel = FL_METHOD_CHANNEL(g_object_ref(lifecycle_channel));
+  g_signal_connect(window, "delete-event", G_CALLBACK(on_window_delete), nullptr);
+  anywork::StudioHostLifecycle::Instance().SetExitRequestCallback(request_exit_cb);
+
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
@@ -220,10 +353,14 @@ static void my_application_startup(GApplication* application) {
 
 // Implements GApplication::shutdown.
 static void my_application_shutdown(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application shutdown.
-
+  // Keep the deadline armed across engine/window teardown; clear the native
+  // close callback (not the deadline) before the engine goes away.
+  anywork::StudioHostLifecycle::Instance().Arm();
+  anywork::StudioHostLifecycle::Instance().ClearExitRequestCallback();
+  if (g_lifecycle_channel != nullptr) {
+    g_object_unref(g_lifecycle_channel);
+    g_lifecycle_channel = nullptr;
+  }
   G_APPLICATION_CLASS(my_application_parent_class)->shutdown(application);
 }
 

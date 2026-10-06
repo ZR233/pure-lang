@@ -15,7 +15,7 @@ use pl_protocol::{McpAvailabilityDescriptor, McpHealthSnapshot, PureError, Resul
 use rmcp::model::Tool;
 use tokio::sync::{Notify, broadcast, mpsc};
 
-use super::{LeaseSnapshot, McpGeneration, McpResetScope, RuntimeCommand};
+use super::{LeaseSnapshot, McpGeneration, McpResetScope, RuntimeCommand, ShutdownCompletion};
 use crate::mcp::McpConnector;
 use crate::mcp::config::EffectiveMcpServerConfig;
 use crate::mcp::health::{McpAvailabilityKind, McpAvailabilitySnapshot};
@@ -46,8 +46,9 @@ pub(super) async fn run(
     receiver: mpsc::UnboundedReceiver<RuntimeCommand>,
     commands: mpsc::UnboundedSender<RuntimeCommand>,
     updates: broadcast::Sender<()>,
+    shutdown_completion: ShutdownCompletion,
 ) {
-    RuntimeWorker::new(connector, receiver, commands, updates)
+    RuntimeWorker::new(connector, receiver, commands, updates, shutdown_completion)
         .run()
         .await;
 }
@@ -62,6 +63,8 @@ struct RuntimeWorker {
     next_generation: u64,
     /// preparation 完成信号，用于 `AcquireLease` 的有界等待。
     preparation_notify: Arc<Notify>,
+    /// Single-owned closing completion shared with every runtime handle.
+    shutdown_completion: ShutdownCompletion,
 }
 
 struct ActiveToolRefresh {
@@ -90,6 +93,7 @@ impl RuntimeWorker {
         receiver: mpsc::UnboundedReceiver<RuntimeCommand>,
         commands: mpsc::UnboundedSender<RuntimeCommand>,
         updates: broadcast::Sender<()>,
+        shutdown_completion: ShutdownCompletion,
     ) -> Self {
         let current = McpGeneration(0);
         Self {
@@ -103,6 +107,7 @@ impl RuntimeWorker {
             current,
             next_generation: 1,
             preparation_notify: Arc::new(Notify::new()),
+            shutdown_completion,
         }
     }
 
@@ -231,15 +236,25 @@ impl RuntimeWorker {
                 }
                 RuntimeCommand::Shutdown { reply } => {
                     reject_reconciles(preparation.take(), &mut pending);
-                    self.shutdown().await;
-                    let _ = reply.send(());
+                    let result = self.shutdown().await;
+                    let recorded = match &result {
+                        Ok(()) => Ok(()),
+                        Err(error) => Err(error.to_string()),
+                    };
+                    self.shutdown_completion.record(recorded).await;
+                    let _ = reply.send(result);
                     return;
                 }
                     }
                 }
             }
         }
-        self.shutdown().await;
+        let result = self.shutdown().await;
+        let recorded = match &result {
+            Ok(()) => Ok(()),
+            Err(error) => Err(error.to_string()),
+        };
+        self.shutdown_completion.record(recorded).await;
     }
 
     fn start_preparation(&mut self, request: PendingReconcile) -> ActivePreparation {
@@ -379,9 +394,20 @@ impl RuntimeWorker {
             .filter_map(|server| server.session.as_ref())
             .map(|session| Arc::as_ptr(session) as usize)
             .collect::<BTreeSet<_>>();
-        for session in unique_sessions(generation.servers) {
-            if !current_sessions.contains(&(Arc::as_ptr(&session) as usize)) {
-                session.close().await;
+        let sessions = unique_sessions(generation.servers)
+            .into_iter()
+            .filter(|session| !current_sessions.contains(&(Arc::as_ptr(session) as usize)))
+            .collect::<Vec<_>>();
+        // Independent owners: cancel and await them concurrently so one slow server cannot
+        // consume the budget of the others.
+        let outcomes =
+            futures::future::join_all(sessions.iter().map(|session| session.close())).await;
+        for outcome in outcomes {
+            if let Err(error) = outcome {
+                tracing::warn!(
+                    %error,
+                    "MCP session did not confirm closure while discarding an unpublished generation"
+                );
             }
         }
     }
@@ -506,38 +532,101 @@ impl RuntimeWorker {
             .filter(|(_, generation)| generation.retired && generation.leases == 0)
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
+        let mut sessions = Vec::new();
         for id in retired {
             let Some(generation) = self.generations.remove(&id) else {
                 continue;
             };
             for session in unique_sessions(generation.servers) {
+                // A session still referenced by another generation is owned elsewhere; the
+                // generation that still holds it retires it.
                 if Arc::strong_count(&session) == 1 {
-                    session.close().await;
-                }
-            }
-        }
-    }
-
-    async fn shutdown(&mut self) {
-        let generations = std::mem::take(&mut self.generations);
-        let mut sessions = Vec::new();
-        let mut seen = BTreeSet::new();
-        for generation in generations.into_values() {
-            for session in generation
-                .servers
-                .into_values()
-                .filter_map(|server| server.session)
-            {
-                let identity = Arc::as_ptr(&session) as usize;
-                if seen.insert(identity) {
                     sessions.push(session);
                 }
             }
         }
-        for session in sessions {
-            session.close().await;
+        // Independent owners: cancel and await them concurrently so one slow server cannot
+        // consume the budget of the others.
+        let outcomes =
+            futures::future::join_all(sessions.iter().map(|session| session.close())).await;
+        for outcome in outcomes {
+            if let Err(error) = outcome {
+                tracing::warn!(
+                    %error,
+                    "MCP session did not confirm closure while retiring a generation"
+                );
+            }
+        }
+    }
+
+    /// 关闭全部 generation 的 session 并确认整树回收。
+    ///
+    /// 独立 session 的关闭并发发出，任一 hang 不会阻止其它 session 收到 cancel；只有
+    /// 确认回收的 session 才从 generation 中移除，未确认的 owner 由 `ConnectedMcp`
+    /// 自有的 close task 保留到任务结束或进程终止。返回 typed `Result`，失败带明确
+    /// server id，让 runtime 能定位到具体未回收的 server 而不是泛化的 "mcp"。
+    async fn shutdown(&mut self) -> Result<()> {
+        let sessions = {
+            let mut seen = BTreeSet::new();
+            let mut sessions = Vec::new();
+            for generation in self.generations.values() {
+                for (server_id, server) in &generation.servers {
+                    if let Some(session) = &server.session
+                        && seen.insert(Arc::as_ptr(session) as usize)
+                    {
+                        sessions.push((server_id.clone(), session.clone()));
+                    }
+                }
+            }
+            sessions
+        };
+        let results = futures::future::join_all(sessions.iter().map(|(server_id, session)| {
+            let server_id = server_id.clone();
+            let session = session.clone();
+            async move {
+                let outcome = session.close().await;
+                (server_id, session, outcome)
+            }
+        }))
+        .await;
+        // Only drop the owner of a session whose process tree was confirmed reclaimed. An
+        // unconfirmed owner stays in its generation so it is never cleared (and dropped)
+        // while the tree may still be alive; it is retained until the worker — and its
+        // `ConnectedMcp` close task — actually ends.
+        let mut reclaimed = BTreeSet::new();
+        let mut failures = Vec::new();
+        for (server_id, session, outcome) in results {
+            match outcome {
+                Ok(()) => {
+                    reclaimed.insert(Arc::as_ptr(&session) as usize);
+                }
+                Err(error) => failures.push(format!(
+                    "MCP server '{server_id}' did not confirm process-tree reclamation: {error}"
+                )),
+            }
+        }
+        if !reclaimed.is_empty() {
+            for generation in self.generations.values_mut() {
+                for server in generation.servers.values_mut() {
+                    if server
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| reclaimed.contains(&(Arc::as_ptr(session) as usize)))
+                    {
+                        server.session = None;
+                    }
+                }
+            }
         }
         self.emit_update();
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(PureError::ToolExecutionFailed {
+                tool: "mcp".to_string(),
+                error: failures.join("; "),
+            })
+        }
     }
 
     fn current_generation(&self) -> &RuntimeGeneration {

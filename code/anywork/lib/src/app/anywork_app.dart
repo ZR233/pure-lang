@@ -12,6 +12,8 @@ import '../features/shell/studio_shell.dart';
 import '../features/update/studio_update_controller.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/studio_l10n.dart';
+import '../platform/error_log.dart';
+import 'studio_host_lifecycle.dart';
 import 'studio_shutdown.dart';
 import 'theme/material3_theme.dart';
 
@@ -66,9 +68,9 @@ class StudioLifecycleCoordinator extends ConsumerStatefulWidget {
 class _StudioLifecycleCoordinatorState
     extends ConsumerState<StudioLifecycleCoordinator>
     with WidgetsBindingObserver {
-  Future<void>? _shutdownFuture;
   late final StudioApi _api;
   late final StudioShutdownProgressState _shutdownProgress;
+  late final StudioExitCoordinator _coordinator;
 
   @override
   void initState() {
@@ -77,62 +79,56 @@ class _StudioLifecycleCoordinatorState
     // dispose 后 ConsumerState.ref 不可再用，关机依赖必须在挂载期间取得。
     _api = ref.read(studioApiProvider);
     _shutdownProgress = ref.read(studioShutdownProgressStateProvider.notifier);
+    _coordinator = StudioExitCoordinator(
+      _api,
+      // dispose 之后 overlay 与 provider container 均已销毁：不再向已销毁的
+      // progress notifier 写状态。
+      (progress) {
+        if (mounted) _shutdownProgress.update(progress);
+      },
+      onFailure: (error) {
+        if (mounted) _shutdownProgress.fail(error);
+      },
+      shutdownOverride: widget.shutdown,
+    );
+    // 安装 native -> Dart 退出回调，并提前把 canonical 日志目录交给 native。
+    StudioExitCoordinator.install(_coordinator);
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) {
-      unawaited(_shutdown().catchError((Object _) {}));
+      unawaited(StudioExitCoordinator.requestExit().catchError(_logExitError));
     }
   }
 
   @override
   Future<AppExitResponse> didRequestAppExit() async {
-    try {
-      await _shutdown();
-      return AppExitResponse.exit;
-    } on Object {
-      return AppExitResponse.cancel;
-    }
+    // 与窗口关闭同一协调器：arm native deadline，执行有界清理并结束本实例。
+    await StudioExitCoordinator.requestExit().catchError(_logExitError);
+    return AppExitResponse.exit;
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // 卸载兜底：此时 overlay 与 provider container 均已销毁，只执行关机，
-    // 不再向已销毁的 progress notifier 写状态。
-    unawaited(
-      (_shutdownFuture ??= _disposeShutdown()).catchError((Object _) {}),
-    );
+    // 卸载兜底：此时 overlay 与 provider container 均已销毁，只执行关机；协调器
+    // 通过共享 future 复用同一次收束，且不会再向已销毁的 progress notifier 写状态。
+    unawaited(StudioExitCoordinator.requestExit().catchError(_logExitError));
     super.dispose();
   }
 
-  /// 幂等共享同一个 shutdown future；默认路径先呈现关机阶段 overlay，
-  /// 等待 write-behind 落库排空（FlushingPersistence pending=0）后才放行退出。
-  Future<void> _shutdown() {
-    final running = _shutdownFuture;
-    if (running != null) return running;
-    late final Future<void> attempt;
-    attempt = Future<void>.sync(widget.shutdown ?? _defaultShutdown).then(
-      (_) {},
-      onError: (Object error, StackTrace stackTrace) {
-        if (identical(_shutdownFuture, attempt)) _shutdownFuture = null;
-        if (mounted) _shutdownProgress.fail(error);
-        Error.throwWithStackTrace(error, stackTrace);
-      },
+  void _logExitError(Object error, StackTrace stackTrace) {
+    // 退出路径的异常不静默丢弃：cause/stack 经 canonical 诊断日志（含 system temp /
+    // stderr 兜底）记录，并带 stage 与 correlation；只记录允许的诊断字段，绝不把
+    // 任意正文当作 wire 安全消息。native 硬期限仍会兜底结束本进程。
+    debugPrint('studio_exit_unhandled=$error\n$stackTrace');
+    recordDartError(
+      error,
+      stackTrace,
+      stage: 'exit-unhandled',
+      correlationId: newStudioCorrelationId(),
     );
-    _shutdownFuture = attempt;
-    return attempt;
-  }
-
-  Future<void> _defaultShutdown() {
-    return runStudioShutdown(_api, _shutdownProgress.update);
-  }
-
-  Future<void> _disposeShutdown() {
-    final override = widget.shutdown;
-    if (override != null) return override();
-    return runStudioShutdown(_api, (_) {});
   }
 
   @override

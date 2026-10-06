@@ -39,6 +39,9 @@ pub(crate) fn initialize() {
 }
 
 /// Flushes asynchronous diagnostics after Studio runtime shutdown completes.
+///
+/// Idempotent and safe to call when diagnostics were never initialized: the live-owner command
+/// can run at any point of the exit sequence, with or without an installed runtime.
 pub(crate) fn shutdown() {
     tracing::info!(application = "anywork", "Studio diagnostics shutting down");
     let guard = DIAGNOSTICS
@@ -51,6 +54,100 @@ pub(crate) fn shutdown() {
             }
         });
     drop(guard);
+}
+
+/// 单条关闭失败的诊断载荷；所有字段都已在调用方脱敏，不包含凭据或正文。
+pub(crate) struct ShutdownDiagnostic<'a> {
+    pub stage: &'a str,
+    pub code: &'a str,
+    pub message: &'a str,
+    pub retryable: bool,
+    pub correlation_id: &'a str,
+    pub pending: &'a str,
+    pub owner_id: Option<&'a str>,
+    pub save_watermark: Option<u64>,
+    pub elapsed_ms: u128,
+}
+
+/// 同步记录一条关闭失败：结构化 error 日志 + 临时应急文件，stderr/Windows debug 兜底。
+///
+/// 写入必须不延误退出期限：即使主日志不可用也必须立即返回，绝不能把日志完成当成
+/// deadline 的前置条件。
+pub(crate) fn record_shutdown_diagnostic(diagnostic: ShutdownDiagnostic<'_>) {
+    let pid = std::process::id();
+    // Force-capture so the stack is a real fact even when `anyhow`/`RUST_BACKTRACE` capture is
+    // disabled; shutdown issues are rare, so the cost is bounded to the degraded path.
+    let backtrace = std::backtrace::Backtrace::force_capture();
+    tracing::error!(
+        pid = pid,
+        stage = diagnostic.stage,
+        code = diagnostic.code,
+        correlation_id = diagnostic.correlation_id,
+        retryable = diagnostic.retryable,
+        pending = diagnostic.pending,
+        elapsed_ms = diagnostic.elapsed_ms,
+        owner_id = diagnostic.owner_id.unwrap_or("-"),
+        save_watermark = diagnostic.save_watermark,
+        detail = diagnostic.message,
+        backtrace = %backtrace,
+        "Studio shutdown issue"
+    );
+    persist_shutdown_emergency(&diagnostic, pid, &backtrace.to_string());
+}
+
+fn persist_shutdown_emergency(diagnostic: &ShutdownDiagnostic<'_>, pid: u32, backtrace: &str) {
+    // Irrecoverable fallback chain: primary diagnostics home, then the process temp dir, then
+    // stderr/Windows debug (via `report_fallback`). Never let a missing/unwritable primary path
+    // drop the emergency record or hold the watchdog.
+    let candidates = [
+        diagnostics_root().join("logs"),
+        std::env::temp_dir().join("anywork-diagnostics"),
+    ];
+    let mut last_error = None;
+    for directory in candidates {
+        match write_shutdown_emergency(&directory, diagnostic, pid, backtrace) {
+            Ok(()) => return,
+            Err(error) => last_error = Some(error),
+        }
+    }
+    if let Some(error) = last_error {
+        report_fallback(&format!(
+            "cannot persist shutdown emergency diagnostics: {error}"
+        ));
+    }
+}
+
+fn write_shutdown_emergency(
+    directory: &Path,
+    diagnostic: &ShutdownDiagnostic<'_>,
+    pid: u32,
+    backtrace: &str,
+) -> std::io::Result<()> {
+    (|| -> std::io::Result<()> {
+        std::fs::create_dir_all(directory)?;
+        let ts = unix_seconds();
+        let path = directory.join(format!("shutdown-emergency-{pid}-{ts}.log"));
+        let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+        writeln!(
+            file,
+            "appVersion={}\npid={pid}\nstage={}\ncode={}\ncorrelationId={}\nretryable={}\npending={}\nownerId={}\nsaveWatermark={}\nelapsedMs={}\nmessage={}\nbacktrace={backtrace}\n",
+            env!("CARGO_PKG_VERSION"),
+            diagnostic.stage,
+            diagnostic.code,
+            diagnostic.correlation_id,
+            diagnostic.retryable,
+            diagnostic.pending,
+            diagnostic.owner_id.unwrap_or("-"),
+            diagnostic
+                .save_watermark
+                .map(|watermark| watermark.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            diagnostic.elapsed_ms,
+            diagnostic.message,
+        )?;
+        file.flush()?;
+        file.sync_all()
+    })()
 }
 
 fn initialize_once() {

@@ -26,9 +26,51 @@ data 层负责 FRB DTO 到 domain 的一次转换；reducer 接收小型 canonic
 和增量 notification；
 Widget 只负责展示与发命令。窗口关闭必须等待 typed shutdown 完成并回收 Flutter、DTD、
 MCP/LSP 和本地 child process tree；远端 helper 在 GUI 退出或 SSH 失联后由心跳租约
-自行清理，窗口不等待远端退出确认。shutdown 失败取消本次正常关窗，展示错误并允许重试。
-shutdown 成功后 bridge 可先于进度流订阅解除初始化；订阅取消仅在 bridge 仍可用时调用
-native cancel，随后始终释放 Dart 侧订阅与句柄，不得在 `RustLib.dispose()` 后调用 FRB API。
+自行清理，窗口不等待远端退出确认。应用退出有单一总期限 30 秒，由 native 宿主在首次 close
+前独立武装，重复关闭或重试都不延长；到期强制结束本进程并以退出码 1，正常完成为退出码 0，
+清理不依赖 Dart 或 bridge 是否返回，写日志也不得延误该期限。
+
+bridge 以 `BridgeShutdownReport`、`BridgeShutdownOutcome`、`BridgePendingPersistence`、
+`BridgeShutdownIssue` 镜像 runtime 的 typed 报告（形状权威源见
+[18](./18-studio-state.md) §18.5.1），退出入口 `shutdown_runtime(remaining_ms, external_issues)`
+的 `remaining_ms` 取 native 宿主剩余清理时间且上限 28 秒，`external_issues` 是 Dart 在进入
+runtime 前已完成并观测到的 typed 外部取消结果（含关机进度订阅）；GUI 只消费报告，不自行推断
+保存是否成功。报告为 `Degraded` 或超时表示未完成安全收束，界面不得据其宣称保存成功或正常退出。
+bridge 侧彼此独立的 owner 组（bridge 持有的订阅与其他在途更新操作）在同一首次绝对期限内
+**并发**观测，任一组 owner 的 join 阻塞都不得让另一组尚未被取消或观测；关机进度只反映这些
+收束并发在途，不作为串行的调用契约。桌面收束与 runtime 阶段共用同一编排与同一期限，不维护
+第二套 cleanup。
+在 Dart 侧取消之前另有轻量的早期退出入口 `begin_runtime_exit(remaining_ms)`：它同步封闭 Rust
+准入并广播 runtime 独立取消，但不触发初始化、不做真正 stop/join、不发布 `Stopped`；native
+首次 close 先调用它，同一 runtime 的 join 与 finalize 仍由 `shutdown_runtime` 的同一编排完成。
+诊断收尾独立于 runtime 初始化状态，`finish_shutdown_diagnostics` 在安全 dispose 之前或退出
+之前调用，使 runtime 从未安装或安装失败时也能回收诊断资源。
+
+启动期第二实例无法取得实例锁时，界面提示「已有实例在运行」；启动失败的错误码集合
+（`instanceBusy`、`cancellationTooLate`、`overloaded` 等）在 Dart 侧以穷尽 switch 映射为稳定的
+本地化文案与诊断编号，不得因未知变体抛出解析异常而覆盖原始 typed 错误。shutdown 失败不再
+取消本次关窗去等待用户确认：失败阶段聚合成带 `code` 与 `correlation_id` 的脱敏诊断后继续关闭，
+不阻塞在用户确认上，也不提供无限重试；剩余期限只用于完成安全收束与退出，不延长总期限。
+
+关窗前 Dart 先进入早期退出入口 `begin_runtime_exit(remaining_ms)` 封闭 Rust 准入：它与退出闩
+的封闭原子地观察已发布 runtime（关闭胜出后不再安装、安装先胜出必被收束）、固定同一首个绝对
+期限，并在既定 runtime 上同步封闭 domain 准入、向包含活动 Turn/模型/工具的彼此独立在途 owner
+广播一次取消；同时预先广播 bridge 侧内容订阅与更新操作取消，其真实错误进入同一 collector。这
+一步只发信号：不触发初始化、不做真正 stop/join、不 close Thread、不发布 `Stopped`。随后 Dart
+再有界完成并观测自身拥有、bridge 无法代持的外部取消（产品/Thread 流、更新操作与关机进度流），
+把任何未确认的 typed `BridgeShutdownIssue` 随同 `remaining_ms` 一起传给 `shutdown_runtime`；
+bridge 再并入自身订阅/更新取消结果，两者与 runtime 阶段共用同一编排、同一成功前置条件，绝不
+先让 runtime `Clean` 释锁后再补写降级，也不存在第二套 cleanup。同一 runtime 的资源 join 与
+finalize 仍由 `shutdown_runtime` 的同一编排完成，早期 arm 绝不被当作最终终态。bridge 与 runtime
+在同一个首个绝对期限内完成门串行、订阅/更新取消、runtime 阶段与诊断收尾。关机进度流使用自持
+token，早期广播不会提前终止它；它同样需要真实取消 ACK，因此在 runtime 收束前完成取消、并以
+`Clean` 报告确认终态；进度流在没有先收到 native `Stopped` 的情况下结束是预期行为。
+
+更新安装的空闲判定与关闭启动是同一原子步骤：runtime 先在任何取消之前完成原子空闲检查，随后
+bridge 通过注入同一严格编排的 adapter hook 解除并等待自身订阅（在 runtime 提交后、收尾前），
+其取消 ACK 与 runtime 阶段共享同一 `Clean` 前置条件；busy 时既不取消订阅也不改变运行状态。
+订阅取消仅在 bridge 仍可用时调用 native cancel，随后始终释放 Dart 侧订阅与句柄，不得在
+`RustLib.dispose()` 后调用 FRB API。
 Timeline Markdown 使用 `gpt_markdown` 的现代解析管线与内置 autolink，不传递旧版
 `components` / `inlineComponents`；自定义引用块、图片与链接通过 builder 扩展。外链点击仍经过
 HTTP(S) URL 校验，远程图片仅允许 HTTPS 且由用户主动加载；图片 alt 从结构化 Markdown 节点读取。

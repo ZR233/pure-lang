@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "flutter_window.h"
+#include "studio_host_lifecycle.h"
 #include "utils.h"
 
 namespace {
@@ -137,6 +138,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
+  // 协调器可靠退出（Dart 侧 finishExit）会在消息循环返回前终止本进程；走到这里说明
+  // engine/window/消息循环在未获协调器 Clean/NotStarted 结论的情况下结束。先幂等 Arm
+  // 让 watchdog 覆盖后续 engine/window 析构、COM teardown 与可能卡住的日志写入，写最小
+  // 诊断，再以非 0 退出 —— 绝不允许未经确认的自然 0。
+  const int unconfirmed_exit =
+      anywork::StudioHostLifecycle::Instance().ExitUnconfirmedFromMainLoop();
   ::CoUninitialize();
-  return EXIT_SUCCESS;
+  return unconfirmed_exit;
 }

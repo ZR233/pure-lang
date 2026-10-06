@@ -6,39 +6,62 @@ class _StudioFatalError extends ConsumerWidget {
   final Object error;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => Scaffold(
-    body: Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560),
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.error_outline,
-                size: 44,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              const SizedBox(height: 16),
-              Text(context.l10n.runtimeFatalTitle),
-              const SizedBox(height: 10),
-              SelectableText(error.toString(), textAlign: TextAlign.center),
-              const SizedBox(height: 20),
-              FilledButton.icon(
-                key: const ValueKey('runtime-fatal-retry'),
-                onPressed: () => ref
-                    .read(studioControllerProvider.notifier)
-                    .retryInitialization(),
-                icon: const Icon(Icons.refresh),
-                label: Text(context.l10n.runtimeFatalRetry),
-              ),
-            ],
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Driver-only 只读投影：把启动致命失败（如第二实例 instanceBusy）的 typed code 与
+    // correlation 暴露给验收，避免从 UI 文案猜测。
+    if (error case final StudioFailure failure) {
+      StudioDriverState.publishStartupFailure(failure);
+    }
+    // 第二实例无法取得实例锁时给出稳定的本地化提示，而不是抛出未知变体解析异常。
+    final busy = switch (error) {
+      StudioFailure(code: StudioFailureCode.instanceBusy) => true,
+      _ => false,
+    };
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.error_outline,
+                  size: 44,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  busy
+                      ? context.l10n.startupInstanceBusy
+                      : context.l10n.runtimeFatalTitle,
+                ),
+                const SizedBox(height: 10),
+                SelectableText(
+                  busy
+                      ? context.l10n.startupInstanceBusyHint
+                      : error.toString(),
+                  textAlign: TextAlign.center,
+                ),
+                if (!busy) ...[
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    key: const ValueKey('runtime-fatal-retry'),
+                    onPressed: () => ref
+                        .read(studioControllerProvider.notifier)
+                        .retryInitialization(),
+                    icon: const Icon(Icons.refresh),
+                    label: Text(context.l10n.runtimeFatalRetry),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _StartupRecoveryBanner extends StatelessWidget {

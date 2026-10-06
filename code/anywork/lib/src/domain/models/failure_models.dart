@@ -1,6 +1,7 @@
 enum StudioFailureCode {
   notInitialized,
   runtimeStopped,
+  instanceBusy,
   invalidArgument,
   notFound,
   busy,
@@ -8,6 +9,8 @@ enum StudioFailureCode {
   staleRevision,
   permissionDenied,
   cancelled,
+  cancellationTooLate,
+  overloaded,
   unavailable,
   protocol,
   storage,

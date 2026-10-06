@@ -11,6 +11,7 @@ add_executable(${BINARY_NAME} WIN32
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
+  "${CMAKE_SOURCE_DIR}/../runner_common/studio_host_lifecycle.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"
@@ -37,6 +38,8 @@ target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib" "shell32.lib" "shlwapi
   "windowscodecs.lib" "ole32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "dbghelp.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+target_include_directories(${BINARY_NAME} PRIVATE
+  "${CMAKE_SOURCE_DIR}/../runner_common")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

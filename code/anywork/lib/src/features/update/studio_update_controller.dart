@@ -189,6 +189,9 @@ class StudioUpdateController extends _$StudioUpdateController {
       throw StateError('Studio runtime has an active turn or task');
     }
     final api = _api;
+    // 本次交接是否经 finishHandoff 的真实完成 ACK 确认需要退出旧实例。只在仍强持有
+    // operation（dispose 之前）时消费，绝不依赖事件流结束的调度时间窗。
+    var handoffConfirmed = false;
     try {
       final operation = await api.startInstall(
         expectedRevision: state.revision,
@@ -199,10 +202,22 @@ class StudioUpdateController extends _$StudioUpdateController {
         return;
       }
       _activeOperation = operation;
+      UpdaterStateSnapshot? terminalSnapshot;
       await for (final snapshot in operation.events) {
+        terminalSnapshot = snapshot;
         if (ref.mounted && snapshot.revision >= state.revision) {
           state = snapshot;
         }
+      }
+      // 正常更新交接：终态是 installer launched。事件流结束只表示 Dart 侧 StreamSink
+      // 结束，与 Rust owned observer 发布「安装任务 / 进度 sink 真实完成」是不同调度顺序。
+      // 必须在仍强持有 operation 时消费同一个 finishHandoff 的实际完成 ACK：它等待该操作
+      // 所有 owner 真正结束，并优先依据真实 installer_launched() 返回 true；没有派生且真实
+      // Stopped 时才安全恢复当前程序，任务异常如实保留。绝不用极短时间窗 / 延时 / 调度概率
+      // 代替 ACK，也绝不在 dispose 之后才失去等待能力。真正的退出仍进入现有
+      // ServicesBinding / native 同一 30 秒协调器。
+      if (terminalSnapshot is InstallerLaunchedUpdaterStateSnapshot) {
+        handoffConfirmed = await operation.finishHandoff();
       }
     } catch (error, stackTrace) {
       if (!ref.mounted) Error.throwWithStackTrace(error, stackTrace);
@@ -229,7 +244,10 @@ class StudioUpdateController extends _$StudioUpdateController {
       _activeOperation = null;
       operation?.dispose();
     }
-    if (ref.mounted && state is InstallerLaunchedUpdaterStateSnapshot) {
+    // 只有在 finishHandoff 真实确认（派生的安装器事实优先，或失败已安全恢复进程）之后才
+    // 退出旧实例：未成功的严格关闭不得启动安装器 / 恢复程序，finishHandoff 的真实错误也
+    // 绝不被伪造成成功退出。
+    if (handoffConfirmed) {
       await ServicesBinding.instance.exitApplication(AppExitType.required);
     }
   }

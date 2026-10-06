@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart'
     show visibleForTesting, ValueNotifier, debugPrint;
 
 import '../../domain/models/studio_models.dart';
+import '../../platform/error_log.dart';
 import '../../rust/api/studio.dart' as frb;
 import '../../rust/api/studio/handlers/chat.dart' as frb_chat;
 import '../../rust/api/studio/types/chat.dart' as frb_chat_types;
@@ -13,6 +14,7 @@ import '../../rust/api/studio/handlers/attachment.dart' as frb_attachment;
 import '../../rust/api/studio/handlers/ssh.dart' as frb_ssh;
 import '../../rust/api/studio/types/attachment.dart' as frb_attachment_types;
 import '../../rust/api/studio/types/ssh.dart' as frb_ssh_types;
+import '../../rust/api/studio/types/shutdown.dart' as frb_shutdown;
 import '../../rust/api/studio/types/thread_stream/item.dart' as frb_item;
 import '../../rust/api/studio/types/thread_activity.dart' as frb_activity;
 import '../../rust/frb_generated.dart';

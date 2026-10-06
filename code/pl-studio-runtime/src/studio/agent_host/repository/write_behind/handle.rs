@@ -103,6 +103,11 @@ impl ThreadWriteBehindWriter {
         self.shared.admitted_ticket.load(Ordering::Acquire)
     }
 
+    /// 已 durable 的最高连续 ticket；诊断用的真实保存水位。
+    pub(in crate::studio) fn saved_watermark(&self) -> u64 {
+        *self.shared.durable_ticket.borrow()
+    }
+
     pub(in crate::studio) fn state_snapshot(&self) -> PersistenceStateSnapshot {
         self.shared.state.borrow().clone()
     }

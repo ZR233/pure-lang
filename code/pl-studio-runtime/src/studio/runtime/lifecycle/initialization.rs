@@ -184,7 +184,8 @@ impl StudioRuntime {
             config,
             resolved.paths.system_skills_dir(),
             resolved.helper_source.clone(),
-        );
+        )
+        .await;
         let runtime = match assembled {
             Ok(runtime) => runtime,
             Err(error) => {
@@ -319,12 +320,20 @@ impl StudioRuntime {
             self.stop_lsp_state_watcher()
         );
         let observer = background_task::stop(&self.persistence_observer).await;
-        self.external_runtimes.mcp.shutdown().await;
-        self.external_runtimes.lsp.shutdown().await;
+        let mcp = self.external_runtimes.mcp.shutdown().await;
+        let lsp = self.external_runtimes.lsp.shutdown().await;
         let ssh = self.ssh_manager.shutdown().await;
-        let writer = self.agent_facility.persistence.lock().await.take();
+        // Clone (never `take`) the retained writer first, then stop it, and only drop the retained
+        // owner once the writer actually stopped; a failed stop keeps the owner out of circulation.
+        let writer = self.agent_facility.persistence.lock().await.clone();
         let persistence = match writer {
-            Some(writer) => writer.shutdown().await,
+            Some(writer) => {
+                let result = writer.shutdown().await;
+                if result.is_ok() {
+                    self.agent_facility.persistence.lock().await.take();
+                }
+                result
+            }
             None => Ok(()),
         };
         let storage = self.store.close().await;
@@ -340,6 +349,8 @@ impl StudioRuntime {
                 anyhow::anyhow!(error.to_string()),
             )
         })?;
+        mcp.map_err(|error| internal("close_mcp", error))?;
+        lsp.map_err(|error| internal("close_lsp", error))?;
         ssh.map_err(|error| environment("close_ssh", error))?;
         persistence.map_err(|error| environment("close_writer", error))?;
         storage.map_err(|error| environment("close_storage", error))?;

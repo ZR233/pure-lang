@@ -172,8 +172,22 @@ impl LspRuntimeRegistry {
             }
             retired_clients
         };
-        for client in retired_clients {
-            client.shutdown().await;
+        // Independent LSP owners: cancel and await them concurrently so one hung server
+        // cannot consume the budget of the others.
+        let outcomes = futures::future::join_all(
+            retired_clients
+                .iter()
+                .cloned()
+                .map(|client| async move { client.shutdown().await }),
+        )
+        .await;
+        for outcome in outcomes {
+            if let Err(error) = outcome {
+                tracing::warn!(
+                    %error,
+                    "LSP client did not confirm closure while reconciling membership"
+                );
+            }
         }
         self.emit_update();
     }

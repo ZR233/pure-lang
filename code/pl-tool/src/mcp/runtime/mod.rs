@@ -82,12 +82,20 @@ impl McpRuntime {
         let connector = connector.with_tool_list_changed(move |server_id| {
             let _ = notification_commands.send(RuntimeCommand::ToolListChanged { server_id });
         });
+        let shutdown_completion = ShutdownCompletion::default();
         let handle = McpRuntimeHandle {
             authorization: pl_core::tool::opaque::ToolAuthorization::unique(),
             commands: commands.clone(),
             updates: updates.clone(),
+            shutdown_completion: shutdown_completion.clone(),
         };
-        tokio::spawn(worker::run(connector, receiver, commands, updates));
+        tokio::spawn(worker::run(
+            connector,
+            receiver,
+            commands,
+            updates,
+            shutdown_completion,
+        ));
         Self { handle }
     }
 
@@ -103,6 +111,34 @@ pub struct McpRuntimeHandle {
     authorization: pl_core::tool::opaque::ToolAuthorization,
     commands: mpsc::UnboundedSender<RuntimeCommand>,
     updates: broadcast::Sender<()>,
+    /// Single-owned closing completion shared by every handle clone and the worker.
+    shutdown_completion: ShutdownCompletion,
+}
+
+/// Single-owned MCP closing completion shared by every [`McpRuntimeHandle`] clone.
+///
+/// The first caller drives the worker's one closing command; every other caller (concurrent
+/// or a later retry) joins that same completion and observes its recorded result. Once the
+/// worker has reliably stopped, a retry is an idempotent success instead of a spurious
+/// "runtime stopped" error. A close that was never acknowledged is never guessed as success
+/// from a vanished worker: only a real recorded result is replayed.
+#[derive(Clone, Default)]
+struct ShutdownCompletion {
+    recorded: Arc<tokio::sync::Mutex<Option<std::result::Result<(), String>>>>,
+    attempt: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl ShutdownCompletion {
+    async fn recorded(&self) -> Option<std::result::Result<(), String>> {
+        self.recorded.lock().await.clone()
+    }
+
+    async fn record(&self, result: std::result::Result<(), String>) {
+        let mut recorded = self.recorded.lock().await;
+        if recorded.is_none() {
+            *recorded = Some(result);
+        }
+    }
 }
 
 impl fmt::Debug for McpRuntimeHandle {
@@ -190,11 +226,33 @@ impl McpRuntimeHandle {
     }
 
     /// 幂等关闭所有 generation 和 transport session。
-    pub async fn shutdown(&self) {
-        let (reply, response) = oneshot::channel();
-        if self.send(RuntimeCommand::Shutdown { reply }).is_ok() {
-            let _ = response.await;
+    ///
+    /// 关闭完成是单一 owned、被所有 handle clone 共享的真实结果：首个调用驱动唯一一次
+    /// `Shutdown`，其余调用（并发或稍后重试）join 同一次并读取同一结果。worker 已可靠
+    /// 停止时重试是幂等 success；未收到 ACK 时不把 worker 消失猜作 success，只重放真实
+    /// 记录的结果或如实返回错误。
+    pub async fn shutdown(&self) -> Result<()> {
+        let _attempt = self.shutdown_completion.attempt.lock().await;
+        if let Some(recorded) = self.shutdown_completion.recorded().await {
+            return replay_shutdown(recorded);
         }
+        let (reply, response) = oneshot::channel();
+        let recorded = match self.send(RuntimeCommand::Shutdown { reply }) {
+            Ok(()) => match response.await {
+                Ok(result) => result.map_err(|error| error.to_string()),
+                Err(error) => match self.shutdown_completion.recorded().await {
+                    Some(recorded) => recorded,
+                    None => return Err(runtime_stopped(error)),
+                },
+            },
+            Err(error) => match self.shutdown_completion.recorded().await {
+                Some(recorded) => recorded,
+                // The worker vanished without acknowledging the close: never guess success.
+                None => return Err(error),
+            },
+        };
+        self.shutdown_completion.record(recorded.clone()).await;
+        replay_shutdown(recorded)
     }
 
     pub(super) async fn call_tool(
@@ -412,7 +470,7 @@ pub(super) enum RuntimeCommand {
         server_id: String,
     },
     Shutdown {
-        reply: oneshot::Sender<()>,
+        reply: oneshot::Sender<Result<()>>,
     },
 }
 
@@ -421,4 +479,12 @@ fn runtime_stopped(error: oneshot::error::RecvError) -> PureError {
         tool: "mcp".to_string(),
         error: format!("MCP runtime response channel closed: {error}"),
     }
+}
+
+/// Rebuild the typed `Result` for a recorded closing completion.
+fn replay_shutdown(result: std::result::Result<(), String>) -> Result<()> {
+    result.map_err(|message| PureError::ToolExecutionFailed {
+        tool: "mcp".to_string(),
+        error: message,
+    })
 }

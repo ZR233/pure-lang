@@ -13,6 +13,11 @@ pub fn studio_error_from_anyhow(error: anyhow::Error) -> StudioError {
     studio_error_from_ref(&error)
 }
 
+/// Borrowing variant used by diagnostics that must keep the original error chain.
+pub fn studio_error_from_anyhow_ref(error: &anyhow::Error) -> StudioError {
+    studio_error_from_ref(error)
+}
+
 fn studio_error_from_ref(error: &anyhow::Error) -> StudioError {
     if let Some(error) = error.downcast_ref::<StudioError>() {
         return error.clone();

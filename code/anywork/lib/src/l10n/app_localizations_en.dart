@@ -34,10 +34,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get shutdownTitle => 'Shutting down safely';
 
   @override
-  String get shutdownFailed => 'Shutdown failed';
+  String get shutdownFinalizing => 'Finishing up';
 
   @override
-  String get shutdownRetryExit => 'Retry exit';
+  String get shutdownFinalizingHint =>
+      'Necessary diagnostics were recorded; the app will exit automatically.';
+
+  @override
+  String get startupInstanceBusy => 'Another instance is already running';
+
+  @override
+  String get startupInstanceBusyHint =>
+      'Close the other anywork window, then start again.';
 
   @override
   String get shutdownPhaseStoppingSubscriptions => 'Stopping subscriptions';

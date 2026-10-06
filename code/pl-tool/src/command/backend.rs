@@ -10,13 +10,17 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 #[cfg(not(target_os = "linux"))]
 use super::termination::terminate_process_tree;
+#[cfg(target_os = "linux")]
+use super::worker::LocalWorkerExecutable;
 use crate::workspace::ToolPathPolicy;
 #[cfg(not(target_os = "linux"))]
-use pl_remote_helper::process::configure_background_command;
+use pl_remote_helper::process::wrap_background_command;
 
 #[cfg(not(target_os = "linux"))]
 use super::shell::command_for_environment;
 use crate::environment::ExecutionEnvironment;
+#[cfg(target_os = "linux")]
+use pl_remote_helper::client::ProcessCommand;
 
 /// 命令执行后端收到的启动请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,23 +309,11 @@ pub struct LocalCommandBackend {
     workspace_root: PathBuf,
     execution_environment: ExecutionEnvironment,
     #[cfg(target_os = "linux")]
-    worker: std::sync::Arc<dyn WorkerExecutable>,
+    worker: std::sync::Arc<dyn LocalWorkerExecutable>,
     #[cfg(target_os = "linux")]
     worker_failure: std::sync::Arc<
         std::sync::OnceLock<std::sync::Arc<pl_remote_helper::client::WorkerClientError>>,
     >,
-}
-
-#[cfg(target_os = "linux")]
-trait WorkerExecutable: std::fmt::Debug + Send + Sync {
-    fn path(&self) -> &Path;
-}
-
-#[cfg(target_os = "linux")]
-impl<T: AsRef<Path> + std::fmt::Debug + Send + Sync> WorkerExecutable for T {
-    fn path(&self) -> &Path {
-        self.as_ref()
-    }
 }
 
 impl LocalCommandBackend {
@@ -357,54 +349,36 @@ impl LocalCommandBackend {
         self.execution_environment = environment;
         self
     }
-}
 
-impl CommandBackend for LocalCommandBackend {
-    type Error = PureError;
-
-    async fn resolve_cwd(
-        &self,
-        cwd: Option<&Path>,
-        allow_workspace_escape: bool,
-    ) -> Result<String> {
-        let policy =
-            ToolPathPolicy::new(self.workspace_root.clone(), allow_workspace_escape, "exec")?;
-        match cwd {
-            Some(dir) => policy.resolve_existing_directory(dir, &dir.display().to_string()),
-            None => Ok(policy.root().to_path_buf()),
-        }
-        .map(|path| path.to_string_lossy().into_owned())
-    }
-
-    async fn output_target(
-        &self,
-        session_id: &str,
-        tool_id: &str,
-        _call_id: &str,
-        _command: &str,
-    ) -> Result<CommandOutputTarget> {
-        let model_file = command_output_model_path(session_id, tool_id);
-        Ok(CommandOutputTarget::new(
-            self.workspace_root.join(&model_file),
-            model_file,
-        ))
-    }
-
+    /// Spawns an exact program and argv through the same supervised worker as [`Self::spawn`].
+    ///
+    /// Arguments, working directory and the inherited environment are preserved verbatim:
+    /// no shell is inserted and no argument is reinterpreted. Used by local hosts that need
+    /// the worker's per-child tree supervision without a shell command string (for example LSP).
+    ///
+    /// # Errors
+    /// Returns the stored worker bootstrap failure or a fresh supervisor error.
     #[cfg(target_os = "linux")]
-    async fn spawn(&self, request: CommandSpawnRequest) -> Result<ManagedCommand> {
-        use pl_remote_helper::client::{ManagedWorker, ProcessCommand, ProcessTermination};
-        let argv =
-            super::shell::argv_for_environment(&self.execution_environment, &request.command);
-        let (program, arguments) = argv
-            .split_first()
-            .ok_or_else(|| command_error("exec", "shell argv is empty"))?;
-        let specification = ProcessCommand::new(program)
-            .args(arguments)
-            .current_dir(&request.cwd);
+    pub async fn spawn_argv(
+        &self,
+        program: &std::ffi::OsStr,
+        args: &[String],
+        cwd: &Path,
+    ) -> Result<ManagedCommand> {
+        let specification = ProcessCommand::new(program.to_os_string())
+            .args(args.iter().cloned())
+            .current_dir(cwd);
+        self.spawn_supervised(specification).await
+    }
+
+    /// Starts one business process under a per-child supervisor that retains the whole tree.
+    #[cfg(target_os = "linux")]
+    async fn spawn_supervised(&self, specification: ProcessCommand) -> Result<ManagedCommand> {
+        use pl_remote_helper::client::{ManagedWorker, ProcessTermination};
         if let Some(error) = self.worker_failure.get() {
             return Err(command_error("exec", error));
         }
-        let mut worker = ManagedWorker::spawn(self.worker.path(), specification)
+        let mut worker = ManagedWorker::spawn(self.worker.worker_path(), specification)
             .await
             .map_err(|error| {
                 let error = std::sync::Arc::new(error);
@@ -450,6 +424,51 @@ impl CommandBackend for LocalCommandBackend {
             },
         ))
     }
+}
+
+impl CommandBackend for LocalCommandBackend {
+    type Error = PureError;
+
+    async fn resolve_cwd(
+        &self,
+        cwd: Option<&Path>,
+        allow_workspace_escape: bool,
+    ) -> Result<String> {
+        let policy =
+            ToolPathPolicy::new(self.workspace_root.clone(), allow_workspace_escape, "exec")?;
+        match cwd {
+            Some(dir) => policy.resolve_existing_directory(dir, &dir.display().to_string()),
+            None => Ok(policy.root().to_path_buf()),
+        }
+        .map(|path| path.to_string_lossy().into_owned())
+    }
+
+    async fn output_target(
+        &self,
+        session_id: &str,
+        tool_id: &str,
+        _call_id: &str,
+        _command: &str,
+    ) -> Result<CommandOutputTarget> {
+        let model_file = command_output_model_path(session_id, tool_id);
+        Ok(CommandOutputTarget::new(
+            self.workspace_root.join(&model_file),
+            model_file,
+        ))
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn spawn(&self, request: CommandSpawnRequest) -> Result<ManagedCommand> {
+        let argv =
+            super::shell::argv_for_environment(&self.execution_environment, &request.command);
+        let (program, arguments) = argv
+            .split_first()
+            .ok_or_else(|| command_error("exec", "shell argv is empty"))?;
+        let specification = ProcessCommand::new(program)
+            .args(arguments)
+            .current_dir(&request.cwd);
+        self.spawn_supervised(specification).await
+    }
 
     #[cfg(not(target_os = "linux"))]
     async fn spawn(&self, request: CommandSpawnRequest) -> Result<ManagedCommand> {
@@ -459,21 +478,21 @@ impl CommandBackend for LocalCommandBackend {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        configure_background_command(&mut command);
+        let mut command = wrap_background_command(command);
         let mut child = command
             .spawn()
             .map_err(|error| command_error("exec", error))?;
         let host_pid = child.id();
         let stdin = child
-            .stdin
+            .stdin()
             .take()
             .map(|value| Box::pin(value) as CommandWriter);
         let stdout = child
-            .stdout
+            .stdout()
             .take()
             .map(|value| Box::pin(value) as CommandReader);
         let stderr = child
-            .stderr
+            .stderr()
             .take()
             .map(|value| Box::pin(value) as CommandReader);
         Ok(ManagedCommand::new(

@@ -161,12 +161,22 @@ async fn connect_server(
             redactor,
         }),
         Ok(Err(error)) => {
-            session.close().await;
+            if let Err(close_error) = session.close().await {
+                tracing::warn!(
+                    %close_error,
+                    "MCP session did not confirm closure after discovery failure"
+                );
+            }
             let message = redactor.redact(error.to_string());
             RuntimeServer::unavailable(descriptor, fingerprint, message, server_config, redactor)
         }
         Err(_) => {
-            session.close().await;
+            if let Err(close_error) = session.close().await {
+                tracing::warn!(
+                    %close_error,
+                    "MCP session did not confirm closure after discovery timeout"
+                );
+            }
             RuntimeServer::unavailable(
                 descriptor,
                 fingerprint,

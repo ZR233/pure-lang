@@ -26,6 +26,10 @@ pub(super) const PROVISIONAL_TITLE_MAX_CHARS: usize = 80;
 const GENERATED_TITLE_MAX_CHARS: usize = 36;
 const TITLE_PROMPT_MAX_BYTES: usize = 4_096;
 const TITLE_TIMEOUT: Duration = Duration::from_secs(40);
+/// Upper bound for taking the title registry lock while broadcasting cancel. The lock is only ever
+/// held for a short iteration, so this is normally instant; the bound keeps a contended registry
+/// from stalling the shutdown cancel broadcast to other independent owners.
+const CANCEL_SIGNAL_LOCK_LIMIT: Duration = Duration::from_millis(100);
 // Responses providers count hidden reasoning against this budget. The visible
 // title is truncated independently after generation, so its UI length must not
 // be used as the model's total reasoning/output budget.
@@ -44,8 +48,17 @@ pub(super) struct ThreadTitleTasks {
 }
 
 struct ThreadTitleTask {
-    cancellation: oneshot::Sender<()>,
+    cancellation: Option<oneshot::Sender<()>>,
     handle: JoinHandle<()>,
+}
+
+impl ThreadTitleTask {
+    /// Sends the one-shot cancellation exactly once; later calls are no-ops.
+    fn signal(&mut self) {
+        if let Some(sender) = self.cancellation.take() {
+            let _ = sender.send(());
+        }
+    }
 }
 
 pub(super) struct ThreadTitleCancellation {
@@ -153,7 +166,7 @@ impl ThreadTitleTasks {
         handles.insert(
             thread_id,
             ThreadTitleTask {
-                cancellation,
+                cancellation: Some(cancellation),
                 handle: task,
             },
         );
@@ -161,17 +174,32 @@ impl ThreadTitleTasks {
 
     /// Cancels and waits for one thread's hidden title request.
     pub(super) async fn cancel(&self, thread_id: &str, cause: ThreadTitleCancellationCause) {
-        let task = self.handles.lock().await.remove(thread_id);
-        let Some(task) = task else {
+        let Some(mut task) = self.handles.lock().await.remove(thread_id) else {
             return;
         };
         tracing::debug!(thread_id, ?cause, "cancelling automatic Thread title task");
-        let _ = task.cancellation.send(());
+        task.signal();
         let _ = task.handle.await;
     }
 
+    /// Broadcasts cancellation to every in-flight title task without waiting.
+    pub(super) async fn signal_cancel(&self) {
+        match timeout(CANCEL_SIGNAL_LOCK_LIMIT, self.handles.lock()).await {
+            Ok(mut handles) => {
+                for task in handles.values_mut() {
+                    task.signal();
+                }
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "title task registry was contended during cancel broadcast; skipping"
+                );
+            }
+        }
+    }
+
     pub(super) async fn cancel_and_wait(&self) {
-        let handles = {
+        let mut handles = {
             let mut handles = self.handles.lock().await;
             handles.drain().map(|(_, task)| task).collect::<Vec<_>>()
         };
@@ -179,10 +207,12 @@ impl ThreadTitleTasks {
             task_count = handles.len(),
             "cancelling automatic Thread title tasks for runtime shutdown"
         );
-        for task in handles {
-            let _ = task.cancellation.send(());
-            let _ = task.handle.await;
+        // Signal every task first (one-shot cancel, no wait), then join them **concurrently**: a
+        // single stalled title request must not hold up settling the remaining tasks.
+        for task in handles.iter_mut() {
+            task.signal();
         }
+        futures::future::join_all(handles.into_iter().map(|task| task.handle)).await;
     }
 }
 
