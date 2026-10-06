@@ -5,6 +5,23 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.3.0](https://github.com/ZR233/pure-lang/compare/v6.2.0...v6.3.0) (2026-10-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **studio:** 关闭桥接接口返回类型化ShutdownReport，调用方须区分NotStarted、Clean和Degraded，并消费未知或待保存状态；降级关闭不可启动更新安装器。
+* **studio:** 搜索设置快照删除 selected 字段，分别展示各后端的生效状态。
+
+### Bug Fixes
+
+* **studio:** 修复多实例退出并并发收束关闭资源 ([c3ccc0b](https://github.com/ZR233/pure-lang/commit/c3ccc0b7e73244164fc25afa0bd203fbcd9e5bc3))
+* **studio:** 修复应用更新检查与安装交接 ([86c87b3](https://github.com/ZR233/pure-lang/commit/86c87b3e52e60f4c2955a107c830d0fe86c6cb28))
+* **studio:** 修复跨模型搜索与搜索配置同步 ([a95762b](https://github.com/ZR233/pure-lang/commit/a95762bdc00bb83ff9839c1f6169b1df7c4464ad))
+* **studio:** 修复退出验收程序的 Windows 条件导入 ([d543ce3](https://github.com/ZR233/pure-lang/commit/d543ce3234d6b861c4eeaaec89684bd529a452bf))
+* **studio:** 按平台限定本地辅助程序来源字段 ([9508d45](https://github.com/ZR233/pure-lang/commit/9508d45e37a62c85d359e73f3c575b9f8f97c67c))
+* **studio:** 统一 GUI 列表弹出定位 ([0fee680](https://github.com/ZR233/pure-lang/commit/0fee6800eb43015f9745cdf258c12857243c7c5b))
+
 ## [6.2.0](https://github.com/ZR233/pure-lang/compare/v6.1.0...v6.2.0) (2026-10-04)
 
 
