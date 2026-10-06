@@ -165,7 +165,10 @@ pub struct StudioRuntime {
     activation: ProjectActivationRuntime,
     attachment_drafts: attachment_drafts::AttachmentDraftRuntime,
     ssh_manager: std::sync::Arc<pl_tool::remote::SshManager>,
-    /// Remote helper source retained for on-demand local worker materialization (e.g. LSP host).
+    /// Linux 本地工作区按需物化受监督 worker（本地工具执行与本地 LSP 宿主）时保留的 remote
+    /// helper 来源；其他平台没有本地 worker 物化路径（Windows 本地执行走原生 Job 监督、远端
+    /// helper 分发走 `ssh_manager`），因此不保留该字段。
+    #[cfg(target_os = "linux")]
     helper_source: crate::worker_assets::RemoteHelperSource,
     /// 外部服务（MCP/LSP/SSH）关闭 job 的常驻槽位；跨阶段与跨重试保留，超时不丢句柄。
     service_stops: lifecycle::shutdown::ServiceStopSlots,

@@ -154,6 +154,7 @@ impl StudioRuntime {
             shutdown_run: Default::default(),
             early_exit_issues: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             title_tasks: Default::default(),
+            #[cfg(target_os = "linux")]
             helper_source,
         })
     }
