@@ -110,7 +110,7 @@ class StudioUpdateSettingsRow extends ConsumerWidget {
           ),
           TextButton(
             key: const ValueKey('studio-update-cancel'),
-            onPressed: controller.cancelInstall,
+            onPressed: () => _runAction(context, controller.cancelInstall),
             child: Text(context.l10n.settingsCancel),
           ),
         ],
@@ -132,7 +132,9 @@ class StudioUpdateSettingsRow extends ConsumerWidget {
           ),
           FilledButton(
             key: const ValueKey('studio-update-install'),
-            onPressed: runtimeBusy ? null : controller.install,
+            onPressed: runtimeBusy
+                ? null
+                : () => _runAction(context, controller.install),
             child: Text(context.l10n.settingsStudioUpdateInstall),
           ),
         ],
@@ -141,9 +143,27 @@ class StudioUpdateSettingsRow extends ConsumerWidget {
     if (state is DisabledUpdaterStateSnapshot) return null;
     return OutlinedButton(
       key: const ValueKey('studio-update-check'),
-      onPressed: controller.check,
+      onPressed: () => _runAction(context, controller.check),
       child: Text(context.l10n.settingsStudioUpdateCheck),
     );
+  }
+
+  Future<void> _runAction(
+    BuildContext context,
+    Future<void> Function() action,
+  ) async {
+    try {
+      await action();
+    } catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.l10n.settingsStudioUpdateFailed(error.toString()),
+          ),
+        ),
+      );
+    }
   }
 
   String _statusText(

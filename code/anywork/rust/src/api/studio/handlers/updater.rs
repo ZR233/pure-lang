@@ -1,4 +1,4 @@
-use crate::api::studio::bridge_runtime::active_bridge;
+use crate::api::studio::bridge_runtime::{active_bridge, installed_bridge};
 use crate::api::studio::convert::runtime::bridge_update_state;
 use crate::api::studio::types::{BridgeError, BridgeUpdaterStateSnapshot};
 use crate::frb_generated::StreamSink;
@@ -21,7 +21,9 @@ struct BridgeStudioUpdateOperationInner {
     cancellation: StudioUpdateCancellation,
     task: Mutex<Option<JoinHandle<()>>>,
     sink_task: Mutex<Option<JoinHandle<()>>>,
-    progress_receiver: Mutex<Option<mpsc::Receiver<BridgeUpdaterStateSnapshot>>>,
+    progress_receiver:
+        Mutex<Option<mpsc::Receiver<Result<BridgeUpdaterStateSnapshot, BridgeError>>>>,
+    restart_started: Mutex<bool>,
 }
 
 impl BridgeStudioUpdateOperation {
@@ -41,7 +43,17 @@ impl BridgeStudioUpdateOperation {
         let inner = Arc::clone(&self.inner);
         let task = tokio::spawn(async move {
             while let Some(event) = receiver.recv().await {
-                if sink.add(event).is_err() {
+                let sent = match event {
+                    Ok(state) => sink.add(state),
+                    // StreamSink's generated error decoder consumes AnyhowException,
+                    // independently of the method's typed opening error.
+                    Err(error) => sink.add_error(anyhow::anyhow!(
+                        "{} ({})",
+                        error.message,
+                        error.correlation_id
+                    )),
+                };
+                if sent.is_err() {
                     let _ = inner.cancellation.cancel();
                     break;
                 }
@@ -55,6 +67,23 @@ impl BridgeStudioUpdateOperation {
         self.inner.cancellation.cancel()?;
         self.inner.wait().await;
         Ok(())
+    }
+
+    /// Completes the actual process handoff; true tells the old GUI to exit.
+    pub async fn finish_handoff(&self) -> Result<bool, BridgeError> {
+        self.inner.wait().await;
+        if self.inner.cancellation.installer_launched() {
+            return Ok(true);
+        }
+        let mut started = self.inner.restart_started.lock().await;
+        if *started {
+            return Ok(true);
+        }
+        *started = installed_bridge()?
+            .studio
+            .restart_after_failed_update()
+            .await?;
+        Ok(*started)
     }
 }
 
@@ -82,7 +111,7 @@ pub async fn check_studio_update() -> Result<BridgeUpdaterStateSnapshot, BridgeE
 }
 
 pub async fn read_studio_update_state() -> Result<BridgeUpdaterStateSnapshot, BridgeError> {
-    let bridge = active_bridge().await?;
+    let bridge = installed_bridge()?;
     Ok(bridge_update_state(bridge.studio.read_update_state().await))
 }
 
@@ -109,22 +138,26 @@ pub async fn install_studio_update(
         task: Mutex::new(None),
         sink_task: Mutex::new(None),
         progress_receiver: Mutex::new(Some(bridge_progress_rx)),
+        restart_started: Mutex::new(false),
     });
     let task = tokio::spawn(async move {
         let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+        let final_progress_tx = bridge_progress_tx.clone();
+        let forward_cancellation = cancellation.clone();
         let forward = tokio::spawn(async move {
             while let Some(state) = progress_rx.recv().await {
                 if bridge_progress_tx
-                    .send(bridge_update_state(state))
+                    .send(Ok(bridge_update_state(state)))
                     .await
                     .is_err()
                 {
+                    let _ = forward_cancellation.cancel();
                     break;
                 }
             }
         });
         let progress_for_install = progress_tx.clone();
-        let _ = bridge
+        let result = bridge
             .studio
             .install_studio_update_after(update, progress_for_install, cancellation, || async {
                 if !shutdown_runtime_for_update(bridge)
@@ -140,7 +173,20 @@ pub async fn install_studio_update(
             })
             .await;
         drop(progress_tx);
-        let _ = forward.await;
+        match forward.await {
+            Ok(()) => {
+                if let Err(error) = result {
+                    let _ = final_progress_tx.send(Err(error.into())).await;
+                }
+            }
+            Err(error) => {
+                let _ = final_progress_tx
+                    .send(Err(BridgeError::from(anyhow::anyhow!(
+                        "update progress forwarding task failed: {error}"
+                    ))))
+                    .await;
+            }
+        }
     });
     *inner.task.lock().await = Some(task);
     update_operations()
@@ -170,7 +216,7 @@ fn update_operations() -> &'static Mutex<Vec<Weak<BridgeStudioUpdateOperationInn
 
 fn runtime_error(error: BridgeError) -> StudioUpdateError {
     StudioUpdateError::new(
-        StudioUpdateErrorCode::InstallerLaunchFailed,
+        StudioUpdateErrorCode::RuntimeShutdownFailed,
         format!(
             "failed to stop Studio runtime safely: {} ({})",
             error.message, error.correlation_id

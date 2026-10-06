@@ -5,14 +5,17 @@ use super::types::{StudioUpdate, StudioUpdateCheck, StudioUpdateEvent};
 use futures::StreamExt;
 use reqwest::{Client, Response, StatusCode};
 use std::env;
+use std::error::Error;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use url::Url;
 
 const MAX_REDIRECTS: usize = 5;
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+pub(crate) const STUDIO_VERSION: &str = include_str!("../../../../studio-version.txt");
 
 /// GitHub Release 稳定更新客户端。
 #[derive(Clone)]
@@ -28,7 +31,10 @@ impl StudioUpdater {
     pub fn new_default() -> Result<Self, StudioUpdateError> {
         let client = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!("anywork/", env!("CARGO_PKG_VERSION")))
+            .user_agent(format!("anywork/{}", STUDIO_VERSION.trim()))
+            .connect_timeout(Duration::from_secs(15))
+            .read_timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(15 * 60))
             .build()
             .map_err(network_error)?;
         let cache_root = env::var_os("LOCALAPPDATA")
@@ -55,7 +61,17 @@ impl StudioUpdater {
                 format!("invalid built-in update URL: {error}"),
             )
         })?;
-        let bytes = self.request_bytes(url, MAX_MANIFEST_BYTES).await?;
+        let bytes = tokio::time::timeout(
+            Duration::from_secs(60),
+            self.request_bytes(url, MAX_MANIFEST_BYTES),
+        )
+        .await
+        .map_err(|_| {
+            StudioUpdateError::new(
+                StudioUpdateErrorCode::Network,
+                "update check exceeded its 60 second deadline",
+            )
+        })??;
         evaluate_manifest(&bytes, current_version)
     }
 
@@ -180,9 +196,14 @@ impl StudioUpdater {
     }
 }
 
-fn network_error(error: reqwest::Error) -> StudioUpdateError {
-    StudioUpdateError::new(
-        StudioUpdateErrorCode::Network,
-        format!("update network request failed: {error}"),
-    )
+pub(super) fn network_error(error: reqwest::Error) -> StudioUpdateError {
+    // Redirect URLs contain temporary CDN credentials; retain causes without URLs.
+    let error = error.without_url();
+    let mut message = format!("update network request failed: {error}");
+    let mut cause = error.source();
+    while let Some(source) = cause {
+        message.push_str(&format!(": {source}"));
+        cause = source.source();
+    }
+    StudioUpdateError::new(StudioUpdateErrorCode::Network, message)
 }

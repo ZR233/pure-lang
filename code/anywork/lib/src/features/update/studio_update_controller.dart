@@ -1,7 +1,11 @@
+import 'dart:ui' show AppExitType;
+
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../data/frb/studio_api.dart' show FrbStudioApi, updaterStateFromFrb;
+import '../../app/studio_shutdown.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../platform/studio_platform.dart';
@@ -11,6 +15,7 @@ part 'studio_update_controller.g.dart';
 
 const _isDemoBuild = bool.fromEnvironment('ANYWORK_DEMO');
 const _isReleaseBuild = bool.fromEnvironment('dart.vm.product');
+const _isDriverBuild = bool.fromEnvironment('ANYWORK_DRIVER');
 const _compiledStudioVersion = String.fromEnvironment(
   'ANYWORK_VERSION',
   defaultValue: '1.0.0',
@@ -21,7 +26,8 @@ final studioUpdateApiProvider = Provider<StudioUpdateApi>(
 );
 
 final studioUpdateEnabledProvider = Provider<bool>(
-  (ref) => isWindowsPlatform && _isReleaseBuild && !_isDemoBuild,
+  (ref) =>
+      isWindowsPlatform && (_isReleaseBuild || _isDriverBuild) && !_isDemoBuild,
 );
 
 final studioVersionProvider = Provider<String>((ref) => _compiledStudioVersion);
@@ -32,6 +38,8 @@ final studioRuntimeBusyProvider = Provider<bool>((ref) {
 });
 
 abstract class StudioUpdateApi {
+  Future<UpdaterStateSnapshot> read();
+
   Future<UpdaterStateSnapshot> check();
 
   Future<StudioUpdateOperation> startInstall({
@@ -47,11 +55,19 @@ abstract class StudioUpdateOperation {
 
   Future<void> cancel();
 
+  Future<bool> finishHandoff();
+
   void dispose();
 }
 
 class FrbStudioUpdateApi implements StudioUpdateApi {
   const FrbStudioUpdateApi();
+
+  @override
+  Future<UpdaterStateSnapshot> read() async {
+    await FrbStudioApi.ensureReady();
+    return updaterStateFromFrb(await frb.readStudioUpdateState());
+  }
 
   @override
   Future<UpdaterStateSnapshot> check() async {
@@ -89,15 +105,14 @@ class _FrbStudioUpdateOperation implements StudioUpdateOperation {
   Stream<UpdaterStateSnapshot> get events => _events();
 
   Stream<UpdaterStateSnapshot> _events() async* {
-    try {
-      yield* _handle.progressStream().map(updaterStateFromFrb);
-    } finally {
-      dispose();
-    }
+    yield* _handle.progressStream().map(updaterStateFromFrb);
   }
 
   @override
   Future<void> cancel() => _handle.cancel();
+
+  @override
+  Future<bool> finishHandoff() => _handle.finishHandoff();
 
   @override
   void dispose() {
@@ -112,6 +127,8 @@ class _FrbStudioUpdateOperation implements StudioUpdateOperation {
 @Riverpod(keepAlive: true)
 class StudioUpdateController extends _$StudioUpdateController {
   StudioUpdateOperation? _activeOperation;
+  Future<void>? _installFuture;
+  bool _checking = false;
 
   StudioUpdateApi get _api => ref.read(studioUpdateApiProvider);
 
@@ -127,9 +144,16 @@ class StudioUpdateController extends _$StudioUpdateController {
       }
     });
     final enabled = ref.watch(studioUpdateEnabledProvider);
-    final observed = ref.watch(
-      studioControllerProvider.select((value) => value.value?.updaterState),
+    final observedProvider = studioControllerProvider.select(
+      (value) => value.value?.updaterState,
     );
+    // Listening preserves the operation owner when product progress arrives.
+    ref.listen(observedProvider, (_, observed) {
+      if (_enabled && observed != null && observed.revision >= state.revision) {
+        state = observed;
+      }
+    });
+    final observed = ref.read(observedProvider);
     if (!enabled) {
       return DisabledUpdaterStateSnapshot(
         revision: observed?.revision ?? 0,
@@ -145,51 +169,68 @@ class StudioUpdateController extends _$StudioUpdateController {
   }
 
   Future<void> check() async {
-    if (!_enabled || state is CheckingUpdaterStateSnapshot) return;
+    if (!_enabled || _checking || _isInstalling(state)) return;
+    _checking = true;
     try {
-      state = await _api.check();
-    } catch (error) {
-      if (state is! CheckFailedUpdaterStateSnapshot) {
-        state = CheckFailedUpdaterStateSnapshot(
-          revision: state.revision + 1,
-          failedAt: DateTime.now(),
-          error: UpdaterErrorView(
-            code: 'checkFailed',
-            message: error.toString(),
-            retryable: true,
-          ),
-        );
-      }
+      final snapshot = await _api.check();
+      if (ref.mounted) state = snapshot;
+    } finally {
+      _checking = false;
     }
   }
 
-  Future<void> install() async {
+  Future<void> install() =>
+      _installFuture ??= _install().whenComplete(() => _installFuture = null);
+
+  Future<void> _install() async {
     final update = state.update;
     if (!_enabled || update == null || _isInstalling(state)) return;
     if (ref.read(studioRuntimeBusyProvider)) {
-      _installFailure(
-        'runtimeBusy',
-        'Studio runtime has an active turn or task',
-      );
-      return;
+      throw StateError('Studio runtime has an active turn or task');
     }
+    final api = _api;
     try {
-      final operation = await _api.startInstall(
+      final operation = await api.startInstall(
         expectedRevision: state.revision,
         version: update.version,
       );
+      if (!ref.mounted) {
+        operation.dispose();
+        return;
+      }
       _activeOperation = operation;
       await for (final snapshot in operation.events) {
-        state = snapshot;
+        if (ref.mounted && snapshot.revision >= state.revision) {
+          state = snapshot;
+        }
       }
-    } catch (error) {
-      if (state is! InstallFailedUpdaterStateSnapshot) {
-        _installFailure('installFailed', error.toString());
+    } catch (error, stackTrace) {
+      if (!ref.mounted) Error.throwWithStackTrace(error, stackTrace);
+      final snapshot = await api.read();
+      if (ref.mounted) state = snapshot;
+      if (!ref.mounted) Error.throwWithStackTrace(error, stackTrace);
+      if (snapshot is InstallFailedUpdaterStateSnapshot &&
+          snapshot.error.code == 'runtimeShutdownFailed') {
+        ref
+            .read(studioShutdownProgressStateProvider.notifier)
+            .fail(snapshot.error.message);
+        return;
+      }
+      final operation = _activeOperation;
+      if (operation != null && await operation.finishHandoff()) {
+        await ServicesBinding.instance.exitApplication(AppExitType.required);
+        return;
+      }
+      if (snapshot is! InstallFailedUpdaterStateSnapshot) {
+        Error.throwWithStackTrace(error, stackTrace);
       }
     } finally {
       final operation = _activeOperation;
       _activeOperation = null;
       operation?.dispose();
+    }
+    if (ref.mounted && state is InstallerLaunchedUpdaterStateSnapshot) {
+      await ServicesBinding.instance.exitApplication(AppExitType.required);
     }
   }
 
@@ -198,9 +239,7 @@ class StudioUpdateController extends _$StudioUpdateController {
     if (operation == null) {
       return;
     }
-    try {
-      await operation.cancel();
-    } catch (_) {}
+    await operation.cancel();
   }
 
   Future<void> openReleaseNotes() async {
@@ -209,17 +248,6 @@ class StudioUpdateController extends _$StudioUpdateController {
     try {
       await _api.openReleaseNotes(update.notesUrl);
     } catch (_) {}
-  }
-
-  void _installFailure(String code, String message) {
-    final update = state.update;
-    if (update == null) return;
-    state = InstallFailedUpdaterStateSnapshot(
-      revision: state.revision + 1,
-      failedAt: DateTime.now(),
-      update: update,
-      error: UpdaterErrorView(code: code, message: message, retryable: true),
-    );
   }
 }
 

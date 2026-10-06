@@ -32,5 +32,8 @@ Future<BridgeStudioUpdateOperation> installStudioUpdate({
 abstract class BridgeStudioUpdateOperation implements RustOpaqueInterface {
   Future<void> cancel();
 
+  /// Completes the actual process handoff; true tells the old GUI to exit.
+  Future<bool> finishHandoff();
+
   Stream<BridgeUpdaterStateSnapshot> progressStream();
 }

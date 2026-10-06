@@ -48,9 +48,9 @@ pub async fn shutdown_runtime() -> Result<RuntimeSnapshot, BridgeError> {
 pub(super) async fn shutdown_runtime_for_update(
     bridge: &'static BridgeRuntime,
 ) -> Result<bool, BridgeError> {
-    bridge.subscriptions.cancel_all().await;
     match bridge.studio.shutdown_runtime_if_idle().await {
         Ok(Some(_)) => {
+            bridge.subscriptions.cancel_all().await;
             bridge.shutdown.cancel();
             tracing::info!("Studio runtime shutdown completed for update");
             crate::diagnostics::shutdown();

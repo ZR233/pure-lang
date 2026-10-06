@@ -6,9 +6,9 @@ use std::mem::size_of;
 use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectExtendedLimitInformation, SetInformationJobObject,
 };
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
@@ -69,7 +69,10 @@ fn configure_kill_on_close(handle: HANDLE) -> Result<()> {
     // integrals where an all-zero value is valid; zeroing it only leaves every
     // limit unset before `LimitFlags` is assigned below.
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    // Only explicit installer/replacement handoffs may leave the job. Ordinary
+    // children remain owned and are still killed when the resident command exits.
+    limits.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
     // SAFETY: the pointer names our local `limits` struct for the duration of
     // the call, the size matches the declared information class, and `handle`
     // is the live Job Object handle created by `ResidentProcessJob::create`.

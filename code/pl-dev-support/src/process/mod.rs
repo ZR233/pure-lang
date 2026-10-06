@@ -45,12 +45,14 @@ pub fn configure_background_command(command: &mut Command) {
 
 /// Places the current process inside a kill-on-close Windows Job Object.
 ///
-/// Every child process started afterwards joins the job, so the whole tree is
+/// Ordinary child processes started afterwards join the job, so the whole tree is
 /// terminated when this process exits for any reason (including a closed
 /// console window). The job is created once per process and is deliberately
 /// never released early: it is the last-resort backstop, while graceful
 /// cancellation is each coordinator's own responsibility. On non-Windows
 /// platforms this is a no-op and process trees are reaped per child.
+/// Explicit installer/replacement handoffs may use the shared handoff factory's
+/// breakaway flag; silent breakaway is never enabled for ordinary children.
 ///
 /// # Errors
 /// Returns an error when the Job Object cannot be created, configured with

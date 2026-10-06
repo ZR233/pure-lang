@@ -83,4 +83,12 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\Windows Error Reporting\LocalDum
 Root: HKCU; Subkey: "Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\{#MyAppExeName}"; ValueType: dword; ValueName: "DumpCount"; ValueData: "10"; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchApp,{cm:AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchApp,{cm:AppName}}"; Flags: nowait postinstall skipifsilent; Check: not IsAppUpdate
+
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: IsAppUpdate
+
+[Code]
+function IsAppUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:ANYWORKUPDATE|0}') = '1';
+end;

@@ -177,11 +177,12 @@ fn update_error(error: &StudioUpdateError) -> StudioError {
         | StudioUpdateErrorCode::HashMismatch
         | StudioUpdateErrorCode::SignatureInvalid
         | StudioUpdateErrorCode::InstallerLaunchFailed
+        | StudioUpdateErrorCode::RuntimeShutdownFailed
         | StudioUpdateErrorCode::Io => StudioErrorCode::Update,
     };
     StudioError::new(
         studio_code,
-        "Studio update could not be completed",
+        format!("Studio update could not be completed: {error}"),
         retryable,
     )
 }

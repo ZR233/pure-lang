@@ -6,6 +6,10 @@ use crate::StudioUpdate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StudioUpdateCommand {
+    RecoverAfterRestart {
+        expected_revision: u64,
+        updated_at: i64,
+    },
     BeginCheck {
         expected_revision: u64,
         operation_id: String,
@@ -55,7 +59,10 @@ pub enum StudioUpdateCommand {
 impl StudioUpdateCommand {
     pub(super) const fn expected_revision(&self) -> u64 {
         match self {
-            Self::BeginCheck {
+            Self::RecoverAfterRestart {
+                expected_revision, ..
+            }
+            | Self::BeginCheck {
                 expected_revision, ..
             }
             | Self::FinishUpToDate {

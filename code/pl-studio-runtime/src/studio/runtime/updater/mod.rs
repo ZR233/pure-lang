@@ -8,9 +8,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use pl_protocol::StateError;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, MutexGuard, RwLock};
 
 use crate::studio::ids::unix_seconds;
+use crate::updater::STUDIO_VERSION;
 use crate::{
     StudioStore, StudioUpdate, StudioUpdateCheck, StudioUpdateErrorCode, StudioUpdateEvent,
     StudioUpdater,
@@ -43,6 +44,11 @@ impl StudioUpdateRuntime {
             return Ok(());
         };
         *self.state.write().await = serde_json::from_str(&value)?;
+        self.apply(StudioUpdateCommand::RecoverAfterRestart {
+            expected_revision: self.read().await.revision(),
+            updated_at: unix_seconds(),
+        })
+        .await?;
         Ok(())
     }
 
@@ -51,7 +57,12 @@ impl StudioUpdateRuntime {
     }
 
     pub(crate) async fn check(&self) -> Result<StudioUpdateStateSnapshot> {
-        let _command = self.command_lock.lock().await;
+        let _command = self.command_lock.try_lock().map_err(|_| {
+            crate::StudioUpdateError::new(
+                StudioUpdateErrorCode::InstallInProgress,
+                "another update command is already running",
+            )
+        })?;
         let previous = self.read().await;
         let running = self
             .apply(StudioUpdateCommand::BeginCheck {
@@ -60,7 +71,7 @@ impl StudioUpdateRuntime {
                 started_at: unix_seconds(),
             })
             .await?;
-        let result = self.updater.check(env!("CARGO_PKG_VERSION")).await;
+        let result = self.updater.check(STUDIO_VERSION.trim()).await;
         let checked_at = unix_seconds();
         let command = match result {
             Ok(StudioUpdateCheck::UpToDate) => StudioUpdateCommand::FinishUpToDate {
@@ -73,13 +84,13 @@ impl StudioUpdateRuntime {
                 update,
             },
             Err(error) => {
+                tracing::warn!(code = error.code().as_str(), error = %error, "Studio update check failed");
                 let command = StudioUpdateCommand::FailCheck {
                     expected_revision: running.revision(),
                     failed_at: checked_at,
                     error: state_error(&error),
                 };
-                self.apply(command).await?;
-                return Err(error.into());
+                return self.apply(command).await;
             }
         };
         self.apply(command).await
@@ -96,11 +107,13 @@ impl StudioUpdateRuntime {
             "update revision conflict: expected {expected_revision}, actual {}",
             state.revision()
         );
-        let StudioUpdateStateSnapshot::Available(available) = state else {
-            anyhow::bail!("cached update is not in the verified Available state");
+        let update = match &state {
+            StudioUpdateStateSnapshot::Available(value) => value.update(),
+            StudioUpdateStateSnapshot::InstallFailed(value) => value.update(),
+            _ => anyhow::bail!("cached update is not available for installation"),
         };
-        (available.update().version == version)
-            .then(|| available.update().clone())
+        (update.version == version)
+            .then(|| update.clone())
             .context("requested update is not the cached verified update")
     }
 
@@ -141,7 +154,9 @@ impl StudioUpdateRuntime {
                     code: code.clone(),
                     message: message.clone(),
                     retryable: code == StudioUpdateErrorCode::Network.as_str()
-                        || code == StudioUpdateErrorCode::Io.as_str(),
+                        || code == StudioUpdateErrorCode::Io.as_str()
+                        || code == StudioUpdateErrorCode::RuntimeBusy.as_str()
+                        || code == StudioUpdateErrorCode::Cancelled.as_str(),
                 },
             },
         };
@@ -152,10 +167,37 @@ impl StudioUpdateRuntime {
         self.updater.clone()
     }
 
+    pub(crate) async fn lock_install(
+        &self,
+        update: &StudioUpdate,
+    ) -> Result<MutexGuard<'_, ()>, crate::StudioUpdateError> {
+        let command = self.command_lock.try_lock().map_err(|_| {
+            crate::StudioUpdateError::new(
+                StudioUpdateErrorCode::InstallInProgress,
+                "another update command is already running",
+            )
+        })?;
+        let state = self.read().await;
+        if !matches!(
+            state,
+            StudioUpdateStateSnapshot::Available(_) | StudioUpdateStateSnapshot::InstallFailed(_)
+        ) || state.update() != Some(update)
+        {
+            return Err(crate::StudioUpdateError::new(
+                StudioUpdateErrorCode::InvalidManifest,
+                "selected update is no longer available for installation",
+            ));
+        }
+        Ok(command)
+    }
+
     async fn apply(&self, command: StudioUpdateCommand) -> Result<StudioUpdateStateSnapshot> {
         let current = self.read().await;
         let decision = current.decide(command)?;
         let next = decision.next_state;
+        if !decision.changed {
+            return Ok(next);
+        }
         self.store
             .save_setting(CACHE_KEY, &serde_json::to_string(&next)?)
             .await?;

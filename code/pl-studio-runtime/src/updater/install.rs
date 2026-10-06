@@ -33,6 +33,7 @@ enum StudioUpdateCancellationPhase {
     Downloading,
     Cancelled,
     Launching,
+    InstallerLaunched,
     Finished,
 }
 
@@ -59,12 +60,12 @@ impl StudioUpdateCancellation {
                 Ok(())
             }
             StudioUpdateCancellationPhase::Cancelled => Ok(()),
-            StudioUpdateCancellationPhase::Launching | StudioUpdateCancellationPhase::Finished => {
-                Err(StudioUpdateError::new(
-                    StudioUpdateErrorCode::CancellationTooLate,
-                    "the verified installer is already launching",
-                ))
-            }
+            StudioUpdateCancellationPhase::Launching
+            | StudioUpdateCancellationPhase::InstallerLaunched
+            | StudioUpdateCancellationPhase::Finished => Err(StudioUpdateError::new(
+                StudioUpdateErrorCode::CancellationTooLate,
+                "the verified installer is already launching",
+            )),
         }
     }
 
@@ -73,6 +74,25 @@ impl StudioUpdateCancellation {
             return Err(cancelled_error());
         }
         Ok(())
+    }
+
+    /// Reports the actual process handoff even if its durable projection failed.
+    pub fn installer_launched(&self) -> bool {
+        *self
+            .inner
+            .phase
+            .lock()
+            .expect("update cancellation phase lock must not be poisoned")
+            == StudioUpdateCancellationPhase::InstallerLaunched
+    }
+
+    fn mark_installer_launched(&self) {
+        *self
+            .inner
+            .phase
+            .lock()
+            .expect("update cancellation phase lock must not be poisoned") =
+            StudioUpdateCancellationPhase::InstallerLaunched;
     }
 
     fn begin_launch(&self) -> Result<(), StudioUpdateError> {
@@ -87,12 +107,12 @@ impl StudioUpdateCancellation {
                 Ok(())
             }
             StudioUpdateCancellationPhase::Cancelled => Err(cancelled_error()),
-            StudioUpdateCancellationPhase::Launching | StudioUpdateCancellationPhase::Finished => {
-                Err(StudioUpdateError::new(
-                    StudioUpdateErrorCode::CancellationTooLate,
-                    "the verified installer is already launching",
-                ))
-            }
+            StudioUpdateCancellationPhase::Launching
+            | StudioUpdateCancellationPhase::InstallerLaunched
+            | StudioUpdateCancellationPhase::Finished => Err(StudioUpdateError::new(
+                StudioUpdateErrorCode::CancellationTooLate,
+                "the verified installer is already launching",
+            )),
         }
     }
 
@@ -134,14 +154,15 @@ where
         });
         let installer = prepare_installer(updater, &update, &progress, &cancellation).await?;
         cancellation.check()?;
-        before_launch().await?;
         cancellation.begin_launch()?;
+        before_launch().await?;
         launch_installer(&installer)?;
-        cancellation.finish();
+        cancellation.mark_installer_launched();
         let _ = progress.send(StudioUpdateEvent::InstallerLaunched);
         Ok(())
     }
     .await;
+    cancellation.finish();
     if let Err(error) = &result {
         let _ = progress.send(StudioUpdateEvent::Failed {
             code: error.code().as_str().to_string(),
@@ -246,9 +267,11 @@ async fn verify_cached(
     if actual_hash != update.installer.sha256 {
         return Ok(false);
     }
-    let _ = progress.send(StudioUpdateEvent::Verifying);
     match verify_file(updater.public_key, signature, installer).await {
-        Ok(()) => Ok(true),
+        Ok(()) => {
+            let _ = progress.send(StudioUpdateEvent::Verifying);
+            Ok(true)
+        }
         Err(_) => Ok(false),
     }
 }
@@ -283,14 +306,14 @@ async fn download_installer(
     let mut stream = response.bytes_stream();
     let mut downloaded = 0_u64;
     let mut hasher = Sha256::new();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = tokio::select! {
+            _ = cancellation.inner.token.cancelled() => return Err(cancelled_error()),
+            chunk = stream.next() => chunk,
+        };
+        let Some(chunk) = chunk else { break };
         cancellation.check()?;
-        let chunk = chunk.map_err(|error| {
-            StudioUpdateError::new(
-                StudioUpdateErrorCode::Network,
-                format!("installer download failed: {error}"),
-            )
-        })?;
+        let chunk = chunk.map_err(super::client::network_error)?;
         downloaded = downloaded
             .checked_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX))
             .ok_or_else(|| {
@@ -406,7 +429,7 @@ fn launch_installer(path: &Path) -> Result<(), StudioUpdateError> {
     }
     let mut command = Command::new(path);
     command.args(installer_arguments());
-    pl_remote_helper::process::configure_background_std_command(&mut command);
+    pl_remote_helper::process::configure_handoff_std_command(&mut command);
     command.spawn().map(|_| ()).map_err(|error| {
         StudioUpdateError::new(
             StudioUpdateErrorCode::InstallerLaunchFailed,
@@ -415,13 +438,14 @@ fn launch_installer(path: &Path) -> Result<(), StudioUpdateError> {
     })
 }
 
-fn installer_arguments() -> [&'static str; 5] {
+fn installer_arguments() -> [&'static str; 6] {
     [
         "/SILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
+        "/NORESTARTAPPLICATIONS",
         "/CLOSEAPPLICATIONS",
-        "/RESTARTAPPLICATIONS",
+        "/ANYWORKUPDATE=1",
     ]
 }
 

@@ -10,3 +10,5 @@ pub use client::StudioUpdater;
 pub use error::*;
 pub use install::StudioUpdateCancellation;
 pub use types::*;
+
+pub(crate) use client::STUDIO_VERSION;

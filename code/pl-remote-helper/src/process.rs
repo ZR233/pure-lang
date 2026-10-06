@@ -58,6 +58,19 @@ pub fn configure_background_std_command(command: &mut std::process::Command) {
     }
 }
 
+/// Transfers an installer or replacement application out of its exiting host's job.
+/// Ordinary background work must continue to use the owned background factories.
+pub fn configure_handoff_std_command(command: &mut std::process::Command) {
+    configure_background_std_command(command);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use windows::Win32::System::Threading::{CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW};
+
+        command.creation_flags(CREATE_NO_WINDOW.0 | CREATE_BREAKAWAY_FROM_JOB.0);
+    }
+}
+
 /// 把需要 Windows Job Object 或 Unix process group 的 Tokio command
 /// 收口为统一后台进程 owner。
 ///
