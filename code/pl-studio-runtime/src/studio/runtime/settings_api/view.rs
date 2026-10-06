@@ -15,10 +15,10 @@ use pl_protocol::studio::{
 
 use crate::{ConfigRuntimeSnapshot, StudioRole};
 use pl_model::config::{ProviderCapabilitySelection, ProviderModelCatalogConfig};
-use pl_tool::search::{WebSearchAvailability, WebSearchBackendKind};
+use pl_tool::search::WebSearchAvailability;
 
 pub(crate) fn settings_snapshot(state: ConfigRuntimeSnapshot) -> Result<StudioSettingsSnapshot> {
-    let mut settings = settings_view(&state.config, StudioRole::Executor)?;
+    let mut settings = settings_view(&state.config)?;
     for provider in &mut settings.providers {
         let id = pl_model::config::ProviderId::new(provider.id.clone())?;
         if let Some(status) = state.model_catalogs.get(&id) {
@@ -33,10 +33,7 @@ pub(crate) fn settings_snapshot(state: ConfigRuntimeSnapshot) -> Result<StudioSe
     })
 }
 
-fn settings_view(
-    config: &crate::StudioConfig,
-    web_search_role: StudioRole,
-) -> Result<StudioSettings> {
+fn settings_view(config: &crate::StudioConfig) -> Result<StudioSettings> {
     let providers = config
         .models
         .providers
@@ -194,7 +191,7 @@ fn settings_view(
             mutation_policy: server.mutation_policy.as_str().to_string(),
         })
         .collect();
-    let (web_search, deepseek_web_search) = search_settings(config, web_search_role)?;
+    let (web_search, deepseek_web_search) = search_settings(config)?;
     Ok(StudioSettings {
         default_provider_id: config
             .mode_model_routes
@@ -275,73 +272,23 @@ fn custom_model_settings(model: &ModelInfo) -> StudioCustomModelSettings {
 
 fn search_settings(
     config: &crate::StudioConfig,
-    role: StudioRole,
 ) -> Result<(StudioWebSearchSettings, StudioDeepSeekWebSearchSettings)> {
-    let selector = config
-        .models
-        .routes
-        .get(&role.id())
-        .context("missing search role")?;
-    if !matches!(
-        config.models.route_availability(selector)?,
-        pl_model::config::ModelRouteAvailability::Available
-    ) {
-        let location = config.web_search.location.as_ref();
-        return Ok((
-            StudioWebSearchSettings {
-                configured_mode: web_search_mode_label(config.web_search.mode).into(),
-                effective_mode: "disabled".into(),
-                availability: "modelUnavailable".into(),
-                selected: false,
-                context_size: config.web_search.context_size.map(|size| {
-                    match size {
-                        WebSearchContextSize::Low => "low",
-                        WebSearchContextSize::Medium => "medium",
-                        WebSearchContextSize::High => "high",
-                    }
-                    .into()
-                }),
-                allowed_domains: config.web_search.allowed_domains.clone(),
-                country: location.and_then(|location| location.country.clone()),
-                region: location.and_then(|location| location.region.clone()),
-                city: location.and_then(|location| location.city.clone()),
-                timezone: location.and_then(|location| location.timezone.clone()),
-                provider_id: Some(selector.provider.to_string()),
-                model: Some(selector.model.clone()),
-            },
-            StudioDeepSeekWebSearchSettings {
-                configured_enabled: config.deepseek_web_search.enabled,
-                effective_enabled: false,
-                availability: "modelUnavailable".into(),
-                selected: false,
-                provider_id: Some(selector.provider.to_string()),
-                model: Some(selector.model.clone()),
-            },
-        ));
-    }
-    let route = config.resolve_role(role)?;
-    let plans = pl_tool::search::plan_web_searches(
+    // Search service availability is independent of any session/executor model; the shared
+    // pl-tool service planner is the single source of truth used by Thread consumption too.
+    let services = pl_tool::search::plan_web_search_services(
         &config.models,
-        &route,
         &config.web_search,
         config.deepseek_web_search.enabled,
     )?;
-    let openai = plans.openai.resolution;
-    let deepseek = plans.deepseek.resolution;
-    let openai_selected = plans.selected == Some(WebSearchBackendKind::OpenAi);
-    let deepseek_selected = plans.selected == Some(WebSearchBackendKind::DeepSeek);
+    let openai = services.openai.resolution;
+    let deepseek = services.deepseek.resolution;
+    let deepseek_available = deepseek.availability == WebSearchAvailability::Available;
     let location = config.web_search.location.as_ref();
     Ok((
         StudioWebSearchSettings {
             configured_mode: web_search_mode_label(openai.configured_mode).to_string(),
-            effective_mode: web_search_mode_label(if openai_selected {
-                openai.effective_mode
-            } else {
-                WebSearchMode::Disabled
-            })
-            .to_string(),
+            effective_mode: web_search_mode_label(openai.effective_mode).to_string(),
             availability: web_search_availability_label(openai.availability).to_string(),
-            selected: openai_selected,
             context_size: config
                 .web_search
                 .context_size
@@ -361,9 +308,8 @@ fn search_settings(
         },
         StudioDeepSeekWebSearchSettings {
             configured_enabled: config.deepseek_web_search.enabled,
-            effective_enabled: deepseek_selected,
+            effective_enabled: deepseek_available,
             availability: web_search_availability_label(deepseek.availability).to_string(),
-            selected: deepseek_selected,
             provider_id: deepseek.provider_id.map(|provider| provider.to_string()),
             model: deepseek.model,
         },

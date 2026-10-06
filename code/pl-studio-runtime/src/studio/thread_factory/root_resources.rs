@@ -114,11 +114,9 @@ impl StudioThreadFactory {
                 helper_source: self.services.helper_source.clone(),
             })
             .await?;
-        if prepared.visibility != pl_tool::search::ToolVisibilityConstraint::Exclusive {
-            prepared.tools = prepared
-                .tools
-                .with_tools(crate::workflow_tool::workflow_registrations(mode.clone())?);
-        }
+        prepared.tools = prepared
+            .tools
+            .with_tools(crate::workflow_tool::workflow_registrations(mode.clone())?);
         let mut initial_context = Vec::new();
         let mut initial_extensions = BTreeMap::new();
         if !has_saved_route {
@@ -141,9 +139,7 @@ impl StudioThreadFactory {
             .await?;
             initial_context = context;
             initial_extensions.insert("studio.instructions".into(), sources);
-            if config.runtime.tool_capabilities.ask_user
-                && prepared.visibility != pl_tool::search::ToolVisibilityConstraint::Exclusive
-            {
+            if config.runtime.tool_capabilities.ask_user {
                 initial_extensions.insert(
                     crate::plan_tool::PLAN_EXTENSION.into(),
                     crate::plan_tool::encode_plan_state(&Default::default())
@@ -220,13 +216,7 @@ impl StudioThreadFactory {
                 &route,
                 config.runtime.openai_compaction_mode,
             )?,
-            agent_controls: if prepared.visibility
-                == pl_tool::search::ToolVisibilityConstraint::Exclusive
-            {
-                crate::thread_assembler::AgentControlExposure::Disabled
-            } else {
-                crate::thread_assembler::AgentControlExposure::Enabled
-            },
+            agent_controls: crate::thread_assembler::AgentControlExposure::Enabled,
             execution: pl_core::thread::input::InputDriverOptions {
                 max_model_steps: pl_core::thread::ModelStepLimit::Unlimited,
             },

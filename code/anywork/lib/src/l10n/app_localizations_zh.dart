@@ -1694,9 +1694,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsWebSearchAvailable => '可用';
 
   @override
-  String get settingsWebSearchAvailableNotSelected => '可用但未选中';
-
-  @override
   String get settingsWebSearchDisabled => '已禁用';
 
   @override
@@ -1726,11 +1723,17 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSaveWebSearch => '保存网页搜索';
 
   @override
+  String get settingsWebSearchUnsaved => '有未保存的搜索设置';
+
+  @override
   String get settingsDeepSeekWebSearchTitle => 'DeepSeek 原生联网搜索';
 
   @override
   String get settingsDeepSeekWebSearchSubtitle =>
-      '使用当前符合条件的 DeepSeek 接口执行联网搜索；当该接口不可用时，将回退到 OpenAI。';
+      '先由其它可用搜索优先处理；仅当其它搜索未配置、不可用或调用失败时，才由 DeepSeek 联网搜索兜底并按实际用量计费。';
+
+  @override
+  String get settingsDeepSeekWebSearchProvider => 'DeepSeek 模型服务商';
 
   @override
   String get settingsDeepSeekWebSearchConfigured => '已配置';

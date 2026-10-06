@@ -24,7 +24,6 @@ pub(super) struct ThreadToolAssembly<'a> {
 
 pub(super) struct PreparedThreadTools {
     pub catalog: Option<Arc<pl_tool::skill::FrozenSkillCatalog>>,
-    pub visibility: pl_tool::search::ToolVisibilityConstraint,
     pub tools: StudioThreadTools,
     pub hosted: Vec<pl_model::runtime::HostedTool>,
     pub environment: pl_tool::environment::ExecutionEnvironment,
@@ -124,11 +123,9 @@ impl StudioThreadFactory {
         )?
         .build_thread(&config.web_search)
         .map_err(|error| resource_error("bind web search", error))?;
-        if search.visibility != pl_tool::search::ToolVisibilityConstraint::Exclusive {
-            search
-                .hosted
-                .extend(crate::programmatic::hosted_tool(route));
-        }
+        search
+            .hosted
+            .extend(crate::programmatic::hosted_tool(route));
         let root = workspace.root().to_owned();
         let remote = match &preparation {
             CatalogPreparation::Refresh { remote, .. } => remote.as_deref().cloned(),
@@ -150,16 +147,6 @@ impl StudioThreadFactory {
             .as_ref()
             .map(|host| host.execution_environment.clone())
             .unwrap_or_else(pl_tool::environment::ExecutionEnvironment::detect_local);
-        if search.visibility == pl_tool::search::ToolVisibilityConstraint::Exclusive {
-            return Ok(PreparedThreadTools {
-                catalog: None,
-                visibility: search.visibility,
-                tools: StudioThreadTools::selected(store, search.tools),
-                hosted: search.hosted,
-                environment,
-                remote,
-            });
-        }
         let binding = match &remote {
             Some(host) => StudioCommandBinding::Remote {
                 host: host.clone(),
@@ -327,7 +314,6 @@ impl StudioThreadFactory {
         };
         Ok(PreparedThreadTools {
             catalog: skill_catalog,
-            visibility: search.visibility,
             tools: tools
                 .with_tools(search.tools)
                 .with_approval(approval, &policies),

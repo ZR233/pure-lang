@@ -1,17 +1,19 @@
 //! Web Search 计划投影为独立的工具执行器与模型持有的 hosted 能力。
 //!
 //! 装配过程中只消费规划结果与共享配置快照；hosted 条目永不在本层获取 core 执行器。
+//! OpenAI 与 DeepSeek 两条规划彼此独立，任一可用都只追加自己的工具，不排斥其他工具。
 
 use pl_core::tool::opaque::Registration;
 use pl_model::provider::StandaloneWebSearchDialect;
+use pl_model::provider::deepseek::search::{SearchClient, SearchError, SearchOptions};
 use pl_model::runtime::{HostedTool, thread_tool_declaration};
 use pl_protocol::HostedWebSearchDialect;
 use pl_protocol::search::WebSearchConfig;
 
 use super::client::{SearchEndpoint, WebSearchClient};
 use super::hosted_options;
-use super::plan::{ToolVisibilityConstraint, WebSearchPath, WebSearchPlans};
-use super::thread::{ThreadSearchOptions, ThreadWebSearchTool};
+use super::plan::{WebSearchPath, WebSearchPlans};
+use super::thread::{ThreadDeepSeekWebSearchTool, ThreadSearchOptions, ThreadWebSearchTool};
 
 /// 公共搜索装配错误；产品调用方负责映射到自身错误域。
 ///
@@ -26,6 +28,8 @@ pub enum SearchBindingError {
     Declaration(#[from] pl_core::model::ModelError),
     #[error("web search tool registration failed")]
     Registry(#[from] pl_core::tool::opaque::RegistryError),
+    #[error(transparent)]
+    DeepSeek(#[from] SearchError),
 }
 
 /// Frozen search assembly; hosted entries never acquire core executors.
@@ -33,34 +37,38 @@ pub enum SearchBindingError {
 pub struct ThreadSearchBinding {
     pub tools: Vec<Registration>,
     pub hosted: Vec<HostedTool>,
-    pub visibility: ToolVisibilityConstraint,
 }
 
 impl WebSearchPlans {
     /// Returns only provider-executed declarations without constructing local tool resources.
     pub fn hosted_tools(&self, config: &WebSearchConfig) -> pl_protocol::Result<Vec<HostedTool>> {
-        let Some(plan) = self.active() else {
-            return Ok(Vec::new());
-        };
-        if plan.resolution.path != Some(WebSearchPath::Hosted) {
-            return Ok(Vec::new());
+        let mut hosted = Vec::new();
+        for plan in self.plans() {
+            if plan.resolution.path != Some(WebSearchPath::Hosted) {
+                continue;
+            }
+            match plan.hosted_dialect {
+                Some(HostedWebSearchDialect::OpenAiResponses) => {
+                    let options = hosted_options::openai_options(config).ok_or_else(|| {
+                        pl_protocol::PureError::ConfigError(
+                            "hosted search requires an enabled effective mode".into(),
+                        )
+                    })?;
+                    hosted.push(HostedTool::WebSearch(options));
+                }
+                // Only OpenAI Responses hosted is planned; DeepSeek search is native standalone.
+                // Any other dialect on a hosted path is an assembly bug, not a silent skip.
+                Some(HostedWebSearchDialect::DeepSeekResponses) | None => {
+                    return Err(pl_protocol::PureError::ConfigError(
+                        "planned hosted web search has an unsupported dialect".into(),
+                    ));
+                }
+            }
         }
-        let options = match plan.hosted_dialect {
-            Some(HostedWebSearchDialect::DeepSeekResponses) => {
-                pl_protocol::HostedWebSearchOptions::DeepSeek
-            }
-            Some(HostedWebSearchDialect::OpenAiResponses) | None => {
-                hosted_options::openai_options(config).ok_or_else(|| {
-                    pl_protocol::PureError::ConfigError(
-                        "hosted search requires an enabled effective mode".into(),
-                    )
-                })?
-            }
-        };
-        Ok(vec![HostedTool::WebSearch(options)])
+        Ok(hosted)
     }
 
-    /// Projects the selected provider capability using the same configuration snapshot as the route.
+    /// Projects every available provider capability using the same configuration snapshot as the route.
     ///
     /// # Errors
     /// Returns missing backend, disabled hosted options, declaration or registration errors.
@@ -71,13 +79,9 @@ impl WebSearchPlans {
         let mut binding = ThreadSearchBinding {
             tools: Vec::new(),
             hosted: self.hosted_tools(config)?,
-            visibility: self.visibility(),
         };
-        let Some(plan) = self.active() else {
-            return Ok(binding);
-        };
-        match plan.resolution.path {
-            Some(WebSearchPath::Standalone) => {
+        for plan in self.plans() {
+            if plan.resolution.path == Some(WebSearchPath::Standalone) {
                 let backend = plan
                     .backend
                     .as_ref()
@@ -101,10 +105,19 @@ impl WebSearchPlans {
                             thread_tool_declaration(&ThreadWebSearchTool::declaration())?;
                         binding.tools.push(tool.registration(declaration)?);
                     }
+                    StandaloneWebSearchDialect::DeepSeekAnthropicMessages => {
+                        let options = SearchOptions {
+                            model: backend.model.clone(),
+                            ..SearchOptions::default()
+                        };
+                        let client = SearchClient::new(&backend.endpoint, options)?;
+                        let tool = ThreadDeepSeekWebSearchTool::new(client);
+                        let declaration =
+                            thread_tool_declaration(&ThreadDeepSeekWebSearchTool::declaration())?;
+                        binding.tools.push(tool.registration(declaration)?);
+                    }
                 }
             }
-            Some(WebSearchPath::Hosted) => {}
-            None => {}
         }
         Ok(binding)
     }

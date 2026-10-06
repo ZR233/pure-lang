@@ -1,5 +1,6 @@
 mod context_replay_recovery;
 mod model_catalog;
+mod web_search;
 mod websocket_recovery;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -51,6 +52,21 @@ pub(crate) struct ManualGuiOptions {
     /// Add isolated OpenAI/DeepSeek instances against a loopback model-list fixture.
     #[arg(long, value_name = "URL")]
     pub(crate) model_catalog_url: Option<String>,
+    /// Optional web-search fault so the operator can observe an error path.
+    #[arg(
+        long,
+        value_parser = ["unstructured", "wrong-search-key", "wrong-mcp-key", "missing-search-key"]
+    )]
+    pub(crate) web_search_fault: Option<String>,
+    /// Reusable web-search probe provider ids, forwarded to the Driver probe.
+    #[arg(long, value_name = "ID,ID,ID")]
+    pub(crate) web_search_providers: Option<String>,
+    /// Reusable web-search probe model slugs, forwarded to the Driver probe.
+    #[arg(long, value_name = "MODEL,MODEL,MODEL")]
+    pub(crate) web_search_models: Option<String>,
+    /// Label the reusable web-search probe as a fixture or real provider run.
+    #[arg(long, value_parser = ["fixture", "real"])]
+    pub(crate) web_search_probe: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -209,6 +225,20 @@ struct RecoveryScenario<'a> {
     fixture_log: &'a Path,
     requests_file: &'a Path,
     status_file: &'a Path,
+    interrupt: &'a mpsc::Receiver<()>,
+}
+
+struct WebSearchScenario<'a> {
+    workspace: &'a Path,
+    app_dir: &'a Path,
+    home: &'a Path,
+    working: &'a Path,
+    output: &'a Path,
+    fixture_log: &'a Path,
+    requests_file: &'a Path,
+    providers: Option<&'a str>,
+    models: Option<&'a str>,
+    probe_mode: &'a str,
     interrupt: &'a mpsc::Receiver<()>,
 }
 
@@ -385,6 +415,17 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         options.ssh_target.is_none() || options.scenario == "tool-scroll",
         "--ssh-target is supported only by --scenario tool-scroll"
     );
+    ensure!(
+        options.web_search_fault.is_none() || options.scenario == "web-search",
+        "--web-search-fault requires --scenario web-search"
+    );
+    ensure!(
+        (options.web_search_providers.is_none()
+            && options.web_search_models.is_none()
+            && options.web_search_probe.is_none())
+            || options.scenario == "web-search",
+        "--web-search-providers/--web-search-models/--web-search-probe require --scenario web-search"
+    );
     // The statistics, realtime, history and plan-recovery journeys are fully
     // driven by Flutter Driver and reviewed from captured evidence, so they do
     // not require an interactive stdin.
@@ -401,6 +442,7 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             | "websocket-recovery"
             | "call-lifecycle-recovery"
             | "tool-scroll"
+            | "web-search"
     ) {
         ensure!(
             io::stdin().is_terminal(),
@@ -493,6 +535,11 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     ) {
         fixture_command.arg("--status-file").arg(&status_file);
     }
+    if options.scenario == "web-search"
+        && options.web_search_fault.as_deref() == Some("unstructured")
+    {
+        fixture_command.arg("--fault").arg("unstructured");
+    }
     #[cfg(windows)]
     process::own_current_process_tree()?;
     let mut fixture = match OwnedProcess::start(&mut fixture_command, true) {
@@ -518,16 +565,18 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         ready.scenario == options.scenario,
         "fixture scenario does not match request"
     );
-    if let Err(error) = write_config(&home, &ready).and_then(|()| {
-        if let Some(url) = &options.model_catalog_url {
-            ensure!(
-                options.scenario == "gui",
-                "--model-catalog-url requires --scenario gui"
-            );
-            model_catalog::configure(&home, url)?;
-        }
-        Ok(())
-    }) {
+    if let Err(error) =
+        write_config(&home, &ready, options.web_search_fault.as_deref()).and_then(|()| {
+            if let Some(url) = &options.model_catalog_url {
+                ensure!(
+                    options.scenario == "gui",
+                    "--model-catalog-url requires --scenario gui"
+                );
+                model_catalog::configure(&home, url)?;
+            }
+            Ok(())
+        })
+    {
         let _ = fixture.stop(&requests_file);
         drop(fixture);
         write_fixture_log(&fixture_log_path, &output.join("fixture.log"))?;
@@ -535,6 +584,32 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     }
     if let Some(fault) = &options.startup_fault {
         seed_startup_fault(&home, fault)?;
+    }
+
+    if options.scenario == "web-search" {
+        let fault = match options.web_search_fault.as_deref() {
+            None => web_search::WebSearchFault::None,
+            Some(value) => web_search::WebSearchFault::parse(value)
+                .with_context(|| format!("unknown web-search fault: {value}"))?,
+        };
+        return web_search::run(
+            &WebSearchScenario {
+                workspace: &workspace,
+                app_dir: &app_dir,
+                home: &home,
+                working: working.path(),
+                output: &output,
+                fixture_log: &fixture_log_path,
+                requests_file: &requests_file,
+                providers: options.web_search_providers.as_deref(),
+                models: options.web_search_models.as_deref(),
+                probe_mode: options.web_search_probe.as_deref().unwrap_or("fixture"),
+                interrupt: &interrupt_rx,
+            },
+            fixture,
+            &ready,
+            fault,
+        );
     }
 
     if matches!(
@@ -1328,7 +1403,15 @@ fn validate_ready(ready: &FixtureReady) -> Result<()> {
     Ok(())
 }
 
-fn write_config(home: &Path, ready: &FixtureReady) -> Result<()> {
+fn write_config(home: &Path, ready: &FixtureReady, web_search_fault: Option<&str>) -> Result<()> {
+    if ready.scenario == "web-search" {
+        let fault = match web_search_fault {
+            None => web_search::WebSearchFault::None,
+            Some(value) => web_search::WebSearchFault::parse(value)
+                .with_context(|| format!("unknown web-search fault: {value}"))?,
+        };
+        return web_search::write_config(home, ready, fault);
+    }
     let profile = if ready.scenario == "websocket-recovery" {
         ModelTransportProfile::responses_websocket()
     } else {

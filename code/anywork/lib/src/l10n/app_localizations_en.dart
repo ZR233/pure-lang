@@ -1786,9 +1786,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsWebSearchAvailable => 'Available';
 
   @override
-  String get settingsWebSearchAvailableNotSelected => 'Available, not selected';
-
-  @override
   String get settingsWebSearchDisabled => 'Disabled';
 
   @override
@@ -1819,11 +1816,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsSaveWebSearch => 'Save web search';
 
   @override
+  String get settingsWebSearchUnsaved => 'Unsaved search settings';
+
+  @override
   String get settingsDeepSeekWebSearchTitle => 'DeepSeek native web search';
 
   @override
   String get settingsDeepSeekWebSearchSubtitle =>
-      'Let the current eligible DeepSeek Responses model search the web. It takes priority over the OpenAI fallback.';
+      'Other available web search is tried first; DeepSeek web search is used only as a billed fallback when other search is unconfigured, unavailable, or fails.';
+
+  @override
+  String get settingsDeepSeekWebSearchProvider => 'DeepSeek provider';
 
   @override
   String get settingsDeepSeekWebSearchConfigured => 'Configured';

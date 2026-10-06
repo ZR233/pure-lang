@@ -1,6 +1,6 @@
 use pl_protocol::{
-    AttachmentModality, ContentPart, MessageContent, MessageRole, Result, ToolCallKind,
-    ToolCallRecord, ToolSpec,
+    AttachmentModality, ContentPart, MessageContent, MessageRole, ResponsesContextItem, Result,
+    ToolCallKind, ToolCallRecord, ToolSpec,
 };
 use serde::Serialize;
 
@@ -20,6 +20,24 @@ fn programmatic_result_output(output: String) -> String {
         Ok(value) => serde_json::json!({ "content": value }).to_string(),
         Err(_) => serde_json::json!({ "content": output }).to_string(),
     }
+}
+
+/// 回放 provider 原生 Responses 上下文项时的输入投影。
+///
+/// 原生上下文类别（reasoning、web_search_call、program 等）的输出项携带 `status` 等仅用于
+/// output 生命周期的字段；严格兼容的 Responses 网关会把它当未知输入参数拒绝
+/// （`unknown_parameter: input[*].status`）。回放这类 item 时去掉 `status`，保留 `id`、
+/// `encrypted_content`、`action`、`results` 与所有未知厂商字段。message、function_call 等
+/// 由 typed 路径重建的 item 不属于原生上下文类别，保持既有回放语义。
+fn replay_native_item(value: serde_json::Value) -> serde_json::Value {
+    if ResponsesContextItem::from_wire(value.clone()).is_none() {
+        return value;
+    }
+    let mut value = value;
+    if let Some(object) = value.as_object_mut() {
+        object.remove("status");
+    }
+    value
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,7 +89,7 @@ impl ResponsesRequestBody {
                 let span = replay_spans
                     .next()
                     .ok_or_else(|| protocol_error("replay span disappeared"))?;
-                input.extend(span.output.iter().cloned().map(ResponsesInputItem::Native));
+                input.extend(span.output.iter().cloned().map(ResponsesInputItem::native));
                 replay_end = span.start + span.semantic.len();
                 continue;
             }
@@ -100,7 +118,7 @@ impl ResponsesRequestBody {
                     continue;
                 }
                 pl_protocol::ModelContextItem::Responses { item } => {
-                    input.push(ResponsesInputItem::Native(item.value.clone()));
+                    input.push(ResponsesInputItem::native(item.value.clone()));
                     continue;
                 }
                 pl_protocol::ModelContextItem::ToolMedia { .. } => unreachable!(),
@@ -240,6 +258,10 @@ enum ResponsesTypedInputItem {
 impl ResponsesInputItem {
     fn typed(item: ResponsesTypedInputItem) -> Self {
         Self::Typed(item)
+    }
+
+    fn native(value: serde_json::Value) -> Self {
+        Self::Native(replay_native_item(value))
     }
 
     fn message(role: ResponsesRole, content: Vec<ResponsesContent>) -> Self {

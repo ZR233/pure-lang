@@ -1,6 +1,8 @@
 //! Independent search over frozen generic context, with no product session access.
 use super::{
-    ASSISTANT_CONTEXT_CHAR_LIMIT, TOOL_WEB_SEARCH, WEB_SEARCH_DESCRIPTION, WebSearchClient,
+    ASSISTANT_CONTEXT_CHAR_LIMIT, DEEPSEEK_SEARCH_CONTEXT_CHAR_LIMIT,
+    DEEPSEEK_WEB_SEARCH_DESCRIPTION, TOOL_DEEPSEEK_WEB_SEARCH, TOOL_WEB_SEARCH,
+    WEB_SEARCH_DESCRIPTION, WebSearchClient,
 };
 use pl_core::{
     context::{ContextContent, ContextSnapshot, ContextSource, OpaquePayload},
@@ -8,6 +10,9 @@ use pl_core::{
         ToolOutput,
         opaque::{CallContext, Registration, RegistryError, Tool, ToolError},
     },
+};
+use pl_model::provider::deepseek::search::{
+    SearchClient, SearchRequest as DeepSeekSearchRequest, SearchResponse,
 };
 use pl_protocol::search::{SearchCommands, SearchRequest, SearchSettings};
 use serde_json::Value;
@@ -140,4 +145,148 @@ fn recent_context(context: &ContextSnapshot) -> Option<Vec<Value>> {
         })
         .collect::<Vec<_>>();
     (!messages.is_empty()).then_some(messages)
+}
+
+/// Arguments accepted by the DeepSeek standalone search tool.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct DeepSeekWebSearchArgs {
+    /// Natural-language search query.
+    query: String,
+}
+
+/// A Thread-local DeepSeek search instance sharing only its immutable client configuration.
+pub struct ThreadDeepSeekWebSearchTool {
+    client: SearchClient,
+}
+
+impl std::fmt::Debug for ThreadDeepSeekWebSearchTool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ThreadDeepSeekWebSearchTool")
+            .finish_non_exhaustive()
+    }
+}
+
+impl ThreadDeepSeekWebSearchTool {
+    /// Binds the resolved standalone DeepSeek search client.
+    pub fn new(client: SearchClient) -> Self {
+        Self { client }
+    }
+
+    /// Stable declaration, independent of conversation, current time and search results.
+    pub fn declaration() -> pl_protocol::ToolSpec {
+        pl_protocol::ToolSpec::function(
+            TOOL_DEEPSEEK_WEB_SEARCH,
+            DEEPSEEK_WEB_SEARCH_DESCRIPTION,
+            schemars::schema_for!(DeepSeekWebSearchArgs).to_value(),
+        )
+    }
+
+    /// Transfers an executor without granting any framework control permissions.
+    ///
+    /// # Errors
+    /// Returns an invalid tool identity error.
+    pub fn registration(self, declaration: OpaquePayload) -> Result<Registration, RegistryError> {
+        Registration::new(TOOL_DEEPSEEK_WEB_SEARCH.into(), declaration, self)
+    }
+}
+
+impl Tool for ThreadDeepSeekWebSearchTool {
+    async fn execute(
+        &self,
+        input: OpaquePayload,
+        context: CallContext,
+    ) -> Result<ToolOutput, ToolError> {
+        if input.format() != "application/json" || input.version() != 1 {
+            return Err(ToolError::new(crate::tool_error(
+                TOOL_DEEPSEEK_WEB_SEARCH,
+                "unsupported argument encoding",
+            )));
+        }
+        let args: DeepSeekWebSearchArgs =
+            serde_json::from_str(input.content()).map_err(ToolError::new)?;
+        if context.cancellation.is_cancelled() {
+            return Err(ToolError::new(pl_core::thread::ThreadError::Cancelled));
+        }
+        let request = DeepSeekSearchRequest { query: args.query };
+        match self
+            .client
+            .search(&request, context.cancellation.clone())
+            .await
+        {
+            Ok(response) => deepseek_search_output(&response, None),
+            Err(error) => match error.observed_response() {
+                Some(observed) => {
+                    // Keep the observed facts in history, but make the model-visible block
+                    // unambiguously a failure even when no usable source was returned.
+                    let notice = format!("[DeepSeek web search failed: {error}]");
+                    let output = deepseek_search_output(observed, Some(notice))?;
+                    Err(ToolError::new(error).with_output(output))
+                }
+                None => Err(ToolError::new(error)),
+            },
+        }
+    }
+}
+
+/// Serializes the complete response for history while projecting a bounded model-visible summary.
+fn deepseek_search_output(
+    response: &SearchResponse,
+    context_prefix: Option<String>,
+) -> Result<ToolOutput, ToolError> {
+    let encoded = serde_json::to_string(response).map_err(ToolError::new)?;
+    let payload =
+        OpaquePayload::new("pl.tool.deepseek-web-search", 1, encoded).map_err(ToolError::new)?;
+    let summary = project_deepseek_summary(response);
+    let text = match (context_prefix, summary.is_empty()) {
+        (Some(prefix), false) => format!("{prefix}\n{summary}"),
+        (Some(prefix), true) => prefix,
+        (None, _) => summary,
+    };
+    Ok(ToolOutput::new(
+        payload,
+        vec![ContextContent::Text {
+            text: Arc::from(text),
+        }],
+    ))
+}
+
+fn project_deepseek_summary(response: &SearchResponse) -> String {
+    let mut sections = Vec::with_capacity(response.sources.len());
+    for source in &response.sources {
+        let mut section = String::new();
+        match source.title.as_deref().filter(|title| !title.is_empty()) {
+            Some(title) => section.push_str(title),
+            None => section.push_str(&source.url),
+        }
+        section.push('\n');
+        section.push_str(&source.url);
+        if let Some(snippet) = source
+            .snippet
+            .as_deref()
+            .filter(|snippet| !snippet.is_empty())
+        {
+            section.push('\n');
+            section.push_str(snippet);
+        }
+        if let Some(published) = source
+            .published_at
+            .as_deref()
+            .filter(|published| !published.is_empty())
+        {
+            section.push('\n');
+            section.push_str(published);
+        }
+        sections.push(section);
+    }
+    let joined = sections.join("\n\n");
+    let bounded = pl_output::bounded_text(&joined, DEEPSEEK_SEARCH_CONTEXT_CHAR_LIMIT, 0);
+    if bounded.truncated {
+        format!(
+            "{}\n[DeepSeek search preview omitted {} bytes; full result retained in history.]",
+            bounded.text, bounded.bytes_omitted
+        )
+    } else {
+        bounded.text
+    }
 }

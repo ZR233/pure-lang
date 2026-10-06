@@ -177,7 +177,6 @@ pub struct BridgeWebSearchSettingsDto {
     pub configured_mode: String,
     pub effective_mode: String,
     pub availability: String,
-    pub selected: bool,
     pub context_size: Option<String>,
     pub allowed_domains: Vec<String>,
     pub country: Option<String>,
@@ -195,7 +194,6 @@ pub struct BridgeDeepSeekWebSearchSettingsDto {
     pub configured_enabled: bool,
     pub effective_enabled: bool,
     pub availability: String,
-    pub selected: bool,
     pub provider_id: Option<String>,
     pub model: Option<String>,
 }

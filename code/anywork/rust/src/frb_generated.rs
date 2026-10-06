@@ -5043,14 +5043,12 @@ impl SseDecode for crate::api::studio::types::settings::BridgeDeepSeekWebSearchS
         let mut var_configuredEnabled = <bool>::sse_decode(deserializer);
         let mut var_effectiveEnabled = <bool>::sse_decode(deserializer);
         let mut var_availability = <String>::sse_decode(deserializer);
-        let mut var_selected = <bool>::sse_decode(deserializer);
         let mut var_providerId = <Option<String>>::sse_decode(deserializer);
         let mut var_model = <Option<String>>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto {
             configured_enabled: var_configuredEnabled,
             effective_enabled: var_effectiveEnabled,
             availability: var_availability,
-            selected: var_selected,
             provider_id: var_providerId,
             model: var_model,
         };
@@ -10283,7 +10281,6 @@ impl SseDecode for crate::api::studio::types::settings::BridgeWebSearchSettingsD
         let mut var_configuredMode = <String>::sse_decode(deserializer);
         let mut var_effectiveMode = <String>::sse_decode(deserializer);
         let mut var_availability = <String>::sse_decode(deserializer);
-        let mut var_selected = <bool>::sse_decode(deserializer);
         let mut var_contextSize = <Option<String>>::sse_decode(deserializer);
         let mut var_allowedDomains = <Vec<String>>::sse_decode(deserializer);
         let mut var_country = <Option<String>>::sse_decode(deserializer);
@@ -10296,7 +10293,6 @@ impl SseDecode for crate::api::studio::types::settings::BridgeWebSearchSettingsD
             configured_mode: var_configuredMode,
             effective_mode: var_effectiveMode,
             availability: var_availability,
-            selected: var_selected,
             context_size: var_contextSize,
             allowed_domains: var_allowedDomains,
             country: var_country,
@@ -13611,7 +13607,6 @@ impl flutter_rust_bridge::IntoDart
             self.configured_enabled.into_into_dart().into_dart(),
             self.effective_enabled.into_into_dart().into_dart(),
             self.availability.into_into_dart().into_dart(),
-            self.selected.into_into_dart().into_dart(),
             self.provider_id.into_into_dart().into_dart(),
             self.model.into_into_dart().into_dart(),
         ]
@@ -19735,7 +19730,6 @@ impl flutter_rust_bridge::IntoDart
             self.configured_mode.into_into_dart().into_dart(),
             self.effective_mode.into_into_dart().into_dart(),
             self.availability.into_into_dart().into_dart(),
-            self.selected.into_into_dart().into_dart(),
             self.context_size.into_into_dart().into_dart(),
             self.allowed_domains.into_into_dart().into_dart(),
             self.country.into_into_dart().into_dart(),
@@ -21587,7 +21581,6 @@ impl SseEncode for crate::api::studio::types::settings::BridgeDeepSeekWebSearchS
         <bool>::sse_encode(self.configured_enabled, serializer);
         <bool>::sse_encode(self.effective_enabled, serializer);
         <String>::sse_encode(self.availability, serializer);
-        <bool>::sse_encode(self.selected, serializer);
         <Option<String>>::sse_encode(self.provider_id, serializer);
         <Option<String>>::sse_encode(self.model, serializer);
     }
@@ -25459,7 +25452,6 @@ impl SseEncode for crate::api::studio::types::settings::BridgeWebSearchSettingsD
         <String>::sse_encode(self.configured_mode, serializer);
         <String>::sse_encode(self.effective_mode, serializer);
         <String>::sse_encode(self.availability, serializer);
-        <bool>::sse_encode(self.selected, serializer);
         <Option<String>>::sse_encode(self.context_size, serializer);
         <Vec<String>>::sse_encode(self.allowed_domains, serializer);
         <Option<String>>::sse_encode(self.country, serializer);

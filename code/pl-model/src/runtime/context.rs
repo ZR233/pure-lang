@@ -21,7 +21,12 @@ impl ModelRuntime {
         &self,
         request: crate::completion::CompletionRequest,
     ) -> Result<crate::completion::CompletionRequest> {
-        project_request(self.endpoint(), self.model(), request)
+        project_request(
+            self.endpoint(),
+            self.model(),
+            self.provider_instance_id(),
+            request,
+        )
     }
 }
 
@@ -50,9 +55,14 @@ pub(super) fn validate(protocol: ProviderWireProtocol, items: &[ModelContextItem
 pub(super) fn project_request(
     endpoint: &crate::provider::ProviderEndpoint,
     model: &crate::model::ModelInfo,
-    request: crate::completion::CompletionRequest,
+    provider_instance_id: &str,
+    mut request: crate::completion::CompletionRequest,
 ) -> Result<crate::completion::CompletionRequest> {
     validate(model.binding.transport.protocol, &request.input)?;
+    drop_unreadable_cross_provider_reasoning(
+        &mut request,
+        crate::runtime::binding_cache_namespace(provider_instance_id, endpoint).as_str(),
+    );
     let capabilities = model
         .capabilities
         .clone()
@@ -102,4 +112,27 @@ pub(super) fn project_request(
 
     request.validate_against(&model.slug, &capabilities)?;
     Ok(request)
+}
+
+/// 出站投影：目标 provider 无法解释的来源 reasoning 不回放。
+///
+/// 原生 reasoning 的 `encrypted_content` 由产生它的 provider 账户/部署加密；切换 provider 后
+/// 目标无法解密（严格兼容网关会以 `invalid_encrypted_content` 失败）。这里按帧已记录的来源隔离
+/// 身份与目标隔离身份比较：来源不同的原生回放只移除 reasoning item，保留 assistant 文本、工具
+/// 身份与工具输出，且不重放工具副作用；来源身份缺失（旧帧或无证据）时维持既有逐字回放语义。
+fn drop_unreadable_cross_provider_reasoning(
+    request: &mut crate::completion::CompletionRequest,
+    target_isolation: &str,
+) {
+    for span in &mut request.replay_spans {
+        let Some(source) = span.source_isolation.as_deref() else {
+            continue;
+        };
+        if source == target_isolation {
+            continue;
+        }
+        span.output.retain(|item| {
+            item.get("type").and_then(serde_json::Value::as_str) != Some("reasoning")
+        });
+    }
 }

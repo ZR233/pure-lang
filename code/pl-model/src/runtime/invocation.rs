@@ -384,7 +384,12 @@ impl InvocationRunner {
         } else {
             context.session.admit().await?
         };
-        let mut request = super::context::project_request(&self.endpoint, &self.model, request)?;
+        let mut request = super::context::project_request(
+            &self.endpoint,
+            &self.model,
+            &self.provider_instance_id,
+            request,
+        )?;
         let inference_timer = InferenceTimer::start();
         let original_trace = context.trace.clone();
         let retry_jitter_key = original_trace
@@ -757,7 +762,12 @@ impl InvocationRunner {
         prompt_cache_key: Option<&str>,
     ) -> Result<(OpenAiRequestBody, InferenceModelObservation)> {
         let protocol = openai_protocol(self.model.binding.transport.protocol);
-        let request = super::context::project_request(&self.endpoint, &self.model, request)?;
+        let request = super::context::project_request(
+            &self.endpoint,
+            &self.model,
+            &self.provider_instance_id,
+            request,
+        )?;
         let mut body = protocol.build_request(&request, &self.model, prompt_cache_key)?;
         body.apply_native_options(&self.native_body);
         if self.purpose == InvocationPurpose::RemoteCompaction {

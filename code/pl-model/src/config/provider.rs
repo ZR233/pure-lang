@@ -7,7 +7,7 @@ use super::{ModelCatalogId, ProviderId, ProviderPresetId, builtin_model_catalog}
 use crate::model::ModelInfo;
 use crate::provider::{
     ApplyPatchToolType, ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities,
-    ToolWirePolicy,
+    StandaloneWebSearchDialect, ToolWirePolicy,
 };
 
 /// Provider 模型目录来源。
@@ -169,6 +169,15 @@ impl ProviderConfig {
                             capabilities.files = Default::default();
                             capabilities.responses_tools = Default::default();
                             capabilities.web_search.hosted_responses = false;
+                            // 仅撤销 DeepSeek 原生 standalone 搜索：非 canonical DeepSeek endpoint
+                            // 必须显式声明该方言。其余 standalone（如 OpenAI `/alpha/search`）
+                            // 保留既有继承语义，不因 base_url 覆盖被禁用。
+                            if matches!(
+                                capabilities.web_search.standalone,
+                                Some(StandaloneWebSearchDialect::DeepSeekAnthropicMessages)
+                            ) {
+                                capabilities.web_search.standalone = None;
+                            }
                         }
                         capabilities
                     })

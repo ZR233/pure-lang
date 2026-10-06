@@ -123,9 +123,7 @@ impl StudioRuntime {
             config.deepseek_web_search.enabled,
         )?;
         let mut hosted = search.hosted_tools(&config.web_search)?;
-        if search.visibility() != pl_tool::search::ToolVisibilityConstraint::Exclusive {
-            hosted.extend(crate::programmatic::hosted_tool(route));
-        }
+        hosted.extend(crate::programmatic::hosted_tool(route));
         // Hash sorted structured inputs in memory. Credentials never enter logs, storage or model context.
         let key = crate::hash::canonical_json_hash(&serde_json::json!({
             "provider": route.provider_id, "endpoint": route.endpoint, "model": route.model,

@@ -189,6 +189,9 @@ abstract class StudioApi {
     int expectedSettingsRevision,
     DeepSeekWebSearchSettingsCommand command,
   );
+
+  /// 重新读取 backend canonical settings 快照（不依赖本地缓存）。
+  Future<SettingsStateSnapshot> readSettingsState();
   Future<ProviderUsageStateSnapshot> checkProviderUsage();
   Future<SkillsStateSnapshot> readSkillsState(String projectId);
   Future<SkillsStateSnapshot> discoverSkills(String projectId);
@@ -1496,6 +1499,12 @@ class FrbStudioApi
         ),
       ),
     );
+  }
+
+  @override
+  Future<SettingsStateSnapshot> readSettingsState() async {
+    await _ensureReady();
+    return _settingsStateFromFrb(await _bridgeCall(frb.readSettingsState));
   }
 
   @override

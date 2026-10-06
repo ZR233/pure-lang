@@ -322,9 +322,7 @@ impl StudioThreadFactory {
                     error
                 }
             })?;
-        let exposure = if child
-            || prepared.visibility == pl_tool::search::ToolVisibilityConstraint::Exclusive
-        {
+        let exposure = if child {
             crate::thread_assembler::AgentControlExposure::Disabled
         } else {
             let mode_id = crate::studio::thread_projection::saved_mode(snapshot)

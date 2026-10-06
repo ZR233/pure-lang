@@ -272,7 +272,10 @@ pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, Model
                 let mut encoded = CompletionRequest::builder().input(input).build();
                 encoded.replay_spans = replay_spans;
                 encoded
-                    .append_response(&frame.receipt.response)
+                    .append_response_from(
+                        &frame.receipt.response,
+                        Some(frame.receipt.binding.isolation.as_str()),
+                    )
                     .map_err(|error| failure(ModelFailureKind::IncompatibleContext, error))?;
                 input = encoded.input;
                 replay_spans = encoded.replay_spans;

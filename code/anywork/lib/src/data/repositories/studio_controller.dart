@@ -32,6 +32,13 @@ class StudioController extends _$StudioController {
   int _chatWindowOperation = 0;
   Future<void>? _openingChatWindow;
 
+  /// 新会话 model route 保存的串行链尾：快速切换模型/effort 按顺序落库，每次执行时重读最新
+  /// revision，避免并发 CAS 互冲；链本身永不失败，单次失败由 [_modeRouteSaveError] 记录。
+  Future<void> _modeRouteSaveChain = Future<void>.value();
+
+  /// 最近一次新会话 model route 保存失败；成功后清空。submit 前若仍存在则拒绝用旧模型启动。
+  Object? _modeRouteSaveError;
+
   /// 固定活动条展开详情的在途请求：同一活动身份只保留一个，避免每 token 排队全量读。
   Future<void>? _activityDetailInFlight;
   String? _activityDetailInFlightThread;
@@ -261,6 +268,8 @@ class StudioController extends _$StudioController {
         current.newThreadMode == mode) {
       return;
     }
+    // 切换 mode 后，上一 mode 的未落库 model 意图不再相关，清除其失败标记以免误挡提交。
+    _modeRouteSaveError = null;
     state = AsyncData(
       current.copyWith(
         newThreadModeByProject: {
@@ -1615,6 +1624,36 @@ class StudioController extends _$StudioController {
       ),
     );
 
+    // 先等所选 mode 的在途 model 路由保存落库，runtime 才会读到 canonical 并按所选模型创建
+    // root；不得用本地乐观模型抢先创建。保存失败则展示错误并终止本次提交（保留草稿）。
+    await _awaitModeRouteSaves();
+    if (!ref.mounted) return;
+    final routeError = _modeRouteSaveError;
+    if (routeError != null) {
+      final latest = state.value;
+      if (latest == null) return;
+      final active =
+          latest.newThreadComposerByProject[projectId] ??
+          const ComposerThreadState.idle();
+      final failed = active.fail(
+        routeError,
+        submissionRevision: submissionRevision,
+      );
+      state = AsyncData(
+        latest.copyWith(
+          newThreadComposerByProject: {
+            ...latest.newThreadComposerByProject,
+            projectId: failed,
+          },
+        ),
+      );
+      return;
+    }
+    final submitMode = state.value?.newThreadMode ?? current.newThreadMode;
+    final submitWorkspaceMode =
+        state.value?.newThreadWorkspaceMode.id ??
+        current.newThreadWorkspaceMode.id;
+
     final StartNewThreadResult result;
     try {
       result = await _api.startNewThread(
@@ -1626,8 +1665,8 @@ class StudioController extends _$StudioController {
             for (final attachment in composer.attachments) attachment.id,
           ],
         ),
-        current.newThreadMode,
-        workspaceMode: current.newThreadWorkspaceMode.id,
+        submitMode,
+        workspaceMode: submitWorkspaceMode,
       );
     } catch (error) {
       if (!ref.mounted) return;
@@ -1891,17 +1930,54 @@ class StudioController extends _$StudioController {
     if (latest != null) state = AsyncData(applySettingsState(latest, next));
   }
 
+  /// 排队保存新会话 mode 的路由（provider/model/effort）。
+  ///
+  /// 返回的 future 完成即代表该次保存已结束：成功应用到 canonical，或失败已记录并展示。
+  /// 多次快速切换通过 [_modeRouteSaveChain] 串行执行，每次执行时重读最新 settings revision，
+  /// 因此不会并发 CAS 互冲；新会话提交进行中不再接受新的路由变更，保证 submit 等待的队列有界。
   Future<void> setModeModelRoute({
     required ThreadModeId mode,
     required String providerId,
     required String model,
     String? effort,
+  }) {
+    final current = state.value;
+    if (current == null ||
+        current.newThreadMode != mode ||
+        current.newThreadComposer.isSubmissionPending) {
+      return Future<void>.value();
+    }
+    final task = _modeRouteSaveChain.then(
+      (_) => _runSetModeModelRoute(
+        mode: mode,
+        providerId: providerId,
+        model: model,
+        effort: effort,
+      ),
+    );
+    _modeRouteSaveChain = task.then((_) {}, onError: (_) {});
+    return task;
+  }
+
+  Future<void> _runSetModeModelRoute({
+    required ThreadModeId mode,
+    required String providerId,
+    required String model,
+    String? effort,
   }) async {
+    if (!ref.mounted) return;
     final current = state.value;
     if (current == null || current.newThreadMode != mode) return;
     final target = _findModel(current, providerId, model);
     if (target == null ||
         !_acceptsAttachments(current.newThreadComposer, target)) {
+      // 当前 mode 的这一选择无法落库：记录并经既有 composer 错误通道展示，submit 据此拒绝用
+      // 旧模型启动 root（不猜 provider 可用性，只报告所选路由不可用）。
+      final error = StateError(
+        'Selected model route is unavailable: $providerId / $model',
+      );
+      _modeRouteSaveError = error;
+      reportComposerFailure(error);
       return;
     }
     final route = current.modeModelRoutes
@@ -1911,17 +1987,44 @@ class StudioController extends _$StudioController {
         route.providerId == providerId &&
         route.model == model &&
         (effort == null || route.effort == effort)) {
+      // 目标与 canonical 一致：没有待保存意图，清除仍属于当前 mode 的历史失败。
+      if (state.value?.newThreadMode == mode) _modeRouteSaveError = null;
       return;
     }
-    final next = await _api.setModeModelRoute(
-      expectedSettingsRevision: current.settingsRevision,
-      mode: mode,
-      providerId: providerId,
-      model: model,
-      effort: effort ?? target.reasoningEfforts.firstOrNull,
-    );
-    final latest = state.value;
-    if (latest != null) state = AsyncData(applySettingsState(latest, next));
+    try {
+      final next = await _api.setModeModelRoute(
+        expectedSettingsRevision: current.settingsRevision,
+        mode: mode,
+        providerId: providerId,
+        model: model,
+        effort: effort ?? target.reasoningEfforts.firstOrNull,
+      );
+      // await 期间 controller 可能已被回收：不得再读取/写入 state。
+      if (!ref.mounted) return;
+      final latest = state.value;
+      if (latest != null) state = AsyncData(applySettingsState(latest, next));
+      // 只清除仍属于当前 mode 的失败标记，避免吞掉其它 mode 的实际失败。
+      if (state.value?.newThreadMode == mode) _modeRouteSaveError = null;
+    } catch (error) {
+      // 回收后不得读取/写入 state，也不把回收后的失败写进 UI。
+      if (!ref.mounted) return;
+      // 期间换 mode 时，旧 mode 的失败不应覆盖新 mode 的标记或误挡 submit。
+      if (state.value?.newThreadMode == mode) {
+        _modeRouteSaveError = error;
+        reportComposerFailure(error);
+      }
+    }
+  }
+
+  /// 等待所有在途新会话 mode 路由保存结束。
+  ///
+  /// 提交进行中不再接受新的路由变更，因此这里最多再多等一轮即稳定，不会无限等待。
+  Future<void> _awaitModeRouteSaves() async {
+    while (true) {
+      final tail = _modeRouteSaveChain;
+      await tail;
+      if (identical(tail, _modeRouteSaveChain)) return;
+    }
   }
 
   Future<void> setThreadModelRoute({
@@ -2114,16 +2217,24 @@ class StudioController extends _$StudioController {
     });
   }
 
-  Future<void> saveWebSearchSettings(WebSearchSettingsCommand command) async {
-    await _saveConfigSettings(
+  /// 保存网页搜索设置，并返回应用后的 canonical settings 快照（必非空）。
+  ///
+  /// 调用方用返回值把已发布的 canonical 值同步回草稿；状态不可读或保存失败都会抛出
+  /// 类型化 [StudioFailure]，不返回 null，避免把未保存当成成功。其他 `save*` 消费者
+  /// 忽略返回值，保持既有行为。
+  Future<SettingsStateSnapshot> saveWebSearchSettings(
+    WebSearchSettingsCommand command,
+  ) {
+    return _saveConfigSettings(
       (revision) => _api.saveWebSearchSettings(revision, command),
     );
   }
 
-  Future<void> saveDeepSeekWebSearchSettings(
+  /// 保存 DeepSeek 原生网页搜索开关，并返回应用后的 canonical settings 快照（必非空）。
+  Future<SettingsStateSnapshot> saveDeepSeekWebSearchSettings(
     DeepSeekWebSearchSettingsCommand command,
-  ) async {
-    await _saveConfigSettings(
+  ) {
+    return _saveConfigSettings(
       (revision) => _api.saveDeepSeekWebSearchSettings(revision, command),
     );
   }
@@ -2160,15 +2271,64 @@ class StudioController extends _$StudioController {
         expectedLeaseRevision: worktree.leaseRevision,
       );
 
-  Future<void> _saveConfigSettings(
+  /// 统一保存 helper：返回已应用的 canonical settings 快照（必非空）。
+  ///
+  /// 状态不可读时抛出 [StudioFailureCode.notInitialized]，绝不返回 null 假冒成功。
+  /// revision/CAS 冲突（[StudioFailureCode.staleRevision]/[StudioFailureCode.conflict]）
+  /// 时先重新读取 backend canonical settings 并应用，再原样抛出冲突错误，让调用方基于
+  /// 最新事实源显式重提交；刷新失败同样保留原冲突错误事实。
+  Future<SettingsStateSnapshot> _saveConfigSettings(
     Future<SettingsStateSnapshot> Function(int revision) request,
   ) async {
     final current = state.value;
-    if (current == null) return;
-    final next = await request(current.settingsRevision);
+    if (current == null) throw _settingsNotReady();
+    final next = await _requestSettings(request, current.settingsRevision);
     final latest = state.value;
-    if (latest != null) state = AsyncData(applySettingsState(latest, next));
+    if (latest != null) {
+      final updated = applySettingsState(latest, next);
+      state = AsyncData(updated);
+      return updated.settingsState;
+    }
+    return next;
   }
+
+  /// 执行保存请求；revision/CAS 冲突时先刷新 canonical 再抛出原错误。
+  Future<SettingsStateSnapshot> _requestSettings(
+    Future<SettingsStateSnapshot> Function(int revision) request,
+    int revision,
+  ) async {
+    try {
+      return await request(revision);
+    } on StudioFailure catch (error, stackTrace) {
+      if (error.code == StudioFailureCode.staleRevision ||
+          error.code == StudioFailureCode.conflict) {
+        await _refreshCanonicalSettings();
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+  }
+
+  /// 从 backend 重新读取 settings 并应用到 controller 状态。
+  ///
+  /// 仅刷新事实源，不重放保存；刷新失败时保留原错误事实，因此这里吞掉刷新异常。
+  Future<void> _refreshCanonicalSettings() async {
+    try {
+      final snapshot = await _api.readSettingsState();
+      final latest = state.value;
+      if (latest != null) {
+        state = AsyncData(applySettingsState(latest, snapshot));
+      }
+    } catch (_) {
+      // 刷新失败：原冲突错误仍是用户可见的事实，不在此覆盖。
+    }
+  }
+
+  StudioFailure _settingsNotReady() => const StudioFailure(
+    code: StudioFailureCode.notInitialized,
+    message: 'Settings are not available yet',
+    retryable: false,
+    correlationId: 'client-settings-not-ready',
+  );
 
   Future<void> refreshModelCatalog(String providerId) async {
     final next = await _api.refreshModelCatalog(providerId);

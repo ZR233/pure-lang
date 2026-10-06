@@ -26,8 +26,16 @@ use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 mod context_replay_recovery;
+mod web_search;
 pub use context_replay_recovery::{
     ReplayExpectation, gui_context_replay_recovery_script, replay_output, replay_tool_arguments,
+};
+pub use web_search::{
+    CHILD_PROFILE_ID, DEEPSEEK_MESSAGES_PATH, DEEPSEEK_SEARCH_KEY, MARK_CHILD_SEARCH,
+    MARK_DEEPSEEK_SEARCH, MARK_EXPECT_NO_SEARCH_TOOLS, MARK_EXPECT_SEARCH_TOOLS, MARK_MCP_SEARCH,
+    MARK_OPENAI_SEARCH, MARK_SLOW_RESPONSE, MARK_SPAWN_CHILD, MCP_KEY, MCP_PATH, MCP_SERVER_ID,
+    MCP_TOOL_NAME, OPENAI_SEARCH_KEY, OPENAI_SEARCH_PATH, WebSearchFault, WebSearchOptions,
+    gui_web_search_script,
 };
 
 /// The GUI script accepts exactly this user prompt for its sole completion step.
@@ -39,7 +47,7 @@ pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
 /// The coordinator's ready-file check, the fixture CLI parser and the script
 /// selection all read this single list, so a scenario can no longer be accepted
 /// by one of them and rejected by another.
-pub const GUI_SCENARIOS: [&str; 14] = [
+pub const GUI_SCENARIOS: [&str; 15] = [
     "gui",
     "storage-compaction",
     "stress",
@@ -54,6 +62,7 @@ pub const GUI_SCENARIOS: [&str; 14] = [
     "tool-scroll",
     "websocket-recovery",
     "call-lifecycle-recovery",
+    "web-search",
 ];
 
 /// Native compaction exhausts its budget, then a fresh input succeeds and waits
@@ -1159,6 +1168,15 @@ struct AppState {
     script: Arc<Mutex<ScriptState>>,
     stopping: CancellationToken,
     stress: Arc<Mutex<StressProgress>>,
+    web_search: Arc<Mutex<web_search::WebSearchState>>,
+}
+
+/// Optional fixture behaviours layered on top of the strict step script.
+#[derive(Debug, Clone, Default)]
+pub struct FixtureOptions {
+    /// Serve the native web-search / MCP acceptance endpoints. `None` keeps the
+    /// listener limited to the classic conversation surfaces.
+    pub web_search: Option<WebSearchOptions>,
 }
 
 /// A listening fixture. Drop aborts the listener; `finish` additionally verifies the script.
@@ -1171,8 +1189,14 @@ pub struct FixtureServer {
 
 impl FixtureServer {
     pub async fn start(steps: Vec<Step>) -> Result<Self> {
+        Self::start_with_options(steps, FixtureOptions::default()).await
+    }
+
+    /// Starts the fixture with optional extra services enabled.
+    pub async fn start_with_options(steps: Vec<Step>, options: FixtureOptions) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
+        let web_search_enabled = options.web_search.is_some();
         let state = AppState {
             script: Arc::new(Mutex::new(ScriptState {
                 steps,
@@ -1180,17 +1204,49 @@ impl FixtureServer {
             })),
             stopping: CancellationToken::new(),
             stress: Arc::new(Mutex::new(StressProgress::default())),
+            web_search: Arc::new(Mutex::new(web_search::WebSearchState::new(
+                options.web_search.unwrap_or_default(),
+            ))),
+        };
+        let responses_route = if web_search_enabled {
+            post(web_search::responses)
+        } else {
+            post(handle)
         };
         let app = Router::new()
             .route(
                 "/v1/responses",
-                post(handle).get(websocket_route).fallback(unexpected_route),
+                responses_route
+                    .get(websocket_route)
+                    .fallback(unexpected_route),
             )
             .route(
                 "/v1/chat/completions",
                 post(handle).fallback(unexpected_route),
             )
             .route("/v1/files", post(files).fallback(unexpected_route))
+            .route(
+                "/v1/alpha/search",
+                post(web_search::openai_search).fallback(unexpected_route),
+            )
+            .route(
+                "/alpha/search",
+                post(web_search::openai_search).fallback(unexpected_route),
+            )
+            .route(
+                "/v1/anthropic/v1/messages",
+                post(web_search::deepseek_messages).fallback(unexpected_route),
+            )
+            .route(
+                "/anthropic/v1/messages",
+                post(web_search::deepseek_messages).fallback(unexpected_route),
+            )
+            .route(
+                "/mcp",
+                post(web_search::mcp_post)
+                    .get(web_search::mcp_get)
+                    .fallback(unexpected_route),
+            )
             .fallback(unexpected_route)
             .with_state(state.clone());
         let (shutdown, receiver) = oneshot::channel();

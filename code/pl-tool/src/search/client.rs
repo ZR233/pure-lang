@@ -47,8 +47,12 @@ impl WebSearchClient {
                     "standalone web search requires a non-empty bearer token".to_string(),
                 )
             })?;
+        // Never follow redirects (credentialed requests must not be replayed to another host)
+        // and never retry implicitly; a failed standalone search is reported to the caller.
         let client = reqwest::Client::builder()
             .timeout(timeout)
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .build()
             .map_err(|error| {
                 PureError::ConfigError(format!("failed to build web search client: {error}"))

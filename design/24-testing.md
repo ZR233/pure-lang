@@ -52,7 +52,9 @@ Studio 专项场景还通过真实 SQLite 写库拒绝验证两个在途工具�
 协议及期望轮次返回固定 HTTP/SSE 或 WebSocket 事件流。它验证实际请求的重要字段；
 未登记的请求、错序、多余调用和错误协议明确失败，不回退到成功文本，也不访问真实
 供应商。OpenAI 已实现的 Responses HTTP/WS 与兼容 Chat 使用共享协议样本；DeepSeek
-和智谱只为原生选项、媒体、上传、搜索方言及使用量差异添加独立样本。
+和智谱只为原生选项、媒体、上传、搜索方言及使用量差异添加独立样本。DeepSeek 原生独立搜索
+（Anthropic 兼容 Messages）不进入会话 transport，由独立的 loopback HTTP 样本证明其请求、
+鉴权与解析。
 
 模拟只证明当前实现与约定样本的行为，不证明供应商线上接口的最新兼容性。真实接口
 保持显式人工观察，采集证据后由人判断，不参与确定性提交门禁。
@@ -75,6 +77,18 @@ DeepSeek 上传与搜索方言、智谱 Chat 与 Coding Plan、远程压缩、�
 恢复及 SQLite 持久化。独立的 Studio `/alpha/search` 编排、GUI 操作、非图片媒体、
 真实供应商后端和其他 crate 的权限/进程/迁移不在这两库的模拟自动测试证明范围内；
 增减协议能力时应同步维护场景和缺口。
+
+`pl-model/tests/deepseek_search.rs` 通过公开的 `pl_model::provider::deepseek::search` 域和真实
+loopback HTTP 服务核对 DeepSeek 原生独立搜索：native Messages 请求形状与 `x-api-key` /
+`anthropic-version` 鉴权、base_url path 前缀保真与 `/v1` 别名归一化、非法 base_url 拒绝、
+`text.citations` 与 `web_search_tool_result` 的 URL 首现去重与片段合并、合法空结果、
+`web_search_tool_result_error`、缺失结果块、非 JSON / 畸形 JSON / 非 UTF-8 正文的无损留存与
+有界 JSON 错误、重定向不被跟随、取消与
+整体超时，以及缺凭据 / 非法参数 / 空 query 时不发出请求；能力门控用例核对 canonical preset
+声明、非 canonical PresetDefaults 撤销与 Explicit opt-in。完整能力用例
+`deepseek_search_uses_canonical_provider_and_native_sources` 消费 canonical DeepSeek preset 的
+standalone capability 并对临时 HTTP 环境执行 native 请求。确定性样本只证明客户端请求与解析
+行为，不证明供应商线上接口的最新兼容性；真实供应商保持显式人工观察。
 
 完整回放用例通过无数据库的真实 Thread 和模拟供应商验证 commentary、final、原生 phase、
 工具原文、HTTP/WS/Chat 前缀以及 checkpoint 恢复；摘要和原生压缩必须消费相同材料。

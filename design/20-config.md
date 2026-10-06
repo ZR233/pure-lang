@@ -382,21 +382,34 @@ Studio 保留两段互不混用的顶层配置。`[web_search]` 只配置 OpenAI
 近似位置均可省略。`[deepseek_web_search]` 只包含 `enabled`，默认 `true`；缺失整段时同样
 按启用处理。DeepSeek 不接受 cached/indexed、域名、位置或 context size 等 OpenAI 专属字段。
 
-规划先独立解析两边状态，再统一仲裁：只有当前 route 的 endpoint 与模型显式声明 DeepSeek
-hosted dialect，且开关启用时，才选择该 hosted 搜索并保持其他普通工具可见。官方 DeepSeek
-Responses endpoint 不声明该能力，因为该 API 会忽略 `web_search` builtin；内置 DeepSeek 模型
-沿用 OpenAI standalone/hosted 规划，以 function tool 执行搜索。两边均不可用时分别保留
-`disabled`、`missingCredential`、`providerUnsupported` 或 `modelUnsupported`，不能合并为模糊状态。
+搜索不是单选：`StudioWebSearchSettings` 与 `StudioDeepSeekWebSearchSettings` 只暴露
+configured/effective/availability、provider_id/model 与原配置开关（`mode` / `enabled`），
+不再有 `selected` 字段，也不存在互斥的 exclusive 路线。canonical DeepSeek preset 声明
+DeepSeek 原生 standalone 能力；preset 实例覆盖非 canonical base_url 时由 PresetDefaults 仅撤销
+该 DeepSeek 原生方言（连同其它 hosted/Responses 能力），非 canonical DeepSeek endpoint 必须显式
+声明该方言。此撤销不改变既有 OpenAI `OpenAiSearchApi` 继承语义：覆盖非 canonical base_url 的
+OpenAI endpoint 仍保留 `/alpha/search` standalone。显式 capability 仍可重新声明。
 
-配置值与生效值必须分离：没有有凭据的 OpenAI preset 时保留 configured mode，但 effective
-mode 为 `disabled`——此状态下工具规划不得注册独立搜索或 hosted 搜索，运行时不得创建
-独立搜索客户端。可用账户优先当前 turn 的 OpenAI provider；否则按 provider id 稳定排序，
-并按 explorer → planner → executor → worktree_executor → reviewer 选择首个指向该 provider
-的有效模型，最后才回退到目录首个模型。DeepSeek 被选中时，OpenAI 仍可显示 availability
-为 `available`，但 `selected = false` 且 effective mode 为 `disabled`。`cached` 映射为
-禁止外部实时访问；`indexed` 映射为显式 indexed 访问；`live` 允许实时外网；`disabled`
-完全关闭该路径。两张卡片的保存命令都携带 Settings CAS revision，成功后以完整 canonical
-snapshot 回写（仲裁机制见 [06](./06-model.md)）。
+设置页运行独立的 service planner，不依赖会话、route 或当前模型：每条后端只按 provider
+capability 与凭据解析 configured/effective/availability、provider_id 与 model。OpenAI
+standalone 服务优先使用该 provider catalog 的 `gpt-6-sol`，否则用该 provider 首个有效模型；
+provider 之间按 ID 稳定排序。DeepSeek standalone 服务默认模型 `deepseek-flash`；线程内优先
+当前支持原生搜索的 DeepSeek provider，否则同样按 ID 排序。服务模型与会话模型独立，不再按
+explorer / planner / executor / worktree_executor / reviewer role route 选模型。
+
+实际 thread 消费时才用当前模型是否支持 function calling 决定本轮是否注册对应 standalone
+搜索工具，它不改变设置里已解析的服务可用性。OpenAI standalone、DeepSeek 原生 standalone 与
+可用的 hosted 搜索互不抢占，也不隐藏 MCP、LSP、文件和命令工具；只有 DeepSeek 搜索工具的
+描述写明收费兜底，其他搜索不分优先级、不按 provider 排序、不自动跨供应商回退，也不因某一路
+可用而停用另一路。
+
+配置值与生效值必须分离：缺少有凭据的 provider 时保留 configured mode，但 effective mode
+为 `disabled`——此状态下不得注册对应 standalone 或 hosted 搜索工具，也不得为它创建客户端。
+服务 planner 的每后端可用性只看 provider capability 与凭据（`disabled` / `missingCredential` /
+`providerUnsupported`），不因当前会话角色或模型不可用而降级；当前模型能力只在真实 thread
+消费时生效。`cached` 映射为禁止外部实时访问；`indexed` 映射为显式 indexed 访问；`live` 允许
+实时外网；`disabled` 完全关闭该路径。两张卡片的保存命令都携带 Settings CAS revision，成功后
+以完整 canonical snapshot 回写（多后端仲裁见 [06](./06-model.md)）。
 
 ## 20.13 LSP 自定义 server 配置
 

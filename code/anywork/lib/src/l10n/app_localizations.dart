@@ -3191,12 +3191,6 @@ abstract class AppLocalizations {
   /// **'Available'**
   String get settingsWebSearchAvailable;
 
-  /// No description provided for @settingsWebSearchAvailableNotSelected.
-  ///
-  /// In en, this message translates to:
-  /// **'Available, not selected'**
-  String get settingsWebSearchAvailableNotSelected;
-
   /// No description provided for @settingsWebSearchDisabled.
   ///
   /// In en, this message translates to:
@@ -3251,6 +3245,12 @@ abstract class AppLocalizations {
   /// **'Save web search'**
   String get settingsSaveWebSearch;
 
+  /// No description provided for @settingsWebSearchUnsaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Unsaved search settings'**
+  String get settingsWebSearchUnsaved;
+
   /// No description provided for @settingsDeepSeekWebSearchTitle.
   ///
   /// In en, this message translates to:
@@ -3260,8 +3260,14 @@ abstract class AppLocalizations {
   /// No description provided for @settingsDeepSeekWebSearchSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Let the current eligible DeepSeek Responses model search the web. It takes priority over the OpenAI fallback.'**
+  /// **'Other available web search is tried first; DeepSeek web search is used only as a billed fallback when other search is unconfigured, unavailable, or fails.'**
   String get settingsDeepSeekWebSearchSubtitle;
+
+  /// No description provided for @settingsDeepSeekWebSearchProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'DeepSeek provider'**
+  String get settingsDeepSeekWebSearchProvider;
 
   /// No description provided for @settingsDeepSeekWebSearchConfigured.
   ///

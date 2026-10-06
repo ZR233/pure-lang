@@ -127,6 +127,18 @@ impl CompletionRequest {
         &mut self,
         response: &super::CompletionResponse,
     ) -> pl_protocol::Result<()> {
+        self.append_response_from(response, None)
+    }
+
+    /// 追加已提交响应，并记录产生该原生回放的 provider 隔离身份。
+    ///
+    /// 出站投影据此判断原生 reasoning 的 `encrypted_content` 能否被目标 provider 解释；
+    /// 隔离身份缺失时维持既有逐字回放语义。
+    pub(crate) fn append_response_from(
+        &mut self,
+        response: &super::CompletionResponse,
+        source_isolation: Option<&str>,
+    ) -> pl_protocol::Result<()> {
         let Some(replay) = response.replay.as_ref() else {
             self.input.extend(super::replay::recorded_input(response)?);
             return Ok(());
@@ -137,6 +149,7 @@ impl CompletionRequest {
                 start: self.input.len(),
                 semantic: semantic.clone(),
                 output: output.clone(),
+                source_isolation: source_isolation.map(str::to_owned),
             });
         }
         self.input.extend(semantic);

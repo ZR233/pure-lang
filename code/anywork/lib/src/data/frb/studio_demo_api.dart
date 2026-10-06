@@ -64,7 +64,6 @@ class DemoStudioApi
   WebSearchSettingsView _webSearch = const WebSearchSettingsView(
     effectiveMode: 'disabled',
     availability: 'available',
-    selected: false,
     providerId: 'openai',
     model: 'gpt-5',
   );
@@ -72,7 +71,6 @@ class DemoStudioApi
       const DeepSeekWebSearchSettingsView(
         effectiveEnabled: true,
         availability: 'available',
-        selected: true,
         providerId: 'deepseek-primary',
         model: 'deepseek-flash',
       );
@@ -2250,7 +2248,6 @@ class DemoStudioApi
       configuredMode: command.mode,
       effectiveMode: command.mode,
       availability: command.mode == 'disabled' ? 'disabled' : 'available',
-      selected: command.mode != 'disabled' && !_deepSeekWebSearch.selected,
       contextSize: command.contextSize,
       allowedDomains: command.allowedDomains,
       country: command.country,
@@ -2273,25 +2270,13 @@ class DemoStudioApi
     _deepSeekWebSearch = _deepSeekWebSearch.withConfiguredEnabled(
       command.enabled,
     );
-    if (!command.enabled && _webSearch.isAvailable) {
-      _webSearch = WebSearchSettingsView(
-        configuredMode: _webSearch.configuredMode,
-        effectiveMode: _webSearch.configuredMode,
-        availability: _webSearch.availability,
-        selected: true,
-        contextSize: _webSearch.contextSize,
-        allowedDomains: _webSearch.allowedDomains,
-        country: _webSearch.country,
-        region: _webSearch.region,
-        city: _webSearch.city,
-        timezone: _webSearch.timezone,
-        providerId: _webSearch.providerId,
-        model: _webSearch.model,
-      );
-    }
     _settingsRevision += 1;
     return (await readStudioState()).settingsState;
   }
+
+  @override
+  Future<SettingsStateSnapshot> readSettingsState() async =>
+      (await readStudioState()).settingsState;
 
   @override
   Future<ProviderUsageStateSnapshot> checkProviderUsage() async {

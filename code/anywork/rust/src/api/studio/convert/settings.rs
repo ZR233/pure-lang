@@ -155,7 +155,6 @@ pub(crate) fn bridge_web_search_settings(
         configured_mode: settings.configured_mode,
         effective_mode: settings.effective_mode,
         availability: settings.availability,
-        selected: settings.selected,
         context_size: settings.context_size,
         allowed_domains: settings.allowed_domains,
         country: settings.country,
@@ -174,7 +173,6 @@ pub(crate) fn bridge_deepseek_web_search_settings(
         configured_enabled: settings.configured_enabled,
         effective_enabled: settings.effective_enabled,
         availability: settings.availability,
-        selected: settings.selected,
         provider_id: settings.provider_id,
         model: settings.model,
     }

@@ -3,10 +3,11 @@ use std::{fs, path::PathBuf, sync::Arc};
 use anyhow::{Context, Result, bail, ensure};
 use clap::Parser;
 use pl_provider_fixture::{
-    FixtureLiveStatus, FixtureServer, GUI_SCENARIOS, ReadyFile, gui_history_fault_script,
-    gui_history_lock_script, gui_plan_recovery_script, gui_realtime_script, gui_script,
-    gui_statistics_script, gui_stress_body_large_script, gui_stress_body_script, gui_stress_script,
-    gui_tool_scroll_script, gui_websocket_recovery_script,
+    FixtureLiveStatus, FixtureOptions, FixtureServer, GUI_SCENARIOS, ReadyFile, WebSearchFault,
+    WebSearchOptions, gui_history_fault_script, gui_history_lock_script, gui_plan_recovery_script,
+    gui_realtime_script, gui_script, gui_statistics_script, gui_stress_body_large_script,
+    gui_stress_body_script, gui_stress_script, gui_tool_scroll_script, gui_web_search_script,
+    gui_websocket_recovery_script,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -24,6 +25,9 @@ struct Args {
     /// coordinator can prove a window without provider traffic mid-run.
     #[arg(long)]
     status_file: Option<PathBuf>,
+    /// Optional web-search fault so the operator can observe an error path.
+    #[arg(long, value_name = "NAME")]
+    fault: Option<String>,
 }
 
 #[tokio::main]
@@ -49,9 +53,20 @@ async fn main() -> Result<()> {
         "context-replay-recovery" => pl_provider_fixture::gui_context_replay_recovery_script(),
         "websocket-recovery" => gui_websocket_recovery_script(),
         "call-lifecycle-recovery" => pl_provider_fixture::gui_call_lifecycle_recovery_script(),
+        "web-search" => gui_web_search_script(),
         value => bail!("unknown fixture scenario: {value}"),
     };
-    let fixture = Arc::new(FixtureServer::start(steps).await?);
+    let fault = match args.fault.as_deref() {
+        None => None,
+        Some(value) => Some(
+            WebSearchFault::parse(value)
+                .ok_or_else(|| anyhow::anyhow!("unknown fixture fault: {value}"))?,
+        ),
+    };
+    let options = FixtureOptions {
+        web_search: (scenario == "web-search").then_some(WebSearchOptions { fault }),
+    };
+    let fixture = Arc::new(FixtureServer::start_with_options(steps, options).await?);
     // The status watcher is a plain reader of the same script state the strict
     // match writes, so it can never reorder or mask a request; it only rewrites
     // the counters file when they change.

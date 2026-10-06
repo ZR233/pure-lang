@@ -5808,15 +5808,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   dco_decode_bridge_deep_seek_web_search_settings_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeDeepSeekWebSearchSettingsDto(
       configuredEnabled: dco_decode_bool(arr[0]),
       effectiveEnabled: dco_decode_bool(arr[1]),
       availability: dco_decode_String(arr[2]),
-      selected: dco_decode_bool(arr[3]),
-      providerId: dco_decode_opt_String(arr[4]),
-      model: dco_decode_opt_String(arr[5]),
+      providerId: dco_decode_opt_String(arr[3]),
+      model: dco_decode_opt_String(arr[4]),
     );
   }
 
@@ -9419,21 +9418,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12)
-      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return BridgeWebSearchSettingsDto(
       configuredMode: dco_decode_String(arr[0]),
       effectiveMode: dco_decode_String(arr[1]),
       availability: dco_decode_String(arr[2]),
-      selected: dco_decode_bool(arr[3]),
-      contextSize: dco_decode_opt_String(arr[4]),
-      allowedDomains: dco_decode_list_String(arr[5]),
-      country: dco_decode_opt_String(arr[6]),
-      region: dco_decode_opt_String(arr[7]),
-      city: dco_decode_opt_String(arr[8]),
-      timezone: dco_decode_opt_String(arr[9]),
-      providerId: dco_decode_opt_String(arr[10]),
-      model: dco_decode_opt_String(arr[11]),
+      contextSize: dco_decode_opt_String(arr[3]),
+      allowedDomains: dco_decode_list_String(arr[4]),
+      country: dco_decode_opt_String(arr[5]),
+      region: dco_decode_opt_String(arr[6]),
+      city: dco_decode_opt_String(arr[7]),
+      timezone: dco_decode_opt_String(arr[8]),
+      providerId: dco_decode_opt_String(arr[9]),
+      model: dco_decode_opt_String(arr[10]),
     );
   }
 
@@ -12765,14 +12763,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_configuredEnabled = sse_decode_bool(deserializer);
     var var_effectiveEnabled = sse_decode_bool(deserializer);
     var var_availability = sse_decode_String(deserializer);
-    var var_selected = sse_decode_bool(deserializer);
     var var_providerId = sse_decode_opt_String(deserializer);
     var var_model = sse_decode_opt_String(deserializer);
     return BridgeDeepSeekWebSearchSettingsDto(
       configuredEnabled: var_configuredEnabled,
       effectiveEnabled: var_effectiveEnabled,
       availability: var_availability,
-      selected: var_selected,
       providerId: var_providerId,
       model: var_model,
     );
@@ -17485,7 +17481,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_configuredMode = sse_decode_String(deserializer);
     var var_effectiveMode = sse_decode_String(deserializer);
     var var_availability = sse_decode_String(deserializer);
-    var var_selected = sse_decode_bool(deserializer);
     var var_contextSize = sse_decode_opt_String(deserializer);
     var var_allowedDomains = sse_decode_list_String(deserializer);
     var var_country = sse_decode_opt_String(deserializer);
@@ -17498,7 +17493,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       configuredMode: var_configuredMode,
       effectiveMode: var_effectiveMode,
       availability: var_availability,
-      selected: var_selected,
       contextSize: var_contextSize,
       allowedDomains: var_allowedDomains,
       country: var_country,
@@ -21534,7 +21528,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.configuredEnabled, serializer);
     sse_encode_bool(self.effectiveEnabled, serializer);
     sse_encode_String(self.availability, serializer);
-    sse_encode_bool(self.selected, serializer);
     sse_encode_opt_String(self.providerId, serializer);
     sse_encode_opt_String(self.model, serializer);
   }
@@ -25188,7 +25181,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.configuredMode, serializer);
     sse_encode_String(self.effectiveMode, serializer);
     sse_encode_String(self.availability, serializer);
-    sse_encode_bool(self.selected, serializer);
     sse_encode_opt_String(self.contextSize, serializer);
     sse_encode_list_String(self.allowedDomains, serializer);
     sse_encode_opt_String(self.country, serializer);

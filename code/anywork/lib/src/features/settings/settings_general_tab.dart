@@ -64,9 +64,15 @@ class _GeneralTabState extends ConsumerState<GeneralTab> {
         SettingsSectionPanel(
           title: context.l10n.settingsNetworkGroup,
           children: [
-            WebSearchSettingsCard(settings: widget.webSearch),
+            WebSearchSettingsCard(
+              key: const ValueKey('web_search_settings'),
+              settings: widget.webSearch,
+            ),
             const Divider(height: 32),
-            DeepSeekWebSearchSettingsCard(settings: widget.deepSeekWebSearch),
+            DeepSeekWebSearchSettingsCard(
+              key: const ValueKey('deepseek_web_search_settings'),
+              settings: widget.deepSeekWebSearch,
+            ),
           ],
         ),
         SettingsSectionPanel(

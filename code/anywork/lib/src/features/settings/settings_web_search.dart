@@ -35,13 +35,20 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
   late final TextEditingController _cityController;
   late final TextEditingController _timezoneController;
   bool _saving = false;
+
+  /// 草稿是否与 canonical 编辑值不同：dirty 时外部 canonical 变化只更新状态摘要，不覆盖草稿。
+  ///
+  /// 由 [_computeDirty] 按完整草稿字段与 canonical 编辑值比较得到，焦点/选区变化或选择同值
+  /// 都不会置位；编辑后再恢复 canonical 值会重新变为 false。
+  bool _dirty = false;
+
+  /// 正在把 canonical 值写入控件；期间控件回调不应把草稿标记为 dirty。
+  bool _applyingCanonical = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _mode = widget.settings.configuredMode;
-    _contextSize = widget.settings.contextSize;
     _domainsController = TextEditingController(
       text: widget.settings.allowedDomains.join(', '),
     );
@@ -49,21 +56,74 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
     _regionController = TextEditingController(text: widget.settings.region);
     _cityController = TextEditingController(text: widget.settings.city);
     _timezoneController = TextEditingController(text: widget.settings.timezone);
+    for (final controller in [
+      _domainsController,
+      _countryController,
+      _regionController,
+      _cityController,
+      _timezoneController,
+    ]) {
+      controller.addListener(_handleDraftEdited);
+    }
+    _syncFrom(widget.settings);
   }
 
   @override
   void didUpdateWidget(covariant WebSearchSettingsCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_saving || oldWidget.settings == widget.settings) {
-      return;
+    if (oldWidget.settings == widget.settings) return;
+    // 外部 canonical（含换模型/换 key 导致的可用性变化）始终更新 controller 状态；控件只在
+    // 用户未编辑时跟随，dirty 草稿保留，避免失败或外部变化清空未保存输入。成功后由 [_save]
+    // 显式用返回的 canonical 同步并清除 dirty。
+    if (_dirty) {
+      // 保留未保存草稿；外部值恰好等于草稿时重算可清除 dirty。
+      _dirty = _computeDirty();
+    } else {
+      _syncFrom(widget.settings);
+      _dirty = false;
     }
-    _mode = widget.settings.configuredMode;
-    _contextSize = widget.settings.contextSize;
-    _replaceText(_domainsController, widget.settings.allowedDomains.join(', '));
-    _replaceText(_countryController, widget.settings.country ?? '');
-    _replaceText(_regionController, widget.settings.region ?? '');
-    _replaceText(_cityController, widget.settings.city ?? '');
-    _replaceText(_timezoneController, widget.settings.timezone ?? '');
+  }
+
+  /// 完整草稿字段是否与 canonical 编辑值不同。
+  ///
+  /// 直接与 [WebSearchSettingsCard.settings] 的编辑字段逐一比较，不新增第二 canonical 事实源。
+  bool _computeDirty() {
+    final settings = widget.settings;
+    return _mode != settings.configuredMode ||
+        _contextSize != settings.contextSize ||
+        _domainsController.text != settings.allowedDomains.join(', ') ||
+        _countryController.text != (settings.country ?? '') ||
+        _regionController.text != (settings.region ?? '') ||
+        _cityController.text != (settings.city ?? '') ||
+        _timezoneController.text != (settings.timezone ?? '');
+  }
+
+  /// 文本控件回调（含焦点/选区变化）：按实际值重算 dirty，同步写入 canonical 时跳过。
+  void _handleDraftEdited() {
+    if (_applyingCanonical) return;
+    _recomputeDirty();
+  }
+
+  void _recomputeDirty() {
+    final next = _computeDirty();
+    if (next == _dirty) return;
+    setState(() => _dirty = next);
+  }
+
+  /// 用 canonical [settings] 覆盖本地草稿：下拉与文本框都回到已发布值。
+  void _syncFrom(WebSearchSettingsView settings) {
+    _applyingCanonical = true;
+    try {
+      _mode = settings.configuredMode;
+      _contextSize = settings.contextSize;
+      _replaceText(_domainsController, settings.allowedDomains.join(', '));
+      _replaceText(_countryController, settings.country ?? '');
+      _replaceText(_regionController, settings.region ?? '');
+      _replaceText(_cityController, settings.city ?? '');
+      _replaceText(_timezoneController, settings.timezone ?? '');
+    } finally {
+      _applyingCanonical = false;
+    }
   }
 
   @override
@@ -117,7 +177,7 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
               ),
               Chip(
                 visualDensity: VisualDensity.compact,
-                label: Text(_availabilityLabel(context, settings)),
+                label: Text(_availabilityLabel(context, settings.availability)),
               ),
             ],
           ),
@@ -166,9 +226,8 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                   SizedBox(
                     width: fieldWidth,
                     child: StudioFormSelectField<String>(
-                      initialValue: _knownWebSearchModes.contains(_mode)
-                          ? _mode
-                          : null,
+                      key: const ValueKey('web_search_mode'),
+                      value: _mode,
                       hint: _knownWebSearchModes.contains(_mode)
                           ? null
                           : Text(_modeLabel(context, _mode)),
@@ -179,18 +238,23 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                         for (final mode in _knownWebSearchModes)
                           StudioFormSelectItem<String>(
                             value: mode,
+                            itemKey: ValueKey('web_search_mode_$mode'),
                             child: Text(_modeLabel(context, mode)),
                           ),
                       ],
                       onChanged: _saving
                           ? null
-                          : (value) => setState(() => _mode = value ?? _mode),
+                          : (value) => setState(() {
+                              _mode = value ?? _mode;
+                              _dirty = _computeDirty();
+                            }),
                     ),
                   ),
                   SizedBox(
                     width: fieldWidth,
                     child: StudioFormSelectField<String>(
-                      initialValue: contextSizeIsKnown ? sizeValue : null,
+                      key: const ValueKey('web_search_context_size'),
+                      value: sizeValue,
                       hint: contextSizeIsKnown
                           ? null
                           : Text(_contextSizeLabel(context, sizeValue)),
@@ -200,27 +264,34 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                       items: [
                         StudioFormSelectItem<String>(
                           value: '',
+                          itemKey: const ValueKey(
+                            'web_search_context_size_default',
+                          ),
                           child: Text(context.l10n.settingsServiceDefault),
                         ),
                         for (final size in _knownWebSearchContextSizes)
                           StudioFormSelectItem<String>(
                             value: size,
+                            itemKey: ValueKey('web_search_context_size_$size'),
                             child: Text(_contextSizeLabel(context, size)),
                           ),
                       ],
                       onChanged: _saving
                           ? null
-                          : (value) => setState(
-                              () => _contextSize = value?.isEmpty == true
+                          : (value) => setState(() {
+                              _contextSize = value?.isEmpty == true
                                   ? null
-                                  : value,
-                            ),
+                                  : value;
+                              _dirty = _computeDirty();
+                            }),
                     ),
                   ),
                   SizedBox(
                     width: constraints.maxWidth,
                     child: TextField(
+                      key: const ValueKey('web_search_domains'),
                       controller: _domainsController,
+                      enabled: !_saving,
                       decoration: InputDecoration(
                         labelText: context.l10n.settingsWebSearchAllowedDomains,
                         hintText: context.l10n.settingsWebSearchDomainsHint,
@@ -229,18 +300,22 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                   ),
                   for (final field in [
                     (
+                      fieldKey: const ValueKey('web_search_country'),
                       controller: _countryController,
                       label: context.l10n.settingsWebSearchCountry,
                     ),
                     (
+                      fieldKey: const ValueKey('web_search_region'),
                       controller: _regionController,
                       label: context.l10n.settingsWebSearchRegion,
                     ),
                     (
+                      fieldKey: const ValueKey('web_search_city'),
                       controller: _cityController,
                       label: context.l10n.settingsWebSearchCity,
                     ),
                     (
+                      fieldKey: const ValueKey('web_search_timezone'),
                       controller: _timezoneController,
                       label: context.l10n.settingsWebSearchTimezone,
                     ),
@@ -248,7 +323,9 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                     SizedBox(
                       width: fieldWidth,
                       child: TextField(
+                        key: field.fieldKey,
                         controller: field.controller,
+                        enabled: !_saving,
                         decoration: InputDecoration(labelText: field.label),
                       ),
                     ),
@@ -260,6 +337,7 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
           Row(
             children: [
               FilledButton.icon(
+                key: const ValueKey('web_search_save'),
                 onPressed: _saving ? null : _save,
                 icon: _saving
                     ? const SizedBox.square(
@@ -269,6 +347,15 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                     : const Icon(Icons.save_outlined),
                 label: Text(context.l10n.settingsSaveWebSearch),
               ),
+              if (_dirty && !_saving) ...[
+                const SizedBox(width: 12),
+                Text(
+                  context.l10n.settingsWebSearchUnsaved,
+                  style: context.text.bodySmall?.copyWith(
+                    color: context.colors.onSurfaceVariant,
+                  ),
+                ),
+              ],
               if (_error != null) ...[
                 const SizedBox(width: 12),
                 Expanded(child: SettingsInlineError(message: _error!)),
@@ -281,12 +368,13 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
-      await ref
+      final snapshot = await ref
           .read(studioControllerProvider.notifier)
           .saveWebSearchSettings(
             WebSearchSettingsCommand(
@@ -304,10 +392,17 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
               timezone: _nullableText(_timezoneController),
             ),
           );
+      if (!mounted) return;
+      // 成功后显式采用已发布的 canonical 快照，清除 dirty，草稿与已保存值回到同一事实源。
+      setState(() {
+        _syncFrom(snapshot.webSearch);
+        _dirty = false;
+      });
     } catch (error) {
-      if (mounted) {
-        setState(() => _error = error.toString());
-      }
+      if (!mounted) return;
+      // 失败保留草稿与错误：controller 已在 revision/CAS 冲突时刷新 canonical 状态，
+      // 这里不覆盖草稿，也不自动重放保存。
+      setState(() => _error = error.toString());
     } finally {
       if (mounted) {
         setState(() => _saving = false);
@@ -439,7 +534,7 @@ class _DeepSeekWebSearchSettingsCardState
                 value: _enabledLabel(context, settings.effectiveEnabled),
               ),
               _WebSearchStatusValue(
-                label: context.l10n.settingsWebSearchProvider,
+                label: context.l10n.settingsDeepSeekWebSearchProvider,
                 value: settings.providerId ?? context.l10n.settingsNotAvailable,
               ),
               _WebSearchStatusValue(
@@ -450,11 +545,7 @@ class _DeepSeekWebSearchSettingsCardState
           ),
           const SizedBox(height: 12),
           Text(
-            _availabilityLabelForValue(
-              context,
-              settings.availability,
-              selected: settings.selected,
-            ),
+            _availabilityLabel(context, settings.availability),
             style: context.text.bodySmall?.copyWith(
               color: settings.isAvailable
                   ? context.colors.onSurfaceVariant
@@ -471,6 +562,7 @@ class _DeepSeekWebSearchSettingsCardState
   }
 
   Future<void> _save(bool enabled) async {
+    if (_saving) return;
     setState(() {
       _saving = true;
       _error = null;
@@ -508,25 +600,8 @@ String _contextSizeLabel(BuildContext context, String size) {
   };
 }
 
-String _availabilityLabel(
-  BuildContext context,
-  WebSearchSettingsView settings,
-) {
-  return _availabilityLabelForValue(
-    context,
-    settings.availability,
-    selected: settings.selected,
-  );
-}
-
-String _availabilityLabelForValue(
-  BuildContext context,
-  String availability, {
-  required bool selected,
-}) {
+String _availabilityLabel(BuildContext context, String availability) {
   return switch (availability) {
-    'available' when !selected =>
-      context.l10n.settingsWebSearchAvailableNotSelected,
     'available' => context.l10n.settingsWebSearchAvailable,
     'disabled' => context.l10n.settingsWebSearchDisabled,
     'providerUnsupported' => context.l10n.settingsWebSearchUnsupportedProvider,

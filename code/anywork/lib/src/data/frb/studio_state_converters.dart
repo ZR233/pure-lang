@@ -134,7 +134,6 @@ WebSearchSettingsView _webSearchFromFrb(frb.BridgeWebSearchSettingsDto value) {
     configuredMode: value.configuredMode,
     effectiveMode: value.effectiveMode,
     availability: value.availability,
-    selected: value.selected,
     contextSize: value.contextSize,
     allowedDomains: value.allowedDomains,
     country: value.country,
@@ -153,7 +152,6 @@ DeepSeekWebSearchSettingsView _deepSeekWebSearchFromFrb(
     configuredEnabled: value.configuredEnabled,
     effectiveEnabled: value.effectiveEnabled,
     availability: value.availability,
-    selected: value.selected,
     providerId: value.providerId,
     model: value.model,
   );

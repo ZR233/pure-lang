@@ -175,4 +175,9 @@ pub(crate) struct ReplaySpan {
     pub start: usize,
     pub semantic: Vec<ModelContextItem>,
     pub output: Vec<Value>,
+    /// 产生 `output` 的 provider 隔离身份（[`crate::runtime::binding_cache_namespace`]）。
+    ///
+    /// 出站请求据此判断原生 reasoning 的 `encrypted_content` 是否可能被目标 provider 解释；
+    /// 缺失（旧帧或无来源证据）时不改写既有回放语义。
+    pub source_isolation: Option<String>,
 }

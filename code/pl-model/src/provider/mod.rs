@@ -30,13 +30,17 @@ pub(crate) const RESPONSES_WEBSOCKET_DIALECT: &str = "responses_websockets=2026-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StandaloneWebSearchDialect {
+    /// OpenAI 兼容的独立 `/alpha/search` 搜索 API。
     OpenAiSearchApi,
+    /// DeepSeek 原生独立搜索：Anthropic 兼容 Messages API 的 `web_search` server tool。
+    DeepSeekAnthropicMessages,
 }
 
 impl StandaloneWebSearchDialect {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::OpenAiSearchApi => "open_ai_search_api",
+            Self::DeepSeekAnthropicMessages => "deep_seek_anthropic_messages",
         }
     }
 }
@@ -47,6 +51,7 @@ impl std::str::FromStr for StandaloneWebSearchDialect {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "open_ai_search_api" => Ok(Self::OpenAiSearchApi),
+            "deep_seek_anthropic_messages" => Ok(Self::DeepSeekAnthropicMessages),
             value => Err(format!(
                 "unsupported standalone web search dialect: {value}"
             )),
@@ -319,14 +324,9 @@ impl ProviderEndpoint {
     }
 
     pub fn deepseek(base_url: Option<String>) -> Self {
-        let files = if base_url
+        let canonical = base_url
             .as_deref()
-            .is_none_or(|url| url.trim_end_matches('/') == "https://api.deepseek.com")
-        {
-            FileUploadCapability::DeepSeek
-        } else {
-            FileUploadCapability::None
-        };
+            .is_none_or(|url| url.trim_end_matches('/') == "https://api.deepseek.com");
         Self {
             adapter: ProviderAdapterKind::DeepSeek,
             name: "DeepSeek".into(),
@@ -336,7 +336,16 @@ impl ProviderEndpoint {
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
             service_capabilities: ProviderServiceCapabilities {
-                files,
+                files: if canonical {
+                    FileUploadCapability::DeepSeek
+                } else {
+                    FileUploadCapability::None
+                },
+                web_search: WebSearchProviderCapabilities {
+                    standalone: canonical
+                        .then_some(StandaloneWebSearchDialect::DeepSeekAnthropicMessages),
+                    ..WebSearchProviderCapabilities::default()
+                },
                 prompt_cache: PromptCacheProviderCapabilities {
                     dialect: PromptCacheDialect::ImplicitPrefix,
                 },

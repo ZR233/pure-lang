@@ -406,6 +406,112 @@ async fn thread_replays_all_assistant_output_without_losing_progress_or_wire_ide
     }
 }
 
+/// 跨 provider 历史回放：来源 provider 的原生 reasoning 由该账户/部署加密，目标 provider 无法
+/// 解密（严格兼容网关以 `invalid_encrypted_content` 失败）。按帧记录来源隔离身份，出站请求必须
+/// 只移除这类 reasoning，保留 assistant 文本、工具身份与工具输出，且不重放工具副作用；同一
+/// provider 的 reasoning 仍按原样回放（见
+/// `thread_replays_all_assistant_output_without_losing_progress_or_wire_identity`）。
+#[tokio::test]
+async fn cross_provider_replay_omits_unreadable_reasoning_but_keeps_assistant_text() {
+    let output = vec![
+        json!({"id":"source-reason","type":"reasoning","summary":[],"encrypted_content":"source-encrypted","status":"completed"}),
+        json!({"id":"source-message","type":"message","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"Provider A answer.","annotations":[]}]}),
+    ];
+    let mut source_events =
+        vec![json!({"type":"response.created","response":{"id":"source-response"}})];
+    for (index, item) in output.iter().enumerate() {
+        source_events
+            .push(json!({"type":"response.output_item.added","output_index":index,"item":item}));
+        source_events
+            .push(json!({"type":"response.output_item.done","output_index":index,"item":item}));
+    }
+    source_events.push(json!({"type":"response.completed","response":{"id":"source-response","output":output,"usage":{"input_tokens":5,"output_tokens":2}}}));
+    let source = FixtureServer::start(vec![Step::prompt(
+        Protocol::ResponsesHttp,
+        "first",
+        0,
+        Reply::Sse(source_events),
+    )])
+    .await
+    .unwrap();
+    let source_runtime = ModelRuntime::new(
+        ProviderEndpoint::compatible("provider-a", source.base_url()),
+        model("provider-a", ModelTransportProfile::responses_http()),
+    )
+    .unwrap();
+    let source_factory =
+        ModelFactory::new(pl_model::runtime::ThreadModel::new(source_runtime, None));
+    let thread = ThreadHandle::start(
+        "cross-provider-thread".into(),
+        source_factory.open_session().await.unwrap(),
+    )
+    .unwrap();
+    thread
+        .run_turn(TurnInput {
+            turn_id: "cross-turn-0".into(),
+            attempt_prefix: "cross-attempt-0".into(),
+            content: vec![ContextContent::Text {
+                text: Arc::from("first"),
+            }],
+            max_model_steps: ModelStepLimit::Limited(1.try_into().unwrap()),
+            cancellation: Default::default(),
+        })
+        .await
+        .unwrap();
+    let checkpoint = thread
+        .checkpoint(thread.snapshot().commit_sequence)
+        .unwrap();
+    let saved = serde_json::to_vec(&checkpoint).unwrap();
+    thread.close().await.unwrap();
+
+    let target = FixtureServer::start(vec![Step::prompt(
+        Protocol::ResponsesHttp,
+        "second",
+        0,
+        Reply::Sse(responses_text("done", "target-response", "provider-b")),
+    )])
+    .await
+    .unwrap();
+    let target_runtime = ModelRuntime::new(
+        ProviderEndpoint::compatible("provider-b", target.base_url()),
+        model("provider-b", ModelTransportProfile::responses_http()),
+    )
+    .unwrap();
+    let target_factory =
+        ModelFactory::new(pl_model::runtime::ThreadModel::new(target_runtime, None));
+    let restored = ThreadHandle::resume(
+        "cross-provider-thread".into(),
+        target_factory.open_session().await.unwrap(),
+        Some(serde_json::from_slice(&saved).unwrap()),
+    )
+    .unwrap();
+    restored
+        .run_turn(TurnInput {
+            turn_id: "cross-turn-1".into(),
+            attempt_prefix: "cross-attempt-1".into(),
+            content: vec![ContextContent::Text {
+                text: Arc::from("second"),
+            }],
+            max_model_steps: ModelStepLimit::Limited(1.try_into().unwrap()),
+            cancellation: Default::default(),
+        })
+        .await
+        .unwrap();
+    restored.close().await.unwrap();
+
+    let requests = target.finish().await.unwrap();
+    let input = requests[0].body["input"].as_array().unwrap();
+    assert!(
+        !input.iter().any(|item| item["type"] == "reasoning"),
+        "cross-provider reasoning must not be replayed to a provider that cannot decrypt it"
+    );
+    let assistant = input
+        .iter()
+        .find(|item| item["type"] == "message" && item["role"] == "assistant")
+        .expect("assistant text must be replayed");
+    assert_eq!(assistant["content"][0]["text"], "Provider A answer.");
+}
+
 #[derive(Debug)]
 struct ReplayTool(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
@@ -852,6 +958,114 @@ async fn terminal_replay_completes_missing_items_and_rejects_conflicting_authori
         );
         fixture.finish().await.unwrap();
     }
+}
+
+/// 跨 provider 历史回放：另一个 Responses provider 的原生 reasoning item 携带 output-only
+/// `status`，严格 Responses 网关会以 `unknown_parameter` 拒绝 `input[*].status`。回放必须去掉
+/// 该生命周期字段，同时保留 reasoning 身份/加密内容与 function_call 身份，使后续工具回合在
+/// 严格输入下完成。
+#[tokio::test]
+async fn cross_provider_replay_strips_output_only_status_for_strict_responses_input() {
+    let output = vec![
+        json!({"id":"source-reason","type":"reasoning","summary":[],"content":[{"type":"reasoning_text","text":"plan the search"}],"encrypted_content":"source-encrypted","status":"completed"}),
+        json!({"id":"source-call","type":"function_call","name":"lookup","call_id":"source-call","arguments":"{\"key\":\"rust\"}","status":"completed"}),
+        json!({"id":"source-message","type":"message","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"Found the docs.","annotations":[]}]}),
+    ];
+    let mut source_events =
+        vec![json!({"type":"response.created","response":{"id":"source-response"}})];
+    for (index, item) in output.iter().enumerate() {
+        source_events
+            .push(json!({"type":"response.output_item.added","output_index":index,"item":item}));
+        source_events
+            .push(json!({"type":"response.output_item.done","output_index":index,"item":item}));
+    }
+    source_events.push(json!({"type":"response.completed","response":{"id":"source-response","output":output,"usage":{"input_tokens":9,"output_tokens":4}}}));
+    let source = FixtureServer::start(vec![Step::prompt(
+        Protocol::ResponsesHttp,
+        "cross provider",
+        0,
+        Reply::Sse(source_events),
+    )])
+    .await
+    .unwrap();
+    let source_runtime = ModelRuntime::new(
+        ProviderEndpoint::compatible("source", source.base_url()),
+        model("source-model", ModelTransportProfile::responses_http()),
+    )
+    .unwrap();
+    let response = source_runtime
+        .complete(request("cross provider"), ModelInvocationContext::default())
+        .await
+        .unwrap();
+    assert_eq!(response.tool_calls.len(), 1);
+
+    let mut prefix = request("cross provider");
+    prefix.append_response(&response).unwrap();
+    for call in &response.tool_calls {
+        prefix.input.push(ModelContextItem::from(Message {
+            role: MessageRole::Tool,
+            content: MessageContent::text(format!("docs for {}", call.call_id)),
+            tool_result: Some(ToolResultRecord {
+                item_id: call.id.clone(),
+                call_id: call.call_id.clone(),
+                name: call.name.clone(),
+                kind: call.kind(),
+            }),
+            ..user("")
+        }));
+    }
+
+    // 严格网关的期望输入：原生 reasoning 去掉 output-only `status`，其余事实（reasoning 身份、
+    // 加密内容、function_call 身份）保持不变。
+    let expected = output
+        .iter()
+        .map(|item| {
+            let mut item = item.clone();
+            if item["type"] == "reasoning" {
+                item.as_object_mut().unwrap().remove("status");
+            }
+            item
+        })
+        .collect::<Vec<_>>();
+    let target = FixtureServer::start(vec![
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            "cross provider",
+            0,
+            Reply::Sse(responses_text("done", "target-response", "target-model")),
+        )
+        .with_replay(pl_provider_fixture::ReplayExpectation {
+            history: expected,
+            previous_response_id: None,
+        }),
+    ])
+    .await
+    .unwrap();
+    let target_runtime = ModelRuntime::new(
+        ProviderEndpoint::compatible("target", target.base_url()),
+        model("target-model", ModelTransportProfile::responses_http()),
+    )
+    .unwrap();
+    target_runtime
+        .complete(prefix, ModelInvocationContext::default())
+        .await
+        .unwrap();
+
+    let records = target.finish().await.unwrap();
+    let input = records[0].body["input"].as_array().unwrap();
+    let reasoning = input
+        .iter()
+        .find(|item| item["type"] == "reasoning")
+        .expect("replayed reasoning item");
+    assert!(reasoning.get("status").is_none());
+    assert_eq!(reasoning["id"], "source-reason");
+    assert_eq!(reasoning["encrypted_content"], "source-encrypted");
+    let call = input
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("replayed function call");
+    assert_eq!(call["call_id"], "source-call");
+    assert_eq!(call["name"], "lookup");
 }
 
 #[tokio::test]

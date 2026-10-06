@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:anywork/main.dart' as studio;
 import 'package:anywork/src/app/studio_shutdown.dart';
 import 'package:anywork/src/data/repositories/studio_repository.dart';
+import 'package:anywork/src/domain/models/studio_models.dart';
 import 'package:anywork/src/shared/studio_driver_state.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -188,6 +189,10 @@ Future<String> _handleDriverData(String? message) async {
       return _handleCopySelected();
     case 'selection-state':
       return _handleSelectionState();
+    case 'search-settings':
+      return _handleSearchSettings();
+    case 'search-mcp-state':
+      return _handleSearchMcpState();
     case 'shutdown':
       try {
         await (_shutdownTask ??= _runShutdown());
@@ -208,6 +213,121 @@ Future<void> _runShutdown() async {
     studioShutdownProgressStateProvider.notifier,
   );
   await runStudioShutdown(api, progress.update);
+}
+
+// ---------------------------------------------------------------------------
+// Web-search + MCP acceptance projection.
+//
+// Driver-only read-only view over the canonical settings/MCP state, so the
+// web-search acceptance can prove the two search cards and the MCP health from
+// typed fields instead of scraping widget text or the provider-only snapshot.
+// Nothing here mutates product state and no credential is read: the endpoint is
+// reduced to scheme/host/path.
+
+StudioState? _readyStudioState() =>
+    switch (_container.read(studioControllerProvider)) {
+      AsyncData(:final value) => value,
+      _ => null,
+    };
+
+Future<String> _handleSearchSettings() async {
+  final state = _readyStudioState();
+  if (state == null) {
+    return jsonEncode(<String, Object?>{
+      'ok': false,
+      'reason': 'studio state not ready',
+    });
+  }
+  final web = state.settingsState.webSearch;
+  final deep = state.settingsState.deepSeekWebSearch;
+  return jsonEncode(<String, Object?>{
+    'ok': true,
+    'revision': state.settingsState.revision,
+    'webSearch': <String, Object?>{
+      'configuredMode': web.configuredMode,
+      'effectiveMode': web.effectiveMode,
+      'availability': web.availability,
+      'contextSize': web.contextSize,
+      'allowedDomains': web.allowedDomains,
+      'country': web.country,
+      'region': web.region,
+      'city': web.city,
+      'timezone': web.timezone,
+      'providerId': web.providerId,
+      'model': web.model,
+    },
+    'deepSeekWebSearch': <String, Object?>{
+      'configuredEnabled': deep.configuredEnabled,
+      'effectiveEnabled': deep.effectiveEnabled,
+      'availability': deep.availability,
+      'providerId': deep.providerId,
+      'model': deep.model,
+    },
+  });
+}
+
+Future<String> _handleSearchMcpState() async {
+  final mcp = _readyStudioState()?.mcpState;
+  if (mcp == null) {
+    return jsonEncode(<String, Object?>{
+      'ok': false,
+      'reason': 'studio state not ready',
+    });
+  }
+  return jsonEncode(<String, Object?>{
+    'ok': true,
+    'revision': mcp.revision,
+    'desiredConfigFingerprint': mcp.desiredConfigFingerprint,
+    'appliedConfigFingerprint': mcp.appliedConfigFingerprint,
+    'activeServers': mcp.activeServers,
+    'servers': [
+      for (final server in mcp.servers)
+        <String, Object?>{
+          'id': server.id,
+          'transport': server.transport,
+          'endpoint': _redactEndpoint(server.endpoint),
+          'sourceKind': server.sourceKind,
+          'mutationPolicy': server.mutationPolicy,
+          'state': _mcpServerStateJson(server.state),
+        },
+    ],
+  });
+}
+
+Map<String, Object?> _mcpServerStateJson(
+  McpServerState state,
+) => switch (state) {
+  McpDisabledState(:final message) => {'kind': 'disabled', 'message': message},
+  McpMissingCredentialState(:final message) => {
+    'kind': 'missingCredential',
+    'message': message,
+  },
+  McpCheckingState(:final message) => {'kind': 'checking', 'message': message},
+  McpAvailableState(:final checkedAt, :final toolCount) => {
+    'kind': 'available',
+    'checkedAt': checkedAt,
+    'toolCount': toolCount,
+  },
+  McpUnavailableState(
+    :final checkedAt,
+    :final code,
+    :final message,
+    :final retryable,
+  ) =>
+    {
+      'kind': 'unavailable',
+      'checkedAt': checkedAt,
+      'code': code,
+      'message': message,
+      'retryable': retryable,
+    },
+};
+
+/// Drops userinfo, query and fragment so only scheme/host/path leave the VM.
+String _redactEndpoint(String endpoint) {
+  final uri = Uri.tryParse(endpoint);
+  if (uri == null) return endpoint;
+  return uri.replace(userInfo: '', query: '', fragment: '').toString();
 }
 
 // ---------------------------------------------------------------------------

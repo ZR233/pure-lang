@@ -73,7 +73,6 @@ class BridgeDeepSeekWebSearchSettingsDto {
   final bool configuredEnabled;
   final bool effectiveEnabled;
   final String availability;
-  final bool selected;
   final String? providerId;
   final String? model;
 
@@ -81,7 +80,6 @@ class BridgeDeepSeekWebSearchSettingsDto {
     required this.configuredEnabled,
     required this.effectiveEnabled,
     required this.availability,
-    required this.selected,
     this.providerId,
     this.model,
   });
@@ -91,7 +89,6 @@ class BridgeDeepSeekWebSearchSettingsDto {
       configuredEnabled.hashCode ^
       effectiveEnabled.hashCode ^
       availability.hashCode ^
-      selected.hashCode ^
       providerId.hashCode ^
       model.hashCode;
 
@@ -103,7 +100,6 @@ class BridgeDeepSeekWebSearchSettingsDto {
           configuredEnabled == other.configuredEnabled &&
           effectiveEnabled == other.effectiveEnabled &&
           availability == other.availability &&
-          selected == other.selected &&
           providerId == other.providerId &&
           model == other.model;
 }
@@ -1094,7 +1090,6 @@ class BridgeWebSearchSettingsDto {
   final String configuredMode;
   final String effectiveMode;
   final String availability;
-  final bool selected;
   final String? contextSize;
   final List<String> allowedDomains;
   final String? country;
@@ -1108,7 +1103,6 @@ class BridgeWebSearchSettingsDto {
     required this.configuredMode,
     required this.effectiveMode,
     required this.availability,
-    required this.selected,
     this.contextSize,
     required this.allowedDomains,
     this.country,
@@ -1124,7 +1118,6 @@ class BridgeWebSearchSettingsDto {
       configuredMode.hashCode ^
       effectiveMode.hashCode ^
       availability.hashCode ^
-      selected.hashCode ^
       contextSize.hashCode ^
       allowedDomains.hashCode ^
       country.hashCode ^
@@ -1142,7 +1135,6 @@ class BridgeWebSearchSettingsDto {
           configuredMode == other.configuredMode &&
           effectiveMode == other.effectiveMode &&
           availability == other.availability &&
-          selected == other.selected &&
           contextSize == other.contextSize &&
           allowedDomains == other.allowedDomains &&
           country == other.country &&
