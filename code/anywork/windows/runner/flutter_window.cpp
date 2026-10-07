@@ -74,10 +74,10 @@ void HandleHostLifecycleCall(
                 std::get_if<int64_t>(&pending->second)) {
           diagnostics.has_pending_commits = true;
           diagnostics.pending_commits = static_cast<uint64_t>(*count);
-        } else if (const auto* small =
+        } else if (const auto* count32 =
                        std::get_if<int32_t>(&pending->second)) {
           diagnostics.has_pending_commits = true;
-          diagnostics.pending_commits = static_cast<uint64_t>(*small);
+          diagnostics.pending_commits = static_cast<uint64_t>(*count32);
         }
       }
     }
