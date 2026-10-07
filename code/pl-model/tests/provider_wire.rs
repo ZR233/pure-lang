@@ -516,6 +516,112 @@ async fn cross_provider_replay_omits_unreadable_reasoning_but_keeps_assistant_te
     assert_eq!(assistant["content"][0]["text"], "Provider A answer.");
 }
 
+/// 同一账户不能代替目标模型的原生材料适用性声明；切换仅投影历史，不丢可见答复。
+#[tokio::test]
+async fn same_account_model_switch_requires_explicit_native_reasoning_compatibility() {
+    let output = vec![
+        json!({"id":"source-reason","type":"reasoning","summary":[],"encrypted_content":"source-encrypted","status":"completed"}),
+        json!({"id":"source-message","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Source answer.","annotations":[]}]}),
+    ];
+    let mut events = vec![json!({"type":"response.created","response":{"id":"source-response"}})];
+    for (index, item) in output.iter().enumerate() {
+        events.push(json!({"type":"response.output_item.added","output_index":index,"item":item}));
+        events.push(json!({"type":"response.output_item.done","output_index":index,"item":item}));
+    }
+    events.push(json!({"type":"response.completed","response":{"id":"source-response","output":output,"usage":{"input_tokens":5,"output_tokens":2}}}));
+    for (source_family, target_family, replay_reasoning) in [
+        (None, None, false),
+        (Some("native-family"), None, false),
+        (Some("native-family"), Some("other-family"), false),
+        (Some("native-family"), Some("native-family"), true),
+        (Some(""), Some(""), false),
+    ] {
+        let server = FixtureServer::start(vec![
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                "first",
+                0,
+                Reply::Sse(events.clone()),
+            ),
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                "second",
+                1,
+                Reply::Sse(responses_text("done", "target-response", "target-model")),
+            ),
+        ])
+        .await
+        .unwrap();
+        let endpoint = ProviderEndpoint::compatible("same-account", server.base_url());
+        let mut source_model = model("source-model", ModelTransportProfile::responses_http());
+        source_model.capabilities.native_context_family = source_family.map(str::to_owned);
+        let source = ModelFactory::new(pl_model::runtime::ThreadModel::new(
+            ModelRuntime::new(endpoint.clone(), source_model).unwrap(),
+            None,
+        ));
+        let thread = ThreadHandle::start(
+            "model-switch-thread".into(),
+            source.open_session().await.unwrap(),
+        )
+        .unwrap();
+        thread
+            .run_turn(TurnInput {
+                turn_id: "source-turn".into(),
+                attempt_prefix: "source-attempt".into(),
+                content: vec![ContextContent::Text {
+                    text: Arc::from("first"),
+                }],
+                max_model_steps: ModelStepLimit::Limited(1.try_into().unwrap()),
+                cancellation: Default::default(),
+            })
+            .await
+            .unwrap();
+        let saved = serde_json::to_vec(
+            &thread
+                .checkpoint(thread.snapshot().commit_sequence)
+                .unwrap(),
+        )
+        .unwrap();
+        thread.close().await.unwrap();
+        let mut target_model = model("target-model", ModelTransportProfile::responses_http());
+        target_model.capabilities.native_context_family = target_family.map(str::to_owned);
+        let target = ModelFactory::new(pl_model::runtime::ThreadModel::new(
+            ModelRuntime::new(endpoint, target_model).unwrap(),
+            None,
+        ));
+        let restored = ThreadHandle::resume(
+            "model-switch-thread".into(),
+            target.open_session().await.unwrap(),
+            Some(serde_json::from_slice(&saved).unwrap()),
+        )
+        .unwrap();
+        restored
+            .run_turn(TurnInput {
+                turn_id: "target-turn".into(),
+                attempt_prefix: "target-attempt".into(),
+                content: vec![ContextContent::Text {
+                    text: Arc::from("second"),
+                }],
+                max_model_steps: ModelStepLimit::Limited(1.try_into().unwrap()),
+                cancellation: Default::default(),
+            })
+            .await
+            .unwrap();
+        restored.close().await.unwrap();
+        let requests = server.finish().await.unwrap();
+        let input = requests[1].body["input"].as_array().unwrap();
+        assert_eq!(
+            input.iter().any(|item| item["type"] == "reasoning"),
+            replay_reasoning
+        );
+        let assistant = input
+            .iter()
+            .find(|item| item["type"] == "message" && item["role"] == "assistant")
+            .unwrap();
+        assert_eq!(assistant["content"][0]["text"], "Source answer.");
+    }
+}
+
 #[derive(Debug)]
 struct ReplayTool(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 

@@ -57,6 +57,24 @@ impl ModelCallBinding {
         )
     }
 
+    /// 同一来源绑定可直接重放；跨模型必须携带产生时和目标共同声明的兼容族。
+    pub(super) fn native_context_compatible(
+        &self,
+        target: &Self,
+        source_family: Option<&str>,
+        target_family: Option<&str>,
+    ) -> bool {
+        let same_origin = self.provider_instance_id == target.provider_instance_id
+            && self.isolation == target.isolation
+            && self.adapter == target.adapter
+            && self.protocol == target.protocol;
+        same_origin
+            && (self.requested_model == target.requested_model
+                || source_family
+                    .filter(|family| !family.is_empty())
+                    .is_some_and(|family| Some(family) == target_family))
+    }
+
     pub(super) fn capture(runtime: &ModelRuntime, purpose: &str) -> Self {
         Self {
             provider_instance_id: runtime.provider_instance_id().to_owned(),

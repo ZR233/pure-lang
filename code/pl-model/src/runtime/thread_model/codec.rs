@@ -72,6 +72,8 @@ fn arguments(call: &ToolCall, kind: ArgumentKind) -> Result<OpaquePayload, Model
 struct AssistantFrame {
     receipt: super::receipt::ModelResponseReceipt,
     bindings: Vec<ModelToolCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    compatibility_family: Option<String>,
 }
 
 pub(super) fn receipt(
@@ -295,7 +297,7 @@ pub(super) fn request(
                 if payload.version() != FRAME_VERSION {
                     return Err(invalid("unknown assistant frame version"));
                 }
-                let frame: AssistantFrame = serde_json::from_str(payload.content())
+                let mut frame: AssistantFrame = serde_json::from_str(payload.content())
                     .map_err(|error| failure(ModelFailureKind::IncompatibleContext, error))?;
                 let text = record
                     .content
@@ -346,6 +348,28 @@ pub(super) fn request(
                 }
                 let mut encoded = CompletionRequest::builder().input(input).build();
                 encoded.replay_spans = replay_spans;
+                let target = super::receipt::ModelCallBinding::capture(runtime, "replay");
+                if !frame.receipt.binding.native_context_compatible(
+                    &target,
+                    frame.compatibility_family.as_deref(),
+                    runtime
+                        .model()
+                        .capabilities
+                        .native_context_family
+                        .as_deref(),
+                ) {
+                    // 只投影当前请求；持久化回执、可见文本和工具身份仍保留原始事实。
+                    if let Some(crate::completion::AssistantReplay::Responses { output }) =
+                        &mut frame.receipt.response.replay
+                    {
+                        output.retain(|item| item["type"] != "reasoning");
+                    }
+                    frame
+                        .receipt
+                        .response
+                        .responses_context_items
+                        .retain(|item| item.value["type"] != "reasoning");
+                }
                 encoded
                     .append_response_from(
                         &frame.receipt.response,
@@ -493,6 +517,7 @@ pub(super) struct ResponseContext<'a> {
     pub names: &'a BTreeMap<String, ToolBinding>,
     pub marker: OpaquePayload,
     pub binding: super::receipt::ModelCallBinding,
+    pub compatibility_family: Option<String>,
 }
 
 pub(super) fn response(
@@ -527,6 +552,7 @@ fn response_inner(
         names,
         marker,
         binding,
+        compatibility_family,
     } = context;
     let replay = response
         .replay
@@ -571,6 +597,7 @@ fn response_inner(
     let frame = AssistantFrame {
         receipt: super::receipt::ModelResponseReceipt { binding, response },
         bindings: bindings.clone(),
+        compatibility_family,
     };
     let encoded = serde_json::to_string(&frame).map_err(|error| ModelError {
         details: None,

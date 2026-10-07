@@ -596,10 +596,13 @@ Responses context 持久化。下一轮出站请求按原始 JSON 顺序把这�
 results 与未知厂商字段；typed `message`、`function_call`、`custom_tool_call` 等仍按现役
 Responses 协议组装，不从 provider id 或 URL 猜测兼容性。帧已持久化产生该原生回放的 provider
 隔离身份（由 provider id 与 endpoint 连接材料派生的 binding namespace），出站投影据此判断可回放
-能力：来源隔离与目标一致的原生 reasoning 才逐字回放；隔离身份不同的原生 reasoning 目标无法
-解密其 `encrypted_content`（严格兼容网关以 `invalid_encrypted_content` 失败），因此只从出站
+能力：线程持有的响应帧同时记录绑定和产生时的原生上下文兼容族。来源供应商、账户隔离、
+适配器、协议及模型一致时逐字回放；跨模型须双方明确声明同一非空兼容族。无法证明适用性时，
+目标不能假定能够解释其 `encrypted_content`，因此只从出站
 `input` 移除这类 reasoning，assistant 文本、工具身份、工具输出与其余原生事实不受影响，也不重放
-工具副作用；来源身份缺失的旧帧维持既有回放。不得以模型名、item id 或加密文本形状猜供应商。
+工具副作用；旧线程响应帧的绑定仍须校验，未记录兼容族不能授权跨模型重放。
+底层 `CompletionRequest.append_response` 不带线程来源，仍由直接调用方承担适用性责任。
+不得以模型名、item id 或加密文本形状猜供应商。
 provider adapter 不自行注入未进入本轮冻结工具计划的 hosted tool。
 
 验证边界：DeepSeek 原生搜索的 wire、鉴权、解析与失败路径由 `pl-model` 公开 API 集成测试在

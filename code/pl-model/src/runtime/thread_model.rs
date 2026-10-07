@@ -279,6 +279,11 @@ impl CoreModelSession for ThreadModelSession {
                     names: &names,
                     marker: marker.clone(),
                     binding,
+                    compatibility_family: runtime
+                        .model()
+                        .capabilities
+                        .native_context_family
+                        .clone(),
                 },
                 response,
             )?;

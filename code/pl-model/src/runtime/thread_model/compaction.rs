@@ -360,20 +360,15 @@ pub(super) fn decode(
     let checkpoint: NativeCheckpoint = serde_json::from_str(payload.content())
         .map_err(|error| failure(ModelFailureKind::IncompatibleContext, error))?;
     let target = super::receipt::ModelCallBinding::capture(runtime, "replay");
-    let origin = &checkpoint.binding;
-    let same_isolation = origin.provider_instance_id == target.provider_instance_id
-        && origin.isolation == target.isolation
-        && origin.adapter == target.adapter
-        && origin.protocol == target.protocol;
-    let same_model = origin.requested_model == target.requested_model;
-    let explicit_family = checkpoint
-        .compatibility_family
-        .as_ref()
-        .filter(|family| !family.is_empty())
-        .is_some_and(|family| {
-            runtime.model().capabilities.native_context_family.as_ref() == Some(family)
-        });
-    if !same_isolation || (!same_model && !explicit_family) {
+    if !checkpoint.binding.native_context_compatible(
+        &target,
+        checkpoint.compatibility_family.as_deref(),
+        runtime
+            .model()
+            .capabilities
+            .native_context_family
+            .as_deref(),
+    ) {
         return Err(failure(
             ModelFailureKind::IncompatibleContext,
             AdapterError::Content(
