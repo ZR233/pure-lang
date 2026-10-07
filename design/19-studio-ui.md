@@ -147,6 +147,10 @@ dirty/changed-files preview 与显式 cleanup。运行中 Agent 目录与 Profil
 所有 mutation 使用 settings revision CAS 并以 canonical snapshot 原子刷新（见
 [12](./12-collaboration.md)）。
 
+Agents 页的 provider/model 选择弹层属于当前设置页；打开、选择及 canonical snapshot 刷新只更新
+当前智能体配置，不改变设置 tab、设置路由或返回聊天页。选择完成后仍展示服务端返回的 canonical
+值，不以本地草稿或弹层关闭动作推导导航状态。
+
 Agents 导航、配置页、preserved worktree recovery 和用户 Profile 详情中的固定界面文案必须
 跟随 Studio locale，并由统一 l10n catalog 提供。Profile ID、provider/model、effort、
 workspace mode 的持久化值，以及分支、路径、commit、worktree 状态和诊断数据保持 canonical
