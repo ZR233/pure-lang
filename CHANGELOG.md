@@ -5,6 +5,18 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.5.0](https://github.com/ZR233/pure-lang/compare/v6.4.0...v6.5.0) (2026-10-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **agent-runtime:** ContextPreparation、ContextPreparationRequest、ModelUsageBinding 等公共契约升级；核心检查点迁移到版本 4，SQLite 会话版本 11，Studio 历史版本 6。既有 v2 历史与业务状态保留。
+
+### Bug Fixes
+
+* **agent-runtime:** 校验跨模型原生推理重放来源 ([a842d3e](https://github.com/ZR233/pure-lang/commit/a842d3edc6aba6694f6e4d18a25b0ae7bb77a239))
+* **agent-runtime:** 重构上下文准备与缓存并恢复批准状态 ([953cf4d](https://github.com/ZR233/pure-lang/commit/953cf4dfa248f38b17b16feb23b13a368f6ab432))
+
 ## [6.4.0](https://github.com/ZR233/pure-lang/compare/v6.3.0...v6.4.0) (2026-10-07)
 
 
