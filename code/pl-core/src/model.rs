@@ -1944,6 +1944,9 @@ impl SessionHealth {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsageBinding {
+    /// Opaque route identity supplied by the model implementation; absent origins stay unknown.
+    #[serde(default)]
+    pub route_identity: Option<String>,
     pub model: String,
     pub context_window: Option<u64>,
 }

@@ -1615,10 +1615,13 @@ fn fixture_config(
 ) -> Result<StudioConfig> {
     let mut config = StudioConfig::default_config()?;
     let mut model = ModelInfo::compatible("fixture-model");
+    model.capabilities.interleaved = Some(pl_model::model::ReasoningInterleaved {
+        field: pl_model::model::ReasoningInterleavedField::ReasoningContent,
+    });
     model.display_name = "Local GUI fixture".into();
     if matches!(
         ready.scenario.as_str(),
-        "storage-compaction" | "call-lifecycle-recovery"
+        "storage-compaction" | "call-lifecycle-recovery" | "plan-recovery"
     ) {
         model.context_window = Some(1_000_000);
         model.max_context_window = Some(1_000_000);

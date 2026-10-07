@@ -49,6 +49,32 @@ impl ChatRequestBody {
         };
         let mut messages = Vec::new();
         let media_plan = MediaRepresentationPlan::for_request(request, model)?;
+        let reasoning_fields =
+            |message: &pl_protocol::Message| -> Result<(Option<String>, Option<String>)> {
+                use crate::model::ReasoningInterleavedField;
+                let Some(content) = message
+                    .reasoning_content
+                    .as_ref()
+                    .filter(|content| !content.is_empty())
+                else {
+                    return Ok((None, None));
+                };
+                match model
+                    .capabilities
+                    .interleaved
+                    .as_ref()
+                    .map(|capability| capability.field)
+                {
+                    Some(ReasoningInterleavedField::ReasoningContent) => {
+                        Ok((Some(content.clone()), None))
+                    }
+                    Some(ReasoningInterleavedField::Reasoning) => Ok((None, Some(content.clone()))),
+                    Some(ReasoningInterleavedField::ReasoningDetails) => Err(protocol_error(
+                        "typed reasoning_details cannot be reconstructed from text reasoning history",
+                    )),
+                    None => Ok((None, None)),
+                }
+            };
 
         if let Some(instructions) = &request.instructions {
             messages.push(ChatMessage::System {
@@ -86,9 +112,11 @@ impl ChatRequestBody {
             match msg.role {
                 MessageRole::Assistant if msg.tool_calls.is_some() => {
                     let text = message_content_text(&msg.content);
+                    let (reasoning_content, reasoning) = reasoning_fields(msg)?;
                     messages.push(ChatMessage::Assistant {
                         content: (!text.is_empty()).then_some(text),
-                        reasoning_content: msg.reasoning_content.clone(),
+                        reasoning_content,
+                        reasoning,
                         tool_calls: msg
                             .tool_calls
                             .as_ref()
@@ -114,11 +142,15 @@ impl ChatRequestBody {
                         &media_plan,
                     )?,
                 }),
-                MessageRole::Assistant => messages.push(ChatMessage::Assistant {
-                    content: Some(message_content_text(&msg.content)),
-                    reasoning_content: msg.reasoning_content.clone(),
-                    tool_calls: None,
-                }),
+                MessageRole::Assistant => {
+                    let (reasoning_content, reasoning) = reasoning_fields(msg)?;
+                    messages.push(ChatMessage::Assistant {
+                        content: Some(message_content_text(&msg.content)),
+                        reasoning_content,
+                        reasoning,
+                        tool_calls: None,
+                    })
+                }
             }
         }
 
@@ -178,6 +210,8 @@ enum ChatMessage {
         content: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         reasoning_content: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reasoning: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_calls: Option<Vec<ChatMessageToolCall>>,
     },

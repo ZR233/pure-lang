@@ -96,7 +96,7 @@ impl StudioChildResources for StudioThreadFactory {
         initial_context.push(ContextRecord {
             id: format!("workspace:{}", request.id),
             turn_id: None,
-            source: ContextSource::Runtime {
+            source: ContextSource::RuntimeFact {
                 source_id: "studio.workspace".into(),
             },
             content: vec![ContextContent::Text {
@@ -168,6 +168,7 @@ impl StudioChildResources for StudioThreadFactory {
             context_preparation: crate::compaction::preparer(
                 &profile.route,
                 profile.config.runtime.openai_compaction_mode,
+                self.services.thread_modes.clone(),
             )?,
             agent_controls: crate::thread_assembler::AgentControlExposure::Disabled,
             execution: pl_core::thread::input::InputDriverOptions {

@@ -201,6 +201,7 @@ impl StudioThreadFactory {
             context_preparation: crate::compaction::preparer(
                 &route,
                 config.runtime.openai_compaction_mode,
+                self.services.thread_modes.clone(),
             )?,
             agent_controls: crate::thread_assembler::AgentControlExposure::Disabled,
             execution: pl_core::thread::input::InputDriverOptions {

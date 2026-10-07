@@ -1,7 +1,7 @@
 //! Current runtime facts, projected by hosts and keyed by stable source identity.
 //!
-//! Only the newest content of each source stays in current context; superseded content belongs to
-//! history and is exported through the commit that replaced it.
+//! Current facts retain one value per source. Model-visible snapshots append on change so an
+//! already observed prefix stays immutable until explicit context replacement.
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -121,8 +121,8 @@ pub(super) fn restore_facts(
 
 /// Writes one source's current facts at most once.
 ///
-/// Superseded content is replaced in place, so a source that keeps reporting never accumulates
-/// historic fact records in current context; an absent source keeps its invalidation record.
+/// A changed value appends a full snapshot; unchanged values do not change the prefix.
+/// An absent source appends an explicit invalidation.
 fn write_fact(records: &mut Vec<ContextRecord>, fact: &RuntimeFact, revision: u64) {
     let content = if fact.content.is_empty() {
         vec![ContextContent::Text {
@@ -133,11 +133,12 @@ fn write_fact(records: &mut Vec<ContextRecord>, fact: &RuntimeFact, revision: u6
     } else {
         fact.content.clone()
     };
-    let source = ContextSource::Runtime {
+    let source = ContextSource::RuntimeFact {
         source_id: fact.source_id.clone(),
     };
-    if let Some(index) = records.iter().rposition(|record| record.source == source) {
-        records[index].content = content;
+    if let Some(index) = records.iter().rposition(|record| record.source == source)
+        && records[index].content == content
+    {
         return;
     }
     let mut identities = records

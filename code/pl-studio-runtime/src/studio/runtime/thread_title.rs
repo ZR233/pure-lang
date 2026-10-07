@@ -340,10 +340,23 @@ async fn generate_title(
         .with_max_tokens(Some(TITLE_MAX_OUTPUT_TOKENS))
         .with_reasoning(reasoning);
     let token = tokio_util::sync::CancellationToken::new();
+    let inference_id = crate::studio::ids::new_id("title");
+    let turn_id = owner
+        .snapshot()
+        .turns
+        .last()
+        .map(|turn| turn.turn_id.clone())
+        .unwrap_or_else(|| inference_id.clone());
     let request = client.complete(
         &input,
         request,
-        ModelTurnOptions::default().with_cancellation(token.clone()),
+        ModelTurnOptions::default()
+            .with_cancellation(token.clone())
+            .with_trace_metadata(pl_model::completion::CompletionTraceContext {
+                session_id: thread_id.to_owned(),
+                turn_id,
+                inference_id: inference_id.clone(),
+            }),
     );
     tokio::pin!(request);
     let result = tokio::select! {
@@ -372,7 +385,7 @@ async fn generate_title(
     );
     let billing = pl_protocol::InferenceBillingRecord {
         purpose: Some("title".into()),
-        inference_id: crate::studio::ids::new_id("title"),
+        inference_id,
         provider_instance_id: route.provider_id.as_str().to_owned(),
         provider: route.endpoint.name.clone(),
         model,

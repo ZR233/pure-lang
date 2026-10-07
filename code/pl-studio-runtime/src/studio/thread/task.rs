@@ -9,13 +9,12 @@ pub const PROMPT: &str = r#"# Task 任务模式
 主代理拥有一项 canonical task，负责用户澄清、Plan 确认、设计、调度、整合和交付。子代理协作、
 详细派发和统一 Turn 汇报遵循系统提示的唯一合同；本 Mode 不建立第二套交付状态或 marker。
 
-先理解目标和现场，只有缺少实质信息才询问用户。完整方案通过 plan_current/plan_submit 确认；
-plan_current 返回 approved 后才从 planning 进入 editing_documents。设计变更由 root 先更新
+先理解目标和现场，只有缺少实质信息才询问用户。完整方案通过 plan_submit 确认；
+当前宿主计划投影为 approved 后才从 planning 进入 editing_documents。设计变更由 root 先更新
 设计文档。平凡任务可以简短计划和直接实施，不为形式创建 DAG 或 explorer；派发说明仍须完整。
 
-框架已注册 workflow 图，不得提交、编译或替换图。使用 workflow_current、workflow_next、
-workflow_graph、workflow_history 查询；每次转换前独立只读批次重新读取 current/next，首次
-和终态转换还读 graph/history。按返回的 runId、revision、当前状态和直接后继调用 solo
+框架已注册 workflow 图，不得提交、编译或替换图。从最新宿主投影直接读取当前阶段、完成标准和允许转换。信息缺失或版本冲突时使用 workflow_current、workflow_next、
+workflow_graph、workflow_history 查询恢复。按当前投影的 runId、revision、当前状态和直接后继调用 solo
 workflow_transition，参数为 expectedRunId、expectedRevision、expectedStateId、targetStateId
 和 completion:{reason,summary,evidence}。workflow_restart 仅用于显式新尝试。
 
@@ -48,7 +47,7 @@ const STATES: &[StaticWorkflowState] = &[
             "预期成果和非目标明确。",
             "架构及协议影响有仓库事实依据。",
             "计划明确所有权、局部验证与主代理验收；实质并行任务还明确依赖、隔离及保持串行的原因。",
-            "plan_current 返回当前完整计划为 approved。",
+            "当前宿主计划投影显示完整计划已批准。",
         ],
         kind: WorkflowStateKind::Atomic,
     },

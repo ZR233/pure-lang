@@ -316,6 +316,8 @@ pub struct ThreadSnapshot {
     /// Usage observed for the newest attempt, so the next Turn still sees the previous request.
     #[serde(default)]
     pub last_attempt_usage: Option<crate::model::ModelUsage>,
+    #[serde(default)]
+    pub last_attempt_usage_origin: Option<ModelUsageOrigin>,
     pub discovered_tools: Arc<[ModelToolDeclaration]>,
     /// Turns that are still running; a finished Turn is a history fact.
     pub turns: Arc<[TurnRecord]>,
@@ -492,6 +494,18 @@ impl ThreadSnapshot {
             .cloned();
         if newest_usage.is_some() {
             self.last_attempt_usage = newest_usage;
+            if let Some(attempt) = self.attempts.last()
+                && let Some(facts) = &attempt.facts
+            {
+                self.last_attempt_usage_origin =
+                    facts.usage_binding.clone().map(|binding| ModelUsageOrigin {
+                        binding,
+                        input_revision: attempt.input_revision,
+                        context_revision: self.context.revision,
+                        input_record_count: facts.input_record_count,
+                        input_hash: facts.input_hash.clone(),
+                    });
+            }
         }
 
         retain_arc_slice(&mut self.turns, |turn| turn.state == TurnState::Running);
@@ -697,6 +711,19 @@ fn clear_attempt_facts(attempts: &mut Arc<[RequestAttempt]>) {
         .into();
 }
 
+/// Provenance for a historical capacity observation; it is never a substitute for accounting.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsageOrigin {
+    pub binding: crate::model::ModelUsageBinding,
+    pub input_revision: u64,
+    pub context_revision: u64,
+    #[serde(default)]
+    pub input_record_count: usize,
+    #[serde(default)]
+    pub input_hash: Option<String>,
+}
+
 /// Complete current facts from a stable host source. Empty content explicitly invalidates it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -782,6 +809,10 @@ pub struct RequestAttempt {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AttemptFacts {
+    #[serde(default)]
+    pub input_record_count: usize,
+    #[serde(default)]
+    pub input_hash: Option<String>,
     #[serde(default)]
     pub request_metadata: Option<OpaquePayload>,
     #[serde(default)]

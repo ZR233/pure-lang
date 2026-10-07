@@ -101,6 +101,7 @@ pub(super) fn append_result_message(
     // checkpointed sequence. Legacy gap-based IDs are smaller than their admission sequence.
     let id = format!("task-result:{}", inbox::next_sequence(state)?);
     let message = inbox::ThreadMessage {
+        kind: crate::context::AgentMessageKind::Report,
         id: id.clone(),
         source_id: task.id.clone(),
         payload: output.payload().clone(),

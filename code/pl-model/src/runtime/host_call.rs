@@ -90,9 +90,15 @@ pub struct ModelTurnOptions {
     cancellation_token: Option<CancellationToken>,
     session: Option<crate::runtime::ModelSession>,
     prompt_cache_key: Option<String>,
+    trace: Option<crate::completion::CompletionTraceContext>,
 }
 
 impl ModelTurnOptions {
+    /// Associates auxiliary requests and observed usage with their owning host invocation.
+    pub fn with_trace_metadata(mut self, trace: crate::completion::CompletionTraceContext) -> Self {
+        self.trace = Some(trace);
+        self
+    }
     /// Supplies the caller-owned model session; no agent or product state is accessed.
     pub fn with_session(mut self, session: crate::runtime::ModelSession) -> Self {
         self.session = Some(session);
@@ -170,10 +176,13 @@ impl ModelTurnClient {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let owns_session = options.session.is_none();
         let session = options.session.unwrap_or_default();
-        let invocation = ModelInvocationContext::new(session.clone())
+        let mut invocation = ModelInvocationContext::new(session.clone())
             .with_events(event_tx)
             .with_prompt_cache_key(options.prompt_cache_key)
             .with_cancellation(options.cancellation_token);
+        if let Some(trace) = options.trace {
+            invocation = invocation.with_trace_metadata(trace);
+        }
         let result = self.runtime.complete(request, invocation).await;
         if !owns_session {
             return result;

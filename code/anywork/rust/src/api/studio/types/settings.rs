@@ -548,6 +548,8 @@ pub struct BridgeModelCapabilities {
     pub parallel_tool_calls: bool,
     pub custom_tools: bool,
     pub freeform_tools: bool,
+    pub instruction_snapshot_overrides: bool,
+    pub native_context_family: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -702,6 +704,8 @@ impl From<pl_protocol::ModelDescriptor> for BridgeModelDescriptor {
                 parallel_tool_calls: model.capabilities.parallel_tool_calls,
                 custom_tools: model.capabilities.custom_tools,
                 freeform_tools: model.capabilities.freeform_tools,
+                instruction_snapshot_overrides: model.capabilities.instruction_snapshot_overrides,
+                native_context_family: model.capabilities.native_context_family,
             },
             reasoning: model
                 .reasoning

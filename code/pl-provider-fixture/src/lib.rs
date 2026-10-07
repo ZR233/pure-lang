@@ -2253,6 +2253,7 @@ pub fn gui_plan_recovery_script() -> Vec<Step> {
     let mut script = RealtimeScript::new();
     // Session A: one prompt answered by a single plan_submit call.
     script.optional_title(&approve_title);
+    script.optional_plan_summary();
     script.add(|step| {
         Step::prompt(
             Protocol::ResponsesHttp,
@@ -2275,6 +2276,7 @@ pub fn gui_plan_recovery_script() -> Vec<Step> {
         )
     });
     script.optional_title(&approve_title);
+    script.optional_plan_summary();
     // Approve continuation: the whole Plan markdown is the user message.
     script.add(|step| {
         Step::prompt(
@@ -2290,6 +2292,7 @@ pub fn gui_plan_recovery_script() -> Vec<Step> {
     });
     // Session B: one prompt answered by a single plan_submit call.
     script.optional_title(&revise_title);
+    script.optional_plan_summary();
     script.add(|step| {
         Step::prompt(
             Protocol::ResponsesHttp,
@@ -2312,6 +2315,7 @@ pub fn gui_plan_recovery_script() -> Vec<Step> {
         )
     });
     script.optional_title(&revise_title);
+    script.optional_plan_summary();
     // Revise continuation: the model rewrites the Plan. The revision CAS is the
     // revision the Revise answer leaves behind (submit 0->1, revise 1->2).
     script.add(|step| {
@@ -2336,6 +2340,7 @@ pub fn gui_plan_recovery_script() -> Vec<Step> {
         )
     });
     script.optional_title(&revise_title);
+    script.optional_plan_summary();
     // Approve continuation of the rewritten Plan.
     script.add(|step| {
         Step::prompt(
@@ -2350,6 +2355,7 @@ pub fn gui_plan_recovery_script() -> Vec<Step> {
         )
     });
     script.optional_title(&revise_title);
+    script.optional_plan_summary();
     script.finish()
 }
 
@@ -2642,6 +2648,22 @@ impl RealtimeScript {
 
     fn optional_title(&mut self, title: &str) {
         self.add(|index| realtime_title_step(index, title));
+    }
+
+    fn optional_plan_summary(&mut self) {
+        self.add(|index| {
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                "请根据以上完整上下文生成压缩摘要。",
+                index,
+                Reply::Sse(responses_text(
+                    "历史摘要中的旧状态为等待批准；有效批准状态和完整计划以最新宿主事实为准。",
+                    &format!("plan-summary-{index}"),
+                    "fixture-model",
+                )),
+            )
+            .optional()
+        });
     }
 
     fn finish(self) -> Vec<Step> {
@@ -3205,7 +3227,11 @@ fn match_step(state: &AppState, method: &str, path: &str, body: &Value) -> Resul
                     RequestMatch::Exact(value) => body == value,
                     RequestMatch::Prompt { text, step } => {
                         *step == index
-                            && prompt(body) == Some(text.as_str())
+                            && prompt(body).is_some_and(|prompt| {
+                                prompt == text
+                                    || (text == "请根据以上完整上下文生成压缩摘要。"
+                                        && prompt.ends_with(&format!("\n\n{text}")))
+                            })
                             && !(script.steps[index].optional
                                 && script.requests.iter().any(|request| {
                                     request.accepted && prompt(&request.body) == Some(text.as_str())
@@ -3328,10 +3354,10 @@ fn prompt(body: &Value) -> Option<&str> {
         .get("input")
         .or_else(|| body.get("messages"))?
         .as_array()?;
-    let user = messages
-        .iter()
-        .rev()
-        .find(|item| item.get("role").and_then(Value::as_str) == Some("user"))?;
+    let user = messages.iter().rev().find(|item| {
+        item.get("role").and_then(Value::as_str) == Some("user")
+            && !user_text(item).is_some_and(|text| text.starts_with("[当前宿主事实："))
+    })?;
     user_text(user)
 }
 

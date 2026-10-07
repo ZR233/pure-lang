@@ -110,8 +110,7 @@ Mode 状态栏在整个计划确认期间持续显示 `planning`。`request_user
 调用 `plan_submit`，不得以普通问题或 final 文本把是否实施交回用户。
 
 Turn 模型上下文从当前 Thread Plan state 派生只读 `pl.plan` section，提供当前
-state/revision、文档 hash、修改意见和允许动作；批准后的完整计划作为隐藏 user message
-存在 canonical transcript 中，并继续存在 canonical tool/Interaction 状态。
+state/revision、文档 hash、修改意见和允许动作；完整计划正文独立按文档版本去重，压缩后重新补入当前版本。批准回复与完整正文也保留在 canonical tool/Interaction 状态。
 
 GUI 不新增 Plan 协议状态、持久化实体或第二套 reducer，而是从 pending `UserInput` 中稳定
 ID 为 `plan_confirmation` 的唯一问题派生只读展示：Timeline 尾部显示一张紧凑摘要卡，点击后
@@ -129,3 +128,7 @@ Plan confirmation pending 期间，普通 prompt composer 必须被 Plan 专用�
 answer 的 Revise 加非空反馈，确认映射为 Approve。右侧详情面板只负责阅读，不包含第二份
 输入或确认控件。Interaction resolved 后摘要、详情和反馈栏一起消失，普通 composer 恢复。
 以上均响应同一个 durable Interaction，不能复制 Plan 正文、resolution 或生命周期状态。
+
+## 压缩与恢复中的实施授权
+
+根会话每步从当前扩展投影计划状态、批准版本及完整正文，正文按版本去重，压缩后补入一次。投影不依赖自动压缩开关。批准、修订、模式切换和恢复刷新同一事实源。最新宿主状态优先于历史摘要；压缩、重启和常规实现调整不撤销批准。代理在既有授权范围内继续实施，仅目标、范围或关键决策改变才请求用户决策；只有状态缺失或并发冲突才通过查询工具恢复。

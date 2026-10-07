@@ -22,10 +22,12 @@ pub(crate) type OpenAiRawEventStream = BoxStream<'static, Result<sse::SseStreamE
 pub(crate) fn decode_raw_event_stream(
     stream: OpenAiRawEventStream,
     protocol: OpenAiProtocol,
+    trace: Option<crate::completion::CompletionTraceContext>,
 ) -> CompletionEventStream {
     let visible_output_protocol = protocol.visible_output_protocol();
     let state = ProviderStreamDecodeState {
         stream,
+        trace,
         decoder: sse::OpenAiStreamDecoder::new(visible_output_protocol),
         visible_output: VisibleOutputDecoder::new(visible_output_protocol),
         pending: VecDeque::new(),
@@ -54,7 +56,9 @@ pub(crate) fn decode_raw_event_stream(
                 }
             };
 
-            if let Err(error) = crate::runtime::wire_capture::capture_usage(&sse_event).await {
+            if let Err(error) =
+                crate::runtime::wire_capture::capture_usage(&sse_event, state.trace.as_ref()).await
+            {
                 return Some((Err(error), state));
             }
             for stream_event in state.decoder.decode(&sse_event) {
@@ -69,6 +73,7 @@ pub(crate) fn decode_raw_event_stream(
 
 struct ProviderStreamDecodeState {
     stream: OpenAiRawEventStream,
+    trace: Option<crate::completion::CompletionTraceContext>,
     decoder: sse::OpenAiStreamDecoder,
     visible_output: VisibleOutputDecoder,
     pending: VecDeque<ModelStreamEvent>,

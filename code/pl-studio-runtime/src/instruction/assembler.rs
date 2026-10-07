@@ -175,10 +175,14 @@ fn base_block(
             content: base_override.to_string(),
         };
     }
-    if !model.base_instructions.trim().is_empty() {
+    model_base_block(&model.base_instructions)
+}
+
+pub(super) fn model_base_block(instructions: &str) -> InstructionBlock {
+    if !instructions.trim().is_empty() {
         return InstructionBlock {
             source: InstructionSource::new(InstructionSourceKind::ModelBase, "model base"),
-            content: model.base_instructions.trim().to_string(),
+            content: instructions.trim().to_string(),
         };
     }
     InstructionBlock {

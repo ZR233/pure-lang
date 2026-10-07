@@ -47,6 +47,16 @@ pub struct ModelCallBinding {
 }
 
 impl ModelCallBinding {
+    /// Stable provenance for the selected account, adapter, protocol and model.
+    pub fn route_identity(&self) -> String {
+        crate::runtime::derive_prompt_cache_key(
+            &self.isolation,
+            &format!("{}:{:?}", self.provider_instance_id, self.adapter),
+            &self.requested_model,
+            self.protocol,
+        )
+    }
+
     pub(super) fn capture(runtime: &ModelRuntime, purpose: &str) -> Self {
         Self {
             provider_instance_id: runtime.provider_instance_id().to_owned(),
@@ -353,6 +363,9 @@ pub struct ModelRequestReceipt {
     pub reasoning: Option<crate::completion::ReasoningConfig>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u64>,
+    /// Hashes of the normalized request; independent of the stable provider cache hint.
+    #[serde(default)]
+    pub prompt: Option<crate::runtime::ThreadPromptSnapshot>,
 }
 
 /// Reads the model-owned record saved at admission, including attempts that failed before any response.
@@ -387,6 +400,7 @@ pub fn model_response_receipt(
 pub(super) fn request_metadata(
     binding: &ModelCallBinding,
     request: &crate::completion::CompletionRequest,
+    prompt: Option<&crate::runtime::ThreadPromptSnapshot>,
 ) -> Result<pl_core::context::OpaquePayload, ModelError> {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -398,6 +412,7 @@ pub(super) fn request_metadata(
         reasoning: &'a Option<crate::completion::ReasoningConfig>,
         temperature: Option<f32>,
         max_tokens: Option<u64>,
+        prompt: Option<&'a crate::runtime::ThreadPromptSnapshot>,
     }
     let content = serde_json::to_string(&RequestMetadata {
         binding,
@@ -407,6 +422,7 @@ pub(super) fn request_metadata(
         reasoning: &request.reasoning,
         temperature: request.temperature,
         max_tokens: request.max_tokens,
+        prompt,
     })
     .map_err(|source| {
         super::failure(pl_core::model::ModelFailureKind::UnsupportedContent, source)

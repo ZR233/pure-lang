@@ -79,6 +79,8 @@ impl StudioRuntime {
             };
             let route = config.models.resolve_route(role, &selector)?;
             Self::validate_model_media(&state, &route.model, &[])?;
+            ThreadModel::new(ModelRuntime::from_route(&route)?, route.reasoning_config())
+                .validate_context_origin(&state.context)?;
             if !is_child {
                 let mode_id =
                     crate::studio::thread_projection::saved_mode(&state)?.unwrap_or(record.mode);
@@ -102,9 +104,11 @@ impl StudioRuntime {
         config: &crate::config::StudioConfig,
         precondition: DeferredModelUpdatePrecondition,
     ) -> Result<()> {
+        ThreadModel::new(ModelRuntime::from_route(route)?, route.reasoning_config())
+            .validate_context_origin(&thread.snapshot().context)?;
         thread
             .queue_deferred_model_update_if_current(
-                Self::deferred_model_update(route, config)?,
+                self.deferred_model_update(route, config)?,
                 precondition,
                 Vec::new(),
             )
@@ -113,6 +117,7 @@ impl StudioRuntime {
     }
 
     pub(super) fn deferred_model_update(
+        &self,
         route: &ResolvedModelRoute,
         config: &crate::config::StudioConfig,
     ) -> Result<DeferredModelUpdate> {
@@ -142,7 +147,11 @@ impl StudioRuntime {
         Ok(DeferredModelUpdate::new(
             key,
             factory,
-            crate::compaction::preparer(route, config.runtime.openai_compaction_mode)?,
+            crate::compaction::preparer(
+                route,
+                config.runtime.openai_compaction_mode,
+                self.thread_modes.clone(),
+            )?,
         ))
     }
 
@@ -209,6 +218,15 @@ impl StudioRuntime {
                         Err(error) => Err(error),
                     };
                     if let Err(error) = result {
+                        if error
+                            .downcast_ref::<pl_core::model::ModelError>()
+                            .is_some_and(|error| {
+                                error.kind == ModelFailureKind::IncompatibleContext
+                            })
+                        {
+                            tracing::error!(thread_id = %id, %error, "incompatible model refresh rejected; original session retained");
+                            continue;
+                        }
                         // Invalid current bindings become an explicit failure on the next Turn,
                         // never silent reuse of an old provider or disabled Profile.
                         let update = DeferredModelUpdate::new(

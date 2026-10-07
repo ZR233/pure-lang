@@ -120,8 +120,11 @@ fn recent_context(context: &ContextSnapshot) -> Option<Vec<Value>> {
                 ContextSource::User => "user",
                 ContextSource::Assistant if record.tool_calls.is_empty() => "assistant",
                 ContextSource::Assistant
+                | ContextSource::InstructionSnapshot { .. }
                 | ContextSource::Instruction
                 | ContextSource::Runtime { .. }
+                | ContextSource::RuntimeFact { .. }
+                | ContextSource::AgentMessage { .. }
                 | ContextSource::ToolResult { .. } => return None,
             };
             let mut text = record

@@ -46,7 +46,7 @@ pub struct ModelInvocationContext {
 
 impl ModelInvocationContext {
     /// Binds core request identities for wire diagnostics without a parallel event sink.
-    pub(super) fn with_trace_metadata(mut self, trace: CompletionTraceContext) -> Self {
+    pub fn with_trace_metadata(mut self, trace: CompletionTraceContext) -> Self {
         self.trace = Some(trace);
         self
     }
@@ -836,12 +836,12 @@ impl InvocationRunner {
                         model_session: session,
                         body,
                         expected_sent_model,
-                        trace,
+                        trace: trace.clone(),
                     },
                 )
                 .await?;
                 return Ok(OpenedCompletionStream {
-                    events: decode_raw_event_stream(raw_stream.stream, protocol),
+                    events: decode_raw_event_stream(raw_stream.stream, protocol, trace),
                     sent_model: raw_stream.sent_model,
                     idle_timeout: Some(RESPONSES_WEBSOCKET_IDLE_TIMEOUT),
                 });
@@ -905,7 +905,7 @@ impl InvocationRunner {
                     raw_stream
                 };
             Ok(OpenedCompletionStream {
-                events: decode_raw_event_stream(raw_stream, protocol),
+                events: decode_raw_event_stream(raw_stream, protocol, trace),
                 sent_model: expected_sent_model,
                 idle_timeout: None,
             })

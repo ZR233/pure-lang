@@ -6562,8 +6562,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeModelCapabilities dco_decode_bridge_model_capabilities(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return BridgeModelCapabilities(
       input: dco_decode_list_bridge_model_input_capability(arr[0]),
       output: dco_decode_list_bridge_model_modality(arr[1]),
@@ -6575,6 +6575,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       parallelToolCalls: dco_decode_bool(arr[7]),
       customTools: dco_decode_bool(arr[8]),
       freeformTools: dco_decode_bool(arr[9]),
+      instructionSnapshotOverrides: dco_decode_bool(arr[10]),
+      nativeContextFamily: dco_decode_opt_String(arr[11]),
     );
   }
 
@@ -13757,6 +13759,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_parallelToolCalls = sse_decode_bool(deserializer);
     var var_customTools = sse_decode_bool(deserializer);
     var var_freeformTools = sse_decode_bool(deserializer);
+    var var_instructionSnapshotOverrides = sse_decode_bool(deserializer);
+    var var_nativeContextFamily = sse_decode_opt_String(deserializer);
     return BridgeModelCapabilities(
       input: var_input,
       output: var_output,
@@ -13768,6 +13772,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       parallelToolCalls: var_parallelToolCalls,
       customTools: var_customTools,
       freeformTools: var_freeformTools,
+      instructionSnapshotOverrides: var_instructionSnapshotOverrides,
+      nativeContextFamily: var_nativeContextFamily,
     );
   }
 
@@ -22402,6 +22408,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.parallelToolCalls, serializer);
     sse_encode_bool(self.customTools, serializer);
     sse_encode_bool(self.freeformTools, serializer);
+    sse_encode_bool(self.instructionSnapshotOverrides, serializer);
+    sse_encode_opt_String(self.nativeContextFamily, serializer);
   }
 
   @protected

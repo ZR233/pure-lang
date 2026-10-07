@@ -21,6 +21,10 @@ pub struct ModelCapabilities {
     pub interleaved: Option<ReasoningInterleaved>,
     #[serde(default)]
     pub prompt_cache: PromptCacheModelCapabilities,
+    #[serde(default, rename = "instructionSnapshotOverrides")]
+    pub instruction_snapshot_overrides: bool,
+    #[serde(default, rename = "nativeContextFamily")]
+    pub native_context_family: Option<String>,
 }
 
 impl Default for ModelCapabilities {
@@ -47,6 +51,8 @@ impl ModelCapabilities {
             },
             interleaved: None,
             prompt_cache: PromptCacheModelCapabilities::default(),
+            instruction_snapshot_overrides: false,
+            native_context_family: None,
         }
     }
 

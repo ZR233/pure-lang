@@ -86,7 +86,8 @@
           "parallel_tool_calls": true,
           "programmatic_tool_calling": false
         },
-        "web_search": false
+        "web_search": false,
+        "instructionSnapshotOverrides": true
       },
       "context_window": 1000000,
       "default_temperature": null,
@@ -225,7 +226,8 @@
           "parallel_tool_calls": true,
           "programmatic_tool_calling": false
         },
-        "web_search": false
+        "web_search": false,
+        "instructionSnapshotOverrides": true
       },
       "context_window": 1000000,
       "default_temperature": null,

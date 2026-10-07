@@ -229,6 +229,7 @@ impl AgentControlHost for AgentHost {
             return Err(cleanup_spawn_failure(&owner, &id, error).await);
         }
         let message = pl_core::thread::inbox::ThreadMessage {
+            kind: pl_core::context::AgentMessageKind::Task,
             id: format!("initial:{}:{}", context.thread_id.len(), context.call_id),
             source_id: format!("agent:{}", context.thread_id),
             payload: OpaquePayload::text(request.message.clone()),
@@ -302,6 +303,7 @@ impl AgentControlHost for AgentHost {
             (entry.thread.clone(), entry.execution)
         };
         let delivery = pl_core::thread::inbox::ThreadMessage {
+            kind: pl_core::context::AgentMessageKind::Report,
             id: message.id.clone(),
             source_id: format!("agent:{caller}"),
             payload: OpaquePayload::text(message.message.clone()),

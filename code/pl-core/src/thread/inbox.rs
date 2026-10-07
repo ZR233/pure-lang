@@ -7,6 +7,11 @@ use super::*;
 pub struct ThreadMessage {
     pub id: String,
     pub source_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::context::AgentMessageKind::is_unclassified"
+    )]
+    pub kind: crate::context::AgentMessageKind,
     pub payload: OpaquePayload,
     pub context: Vec<ContextContent>,
 }
@@ -227,8 +232,9 @@ impl Owner {
                 ContextRecord {
                     id: format!("inbox:{}", record.sequence),
                     turn_id: Some(turn_id.to_owned()),
-                    source: ContextSource::Runtime {
+                    source: ContextSource::AgentMessage {
                         source_id: record.message.source_id.clone(),
+                        purpose: record.message.kind,
                     },
                     content: record.message.context.clone(),
                     tool_calls: Vec::new(),

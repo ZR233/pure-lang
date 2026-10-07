@@ -310,6 +310,7 @@ impl StateStore {
                     },
                 );
             }
+            crate::compaction::migrate_checkpoint_sources(&mut checkpoint)?;
             return Ok(checkpoint);
         }
         let mut checkpoint = parse_checkpoint(content, path)?;

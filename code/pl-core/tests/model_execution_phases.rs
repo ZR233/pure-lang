@@ -175,6 +175,7 @@ async fn preparing_the_request_is_not_reported_as_the_running_call() {
     // Borrowing it for preparation must not look like a missing model binding.
     thread
         .send_message(pl_core::thread::inbox::ThreadMessage {
+            kind: pl_core::context::AgentMessageKind::Report,
             id: "during-prepare".into(),
             source_id: "observer".into(),
             payload: pl_core::context::OpaquePayload::text("status update"),

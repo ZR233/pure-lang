@@ -297,6 +297,8 @@ class BridgeModelCapabilities {
   final bool parallelToolCalls;
   final bool customTools;
   final bool freeformTools;
+  final bool instructionSnapshotOverrides;
+  final String? nativeContextFamily;
 
   const BridgeModelCapabilities({
     required this.input,
@@ -309,6 +311,8 @@ class BridgeModelCapabilities {
     required this.parallelToolCalls,
     required this.customTools,
     required this.freeformTools,
+    required this.instructionSnapshotOverrides,
+    this.nativeContextFamily,
   });
 
   @override
@@ -322,7 +326,9 @@ class BridgeModelCapabilities {
       functionCalling.hashCode ^
       parallelToolCalls.hashCode ^
       customTools.hashCode ^
-      freeformTools.hashCode;
+      freeformTools.hashCode ^
+      instructionSnapshotOverrides.hashCode ^
+      nativeContextFamily.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -338,7 +344,9 @@ class BridgeModelCapabilities {
           functionCalling == other.functionCalling &&
           parallelToolCalls == other.parallelToolCalls &&
           customTools == other.customTools &&
-          freeformTools == other.freeformTools;
+          freeformTools == other.freeformTools &&
+          instructionSnapshotOverrides == other.instructionSnapshotOverrides &&
+          nativeContextFamily == other.nativeContextFamily;
 }
 
 enum BridgeModelCatalogCacheWarning { read, schema, identity, declaration }

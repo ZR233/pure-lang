@@ -148,7 +148,10 @@ pub(super) fn declarations(
         .collect()
 }
 
-pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, ModelError> {
+pub(super) fn request(
+    request: &ModelRequest,
+    runtime: &super::ModelRuntime,
+) -> Result<CompletionRequest, ModelError> {
     request
         .context
         .validate_complete()
@@ -181,8 +184,80 @@ pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, Model
     let mut call_order = Vec::new();
     let mut result_messages = BTreeMap::new();
     let mut tool_media = Vec::new();
+    let mut previous_snapshot: Option<(u64, &str)> = None;
     for record in request.context.records.iter() {
-        if record.source == ContextSource::Instruction {
+        if let ContextSource::InstructionSnapshot {
+            revision,
+            content_hash,
+            replaces,
+        } = &record.source
+        {
+            if let Some((previous_revision, previous_hash)) = previous_snapshot
+                && (*revision <= previous_revision || replaces.as_deref() != Some(previous_hash))
+            {
+                return Err(invalid(
+                    "instruction snapshot revision or predecessor is inconsistent",
+                ));
+            }
+            previous_snapshot = Some((*revision, content_hash));
+        }
+    }
+    let append = runtime
+        .endpoint()
+        .instruction_update_strategy(runtime.model())
+        == crate::provider::InstructionUpdateStrategy::AppendFullSnapshot;
+    let latest_snapshot = request
+        .context
+        .records
+        .iter()
+        .rev()
+        .find(|record| matches!(record.source, ContextSource::InstructionSnapshot { .. }));
+    let records = if !append && latest_snapshot.is_some() {
+        latest_snapshot
+            .into_iter()
+            .chain(request.context.records.iter().filter(|record| {
+                !matches!(
+                    record.source,
+                    ContextSource::Instruction | ContextSource::InstructionSnapshot { .. }
+                )
+            }))
+            .collect::<Vec<_>>()
+    } else {
+        request.context.records.iter().collect::<Vec<_>>()
+    };
+    for record in records {
+        let snapshot = matches!(record.source, ContextSource::InstructionSnapshot { .. });
+        if record.source == ContextSource::Instruction || snapshot {
+            let text = record
+                .content
+                .iter()
+                .map(|content| match content {
+                    ContextContent::Text { text } => Ok(text.as_ref()),
+                    _ => Err(invalid("instructions require text")),
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .join("\n");
+            if let ContextSource::InstructionSnapshot {
+                revision,
+                content_hash,
+                ..
+            } = &record.source
+                && (*revision == 0
+                    || pl_core::context::content_hash(text.as_bytes()) != *content_hash)
+            {
+                return Err(invalid(
+                    "invalid instruction snapshot revision or content hash",
+                ));
+            }
+            if snapshot && append && !input.is_empty() {
+                input.push(ModelContextItem::from(Message {
+                    presentation: pl_protocol::MessagePresentation::Hidden,
+                    role: MessageRole::System,
+                    content: MessageContent::text(format!("Current complete host instruction snapshot. This supersedes every earlier host instruction snapshot.\n{text}")),
+                    reasoning_content: None, tool_calls: None, tool_result: None, metadata: Default::default(),
+                }));
+                continue;
+            }
             if !input.is_empty() {
                 return Err(invalid(
                     "tail instructions require an explicitly supported update strategy",
@@ -196,7 +271,7 @@ pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, Model
             }
             continue;
         }
-        if let Some(checkpoint) = super::compaction::decode(record)? {
+        if let Some(checkpoint) = super::compaction::decode(record, runtime)? {
             if !pending_calls.is_empty() {
                 return Err(invalid("compaction splits pending tool calls"));
             }
@@ -288,6 +363,11 @@ pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, Model
             }
         }
         let mut parts = Vec::new();
+        if let ContextSource::RuntimeFact { source_id } = &record.source {
+            parts.push(pl_protocol::ContentPart::Text {
+                text: format!("[当前宿主事实：{source_id}]\n最新快照优先于历史摘要中的旧状态。\n"),
+            });
+        }
         for content in &record.content {
             match content {
                 ContextContent::Text { text } => parts.push(pl_protocol::ContentPart::Text {
@@ -312,7 +392,10 @@ pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, Model
                                 },
                             })
                         }
-                        ContextSource::User | ContextSource::Runtime { .. } => {
+                        ContextSource::User
+                        | ContextSource::Runtime { .. }
+                        | ContextSource::RuntimeFact { .. }
+                        | ContextSource::AgentMessage { .. } => {
                             parts.push(pl_protocol::ContentPart::Attachment {
                                 attachment_id: reference.id().to_owned(),
                                 modality: attachment.modality,
@@ -320,7 +403,9 @@ pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, Model
                                 filename: None,
                             })
                         }
-                        ContextSource::Instruction | ContextSource::Assistant => {
+                        ContextSource::Instruction
+                        | ContextSource::InstructionSnapshot { .. }
+                        | ContextSource::Assistant => {
                             return Err(invalid(
                                 "attachment projection has an unsupported source role",
                             ));
@@ -340,10 +425,15 @@ pub(super) fn request(request: &ModelRequest) -> Result<CompletionRequest, Model
             }
         }
         let role = match &record.source {
-            ContextSource::User | ContextSource::Runtime { .. } => MessageRole::User,
+            ContextSource::User
+            | ContextSource::Runtime { .. }
+            | ContextSource::RuntimeFact { .. }
+            | ContextSource::AgentMessage { .. } => MessageRole::User,
             ContextSource::Assistant => MessageRole::Assistant,
             ContextSource::ToolResult { .. } => MessageRole::Tool,
-            ContextSource::Instruction => return Err(invalid("instruction order changed")),
+            ContextSource::Instruction | ContextSource::InstructionSnapshot { .. } => {
+                return Err(invalid("instruction order changed"));
+            }
         };
         let mut message = message(role, MessageContent::new(parts));
         if let ContextSource::ToolResult { call_id, .. } = &record.source {

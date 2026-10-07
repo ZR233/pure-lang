@@ -362,6 +362,8 @@ fn minimal(slug: &str, adapter: ProviderAdapterKind) -> ModelInfo {
             tools: ToolCapabilities::default(),
             interleaved: None,
             prompt_cache: Default::default(),
+            instruction_snapshot_overrides: false,
+            native_context_family: None,
         },
         truncation_policy: TruncationPolicy::default(),
         base_instructions: String::new(),

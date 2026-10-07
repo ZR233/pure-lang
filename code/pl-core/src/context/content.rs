@@ -135,10 +135,45 @@ pub struct ContextRecord {
 )]
 pub enum ContextSource {
     Instruction,
+    /// A complete host instruction revision, replacing the named predecessor.
+    InstructionSnapshot {
+        revision: u64,
+        content_hash: String,
+        replaces: Option<String>,
+    },
     User,
     Assistant,
-    Runtime { source_id: String },
-    ToolResult { call_id: String, tool_id: String },
+    Runtime {
+        source_id: String,
+    },
+    /// Host-managed current facts; ordinary runtime messages are independent task input.
+    RuntimeFact {
+        source_id: String,
+    },
+    /// An explicitly delivered agent message; never replaced as a current host fact.
+    AgentMessage {
+        source_id: String,
+        purpose: AgentMessageKind,
+    },
+    ToolResult {
+        call_id: String,
+        tool_id: String,
+    },
+}
+
+/// Dispatch ownership is explicit. Old messages retain unknown purpose during migration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentMessageKind {
+    Task,
+    Report,
+    #[default]
+    Unclassified,
+}
+impl AgentMessageKind {
+    pub fn is_unclassified(&self) -> bool {
+        *self == Self::Unclassified
+    }
 }
 
 /// A frozen model context version, shared without copying content or interpreting payloads.

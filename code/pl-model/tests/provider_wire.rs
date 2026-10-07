@@ -306,9 +306,13 @@ async fn thread_replays_all_assistant_output_without_losing_progress_or_wire_ide
         ])
         .await
         .unwrap();
+        let mut replay_model = model("replay-fixture", profile);
+        replay_model.capabilities.interleaved = Some(pl_model::model::ReasoningInterleaved {
+            field: pl_model::model::ReasoningInterleavedField::ReasoningContent,
+        });
         let runtime = ModelRuntime::new(
             ProviderEndpoint::compatible("fixture", fixture.base_url()),
-            model("replay-fixture", profile),
+            replay_model,
         )
         .unwrap();
         let factory = ModelFactory::new(pl_model::runtime::ThreadModel::new(runtime, None));
@@ -586,9 +590,13 @@ async fn tool_replay_survives_checkpoint_without_reexecuting_tools_or_failed_out
             ModelTransportProfile::chat_completions_http(),
         ),
     ] {
+        let mut fixture_model = model("fixture-model", profile);
+        fixture_model.capabilities.interleaved = Some(pl_model::model::ReasoningInterleaved {
+            field: pl_model::model::ReasoningInterleavedField::ReasoningContent,
+        });
         let runtime = ModelRuntime::new(
             ProviderEndpoint::compatible("fixture", fixture.base_url()),
-            model("fixture-model", profile),
+            fixture_model,
         )
         .unwrap();
         let factory = ModelFactory::new(pl_model::runtime::ThreadModel::new(runtime, None));
@@ -774,7 +782,7 @@ async fn auxiliary_requests_keep_frozen_replay_and_mutated_input_is_rejected() {
             ),
             Step::prompt(
                 protocol,
-                "summarize",
+                "Summarize recorded facts\n\nsummarize",
                 1,
                 Reply::Sse(if protocol == Protocol::Chat {
                     chat_events("summary", "fixture-model")
@@ -796,6 +804,7 @@ async fn auxiliary_requests_keep_frozen_replay_and_mutated_input_is_rejected() {
             .await
             .unwrap();
         let mut prefix = request("question");
+        prefix.instructions = Some("Original authoritative instructions".into());
         prefix.append_response(&first).unwrap();
         if protocol == Protocol::Chat {
             assert!(pl_model::completion::estimate_text_input_tokens(&prefix).unwrap() >= 1024);
@@ -828,6 +837,17 @@ async fn auxiliary_requests_keep_frozen_replay_and_mutated_input_is_rejected() {
             .await
             .unwrap();
         assert_eq!(summary.text, "summary");
+        let records = fixture.recorded();
+        let body = &records[1].body;
+        if protocol == Protocol::Chat {
+            assert_eq!(
+                body["messages"][0]["content"],
+                "Original authoritative instructions"
+            );
+        } else {
+            assert_eq!(body["instructions"], "Original authoritative instructions");
+        }
+        assert!(body.to_string().contains("Summarize recorded facts"));
         if protocol == Protocol::ResponsesHttp {
             let compacted = runtime
                 .compaction()
@@ -2392,4 +2412,691 @@ async fn transient_provider_error_retries_one_logical_request_without_double_cou
     assert_eq!(result.content.as_deref(), Some("recovered"));
     assert_eq!(result.accounting.usage.total_tokens, Some(24));
     assert_eq!(fixture.finish().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn empty_native_checkpoint_is_rejected_before_commit_and_keeps_usage() {
+    let fixture = FixtureServer::start(vec![Step::prompt(Protocol::ResponsesHttp, "empty-native", 0,
+        Reply::Sse(vec![json!({"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":" "}}),
+        json!({"type":"response.completed","response":{"id":"empty","usage":{"input_tokens":31,"output_tokens":2}}})]))]).await.unwrap();
+    let mut endpoint = ProviderEndpoint::compatible("fixture", fixture.base_url());
+    endpoint.service_capabilities.remote_compaction = true;
+    let runtime = ModelRuntime::new(
+        endpoint,
+        model("origin-model", ModelTransportProfile::responses_http()),
+    )
+    .unwrap();
+    let failure = runtime
+        .compaction()
+        .unwrap()
+        .checkpoint(request("empty-native"), ModelInvocationContext::default())
+        .await
+        .unwrap_err();
+    assert_eq!(failure.accounting.usage.input_tokens, Some(31));
+    assert!(failure.to_string().contains("empty checkpoint"));
+    fixture.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn native_checkpoint_replay_requires_bound_origin_and_explicit_model_family() {
+    use pl_core::{
+        context::{ContextRecord, ContextSnapshot, OpaquePayload},
+        model::{ModelRequest, ToolCallMode},
+    };
+    use pl_model::runtime::{
+        ThreadCompactionOptions, ThreadCompactionStrategy, ThreadModel, migrate_legacy_compaction,
+    };
+    let fixture = FixtureServer::start(vec![Step::prompt(Protocol::ResponsesHttp, "native-origin", 0,
+        Reply::Sse(vec![json!({"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"origin-bound-material"}}),
+        json!({"type":"response.completed","response":{"id":"origin","usage":{"input_tokens":20,"output_tokens":2}}})]))]).await.unwrap();
+    let mut endpoint = ProviderEndpoint::compatible("fixture", fixture.base_url());
+    endpoint.service_capabilities.remote_compaction = true;
+    let mut info = model("source-model", ModelTransportProfile::responses_http());
+    info.capabilities.native_context_family = Some("explicit-fixture-family".into());
+    let source = ThreadModel::new(
+        ModelRuntime::new_with_provider_id("source", endpoint.clone(), info.clone()).unwrap(),
+        None,
+    );
+    let result = source
+        .compact(
+            ModelRequest {
+                thread_id: "origin-thread".into(),
+                turn_id: "origin-turn".into(),
+                attempt_id: "origin-attempt".into(),
+                context: ContextSnapshot {
+                    revision: 1,
+                    records: vec![ContextRecord {
+                        id: "input".into(),
+                        turn_id: Some("origin-turn".into()),
+                        source: ContextSource::User,
+                        content: vec![ContextContent::Text {
+                            text: "native-origin".into(),
+                        }],
+                        tool_calls: vec![],
+                    }]
+                    .into(),
+                },
+                tools: Default::default(),
+                tool_call_mode: ToolCallMode::Parallel,
+                solo_tool_ids: Default::default(),
+                committed_private_context: None,
+                resources: Default::default(),
+                cancellation: Default::default(),
+                progress: None,
+            },
+            ThreadCompactionOptions {
+                strategy: ThreadCompactionStrategy::PreferNative,
+                instructions: "compact".into(),
+                requirement: "compact".into(),
+                summary_prefix: "summary".into(),
+                max_output_tokens: None,
+            },
+        )
+        .await
+        .unwrap();
+    let context = ContextSnapshot {
+        revision: 2,
+        records: result.replacement.records.into(),
+    };
+    source.validate_context_origin(&context).unwrap();
+    let other_account = ThreadModel::new(
+        ModelRuntime::new_with_provider_id("other-account", endpoint.clone(), info.clone())
+            .unwrap(),
+        None,
+    );
+    assert!(other_account.validate_context_origin(&context).is_err());
+    info.slug = "target-model".into();
+    info.capabilities.native_context_family = None;
+    let unproven = ThreadModel::new(
+        ModelRuntime::new_with_provider_id("source", endpoint.clone(), info.clone()).unwrap(),
+        None,
+    );
+    assert!(unproven.validate_context_origin(&context).is_err());
+    info.capabilities.native_context_family = Some("explicit-fixture-family".into());
+    let explicit = ThreadModel::new(
+        ModelRuntime::new_with_provider_id("source", endpoint, info).unwrap(),
+        None,
+    );
+    explicit.validate_context_origin(&context).unwrap();
+    let mut duplicate = context.clone();
+    let mut records = duplicate.records.to_vec();
+    let mut second = records[0].clone();
+    second.id = "second-native".into();
+    records.push(second);
+    duplicate.records = records.into();
+    assert!(source.validate_context_origin(&duplicate).is_err());
+    let mut old = context.clone();
+    let records = Arc::make_mut(&mut old.records);
+    let record = &mut records[0];
+    let ContextContent::Opaque { payload } = &record.content[0] else {
+        panic!("native material missing")
+    };
+    let item = serde_json::from_str::<Value>(payload.content()).unwrap()["item"].clone();
+    record.content = vec![ContextContent::Opaque {
+        payload: OpaquePayload::new("pl.model.compaction", 1, item.to_string()).unwrap(),
+    }];
+    assert!(!migrate_legacy_compaction(record, "wrong-receipt", result.binding.clone()).unwrap());
+    assert!(migrate_legacy_compaction(record, "origin-attempt", result.binding).unwrap());
+    source.validate_context_origin(&old).unwrap();
+    fixture.finish().await.unwrap();
+}
+
+#[tokio::test]
+async fn instruction_snapshots_use_only_jointly_declared_endpoint_and_model_semantics() {
+    use pl_core::context::ContextRecord;
+    use pl_core::thread::{ContextReplacementReason, ReplaceContext};
+    use pl_model::provider::HistoryInstructionRole;
+    for (model_support, endpoint_support, append) in [
+        (false, false, false),
+        (true, false, false),
+        (false, true, false),
+        (true, true, true),
+    ] {
+        let fixture = FixtureServer::start(vec![
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                "snapshot-probe",
+                0,
+                Reply::Sse(responses_text("first", "first", "snapshot-model")),
+            ),
+            Step::prompt(
+                Protocol::ResponsesHttp,
+                "snapshot-probe",
+                1,
+                Reply::Sse(responses_text("second", "second", "snapshot-model")),
+            ),
+        ])
+        .await
+        .unwrap();
+        let mut endpoint = ProviderEndpoint::compatible("fixture", fixture.base_url());
+        endpoint.service_capabilities.history_instruction_role = if endpoint_support {
+            HistoryInstructionRole::Developer
+        } else {
+            HistoryInstructionRole::None
+        };
+        let mut info = model("snapshot-model", ModelTransportProfile::responses_http());
+        info.capabilities.instruction_snapshot_overrides = model_support;
+        let session = ModelFactory::new(pl_model::runtime::ThreadModel::new(
+            ModelRuntime::new(endpoint, info).unwrap(),
+            None,
+        ))
+        .open_session()
+        .await
+        .unwrap();
+        let thread = ThreadHandle::start("snapshot-thread".into(), session).unwrap();
+        let base = ContextRecord {
+            id: "initial-instructions".into(),
+            turn_id: None,
+            source: ContextSource::Instruction,
+            content: vec![ContextContent::Text {
+                text: "initial authority".into(),
+            }],
+            tool_calls: vec![],
+        };
+        thread
+            .replace_context(ReplaceContext {
+                expected_revision: 0,
+                reason: ContextReplacementReason::Rebuild,
+                records: vec![base],
+            })
+            .await
+            .unwrap();
+        for index in 0..2 {
+            if index == 1 {
+                let state = thread.snapshot();
+                let mut records = state.context.records.to_vec();
+                records.push(ContextRecord {
+                    id: "instruction-revision".into(),
+                    turn_id: None,
+                    source: ContextSource::InstructionSnapshot {
+                        revision: 1,
+                        content_hash: pl_core::context::content_hash(b"new complete authority"),
+                        replaces: None,
+                    },
+                    content: vec![ContextContent::Text {
+                        text: "new complete authority".into(),
+                    }],
+                    tool_calls: vec![],
+                });
+                thread
+                    .replace_context(ReplaceContext {
+                        expected_revision: state.context.revision,
+                        reason: ContextReplacementReason::Rebuild,
+                        records,
+                    })
+                    .await
+                    .unwrap();
+            }
+            thread
+                .run_turn(TurnInput {
+                    turn_id: format!("turn-{index}"),
+                    attempt_prefix: format!("attempt-{index}"),
+                    content: vec![ContextContent::Text {
+                        text: "snapshot-probe".into(),
+                    }],
+                    max_model_steps: ModelStepLimit::Limited(1.try_into().unwrap()),
+                    cancellation: Default::default(),
+                })
+                .await
+                .unwrap();
+        }
+        thread.close().await.unwrap();
+        let records = fixture.finish().await.unwrap();
+        let body = &records[1].body;
+        if append {
+            assert!(
+                body["instructions"]
+                    .as_str()
+                    .unwrap()
+                    .contains("initial authority")
+            );
+            assert!(
+                body["input"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|item| item["role"] == "developer"
+                        && item.to_string().contains("new complete authority"))
+            );
+        } else {
+            assert!(
+                body["instructions"]
+                    .as_str()
+                    .unwrap()
+                    .contains("new complete authority")
+            );
+            assert!(
+                !body["instructions"]
+                    .as_str()
+                    .unwrap()
+                    .contains("initial authority")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn chat_reasoning_replay_uses_target_capability_and_rejects_untyped_details() {
+    use pl_model::model::{ReasoningInterleaved, ReasoningInterleavedField};
+    for field in [
+        None,
+        Some(ReasoningInterleavedField::ReasoningContent),
+        Some(ReasoningInterleavedField::Reasoning),
+        Some(ReasoningInterleavedField::ReasoningDetails),
+    ] {
+        let rejected = field == Some(ReasoningInterleavedField::ReasoningDetails);
+        let fixture = FixtureServer::start(if rejected {
+            vec![]
+        } else {
+            vec![Step::prompt(
+                Protocol::Chat,
+                "target-probe",
+                0,
+                Reply::Sse(chat_events("done", "target-model")),
+            )]
+        })
+        .await
+        .unwrap();
+        let mut info = model(
+            "target-model",
+            ModelTransportProfile::chat_completions_http(),
+        );
+        info.capabilities.interleaved = field.map(|field| ReasoningInterleaved { field });
+        let runtime = ModelRuntime::new(
+            ProviderEndpoint::compatible("target", fixture.base_url()),
+            info,
+        )
+        .unwrap();
+        let assistant = Message {
+            role: MessageRole::Assistant,
+            reasoning_content: Some("retained reasoning".into()),
+            ..user("previous answer")
+        };
+        let result = runtime
+            .complete(
+                CompletionRequest::builder()
+                    .messages(vec![assistant, user("target-probe")])
+                    .build(),
+                ModelInvocationContext::default(),
+            )
+            .await;
+        let records = fixture.finish().await.unwrap();
+        if rejected {
+            assert!(result.is_err());
+            assert!(records.is_empty());
+            continue;
+        }
+        result.unwrap();
+        let message = records[0].body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message["role"] == "assistant")
+            .unwrap();
+        assert_eq!(
+            message.get("reasoning_content").and_then(Value::as_str),
+            (field == Some(ReasoningInterleavedField::ReasoningContent))
+                .then_some("retained reasoning")
+        );
+        assert_eq!(
+            message.get("reasoning").and_then(Value::as_str),
+            (field == Some(ReasoningInterleavedField::Reasoning)).then_some("retained reasoning")
+        );
+        assert!(message.get("reasoning_details").is_none());
+    }
+}
+
+#[tokio::test]
+async fn stable_cache_hint_keeps_diagnostics_separate_from_changed_instructions() {
+    use pl_core::context::{ContextRecord, ContextSnapshot};
+    use pl_core::model::{ModelRequest, ToolCallMode};
+    use pl_model::runtime::{ThreadModel, model_request_receipt};
+    use pl_protocol::PromptPrefixChangedReason;
+    let fixture = FixtureServer::start(vec![
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            "cache-probe",
+            0,
+            Reply::Sse(responses_text("first", "cache-1", "cache-model")),
+        ),
+        Step::prompt(
+            Protocol::ResponsesHttp,
+            "cache-probe",
+            1,
+            Reply::Sse(responses_text("second", "cache-2", "cache-model")),
+        ),
+    ])
+    .await
+    .unwrap();
+    let mut endpoint = ProviderEndpoint::compatible("cache", fixture.base_url());
+    endpoint.service_capabilities.prompt_cache.dialect = PromptCacheDialect::OpenAiPromptCacheKey;
+    let factory = ModelFactory::new(ThreadModel::new(
+        ModelRuntime::new(
+            endpoint,
+            model("cache-model", ModelTransportProfile::responses_http()),
+        )
+        .unwrap(),
+        None,
+    ));
+    let mut session = factory.open_session().await.unwrap();
+    let mut prompts = Vec::new();
+    for index in 0..2 {
+        let call = session
+            .prepare(ModelRequest {
+                thread_id: "stable-thread".into(),
+                turn_id: format!("turn-{index}"),
+                attempt_id: format!("attempt-{index}"),
+                context: ContextSnapshot {
+                    revision: index + 1,
+                    records: vec![
+                        ContextRecord {
+                            id: "instructions".into(),
+                            turn_id: None,
+                            source: ContextSource::Instruction,
+                            content: vec![ContextContent::Text {
+                                text: format!("complete authority {index}").into(),
+                            }],
+                            tool_calls: vec![],
+                        },
+                        ContextRecord {
+                            id: format!("input-{index}"),
+                            turn_id: Some(format!("turn-{index}")),
+                            source: ContextSource::User,
+                            content: vec![ContextContent::Text {
+                                text: "cache-probe".into(),
+                            }],
+                            tool_calls: vec![],
+                        },
+                    ]
+                    .into(),
+                },
+                tools: Default::default(),
+                tool_call_mode: ToolCallMode::Sequential,
+                solo_tool_ids: Default::default(),
+                committed_private_context: None,
+                resources: None,
+                cancellation: Default::default(),
+                progress: None,
+            })
+            .await
+            .unwrap();
+        prompts.push(
+            model_request_receipt(call.request_metadata().unwrap())
+                .unwrap()
+                .prompt
+                .unwrap(),
+        );
+        call.execute().await.unwrap();
+    }
+    session.close().await.unwrap();
+    let records = fixture.finish().await.unwrap();
+    assert!(records[0].body["prompt_cache_key"].as_str().is_some());
+    assert_eq!(
+        records[0].body["prompt_cache_key"],
+        records[1].body["prompt_cache_key"]
+    );
+    assert_ne!(prompts[0].fixed_prefix_hash, prompts[1].fixed_prefix_hash);
+    assert_eq!(
+        prompts[1].prefix_changed_reason,
+        PromptPrefixChangedReason::FixedPrefixChanged
+    );
+    assert_eq!(prompts[1].generation, prompts[0].generation + 1);
+}
+
+#[tokio::test]
+async fn compaction_keeps_recent_execution_proof_without_reexecuting_the_tool() {
+    use pl_core::{
+        context::{ContextRecord, ContextSnapshot},
+        model::{ModelRequest, ModelToolDeclaration, ToolCallMode},
+        thread::{ContextReplacementReason, ReplaceContext},
+    };
+    use pl_model::runtime::{ThreadCompactionOptions, ThreadCompactionStrategy, ThreadModel};
+    let call = json!({"type":"function_call","id":"proof-output","call_id":"proof-call","name":"exec","arguments":pl_provider_fixture::replay_tool_arguments()});
+    let fixture = FixtureServer::start(vec![
+        Step::prompt(Protocol::ResponsesHttp, "proof-task", 0, Reply::Sse(vec![json!({"type":"response.output_item.done","item":call}),json!({"type":"response.completed","response":{"id":"proof-response","output":[call]}})])),
+        Step::prompt(Protocol::ResponsesHttp, "proof-task", 1, Reply::Sse(responses_text("done", "proof-final", "proof-model"))),
+        Step::prompt(Protocol::ResponsesHttp, "summarize proof\n\nsummary requirement", 2, Reply::Sse(responses_text("summary omits the execution proof", "proof-summary", "proof-model"))),
+        Step::prompt(Protocol::ResponsesHttp, "resume-proof", 3, Reply::Sse(responses_text("already completed", "proof-resume", "proof-model"))),
+    ]).await.unwrap();
+    let source = ThreadModel::new(
+        ModelRuntime::new(
+            ProviderEndpoint::compatible("proof", fixture.base_url()),
+            model("proof-model", ModelTransportProfile::responses_http()),
+        )
+        .unwrap(),
+        None,
+    );
+    let factory = ModelFactory::new(source.clone());
+    let thread =
+        ThreadHandle::start("proof-thread".into(), factory.open_session().await.unwrap()).unwrap();
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    thread
+        .register_tools(vec![replay_registration(&count)])
+        .await
+        .unwrap();
+    let spec = ToolSpec::function(
+        "exec",
+        "Return a recorded marker",
+        json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}),
+    );
+    thread
+        .replace_context(ReplaceContext {
+            expected_revision: 0,
+            reason: ContextReplacementReason::Rebuild,
+            records: vec![ContextRecord {
+                id: "delegated-task".into(),
+                turn_id: None,
+                source: ContextSource::AgentMessage {
+                    source_id: "parent".into(),
+                    purpose: pl_core::context::AgentMessageKind::Task,
+                },
+                content: vec![ContextContent::Text {
+                    text: "explicit private task input".into(),
+                }],
+                tool_calls: vec![],
+            }],
+        })
+        .await
+        .unwrap();
+    thread
+        .run_turn(replay_turn("proof-task", Default::default()))
+        .await
+        .unwrap();
+    let state = thread.snapshot();
+    let compacted = source
+        .compact(
+            ModelRequest {
+                thread_id: "proof-thread".into(),
+                turn_id: "proof-task".into(),
+                attempt_id: "proof-compaction".into(),
+                context: state.context.clone(),
+                tools: vec![ModelToolDeclaration {
+                    tool_id: "exec".into(),
+                    declaration: pl_model::runtime::thread_tool_declaration(&spec).unwrap(),
+                }]
+                .into(),
+                tool_call_mode: ToolCallMode::Sequential,
+                solo_tool_ids: Default::default(),
+                committed_private_context: None,
+                resources: None,
+                cancellation: Default::default(),
+                progress: None,
+            },
+            ThreadCompactionOptions {
+                strategy: ThreadCompactionStrategy::TextSummary,
+                instructions: "summarize proof".into(),
+                requirement: "summary requirement".into(),
+                summary_prefix: "summary".into(),
+                max_output_tokens: None,
+            },
+        )
+        .await
+        .unwrap();
+    let reduced = ContextSnapshot {
+        revision: state.context.revision + 1,
+        records: compacted.replacement.records.clone().into(),
+    };
+    assert!(
+        reduced
+            .records
+            .iter()
+            .any(|record| record.id == "delegated-task")
+    );
+    assert!(reduced.records.iter().any(|record| {
+        record
+            .tool_calls
+            .iter()
+            .any(|call| call.call_id == "proof-call")
+    }));
+    assert!(reduced.records.iter().any(|record| matches!(&record.source, ContextSource::ToolResult { call_id, .. } if call_id == "proof-call")));
+    thread.replace_context(compacted.replacement).await.unwrap();
+    thread
+        .run_turn(replay_turn("resume-proof", Default::default()))
+        .await
+        .unwrap();
+    thread.close().await.unwrap();
+    assert_eq!(count.load(std::sync::atomic::Ordering::Relaxed), 1);
+    let records = fixture.finish().await.unwrap();
+    let input = records[3].body["input"].as_array().unwrap();
+    assert!(
+        input
+            .iter()
+            .any(|item| item["type"] == "function_call" && item["call_id"] == "proof-call")
+    );
+    assert!(
+        input
+            .iter()
+            .any(|item| item["type"] == "function_call_output"
+                && item["call_id"] == "proof-call"
+                && item["output"] == "replay-tool-marker")
+    );
+}
+
+#[tokio::test]
+async fn native_capacity_preview_counts_new_input_and_requires_bound_prior_usage() {
+    use pl_core::thread::{ModelUsageOrigin, context_preparation::PreviousContextUsage};
+    use pl_core::{
+        context::{ContextRecord, ContextSnapshot},
+        model::{ModelRequest, ModelUsage, ToolCallMode},
+    };
+    use pl_model::runtime::ThreadModel;
+    let checkpoint_item = json!({"type":"compaction","encrypted_content":"capacity-native"});
+    let fixture = FixtureServer::start(vec![
+        Step::prompt(Protocol::ResponsesHttp, "old-input", 0, Reply::Sse(responses_text("retained output", "capacity-output", "capacity-model"))),
+        Step::prompt(Protocol::ResponsesHttp, "old-input", 1, Reply::Sse(vec![json!({"type":"response.output_item.done","item":checkpoint_item}), json!({"type":"response.completed","response":{"id":"capacity-compaction","output":[checkpoint_item]}})])),
+    ]).await.unwrap();
+    let mut endpoint = ProviderEndpoint::compatible("capacity", fixture.base_url());
+    endpoint.service_capabilities.remote_compaction = true;
+    let source = ThreadModel::new(
+        ModelRuntime::new(
+            endpoint,
+            model("capacity-model", ModelTransportProfile::responses_http()),
+        )
+        .unwrap(),
+        None,
+    );
+    let mut session = ModelFactory::new(source.clone())
+        .open_session()
+        .await
+        .unwrap();
+    let mut request = ModelRequest {
+        thread_id: "capacity-thread".into(),
+        turn_id: "old-turn".into(),
+        attempt_id: "old-attempt".into(),
+        context: ContextSnapshot {
+            revision: 1,
+            records: vec![ContextRecord {
+                id: "old-input".into(),
+                turn_id: Some("old-turn".into()),
+                source: ContextSource::User,
+                content: vec![ContextContent::Text {
+                    text: "old-input".into(),
+                }],
+                tool_calls: vec![],
+            }]
+            .into(),
+        },
+        tools: Default::default(),
+        tool_call_mode: ToolCallMode::Sequential,
+        solo_tool_ids: Default::default(),
+        committed_private_context: None,
+        resources: None,
+        cancellation: Default::default(),
+        progress: None,
+    };
+    let call = session.prepare(request.clone()).await.unwrap();
+    let binding = call.usage_binding().unwrap().clone();
+    let output = call.execute().await.unwrap();
+    session.close().await.unwrap();
+    let compacted = source
+        .compact(
+            request.clone(),
+            pl_model::runtime::ThreadCompactionOptions {
+                strategy: pl_model::runtime::ThreadCompactionStrategy::PreferNative,
+                instructions: "compact".into(),
+                requirement: "compact".into(),
+                summary_prefix: "summary".into(),
+                max_output_tokens: None,
+            },
+        )
+        .await
+        .unwrap();
+    let mut records = compacted.replacement.records;
+    let input_record_count = records.len();
+    records.push(ContextRecord {
+        id: "old-output".into(),
+        turn_id: Some("old-turn".into()),
+        source: ContextSource::Assistant,
+        content: output.content,
+        tool_calls: output.tool_calls,
+    });
+    records.push(ContextRecord {
+        id: "new-input".into(),
+        turn_id: Some("new-turn".into()),
+        source: ContextSource::User,
+        content: vec![ContextContent::Text {
+            text: "01234567".into(),
+        }],
+        tool_calls: vec![],
+    });
+    request.context.records = records.into();
+    assert!(
+        source
+            .estimate_input(&request, None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let mut previous = PreviousContextUsage {
+        usage: ModelUsage {
+            input_tokens: Some(100),
+            output_tokens: Some(20),
+            ..Default::default()
+        },
+        origin: ModelUsageOrigin {
+            binding,
+            input_revision: 1,
+            context_revision: 1,
+            input_record_count,
+            input_hash: Some("core-validated-prefix".into()),
+        },
+    };
+    assert_eq!(
+        source
+            .estimate_input(&request, Some(&previous))
+            .await
+            .unwrap()
+            .unwrap()
+            .tokens,
+        122
+    );
+    previous.origin.binding.route_identity = Some("another-route".into());
+    assert!(
+        source
+            .estimate_input(&request, Some(&previous))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    fixture.finish().await.unwrap();
 }

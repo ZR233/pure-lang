@@ -115,6 +115,10 @@ pub struct ModelCapabilitiesDto {
     pub parallel_tool_calls: bool,
     pub custom_tools: bool,
     pub freeform_tools: bool,
+    #[serde(default, rename = "instructionSnapshotOverrides")]
+    pub instruction_snapshot_overrides: bool,
+    #[serde(default, rename = "nativeContextFamily")]
+    pub native_context_family: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]

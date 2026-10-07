@@ -6113,6 +6113,8 @@ impl SseDecode for crate::api::studio::types::settings::BridgeModelCapabilities 
         let mut var_parallelToolCalls = <bool>::sse_decode(deserializer);
         let mut var_customTools = <bool>::sse_decode(deserializer);
         let mut var_freeformTools = <bool>::sse_decode(deserializer);
+        let mut var_instructionSnapshotOverrides = <bool>::sse_decode(deserializer);
+        let mut var_nativeContextFamily = <Option<String>>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeModelCapabilities {
             input: var_input,
             output: var_output,
@@ -6124,6 +6126,8 @@ impl SseDecode for crate::api::studio::types::settings::BridgeModelCapabilities 
             parallel_tool_calls: var_parallelToolCalls,
             custom_tools: var_customTools,
             freeform_tools: var_freeformTools,
+            instruction_snapshot_overrides: var_instructionSnapshotOverrides,
+            native_context_family: var_nativeContextFamily,
         };
     }
 }
@@ -15009,6 +15013,10 @@ impl flutter_rust_bridge::IntoDart
             self.parallel_tool_calls.into_into_dart().into_dart(),
             self.custom_tools.into_into_dart().into_dart(),
             self.freeform_tools.into_into_dart().into_dart(),
+            self.instruction_snapshot_overrides
+                .into_into_dart()
+                .into_dart(),
+            self.native_context_family.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -22625,6 +22633,8 @@ impl SseEncode for crate::api::studio::types::settings::BridgeModelCapabilities 
         <bool>::sse_encode(self.parallel_tool_calls, serializer);
         <bool>::sse_encode(self.custom_tools, serializer);
         <bool>::sse_encode(self.freeform_tools, serializer);
+        <bool>::sse_encode(self.instruction_snapshot_overrides, serializer);
+        <Option<String>>::sse_encode(self.native_context_family, serializer);
     }
 }
 

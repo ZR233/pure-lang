@@ -341,9 +341,14 @@ impl StudioRuntime {
             .resolve_route(StudioRole::Planner.id(), &selector)?;
         crate::mode::validate_thread_mode_model(Some(&mode_definition), &route.model)?;
         Self::validate_model_media(&state, &route.model, &[])?;
+        pl_model::runtime::ThreadModel::new(
+            pl_model::runtime::ModelRuntime::from_route(&route)?,
+            route.reasoning_config(),
+        )
+        .validate_context_origin(&state.context)?;
         match thread
             .queue_deferred_model_update_if_current(
-                Self::deferred_model_update(&route, &settings.config)?,
+                self.deferred_model_update(&route, &settings.config)?,
                 pl_core::thread::DeferredModelUpdatePrecondition::commit_sequence(
                     state.commit_sequence,
                 ),

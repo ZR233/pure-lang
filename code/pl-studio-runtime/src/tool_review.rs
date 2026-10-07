@@ -62,8 +62,14 @@ async fn review(binding: ReviewBinding, request: ToolReviewRequest) -> ToolAppro
         .reasoning(binding.reasoning.clone())
         .build();
     let (events, _) = tokio::sync::broadcast::channel(1);
+    let inference_id = crate::studio::new_id("review");
     let invocation = ModelInvocationContext::new(Default::default())
         .with_events(events)
+        .with_trace_metadata(pl_model::completion::CompletionTraceContext {
+            session_id: request.thread_id,
+            turn_id: request.turn_id,
+            inference_id: inference_id.clone(),
+        })
         .with_cancellation(request.cancellation_token);
     let result = binding.runtime.complete(completion, invocation).await;
     let route = &binding.route;
@@ -77,7 +83,7 @@ async fn review(binding: ReviewBinding, request: ToolReviewRequest) -> ToolAppro
     };
     let billing = pl_protocol::InferenceBillingRecord {
         purpose: Some("review".into()),
-        inference_id: crate::studio::new_id("review"),
+        inference_id,
         provider_instance_id: route.provider_id.as_str().into(),
         provider: route.endpoint.name.clone(),
         model: model_observation.as_ref().map_or_else(

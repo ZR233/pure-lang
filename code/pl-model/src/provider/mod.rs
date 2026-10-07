@@ -83,6 +83,25 @@ pub struct ProviderServiceCapabilities {
     pub prompt_cache: PromptCacheProviderCapabilities,
     #[serde(default)]
     pub responses_tools: ResponsesHostedToolCapabilities,
+    #[serde(default, rename = "historyInstructionRole")]
+    pub history_instruction_role: HistoryInstructionRole,
+}
+
+/// Accepted authority for full instruction snapshots inside model history.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryInstructionRole {
+    #[default]
+    None,
+    System,
+    Developer,
+}
+
+/// Effective behavior requires both endpoint syntax and model override semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstructionUpdateStrategy {
+    ReplacePrefix,
+    AppendFullSnapshot,
 }
 
 /// Explicit upload dialect; custom endpoints must opt in.
@@ -169,6 +188,7 @@ impl ProviderServiceCapabilities {
     /// 返回同时支持 Responses hosted 与 OpenAI Search API 的能力集合。
     pub fn openai_web_search() -> Self {
         Self {
+            history_instruction_role: HistoryInstructionRole::None,
             remote_compaction: true,
             files: FileUploadCapability::None,
             web_search: WebSearchProviderCapabilities {
@@ -304,6 +324,30 @@ impl ProviderEndpoint {
         }
     }
 
+    pub fn instruction_update_strategy(
+        &self,
+        model: &crate::model::ModelInfo,
+    ) -> InstructionUpdateStrategy {
+        let accepts = matches!(
+            (
+                model.binding.transport.protocol,
+                self.service_capabilities.history_instruction_role
+            ),
+            (
+                ProviderWireProtocol::ChatCompletions,
+                HistoryInstructionRole::System
+            ) | (
+                ProviderWireProtocol::Responses,
+                HistoryInstructionRole::Developer
+            )
+        );
+        if accepts && model.capabilities.instruction_snapshot_overrides {
+            InstructionUpdateStrategy::AppendFullSnapshot
+        } else {
+            InstructionUpdateStrategy::ReplacePrefix
+        }
+    }
+
     pub fn openai(base_url: Option<String>) -> Self {
         let custom_endpoint = base_url.is_some();
         let mut service_capabilities = ProviderServiceCapabilities::openai_web_search();
@@ -336,6 +380,11 @@ impl ProviderEndpoint {
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
             service_capabilities: ProviderServiceCapabilities {
+                history_instruction_role: if canonical {
+                    HistoryInstructionRole::Developer
+                } else {
+                    HistoryInstructionRole::None
+                },
                 files: if canonical {
                     FileUploadCapability::DeepSeek
                 } else {

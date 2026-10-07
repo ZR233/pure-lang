@@ -59,6 +59,29 @@ pub(super) fn project_request(
     mut request: crate::completion::CompletionRequest,
 ) -> Result<crate::completion::CompletionRequest> {
     validate(model.binding.transport.protocol, &request.input)?;
+    if model.binding.transport.protocol == ProviderWireProtocol::ChatCompletions
+        && model
+            .capabilities
+            .interleaved
+            .as_ref()
+            .is_some_and(|capability| {
+                capability.field == crate::model::ReasoningInterleavedField::ReasoningDetails
+            })
+        && request
+            .input
+            .iter()
+            .filter_map(ModelContextItem::as_message)
+            .any(|message| {
+                message
+                    .reasoning_content
+                    .as_ref()
+                    .is_some_and(|text| !text.is_empty())
+            })
+    {
+        return Err(PureError::ConfigError(
+            "typed reasoning_details cannot be reconstructed from text reasoning history".into(),
+        ));
+    }
     drop_unreadable_cross_provider_reasoning(
         &mut request,
         crate::runtime::binding_cache_namespace(provider_instance_id, endpoint).as_str(),

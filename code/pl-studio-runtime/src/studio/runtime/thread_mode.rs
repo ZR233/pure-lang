@@ -32,6 +32,11 @@ impl StudioRuntime {
         let thread = self.ensure_thread_owner(thread_id).await?;
         let state = thread.snapshot();
         Self::validate_model_media(&state, &route.model, &[])?;
+        pl_model::runtime::ThreadModel::new(
+            pl_model::runtime::ModelRuntime::from_route(&route)?,
+            route.reasoning_config(),
+        )
+        .validate_context_origin(&state.context)?;
         let previous = state
             .extensions
             .get("studio.instructions")
@@ -55,19 +60,74 @@ impl StudioRuntime {
             .label
             .clone_from(&mode.descriptor().display_name);
         profile.content = mode.prompt().to_owned();
-        let mut records = instructions.context_records(thread_id);
-        let instruction_ids = records
+        let projected = instructions.context_records(thread_id);
+        let complete = projected
             .iter()
-            .map(|record| record.id.clone())
-            .collect::<std::collections::BTreeSet<_>>();
-        records.extend(
+            .filter(|record| record.source == pl_core::context::ContextSource::Instruction)
+            .flat_map(|record| &record.content)
+            .filter_map(|content| match content {
+                pl_core::context::ContextContent::Text { text } => Some(text.as_ref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let hash = pl_core::context::content_hash(complete.as_bytes());
+        let replaces = state
+            .context
+            .records
+            .iter()
+            .rev()
+            .find_map(|record| match &record.source {
+                pl_core::context::ContextSource::InstructionSnapshot { content_hash, .. } => {
+                    Some(content_hash.clone())
+                }
+                _ => None,
+            });
+        // The instruction Put is third in this atomic extension batch.
+        let instruction_revision = state
+            .extension_sequence
+            .checked_add(3)
+            .context("instruction revision exhausted")?;
+        let snapshot = pl_core::context::ContextRecord {
+            id: format!("instruction:{thread_id}:revision:{instruction_revision}"),
+            turn_id: None,
+            source: pl_core::context::ContextSource::InstructionSnapshot {
+                revision: instruction_revision,
+                content_hash: hash,
+                replaces,
+            },
+            content: vec![pl_core::context::ContextContent::Text {
+                text: complete.into(),
+            }],
+            tool_calls: Vec::new(),
+        };
+        let same_route = crate::studio::model_route::saved(&state)?
+            .is_some_and(|saved| saved.route == route_selector);
+        let append = same_route
+            && route.endpoint.instruction_update_strategy(&route.model)
+                == pl_model::provider::InstructionUpdateStrategy::AppendFullSnapshot;
+        let mut records = if append {
+            state.context.records.to_vec()
+        } else {
             state
                 .context
                 .records
                 .iter()
-                .filter(|record| !instruction_ids.contains(&record.id))
-                .cloned(),
-        );
+                .filter(|record| {
+                    !matches!(
+                        record.source,
+                        pl_core::context::ContextSource::Instruction
+                            | pl_core::context::ContextSource::InstructionSnapshot { .. }
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        if append {
+            records.push(snapshot);
+        } else {
+            records.insert(0, snapshot);
+        }
         let workflow_record = state
             .extensions
             .get(crate::workflow_tool::WORKFLOW_EXTENSION);
@@ -163,7 +223,7 @@ impl StudioRuntime {
                     reason: ContextReplacementReason::Rebuild,
                     records,
                 }),
-                model_update: Some(Self::deferred_model_update(&route, &config)?),
+                model_update: Some(self.deferred_model_update(&route, &config)?),
                 replace_tools: true,
                 remove_tools: Vec::new(),
                 tools: registrations,

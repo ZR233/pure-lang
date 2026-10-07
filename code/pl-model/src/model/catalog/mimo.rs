@@ -135,5 +135,7 @@ fn mimo_capabilities(input: Vec<ModelInputCapability>) -> ModelCapabilities {
             field: ReasoningInterleavedField::ReasoningContent,
         }),
         prompt_cache: PromptCacheModelCapabilities::default(),
+        instruction_snapshot_overrides: false,
+        native_context_family: None,
     }
 }

@@ -56,7 +56,8 @@ pub async fn migrate_to_current(
     migrate_v6(options.clone(), transform).await?;
     migrate_v7(options.clone()).await?;
     migrate_v8(options.clone()).await?;
-    migrate_v9(options).await
+    migrate_v9(options.clone()).await?;
+    migrate_v10(options).await
 }
 
 /// Migrates version 6 to 7 in one transaction, preserving entry identities and all history.
@@ -84,7 +85,7 @@ async fn migrate_v6(
         // A versioned step accepts only its own target or later steps this facade knows about.
         // Do not tie its no-op range to SESSION_SCHEMA_VERSION: a future schema bump must add a
         // new step to migrate_to_current, not silently redefine what this migration did.
-        if version == 7 || version == 8 || version == 9 || version == 10 { tx.commit().await?; return Ok(()); }
+        if version == 7 || version == 8 || version == 9 || version == 10 || version == 11 { tx.commit().await?; return Ok(()); }
         if version != 6 { return Err(SessionStoreError::UnsupportedSchema { found: version, supported: super::SESSION_SCHEMA_VERSION }); }
         let sessions = tx.query_all_raw(sqlite::statement("SELECT session_id FROM session_history_heads UNION SELECT session_id FROM session_entries UNION SELECT session_id FROM session_entry_history", vec![])).await?;
         for row in sessions {
@@ -169,7 +170,7 @@ async fn migrate_v7(options: SqliteSessionOptions) -> Result<(), SessionStoreErr
             .await?
             .ok_or_else(|| SessionStoreError::Invalid("missing version".into()))?
             .try_get::<i64>("", "user_version")?;
-        if version == 8 || version == 9 || version == 10 {
+        if version == 8 || version == 9 || version == 10 || version == 11 {
             tx.commit().await?;
             return Ok(());
         }
@@ -237,7 +238,7 @@ async fn migrate_v8(options: SqliteSessionOptions) -> Result<(), SessionStoreErr
             .await?
             .ok_or_else(|| SessionStoreError::Invalid("missing version".into()))?
             .try_get::<i64>("", "user_version")?;
-        if version == 9 || version == 10 {
+        if version == 9 || version == 10 || version == 11 {
             tx.commit().await?;
             return Ok(());
         }
@@ -386,7 +387,7 @@ async fn migrate_v9(options: SqliteSessionOptions) -> Result<(), SessionStoreErr
             .await?
             .ok_or_else(|| SessionStoreError::Invalid("missing version".into()))?
             .try_get::<i64>("", "user_version")?;
-        if version == 10 {
+        if version == 10 || version == 11 {
             tx.commit().await?;
             return Ok(());
         }
@@ -527,4 +528,48 @@ fn convert(
     entry.schema_version = 3;
     entry.payload = serde_json::to_string(&commit)?;
     Ok(())
+}
+
+/// Upgrades only the current checkpoint envelope; immutable session history is preserved.
+async fn migrate_v10(options: SqliteSessionOptions) -> Result<(), SessionStoreError> {
+    let mut url =
+        url::Url::parse("sqlite:///").map_err(|e| SessionStoreError::Invalid(e.to_string()))?;
+    url.set_path(
+        options
+            .path
+            .to_str()
+            .ok_or_else(|| SessionStoreError::Invalid("non-UTF8 database path".into()))?,
+    );
+    url.set_query(Some("mode=rw"));
+    let db = Database::connect(url.to_string()).await?;
+    let result = async {
+        let tx = db.begin().await?;
+        let version = tx.query_one_raw(sqlite::statement("PRAGMA user_version", vec![])).await?.ok_or_else(|| SessionStoreError::Invalid("missing version".into()))?.try_get::<i64>("", "user_version")?;
+        if version == 11 { tx.commit().await?; return Ok(()); }
+        if version != 10 { return Err(SessionStoreError::UnsupportedSchema { found: version, supported: super::SESSION_SCHEMA_VERSION }); }
+        let mut after = String::new();
+        loop {
+            let rows = tx.query_all_raw(sqlite::statement("SELECT * FROM thread_checkpoints WHERE thread_id>? ORDER BY thread_id LIMIT 128", vec![after.clone().into()])).await?;
+            if rows.is_empty() { break; }
+            for row in rows {
+                let id: String = row.try_get("", "thread_id")?;
+                after.clone_from(&id);
+                let envelope: String = row.try_get("", "envelope")?;
+                let hash: String = row.try_get("", "payload_hash")?;
+                if crate::context::content_hash(envelope.as_bytes()) != hash { return Err(SessionStoreError::Invalid("checkpoint integrity check failed".into())); }
+                let header: serde_json::Value = serde_json::from_str(&envelope)?;
+                let indexed: i64 = row.try_get("", "schema_version")?;
+                if header["schemaVersion"].as_i64() != Some(indexed) { return Err(SessionStoreError::Invalid("checkpoint schema mismatch".into())); }
+                let checkpoint: crate::thread::ThreadCheckpoint = if indexed == 4 { serde_json::from_str(&envelope)? } else { crate::thread::ThreadCheckpoint::decode_legacy(&envelope).map_err(|e| SessionStoreError::Invalid(e.to_string()))? };
+                if checkpoint.thread_id != id || checkpoint.state_revision != checkpoint.state.commit_sequence || checkpoint.history_fence > checkpoint.state_revision { return Err(SessionStoreError::Invalid("checkpoint ownership or fence mismatch".into())); }
+                let encoded = serde_json::to_string(&checkpoint)?;
+                tx.execute_raw(sqlite::statement("UPDATE thread_checkpoints SET schema_version=?,envelope=?,payload_hash=? WHERE thread_id=?", vec![4_i64.into(), encoded.clone().into(), crate::context::content_hash(encoded.as_bytes()).into(), id.into()])).await?;
+            }
+        }
+        tx.execute_unprepared("PRAGMA user_version=11").await?;
+        tx.commit().await?;
+        Ok(())
+    }.await;
+    db.close().await?;
+    result
 }

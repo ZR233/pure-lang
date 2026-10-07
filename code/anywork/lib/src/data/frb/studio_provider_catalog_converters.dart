@@ -48,6 +48,7 @@ ProviderModelView _providerModelFromCatalog(frb.BridgeModelDescriptor model) {
     if (model.capabilities.parallelToolCalls) 'parallel tools',
     if (model.capabilities.customTools) 'custom tools',
     if (model.capabilities.freeformTools) 'freeform tools',
+    if (model.capabilities.instructionSnapshotOverrides) '历史指令更新',
   ];
   final reasoning = model.reasoning;
   final pricing = model.pricing;

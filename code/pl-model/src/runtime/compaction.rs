@@ -168,6 +168,11 @@ fn parse_output_item(item: Value) -> Result<Option<ModelContextItem>> {
                         "OpenAI compaction item is missing encrypted_content".to_string(),
                     )
                 })?;
+            if encrypted_content.trim().is_empty() {
+                return Err(PureError::Protocol(
+                    "remote compaction returned an empty checkpoint".into(),
+                ));
+            }
             Ok(Some(ModelContextItem::Compaction {
                 encrypted_content: encrypted_content.to_string(),
             }))

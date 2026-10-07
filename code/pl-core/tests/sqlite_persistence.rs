@@ -1,5 +1,136 @@
 mod support;
 
+#[tokio::test]
+async fn sqlite_v10_context_migration_preserves_history_and_marks_unknown_usage_origin() {
+    use pl_core::{context::ContextSource, thread::RuntimeFact};
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+    let directory = tempfile::tempdir().unwrap();
+    let options = SqliteSessionOptions {
+        path: directory.path().join("v10.sqlite"),
+    };
+    let store = SqliteSessionStore::open(options.clone()).await.unwrap();
+    let (mut model, _) = ScriptedModel::new(&[]);
+    model.usage.input_tokens = Some(83);
+    let thread = ThreadHandle::start("v10".into(), DynModelSession::new(model)).unwrap();
+    thread
+        .attach_storage(ColdStoreHandle::new(store.clone()))
+        .await
+        .unwrap();
+    thread
+        .update_facts(vec![RuntimeFact {
+            source_id: "plan".into(),
+            content: vec![support::text("approved immutable plan")],
+        }])
+        .await
+        .unwrap();
+    thread.run_turn(turn("historical-task")).await.unwrap();
+    thread.flush().await.unwrap();
+    thread.close().await.unwrap();
+    let checkpoint = store.read_thread_checkpoint("v10").await.unwrap().unwrap();
+    let historical_effect = store
+        .read_thread_effect("v10", checkpoint.history_fence)
+        .await
+        .unwrap()
+        .unwrap();
+    store.shutdown().await.unwrap();
+    let mut legacy = serde_json::to_value(&checkpoint).unwrap();
+    legacy["schemaVersion"] = serde_json::json!(3);
+    legacy["state"]
+        .as_object_mut()
+        .unwrap()
+        .remove("lastAttemptUsageOrigin");
+    for record in legacy["state"]["context"]["records"]
+        .as_array_mut()
+        .unwrap()
+    {
+        if record["source"]["kind"] == "runtimeFact" {
+            record["source"]["kind"] = serde_json::json!("runtime");
+        }
+    }
+    let encoded = serde_json::to_string(&legacy).unwrap();
+    let db = sea_orm::Database::connect(format!("sqlite://{}?mode=rw", options.path.display()))
+        .await
+        .unwrap();
+    db.execute_raw(Statement::from_sql_and_values(DatabaseBackend::Sqlite, "UPDATE thread_checkpoints SET schema_version=3,envelope=?,payload_hash='damaged' WHERE thread_id='v10'", vec![encoded.clone().into()])).await.unwrap();
+    db.execute_unprepared("PRAGMA user_version=10")
+        .await
+        .unwrap();
+    db.close().await.unwrap();
+    assert!(
+        migration::migrate_to_current(options.clone(), |_| Ok(()))
+            .await
+            .is_err()
+    );
+    let db = sea_orm::Database::connect(format!("sqlite://{}?mode=rw", options.path.display()))
+        .await
+        .unwrap();
+    let version = db
+        .query_one_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "PRAGMA user_version",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i64>("", "user_version")
+        .unwrap();
+    assert_eq!(version, 10, "a failed migration cannot advance its version");
+    let row = db
+        .query_one_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT envelope FROM thread_checkpoints WHERE thread_id='v10'",
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.try_get::<String>("", "envelope").unwrap(), encoded);
+    db.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Sqlite,
+        "UPDATE thread_checkpoints SET payload_hash=? WHERE thread_id='v10'",
+        vec![pl_core::context::content_hash(encoded.as_bytes()).into()],
+    ))
+    .await
+    .unwrap();
+    db.close().await.unwrap();
+    migration::migrate_to_current(options.clone(), |_| Ok(()))
+        .await
+        .unwrap();
+    let reopened = SqliteSessionStore::open(options).await.unwrap();
+    let restored = reopened
+        .read_thread_checkpoint("v10")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(restored.schema_version, 4);
+    assert_eq!(
+        restored
+            .state
+            .last_attempt_usage
+            .as_ref()
+            .unwrap()
+            .input_tokens,
+        Some(83)
+    );
+    assert!(restored.state.last_attempt_usage_origin.is_none());
+    assert!(matches!(
+        restored.state.context.records[0].source,
+        ContextSource::RuntimeFact { .. }
+    ));
+    assert_eq!(restored.state.runtime_facts, checkpoint.state.runtime_facts);
+    assert_eq!(
+        serde_json::to_value(
+            reopened
+                .read_thread_effect("v10", checkpoint.history_fence)
+                .await
+                .unwrap()
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(historical_effect).unwrap()
+    );
+    reopened.shutdown().await.unwrap();
+}
+
 use std::sync::Arc;
 
 use pl_core::context::OpaquePayload;
@@ -32,6 +163,7 @@ async fn sqlite_thread_usage_matches_hot_snapshot_and_restored_checkpoint() {
         total_tokens: Some(150),
     };
     model.usage_binding = Some(ModelUsageBinding {
+        route_identity: None,
         model: "test-model".into(),
         context_window: Some(1_000),
     });

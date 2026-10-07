@@ -17,7 +17,7 @@ mod writer;
 /// effect rows that are the durable history query contract. Older data is upgraded only through the
 /// explicit [`migration::migrate_to_current`] path; opening a database never converts or discards
 /// it.
-pub const SESSION_SCHEMA_VERSION: i64 = 10;
+pub const SESSION_SCHEMA_VERSION: i64 = 11;
 
 use std::sync::Arc;
 

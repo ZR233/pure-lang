@@ -145,6 +145,7 @@ async fn background_result_identity_survives_consumed_history_pruning_and_recove
     for id in &old_ids {
         thread
             .send_message(ThreadMessage {
+                kind: pl_core::context::AgentMessageKind::Report,
                 id: id.clone(),
                 source_id: "earlier-task".into(),
                 payload: OpaquePayload::text("earlier result"),

@@ -1,20 +1,26 @@
 //! Stable provider cache hints, independent of execution and diagnostic identities.
-use pl_protocol::ThreadPromptSnapshot;
+use crate::provider::ProviderWireProtocol;
 use sha2::{Digest, Sha256};
 
 /// Derives a deterministic cache hint from stable model input identity and host isolation.
 /// The isolation value must represent an account/deployment boundary and contain no credentials.
 /// Appended dynamic context, timestamps, scope labels and diagnostic generations do not rotate it.
-pub fn derive_prompt_cache_key(isolation: &str, prompt: &ThreadPromptSnapshot) -> String {
+pub fn derive_prompt_cache_key(
+    isolation: &str,
+    thread_id: &str,
+    model: &str,
+    protocol: ProviderWireProtocol,
+) -> String {
     let mut hash = Sha256::new();
     for part in [
-        "pl-model/cache-key/v1",
+        "pl-model/cache-key/v2",
         isolation,
-        &prompt.provider_hash,
-        &prompt.model,
-        &prompt.fixed_prefix_hash,
-        &prompt.request_properties_hash,
-        &prompt.tool_schema_hash,
+        thread_id,
+        model,
+        match protocol {
+            ProviderWireProtocol::Responses => "responses",
+            ProviderWireProtocol::ChatCompletions => "chatCompletions",
+        },
     ] {
         hash.update((part.len() as u64).to_le_bytes());
         hash.update(part.as_bytes());

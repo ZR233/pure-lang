@@ -171,13 +171,23 @@ fn attempt_billing(
         model,
         model_observation,
         reasoning_effort: request
-            .and_then(|request| request.reasoning)
-            .and_then(|reasoning| reasoning.effort),
-        context_window: None,
+            .as_ref()
+            .and_then(|request| request.reasoning.as_ref())
+            .and_then(|reasoning| reasoning.effort.clone()),
+        context_window: binding.as_ref().and_then(|binding| binding.context_window),
         accounting,
-        prompt_generation: None,
-        prompt_cache_policy: None,
-        prefix_changed_reason: None,
+        prompt_generation: request
+            .as_ref()
+            .and_then(|request| request.prompt.as_ref())
+            .map(|prompt| prompt.generation),
+        prompt_cache_policy: request
+            .as_ref()
+            .and_then(|request| request.prompt.as_ref())
+            .map(|prompt| prompt.prompt_cache_policy.clone()),
+        prefix_changed_reason: request
+            .as_ref()
+            .and_then(|request| request.prompt.as_ref())
+            .map(|prompt| prompt.prefix_changed_reason),
         orchestration,
         timing,
         recorded_at,

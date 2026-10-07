@@ -303,6 +303,7 @@ async fn a_durable_message_receipt_wakes_only_its_unconsumed_message() {
     let (model, requests) = ScriptedModel::new(&[]);
     let thread = ThreadHandle::start("parent".into(), DynModelSession::new(model)).unwrap();
     let message = ThreadMessage {
+        kind: pl_core::context::AgentMessageKind::Report,
         id: "child-report".into(),
         source_id: "child".into(),
         payload: OpaquePayload::text("finished"),
@@ -344,8 +345,9 @@ async fn a_durable_message_receipt_wakes_only_its_unconsumed_message() {
         assert_eq!(requests.len(), 1);
         assert!(requests[0].records.iter().any(|record| {
             record.source
-                == ContextSource::Runtime {
+                == ContextSource::AgentMessage {
                     source_id: "child".into(),
+                    purpose: pl_core::context::AgentMessageKind::Report,
                 }
         }));
     }

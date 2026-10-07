@@ -53,3 +53,11 @@ required-features = ["live-tests"]
 [build-dependencies]
 sha2 = { workspace = true }
 hex = { workspace = true }
+
+[[example]]
+name = "context_cache_observe"
+required-features = ["live-tests"]
+
+[[example]]
+name = "context_cache_matrix"
+required-features = ["live-tests"]

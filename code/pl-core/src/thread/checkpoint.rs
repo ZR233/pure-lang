@@ -383,6 +383,14 @@ impl LegacyThreadCheckpoint {
                 header.schema_version,
             ));
         }
+        if header.schema_version == 3 {
+            let checkpoint: ThreadCheckpoint = serde_json::from_str(envelope)?;
+            return Ok(Self {
+                checkpoint,
+                attempts: Vec::new(),
+                attempt_bodies: Vec::new(),
+            });
+        }
         let mut root: serde_json::Value = serde_json::from_str(envelope)?;
         let mut attempts = Vec::new();
         let mut attempt_bodies = Vec::new();
@@ -459,7 +467,7 @@ impl LegacyThreadCheckpoint {
         &self.attempt_bodies
     }
 
-    /// Converts the reified legacy checkpoint into the current schema-3 resident form.
+    /// Converts the reified legacy checkpoint into the current schema-4 resident form.
     ///
     /// # Errors
     /// Rejects a still-pending current-context body: converting would drop body text the live
@@ -490,11 +498,39 @@ impl LegacyThreadCheckpoint {
                 }
             }
         }
-        checkpoint.state.attempts = attempts
-            .into_iter()
-            .map(LegacyRequestAttempt::into_current)
-            .collect::<Vec<_>>()
-            .into();
+        if checkpoint.schema_version != 3 {
+            checkpoint.state.attempts = attempts
+                .into_iter()
+                .map(LegacyRequestAttempt::into_current)
+                .collect::<Vec<_>>()
+                .into();
+        }
+        checkpoint.schema_version = ThreadCheckpoint::SCHEMA_VERSION;
+        checkpoint.state.last_attempt_usage_origin = None;
+        let sources = checkpoint
+            .state
+            .runtime_facts
+            .iter()
+            .map(|fact| fact.source_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        for record in std::sync::Arc::make_mut(&mut checkpoint.state.context.records) {
+            if let crate::context::ContextSource::Runtime { source_id } = &record.source
+                && record.id.starts_with("inbox:")
+            {
+                record.source = crate::context::ContextSource::AgentMessage {
+                    source_id: source_id.clone(),
+                    purpose: crate::context::AgentMessageKind::Unclassified,
+                };
+            }
+            if let crate::context::ContextSource::Runtime { source_id } = &record.source
+                && record.id.starts_with("runtime:")
+                && sources.contains(source_id.as_str())
+            {
+                record.source = crate::context::ContextSource::RuntimeFact {
+                    source_id: source_id.clone(),
+                };
+            }
+        }
         Ok(checkpoint)
     }
 }
@@ -535,16 +571,17 @@ pub struct ThreadCheckpoint {
 }
 
 impl ThreadCheckpoint {
-    /// Current checkpoint schema. Schema 3 keeps only the lightweight resident attempt shape: the
+    /// Current checkpoint schema. Schema 4 adds typed host facts, message purpose and usage provenance.
+    /// The lightweight resident attempt shape introduced by schema 3 still excludes the
     /// frozen input context and the complete attempt outcome are no longer part of a checkpoint,
     /// because the matching [`super::ThreadEffectBatch`] is their only durable copy.
-    pub const SCHEMA_VERSION: u32 = 3;
+    pub const SCHEMA_VERSION: u32 = 4;
 
     /// Schema versions this build no longer interprets in its normal path, but can still convert
     /// through [`Self::decode_legacy`].
     ///
     /// Schema 1 inlines every body; schema 2 may name external bodies instead of inlining them.
-    pub const LEGACY_SCHEMA_VERSIONS: [u32; 2] = [1, 2];
+    pub const LEGACY_SCHEMA_VERSIONS: [u32; 3] = [1, 2, 3];
 
     /// Whether this build interprets `schema_version` without loss.
     pub fn supports_schema(schema_version: u32) -> bool {
@@ -556,7 +593,7 @@ impl ThreadCheckpoint {
         Self::LEGACY_SCHEMA_VERSIONS.contains(&schema_version)
     }
 
-    /// Converts a schema-1/2 checkpoint envelope into the current schema-3 resident form.
+    /// Converts a schema-1/2 checkpoint envelope into the current schema-4 resident form.
     ///
     /// The conversion is one-way and explicit: the normal reader ([`Self::supports_schema`]) rejects
     /// the old versions so it can never mistake an unread layout for the current one. The caller is

@@ -60,6 +60,7 @@ pub(super) async fn publish_terminal(
         .notify_parent(
             parent,
             pl_core::thread::inbox::ThreadMessage {
+                kind: pl_core::context::AgentMessageKind::Report,
                 // Preserve the sequence-derived identity used by historical terminal notifications.
                 id: message_id,
                 source_id: format!("studio.child:{}", thread.id),

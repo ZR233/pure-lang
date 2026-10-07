@@ -67,6 +67,10 @@ root Turn 在调用 provider 前捕获一个 Mode 快照；本 Turn 的 Prompt�
 显式拒绝不具备该能力的模型，不能为了迁就 hosted Web Search 的 exclusive 路径而静默卸载
 workflow 工具。无图的 Mode 和 child Agent 不受这项约束。
 
+等待下一条用户输入时通过 final 或 finish_turn 结束当前轮次，保留当前非终结工作流阶段。
+wait 仅用于接收已存在的后台任务、代理或定时器结果；不存在独立工作时不得用空任务循环
+等待用户输入，也不得因等待超时重新读取已经确认的状态或重复验证已完成操作。
+
 只选择 Mode 不创建 run。带图的 Mode 在收到根用户输入且没有活动 run 时自动从初态创建 run；
 用户输入与新 working state 在第一次 Thread checkpoint 一起提交，准备或提交失败不得调用
 provider。进入 terminal 后，下一条根用户输入创建新 lineage。切换 Mode 会归档旧活动 run，但
@@ -153,11 +157,7 @@ transition result 内含最新 stage constraint，供同一 Turn 后续 inferenc
 working state 派生 `pl.workflow`，context compaction 后重新捕获最新 projection，不复用压缩前
 阶段。
 
-Task Mode Prompt 规定每次 `workflow_transition` 前必须产生一个独立的只读 tool response，
-同时调用 `workflow_current` 与 `workflow_next`，并只使用这次返回的 run、revision、current
-state 和直接后继；不得从注入摘要或旧 mutation receipt 推测 CAS。首次和进入终态前的读取还
-必须包含 `workflow_graph` 与 `workflow_history`。只读查询可以并发，mutation 仍必须单独占用
-下一次 tool response。
+Task Mode 使用最新宿主状态投影的 run、revision、当前阶段和直接后继进行比较交换，不从旧摘要或旧 mutation receipt 推测状态。投影缺失或发生并发冲突时再调用 `workflow_current`、`workflow_next`，图与历史信息确有需要时再查询；mutation 仍独占一次 tool response。
 
 ## 11.6 内置 Mode
 
@@ -185,7 +185,7 @@ integrating 和 reviewing。状态指令、完成标准和每条边的 guard 属
 约束属于 Mode Prompt（完整编排合同见 [12](./12-collaboration.md)）。
 
 完整计划必须在 planning 中通过 `plan_current`、`plan_next` 和 `plan_submit` 请求批准或修订；
-只有 `plan_current` 返回 `approved` 后才可 transition 到 editing_documents。计划确认不属于
+只有当前宿主计划投影为 `approved` 后才可 transition 到 editing_documents。计划确认不属于
 Mode 图：它由 Plan 固定状态机和整套 `plan_*` 工具管理（见 [13](./13-plan.md)），planning
 期间的澄清、提交、要求修订和重新批准都保持 workflow state 为 `planning`，Plan 已批准是
 `planning -> editing_documents` 的声明性条件。进入 `completed` 后自然 final 或调用 `finish_turn({message})`，只交付一次。
@@ -200,3 +200,7 @@ canonical snapshot、工具回执和 wire 读取完整历史。
 Mode 目录覆盖已完成切换的新工具；过期发布不记为已安装、不清空当前目录，关闭候选后安排
 重新准备。刷新指纹包含 Mode 扩展身份；模型/工具执行期间发生的普通状态事件不单独触发目录
 重建（通用条件发布机制见 [01](./01-overview.md)）。
+
+## 当前工作流投影
+
+根会话请求直接包含当前工作流身份、图版本、当前阶段指令、完成标准、允许转换及比较交换所需参数。关闭自动压缩仍保持投影；压缩和重启后恢复最新业务状态，不能依据旧摘要回退到初始阶段。业务状态与当前图不一致时明确拒绝；查询工具用于信息缺失或并发冲突，不作为每步重新定位的强制前置操作。

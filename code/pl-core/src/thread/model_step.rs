@@ -254,21 +254,8 @@ impl Owner {
                     )
             })
         });
-        if retry_of.is_none() || correcting {
-            // The context-preparation hook is the only step that may replace or compact the context;
-            // it is the one boundary that can genuinely run a separate preparation model.
-            self.enter_model_execution(ModelExecutionPhase::PreparingContext);
-            self.apply_pending_runtime_facts()?;
-            self.prepare_context(&input, tools.clone()).await?;
-            // Admission after the hook is a storage/capacity wait again, not context preparation and
-            // not a provider wait.
-            self.enter_model_execution(ModelExecutionPhase::Admitting);
-            self.ensure_model_admission(&input.cancellation).await?;
-        }
-        // Assembling the message/steering/tool records and the immutable request is request
-        // construction, not context preparation.
-        self.enter_model_execution(ModelExecutionPhase::BuildingRequest);
-        let mut records = self.state.context.records.to_vec();
+        // Freeze consumption before any awaited preparation. Mailbox input arriving while the
+        // hook runs belongs to the next step and must not change this preview or its watermark.
         let (messages, consumed_messages) = if retry_of.is_none() || correcting {
             self.message_context(&input.turn_id)
         } else {
@@ -279,10 +266,9 @@ impl Owner {
         } else {
             (Vec::new(), Vec::new())
         };
-        let changed = !messages.is_empty() || !steering.is_empty() || !input.content.is_empty();
-        records.extend(messages);
+        let mut frozen_input = messages;
         if !input.content.is_empty() {
-            records.push(ContextRecord {
+            frozen_input.push(ContextRecord {
                 tool_calls: Vec::new(),
                 id: format!("{}:input", input.attempt_id),
                 turn_id: Some(input.turn_id.clone()),
@@ -293,11 +279,37 @@ impl Owner {
                 } else {
                     ContextSource::User
                 },
-                content: input.content,
+                content: input.content.clone(),
             });
         }
-        records.extend(steering);
-        let input_revision = if changed {
+        frozen_input.extend(steering);
+        if retry_of.is_none() || correcting {
+            self.enter_model_execution(ModelExecutionPhase::PreparingContext);
+            self.apply_pending_runtime_facts()?;
+            for refresh in 0..=1 {
+                let prepared = self
+                    .prepare_context(&input, &plan, &frozen_input, false)
+                    .await;
+                if refresh == 0
+                    && matches!(
+                        prepared,
+                        Err(ThreadError::ContextConflict { .. }
+                            | ThreadError::ExtensionConflict { .. })
+                    )
+                {
+                    continue;
+                }
+                prepared?;
+                break;
+            }
+            self.enter_model_execution(ModelExecutionPhase::Admitting);
+            self.ensure_model_admission(&input.cancellation).await?;
+        }
+        self.enter_model_execution(ModelExecutionPhase::BuildingRequest);
+        let mut records = self.state.context.records.to_vec();
+        let changed = !frozen_input.is_empty();
+        records.extend_from_slice(&frozen_input);
+        let mut input_revision = if changed {
             self.state
                 .context
                 .revision
@@ -306,15 +318,11 @@ impl Owner {
         } else {
             self.state.context.revision
         };
-        let output_revision = input_revision
-            .checked_add(1)
-            .ok_or(ThreadError::RevisionExhausted)?;
-        let context = ContextSnapshot {
+        let mut context = ContextSnapshot {
             revision: input_revision,
             records: records.into(),
         };
         context.validate_complete()?;
-        let tool_context = context.clone();
         // Reserving the reliable output budget waits for capacity/storage admission, which is a wait
         // on the host, not on the model implementation.
         self.enter_model_execution(ModelExecutionPhase::Admitting);
@@ -331,7 +339,7 @@ impl Owner {
             output_budget.clone(),
         );
         self.model_progress = Some((input.attempt_id.clone(), observations));
-        let request = ModelRequest {
+        let mut request = ModelRequest {
             tool_call_mode: plan.call_mode(),
             solo_tool_ids: plan.solo_tool_ids(),
             progress: Some(progress),
@@ -347,21 +355,63 @@ impl Owner {
         // Preparing the request runs inside the model implementation (freezing, encoding, estimating)
         // before any provider call exists, so this is still preparation, not a wait for output.
         self.enter_model_execution(ModelExecutionPhase::PreparingRequest);
-        let mut model = self.model.take().ok_or(ThreadError::Closed)?;
-        self.preparing_model_available = model.is_available();
-        let prepared = self.await_with_mailbox(model.prepare(request)).await;
-        self.model = Some(model);
-        self.preparing_model_available = false;
-        self.publish_snapshot();
-        let prepared = match prepared {
-            Err(error)
-                if input.cancellation.is_cancelled()
-                    && error.kind == crate::model::ModelFailureKind::Cancelled =>
-            {
-                return Err(ThreadError::Cancelled);
+        let mut recovered_capacity = false;
+        let prepared = loop {
+            let mut model = self.model.take().ok_or(ThreadError::Closed)?;
+            self.preparing_model_available = model.is_available();
+            let prepared = self
+                .await_with_mailbox(model.prepare(request.clone()))
+                .await;
+            self.model = Some(model);
+            self.preparing_model_available = false;
+            self.publish_snapshot();
+            match prepared {
+                Err(error)
+                    if input.cancellation.is_cancelled()
+                        && error.kind == crate::model::ModelFailureKind::Cancelled =>
+                {
+                    return Err(ThreadError::Cancelled);
+                }
+                Err(error)
+                    if error.kind == crate::model::ModelFailureKind::ContextLimit
+                        && !recovered_capacity
+                        && retry_of.is_none() =>
+                {
+                    recovered_capacity = true;
+                    let before = self.state.context.revision;
+                    self.enter_model_execution(ModelExecutionPhase::PreparingContext);
+                    self.prepare_context(&input, &plan, &frozen_input, true)
+                        .await?;
+                    if self.state.context.revision == before {
+                        return Err(ThreadError::Model(Arc::new(error)));
+                    }
+                    let mut records = self.state.context.records.to_vec();
+                    records.extend_from_slice(&frozen_input);
+                    input_revision = if changed {
+                        self.state
+                            .context
+                            .revision
+                            .checked_add(1)
+                            .ok_or(ThreadError::RevisionExhausted)?
+                    } else {
+                        self.state.context.revision
+                    };
+                    context = ContextSnapshot {
+                        revision: input_revision,
+                        records: records.into(),
+                    };
+                    context.validate_complete()?;
+                    request.context = context.clone();
+                    request.committed_private_context = self.state.private_context.clone();
+                    self.enter_model_execution(ModelExecutionPhase::PreparingRequest);
+                }
+                other => break other.map_err(|error| ThreadError::Model(Arc::new(error)))?,
             }
-            other => other.map_err(|error| ThreadError::Model(Arc::new(error)))?,
         };
+        let output_revision = input_revision
+            .checked_add(1)
+            .ok_or(ThreadError::RevisionExhausted)?;
+        let tool_context = context.clone();
         if input.cancellation.is_cancelled() {
             return Err(ThreadError::Cancelled);
         }
@@ -386,6 +436,13 @@ impl Owner {
             status: AttemptStatus::Running,
             usage: None,
             facts: Some(AttemptFacts {
+                input_record_count: context.records.len(),
+                input_hash: Some(super::context_preparation::input_hash(
+                    &context.records,
+                    &tools,
+                    plan.call_mode(),
+                    &plan.solo_tool_ids(),
+                )?),
                 request_metadata,
                 usage_binding,
                 tool_projection: tool_projection.clone(),

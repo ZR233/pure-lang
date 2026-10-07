@@ -94,6 +94,21 @@ pub enum InstructionSourceKind {
 }
 
 impl InstructionSnapshot {
+    /// Rebinds model-owned defaults while preserving explicit host/profile overrides.
+    pub(crate) fn rebind_model_base(&mut self, instructions: &str) -> bool {
+        if !matches!(
+            self.base.source.kind,
+            InstructionSourceKind::BuiltInBase | InstructionSourceKind::ModelBase
+        ) {
+            return false;
+        }
+        let base = super::assembler::model_base_block(instructions);
+        if self.base == base {
+            return false;
+        }
+        self.base = base;
+        true
+    }
     /// Projects captured instruction sources without rescanning files or changing their content.
     pub(crate) fn context_records(&self, thread_id: &str) -> Vec<pl_core::context::ContextRecord> {
         use pl_core::context::{ContextContent, ContextRecord, ContextSource};
@@ -114,7 +129,7 @@ impl InstructionSnapshot {
                 source: if instruction {
                     ContextSource::Instruction
                 } else {
-                    ContextSource::Runtime {
+                    ContextSource::RuntimeFact {
                         source_id: format!("studio.instructions:{index}"),
                     }
                 },

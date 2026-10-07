@@ -426,6 +426,8 @@ pub fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
             parallel_tool_calls: capabilities.tools.parallel_tool_calls,
             custom_tools: capabilities.tools.custom_tools,
             freeform_tools: capabilities.tools.freeform_tools,
+            instruction_snapshot_overrides: capabilities.instruction_snapshot_overrides,
+            native_context_family: capabilities.native_context_family.clone(),
         },
         reasoning,
         pricing,

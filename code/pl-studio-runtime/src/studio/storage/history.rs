@@ -19,7 +19,7 @@ use sea_orm::{
     SqliteTransactionMode, Statement, TransactionOptions, TransactionTrait, Value,
 };
 
-const HISTORY_SCHEMA_VERSION: i64 = 5;
+const HISTORY_SCHEMA_VERSION: i64 = 6;
 
 mod checkpoint;
 /// 单页返回的总 payload 字节预算；达到预算即停止装入更多条目。
@@ -2416,6 +2416,9 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
                 if version < 4 {
                     migrate_unconsumed_input_bindings(&tx).await?;
                 }
+                if version < 6 {
+                    migrate_context_sources(&tx, thread_id).await?;
+                }
                 tx.execute_raw(statement(
                     "UPDATE history_meta SET schema_version=? WHERE id=1 AND schema_version=?",
                     vec![HISTORY_SCHEMA_VERSION.into(), version.into()],
@@ -2441,6 +2444,87 @@ async fn initialize(db: &DatabaseConnection, thread_id: &str) -> Result<String> 
             Ok(database_id)
         }
     }
+}
+
+/// Converts current context and its envelope atomically; history bodies remain byte-identical.
+async fn migrate_context_sources(tx: &impl ConnectionTrait, thread_id: &str) -> Result<()> {
+    use pl_core::{context::content_hash, thread::ThreadCheckpoint};
+    let Some(row) = tx
+        .query_one_raw(statement(
+            "SELECT payload,payload_hash FROM session_checkpoint WHERE id=1",
+            vec![],
+        ))
+        .await?
+    else {
+        return Ok(());
+    };
+    let payload: String = row.try_get("", "payload")?;
+    ensure!(
+        content_hash(payload.as_bytes()) == row.try_get::<String>("", "payload_hash")?,
+        "checkpoint migration hash mismatch"
+    );
+    let mut root: serde_json::Value = serde_json::from_str(&payload)?;
+    let rows = tx
+        .query_all_raw(statement(
+            "SELECT ordinal,record_id,payload,payload_hash FROM current_context ORDER BY ordinal",
+            vec![],
+        ))
+        .await?;
+    let mut records = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        ensure!(
+            row.try_get::<i64>("", "ordinal")? == i64::try_from(index)?,
+            "context migration ordinal mismatch"
+        );
+        let bytes: String = row.try_get("", "payload")?;
+        ensure!(
+            content_hash(bytes.as_bytes()) == row.try_get::<String>("", "payload_hash")?,
+            "context migration hash mismatch"
+        );
+        let record: pl_core::context::ContextRecord = serde_json::from_str(&bytes)?;
+        ensure!(
+            record.id == row.try_get::<String>("", "record_id")?,
+            "context migration identity mismatch"
+        );
+        records.push(record);
+    }
+    root["state"]["context"]["records"] = serde_json::to_value(&records)?;
+    let mut checkpoint: ThreadCheckpoint =
+        if root["schemaVersion"].as_u64() == Some(u64::from(ThreadCheckpoint::SCHEMA_VERSION)) {
+            serde_json::from_value(root)?
+        } else {
+            ThreadCheckpoint::decode_legacy(&serde_json::to_string(&root)?)?
+        };
+    ensure!(
+        checkpoint.thread_id == thread_id
+            && checkpoint.state_revision == checkpoint.state.commit_sequence,
+        "checkpoint migration ownership mismatch"
+    );
+    crate::compaction::migrate_checkpoint_sources(&mut checkpoint)?;
+    for (index, record) in checkpoint.state.context.records.iter().enumerate() {
+        let encoded = serde_json::to_string(record)?;
+        tx.execute_raw(statement(
+            "UPDATE current_context SET payload=?,payload_hash=? WHERE ordinal=? AND record_id=?",
+            vec![
+                encoded.clone().into(),
+                content_hash(encoded.as_bytes()).into(),
+                i64::try_from(index)?.into(),
+                record.id.clone().into(),
+            ],
+        ))
+        .await?;
+    }
+    checkpoint.state.context.records = Default::default();
+    let encoded = serde_json::to_string(&checkpoint)?;
+    tx.execute_raw(statement(
+        "UPDATE session_checkpoint SET payload=?,payload_hash=? WHERE id=1",
+        vec![
+            encoded.clone().into(),
+            content_hash(encoded.as_bytes()).into(),
+        ],
+    ))
+    .await?;
+    Ok(())
 }
 
 /// The old projection inferred input bindings from running Turns before model admission. A Turn
@@ -3699,6 +3783,221 @@ mod storage_fault_tests {
             "storage long-task: calls=137 records=139 new_context_serialized_bytes={serialized_new_bytes} sqlite_row_mutations={} database_bytes={database_bytes} wal_bytes={wal_bytes}",
             after - before
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn context_source_migration_is_atomic_and_preserves_business_state_and_history()
+    -> Result<()> {
+        use pl_core::{
+            context::{
+                AgentMessageKind, ContextContent, ContextRecord, ContextSnapshot, ContextSource,
+                OpaquePayload, content_hash,
+            },
+            thread::{RuntimeFact, ThreadCheckpoint, ThreadSnapshot, extensions::ExtensionRecord},
+        };
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("history.sqlite");
+        let store = HistoryStore::open(&path, "context-migration").await?;
+        let mut item = ThreadItem::completed_user_message(
+            "original-user".into(),
+            "context-migration".into(),
+            "original-turn".into(),
+            "保留的原始历史".into(),
+            vec![],
+            7,
+        );
+        item.ordinal = 1;
+        item.revision = 1;
+        store
+            .commit_effect(
+                1,
+                EffectCommit {
+                    items: &[item.clone()],
+                    rolled_back_turns: &Default::default(),
+                    identities: &[],
+                    messages: &[],
+                    receipts: &[],
+                    tasks: &[],
+                    deliveries: &[],
+                    delivery_repairs: &[],
+                    attempt: None,
+                },
+            )
+            .await?;
+        let text = ContextContent::Text {
+            text: std::sync::Arc::from("approved version one"),
+        };
+        let state = ThreadSnapshot {
+            commit_sequence: 1,
+            context: ContextSnapshot {
+                revision: 1,
+                records: vec![
+                    ContextRecord {
+                        id: "runtime:plan:1".into(),
+                        turn_id: None,
+                        source: ContextSource::Runtime {
+                            source_id: "plan".into(),
+                        },
+                        content: vec![text.clone()],
+                        tool_calls: vec![],
+                    },
+                    ContextRecord {
+                        id: "inbox:1:task".into(),
+                        turn_id: None,
+                        source: ContextSource::Runtime {
+                            source_id: "parent".into(),
+                        },
+                        content: vec![ContextContent::Text {
+                            text: "delegated task".into(),
+                        }],
+                        tool_calls: vec![],
+                    },
+                    ContextRecord {
+                        id: "workspace:context-migration".into(),
+                        turn_id: None,
+                        source: ContextSource::Runtime {
+                            source_id: "studio.workspace".into(),
+                        },
+                        content: vec![ContextContent::Text {
+                            text: "assigned workspace".into(),
+                        }],
+                        tool_calls: vec![],
+                    },
+                    ContextRecord {
+                        id: "workflow:context-migration:initial".into(),
+                        turn_id: None,
+                        source: ContextSource::Runtime {
+                            source_id: "studio.workflow".into(),
+                        },
+                        content: vec![ContextContent::Text {
+                            text: "current workflow".into(),
+                        }],
+                        tool_calls: vec![],
+                    },
+                    ContextRecord {
+                        id: "workspace:another-session".into(),
+                        turn_id: None,
+                        source: ContextSource::Runtime {
+                            source_id: "studio.workspace".into(),
+                        },
+                        content: vec![ContextContent::Text {
+                            text: "preserved unclassified material".into(),
+                        }],
+                        tool_calls: vec![],
+                    },
+                ]
+                .into(),
+            },
+            runtime_facts: vec![RuntimeFact {
+                source_id: "plan".into(),
+                content: vec![text],
+            }]
+            .into(),
+            extensions: std::collections::BTreeMap::from([(
+                "plan.authority".into(),
+                ExtensionRecord {
+                    revision: 1,
+                    payload: OpaquePayload::text("approved"),
+                },
+            )]),
+            last_attempt_usage: Some(pl_core::model::ModelUsage {
+                input_tokens: Some(83),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        store
+            .import_checkpoint(
+                &ThreadCheckpoint::capture("context-migration".into(), 1, state.clone()),
+                &[],
+            )
+            .await?;
+        let db = &store.writer().await?.db;
+        let row = db
+            .query_one_raw(statement(
+                "SELECT payload FROM session_checkpoint WHERE id=1",
+                vec![],
+            ))
+            .await?
+            .context("checkpoint")?;
+        let mut legacy: serde_json::Value =
+            serde_json::from_str(&row.try_get::<String>("", "payload")?)?;
+        legacy["schemaVersion"] = serde_json::json!(3);
+        legacy["state"]
+            .as_object_mut()
+            .context("state")?
+            .remove("lastAttemptUsageOrigin");
+        let encoded = serde_json::to_string(&legacy)?;
+        db.execute_raw(statement(
+            "UPDATE session_checkpoint SET payload=?,payload_hash=? WHERE id=1",
+            vec![
+                encoded.clone().into(),
+                content_hash(encoded.as_bytes()).into(),
+            ],
+        ))
+        .await?;
+        db.execute_unprepared("UPDATE history_meta SET schema_version=5; CREATE TRIGGER reject_context_migration BEFORE UPDATE ON current_context BEGIN SELECT RAISE(ABORT,'injected context migration failure'); END;").await?;
+        drop(store);
+        let failed = HistoryStore::open(&path, "context-migration").await?;
+        assert!(failed.prepare_activation().await.is_err());
+        let reader = failed.reader().await?.context("reader")?;
+        assert_eq!(reader.schema_version, 5);
+        let row = reader
+            .db
+            .query_one_raw(statement(
+                "SELECT payload FROM session_checkpoint WHERE id=1",
+                vec![],
+            ))
+            .await?
+            .context("checkpoint")?;
+        assert_eq!(row.try_get::<String>("", "payload")?, encoded);
+        let recovery =
+            sea_orm::Database::connect(format!("sqlite://{}?mode=rw", path.display())).await?;
+        recovery
+            .execute_unprepared("DROP TRIGGER reject_context_migration")
+            .await?;
+        recovery.close().await?;
+        drop(failed);
+        let restored = HistoryStore::open(&path, "context-migration").await?;
+        restored.prepare_activation().await?;
+        let checkpoint = restored
+            .checkpoint()
+            .await?
+            .context("migrated checkpoint")?;
+        assert_eq!(checkpoint.schema_version, 4);
+        assert!(matches!(
+            checkpoint.state.context.records[0].source,
+            ContextSource::RuntimeFact { .. }
+        ));
+        assert!(matches!(
+            checkpoint.state.context.records[1].source,
+            ContextSource::AgentMessage {
+                purpose: AgentMessageKind::Unclassified,
+                ..
+            }
+        ));
+        assert!(
+            matches!(&checkpoint.state.context.records[2].source, ContextSource::RuntimeFact { source_id } if source_id == "studio.workspace")
+        );
+        assert!(
+            matches!(&checkpoint.state.context.records[3].source, ContextSource::RuntimeFact { source_id } if source_id == "studio.workflow")
+        );
+        assert_eq!(
+            checkpoint.state.context.records[4],
+            state.context.records[4]
+        );
+        assert_eq!(checkpoint.state.extensions, state.extensions);
+        assert_eq!(
+            checkpoint.state.last_attempt_usage,
+            state.last_attempt_usage
+        );
+        assert!(checkpoint.state.last_attempt_usage_origin.is_none());
+        assert_eq!(
+            restored.existing_items([item.id.clone()]).await?[&item.id],
+            item
+        );
+        assert_eq!(restored.watermark().await?, 1);
         Ok(())
     }
 

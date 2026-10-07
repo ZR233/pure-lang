@@ -17,7 +17,9 @@ use crate::completion::{ReasoningConfig, ToolSpec};
 
 mod cache;
 mod compaction;
-pub use compaction::{ThreadCompaction, ThreadCompactionOptions, ThreadCompactionStrategy};
+pub use compaction::{
+    ThreadCompaction, ThreadCompactionOptions, ThreadCompactionStrategy, migrate_legacy_compaction,
+};
 mod codec;
 mod media;
 pub(crate) mod progress;
@@ -49,6 +51,11 @@ impl ThreadModel {
             hosted_tools: Vec::new().into(),
         }
     }
+    /// Stable route provenance, independent of instruction, tool and execution revisions.
+    pub fn route_identity(&self) -> String {
+        receipt::ModelCallBinding::capture(&self.runtime, &self.purpose).route_identity()
+    }
+
     /// Configures provider-executed capabilities; these never create local tool executors.
     pub fn with_hosted_tools(mut self, tools: Vec<super::HostedTool>) -> Self {
         self.hosted_tools = tools.into();
@@ -73,6 +80,8 @@ impl Model for ThreadModel {
             hosted_tools: self.hosted_tools.clone(),
             physical: ModelSession::default(),
             observed: Arc::new(Mutex::new(None)),
+            prompt: super::ThreadPromptMetadata::default(),
+            last_compaction_id: None,
         };
         async move { Ok(DynModelSession::new(session)) }
     }
@@ -85,11 +94,15 @@ struct ThreadModelSession {
     hosted_tools: Arc<[super::HostedTool]>,
     physical: ModelSession,
     observed: Arc<Mutex<Option<OpaquePayload>>>,
+    prompt: super::ThreadPromptMetadata,
+    last_compaction_id: Option<String>,
 }
 
 impl CoreModelSession for ThreadModelSession {
     async fn prepare(&mut self, request: ModelRequest) -> Result<PreparedModelCall, ModelError> {
-        let mut encoded = codec::request(&request)?;
+        ThreadModel::new(self.runtime.clone(), self.reasoning.clone())
+            .validate_context_origin(&request.context)?;
+        let mut encoded = codec::request(&request, &self.runtime)?;
         encoded.reasoning = self.reasoning.clone();
         encoded.max_tokens = self.runtime.model().max_output_tokens;
         encoded.parallel_tool_calls = request.tool_call_mode
@@ -158,11 +171,76 @@ impl CoreModelSession for ThreadModelSession {
             .prepare_request(encoded)
             .map_err(|error| failure(ModelFailureKind::UnsupportedContent, error))?;
         let estimate = crate::completion::estimate_text_input_tokens(&encoded);
+        if estimate
+            .zip(self.runtime.model().resolved_context_window())
+            .is_some_and(|(tokens, window)| tokens >= window)
+        {
+            return Err(failure(
+                ModelFailureKind::ContextLimit,
+                AdapterError::Content("prepared input exceeds the bound model context window"),
+            ));
+        }
         let tool_projection = media::tool_projection(self.runtime.model())?;
         let runtime = self.runtime.clone();
         let binding = receipt::ModelCallBinding::capture(&runtime, &self.purpose);
-        let request_metadata = receipt::request_metadata(&binding, &encoded)?;
+        let compaction_id = request.context.records.iter().rev().find_map(|record| {
+            matches!(&record.source, pl_core::context::ContextSource::Runtime { source_id } if source_id == "model.compaction")
+                .then(|| record.id.clone())
+        });
+        let replay_material = encoded
+            .replay_spans
+            .iter()
+            .map(|span| (span.start, &span.output))
+            .collect::<Vec<_>>();
+        let context_bytes = serde_json::to_vec(&(&encoded.input, replay_material))
+            .map_err(|source| failure(ModelFailureKind::UnsupportedContent, source))?;
+        let context_hash = pl_core::context::content_hash(&context_bytes);
+        let prefix_hash = pl_core::context::content_hash(
+            encoded
+                .instructions
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+        let prompt = super::prompt_diagnostics(
+            &self.prompt,
+            super::PromptCacheInput {
+                scope: &self.purpose,
+                provider: runtime.endpoint(),
+                model: &runtime.model().slug,
+                instructions: encoded.instructions.as_deref().unwrap_or_default(),
+                prelude_messages: &[],
+                context_hash: &context_hash,
+                fixed_prefix_section_hashes: BTreeMap::from([("instructions".into(), prefix_hash)]),
+                tools: &encoded.tools,
+                tool_choice: &encoded.tool_choice,
+                parallel_tool_calls: encoded.parallel_tool_calls,
+                reasoning: encoded.reasoning.as_ref(),
+                output_schema: None,
+                service_tier: None,
+                compacted: compaction_id.is_some() && self.last_compaction_id != compaction_id,
+                prompt_cache_policy: runtime
+                    .endpoint()
+                    .effective_prompt_cache_policy(runtime.model()),
+                updated_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    .min(i64::MAX as u64) as i64,
+            },
+        )
+        .map_err(|source| failure(ModelFailureKind::UnsupportedContent, source))?
+        .or_else(|| self.prompt.slots.get(&self.purpose).cloned());
+        let request_metadata = receipt::request_metadata(&binding, &encoded, prompt.as_ref())?;
+        if let Some(prompt) = &prompt {
+            self.prompt.active_scope = self.purpose.clone();
+            self.prompt
+                .slots
+                .insert(self.purpose.clone(), prompt.clone());
+        }
+        self.last_compaction_id = compaction_id;
         let usage_binding = pl_core::model::ModelUsageBinding {
+            route_identity: Some(binding.route_identity()),
             model: binding.requested_model.clone(),
             context_window: binding.context_window,
         };
@@ -170,7 +248,7 @@ impl CoreModelSession for ThreadModelSession {
         let observed = self.observed.clone();
         let marker = OpaquePayload::new("pl.model.continuation", 1, request.attempt_id.clone())
             .map_err(|error| failure(ModelFailureKind::InvalidResponse, error))?;
-        let cache_key = cache::key(&runtime, &encoded)?;
+        let cache_key = cache::key(&runtime, &request.thread_id);
         let invocation = ModelInvocationContext::new(self.physical.clone())
             .with_trace_metadata(crate::completion::CompletionTraceContext {
                 session_id: request.thread_id.clone(),

@@ -2502,6 +2502,7 @@ mod storage_fault_tests {
         let record = InboxRecord {
             sequence: 1,
             message: ThreadMessage {
+                kind: pl_core::context::AgentMessageKind::Report,
                 id: "initial:spawn".into(),
                 source_id: "agent:parent".into(),
                 payload: OpaquePayload::text("implement the assigned task"),

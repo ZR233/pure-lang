@@ -4,8 +4,8 @@ mod content;
 mod payload;
 
 pub use content::{
-    ContextContent, ContextError, ContextRecord, ContextSnapshot, ContextSource, ResourceError,
-    ResourceReference,
+    AgentMessageKind, ContextContent, ContextError, ContextRecord, ContextSnapshot, ContextSource,
+    ResourceError, ResourceReference,
 };
 pub use payload::{OpaquePayload, PayloadError};
 

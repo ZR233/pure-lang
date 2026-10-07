@@ -159,7 +159,7 @@ impl StudioThreadFactory {
                     initial_context.push(pl_core::context::ContextRecord {
                         id: format!("workflow:{id}:initial"),
                         turn_id: None,
-                        source: pl_core::context::ContextSource::Runtime {
+                        source: pl_core::context::ContextSource::RuntimeFact {
                             source_id: "studio.workflow".into(),
                         },
                         content: vec![pl_core::context::ContextContent::Text {
@@ -215,6 +215,7 @@ impl StudioThreadFactory {
             context_preparation: crate::compaction::preparer(
                 &route,
                 config.runtime.openai_compaction_mode,
+                self.services.thread_modes.clone(),
             )?,
             agent_controls: crate::thread_assembler::AgentControlExposure::Enabled,
             execution: pl_core::thread::input::InputDriverOptions {
