@@ -5,6 +5,13 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.4.0](https://github.com/ZR233/pure-lang/compare/v6.3.0...v6.4.0) (2026-10-07)
+
+
+### Bug Fixes
+
+* **ci:** 修复 Windows 发布构建失败 ([5fda76f](https://github.com/ZR233/pure-lang/commit/5fda76f4489ebcf9a3ee957a50fe0eb1bc226234))
+
 ## [6.3.0](https://github.com/ZR233/pure-lang/compare/v6.2.0...v6.3.0) (2026-10-06)
 
 
