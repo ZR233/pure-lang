@@ -37,3 +37,24 @@ pub struct BridgeAgentProfileDto {
     pub enabled: bool,
     pub workspace_mode: BridgeAgentWorkspaceMode,
 }
+
+impl From<pl_protocol::AgentProfileSnapshot> for BridgeAgentProfileDto {
+    fn from(profile: pl_protocol::AgentProfileSnapshot) -> Self {
+        Self {
+            profile_id: profile.profile_id,
+            display_name: profile.display_name,
+            description: profile.description,
+            when_to_use: profile.when_to_use,
+            system_instructions: profile.system_instructions,
+            provider_id: profile.provider_id,
+            model: profile.model,
+            effort: profile.effort,
+            source: profile.source,
+            revision: profile.revision,
+            content_hash: profile.content_hash,
+            system: profile.system,
+            enabled: profile.enabled,
+            workspace_mode: profile.workspace_mode.into(),
+        }
+    }
+}

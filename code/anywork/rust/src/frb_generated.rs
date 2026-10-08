@@ -42,7 +42,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1358471279;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1832939026;
 
 // Section: executor
 
@@ -632,17 +632,17 @@ fn wire__crate__api__studio__subscription__BridgeEventSubscription_cancel_impl(
         },
     )
 }
-fn wire__crate__api__studio__subscription__BridgeEventSubscription_product_stream_impl(
+fn wire__crate__api__studio__subscription__BridgeEventSubscription_product_topic_stream_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
 ) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec,_,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "BridgeEventSubscription_product_stream", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec,_,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "BridgeEventSubscription_product_topic_stream", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
             let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
             let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_that = <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeEventSubscription>>>::sse_decode(&mut deserializer);
-let api_sink = <StreamSink<crate::api::studio::subscription::BridgeProductStreamEnvelope,flutter_rust_bridge::for_generated::SseCodec>>::sse_decode(&mut deserializer);deserializer.end(); move |context| async move {
+let api_sink = <StreamSink<crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope,flutter_rust_bridge::for_generated::SseCodec>>::sse_decode(&mut deserializer);deserializer.end(); move |context| async move {
                     transform_result_sse::<_, crate::api::studio::types::error::BridgeError>((move || async move {
                         let mut api_that_guard = None;
 let decode_indices_ = flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(&api_that, 0, false)]);
@@ -653,7 +653,7 @@ let decode_indices_ = flutter_rust_bridge::for_generated::lockable_compute_decod
             }
         }
         let api_that_guard = api_that_guard.unwrap();
- let output_ok = crate::api::studio::subscription::BridgeEventSubscription::product_stream(&*api_that_guard, api_sink).await?;   std::result::Result::Ok(output_ok)
+ let output_ok = crate::api::studio::subscription::BridgeEventSubscription::product_topic_stream(&*api_that_guard, api_sink).await?;   std::result::Result::Ok(output_ok)
                     })().await)
                 } })
 }
@@ -679,6 +679,31 @@ let decode_indices_ = flutter_rust_bridge::for_generated::lockable_compute_decod
         }
         let api_that_guard = api_that_guard.unwrap();
  let output_ok = crate::api::studio::subscription::BridgeEventSubscription::shutdown_stream(&*api_that_guard, api_sink).await?;   std::result::Result::Ok(output_ok)
+                    })().await)
+                } })
+}
+fn wire__crate__api__studio__subscription__BridgeEventSubscription_startup_stream_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec,_,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "BridgeEventSubscription_startup_stream", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeEventSubscription>>>::sse_decode(&mut deserializer);
+let api_sink = <StreamSink<crate::api::studio::types::runtime::BridgeStartupStage,flutter_rust_bridge::for_generated::SseCodec>>::sse_decode(&mut deserializer);deserializer.end(); move |context| async move {
+                    transform_result_sse::<_, crate::api::studio::types::error::BridgeError>((move || async move {
+                        let mut api_that_guard = None;
+let decode_indices_ = flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(&api_that, 0, false)]);
+        for i in decode_indices_ {
+            match i {
+                0 => api_that_guard = Some(api_that.lockable_decode_async_ref().await),
+                _ => unreachable!(),
+            }
+        }
+        let api_that_guard = api_that_guard.unwrap();
+ let output_ok = crate::api::studio::subscription::BridgeEventSubscription::startup_stream(&*api_that_guard, api_sink).await?;   std::result::Result::Ok(output_ok)
                     })().await)
                 } })
 }
@@ -1123,42 +1148,20 @@ fn wire__crate__api__studio__types__runtime__bridge_idle_agent_default_impl(
         },
     )
 }
-fn wire__crate__api__studio__types__event__bridge_product_event_envelope_stale_impl(
+fn wire__crate__api__studio__types__product_topic__bridge_product_topic_validate_scope_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
 ) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "bridge_product_event_envelope_stale",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_lagged_events = <u64>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, ()>((move || {
-                    let output_ok = Ok::<_, ()>(
-                        crate::api::studio::types::event::BridgeProductEventEnvelope::stale(
-                            api_lagged_events,
-                        ),
-                    )?;
-                    std::result::Result::Ok(output_ok)
-                })())
-            }
-        },
-    )
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "bridge_product_topic_validate_scope", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <crate::api::studio::types::product_topic::BridgeProductTopic>::sse_decode(&mut deserializer);deserializer.end(); move |context|  {
+                    transform_result_sse::<_, crate::api::studio::types::error::BridgeError>((move ||  {
+                         let output_ok = crate::api::studio::types::product_topic::BridgeProductTopic::validate_scope(&api_that)?;   std::result::Result::Ok(output_ok)
+                    })())
+                } })
 }
 fn wire__crate__api__studio__types__thread_activity__bridge_thread_activity_tools_default_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
@@ -1305,41 +1308,20 @@ let api_expected_lease_revision = <u64>::sse_decode(&mut deserializer);deseriali
                     })().await)
                 } })
 }
-fn wire__crate__api__studio__subscription__create_product_subscription_impl(
+fn wire__crate__api__studio__subscription__product_topic__create_product_topic_subscription_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
 ) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "create_product_subscription",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            deserializer.end();
-            move |context| async move {
-                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
-                    (move || async move {
-                        let output_ok =
-                            crate::api::studio::subscription::create_product_subscription().await?;
-                        std::result::Result::Ok(output_ok)
-                    })()
-                    .await,
-                )
-            }
-        },
-    )
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec,_,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "create_product_topic_subscription", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_topic = <crate::api::studio::types::product_topic::BridgeProductTopic>::sse_decode(&mut deserializer);deserializer.end(); move |context| async move {
+                    transform_result_sse::<_, crate::api::studio::types::error::BridgeError>((move || async move {
+                         let output_ok = crate::api::studio::subscription::product_topic::create_product_topic_subscription(api_topic).await?;   std::result::Result::Ok(output_ok)
+                    })().await)
+                } })
 }
 fn wire__crate__api__studio__handlers__ssh__delete_ssh_server_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
@@ -1884,6 +1866,43 @@ fn wire__crate__api__studio__handlers__ssh__open_remote_project_impl(
         },
     )
 }
+fn wire__crate__api__studio__handlers__lifecycle__prepare_startup_attempt_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "prepare_startup_attempt",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::studio::handlers::lifecycle::prepare_startup_attempt()
+                                .await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__studio__handlers__external_state__probe_lsp_server_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1965,42 +1984,20 @@ fn wire__crate__api__studio__handlers__history__query_threads_impl(
         },
     )
 }
-fn wire__crate__api__studio__handlers__agent_profiles__read_agent_profiles_impl(
+fn wire__crate__api__studio__handlers__agent_profiles__read_agent_profiles_state_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
 ) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "read_agent_profiles",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            deserializer.end();
-            move |context| async move {
-                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
-                    (move || async move {
-                        let output_ok =
-                            crate::api::studio::handlers::agent_profiles::read_agent_profiles()
-                                .await?;
-                        std::result::Result::Ok(output_ok)
-                    })()
-                    .await,
-                )
-            }
-        },
-    )
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec,_,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "read_agent_profiles_state", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end(); move |context| async move {
+                    transform_result_sse::<_, crate::api::studio::types::error::BridgeError>((move || async move {
+                         let output_ok = crate::api::studio::handlers::agent_profiles::read_agent_profiles_state().await?;   std::result::Result::Ok(output_ok)
+                    })().await)
+                } })
 }
 fn wire__crate__api__studio__handlers__attachment__read_attachment_draft_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
@@ -2311,36 +2308,6 @@ fn wire__crate__api__studio__handlers__providers__read_skills_state_impl(
                     .await,
                 )
             }
-        },
-    )
-}
-fn wire__crate__api__studio__handlers__lifecycle__read_startup_stage_impl(
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "read_startup_stage",
-            port: None,
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            deserializer.end();
-            transform_result_sse::<_, ()>((move || {
-                let output_ok =
-                    Ok::<_, ()>(crate::api::studio::handlers::lifecycle::read_startup_stage())?;
-                std::result::Result::Ok(output_ok)
-            })())
         },
     )
 }
@@ -4028,12 +3995,16 @@ fn wire__crate__api__studio__handlers__lifecycle__start_studio_runtime_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_attempt = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
                     (move || async move {
                         let output_ok =
-                            crate::api::studio::handlers::lifecycle::start_studio_runtime().await?;
+                            crate::api::studio::handlers::lifecycle::start_studio_runtime(
+                                api_attempt,
+                            )
+                            .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -4086,7 +4057,22 @@ fn wire__crate__api__studio__handlers__prompt__submit_prompt_impl(
         },
     )
 }
-fn wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(
+fn wire__crate__api__studio__subscription__shutdown__subscribe_shutdown_progress_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec,_,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "subscribe_shutdown_progress", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end(); move |context| async move {
+                    transform_result_sse::<_, crate::api::studio::types::error::BridgeError>((move || async move {
+                         let output_ok = crate::api::studio::subscription::shutdown::subscribe_shutdown_progress().await?;   std::result::Result::Ok(output_ok)
+                    })().await)
+                } })
+}
+fn wire__crate__api__studio__subscription__startup__subscribe_startup_progress_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -4094,7 +4080,7 @@ fn wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "subscribe_shutdown_progress",
+            debug_name: "subscribe_startup_progress",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -4108,12 +4094,16 @@ fn wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_attempt = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
                     (move || async move {
                         let output_ok =
-                            crate::api::studio::subscription::subscribe_shutdown_progress().await?;
+                            crate::api::studio::subscription::startup::subscribe_startup_progress(
+                                api_attempt,
+                            )
+                            .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -4122,7 +4112,7 @@ fn wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(
         },
     )
 }
-fn wire__crate__api__studio__subscription__subscribe_thread_impl(
+fn wire__crate__api__studio__subscription__thread__subscribe_thread_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -4149,9 +4139,10 @@ fn wire__crate__api__studio__subscription__subscribe_thread_impl(
             move |context| async move {
                 transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
                     (move || async move {
-                        let output_ok =
-                            crate::api::studio::subscription::subscribe_thread(api_thread_id)
-                                .await?;
+                        let output_ok = crate::api::studio::subscription::thread::subscribe_thread(
+                            api_thread_id,
+                        )
+                        .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -4287,7 +4278,7 @@ impl SseDecode
 
 impl SseDecode
     for StreamSink<
-        crate::api::studio::subscription::BridgeProductStreamEnvelope,
+        crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope,
         flutter_rust_bridge::for_generated::SseCodec,
     >
 {
@@ -4301,6 +4292,19 @@ impl SseDecode
 impl SseDecode
     for StreamSink<
         crate::api::studio::types::event::BridgeShutdownProgress,
+        flutter_rust_bridge::for_generated::SseCodec,
+    >
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <String>::sse_decode(deserializer);
+        return StreamSink::deserialize(inner);
+    }
+}
+
+impl SseDecode
+    for StreamSink<
+        crate::api::studio::types::runtime::BridgeStartupStage,
         flutter_rust_bridge::for_generated::SseCodec,
     >
 {
@@ -4369,6 +4373,17 @@ impl SseDecode for bool {
     }
 }
 
+impl SseDecode for Box<crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        return Box::new(
+            <crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot>::sse_decode(
+                deserializer,
+            ),
+        );
+    }
+}
+
 impl SseDecode for Box<crate::api::studio::types::thread_stream::BridgeInteractionRequest> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4380,11 +4395,44 @@ impl SseDecode for Box<crate::api::studio::types::thread_stream::BridgeInteracti
     }
 }
 
+impl SseDecode for Box<crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        return Box::new(
+            <crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot>::sse_decode(
+                deserializer,
+            ),
+        );
+    }
+}
+
+impl SseDecode for Box<crate::api::studio::types::product_topic::BridgeProductBaseline> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        return Box::new(
+            <crate::api::studio::types::product_topic::BridgeProductBaseline>::sse_decode(
+                deserializer,
+            ),
+        );
+    }
+}
+
 impl SseDecode for Box<crate::api::studio::types::event::BridgeProductEventEnvelope> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         return Box::new(
             <crate::api::studio::types::event::BridgeProductEventEnvelope>::sse_decode(
+                deserializer,
+            ),
+        );
+    }
+}
+
+impl SseDecode for Box<crate::api::studio::types::response::BridgeSessionCostsState> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        return Box::new(
+            <crate::api::studio::types::response::BridgeSessionCostsState>::sse_decode(
                 deserializer,
             ),
         );
@@ -4628,6 +4676,18 @@ impl SseDecode for crate::api::studio::types::response::BridgeAgentDirectoryStat
     }
 }
 
+impl SseDecode for crate::api::studio::types::response::BridgeAgentProfileDiagnostic {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_path = <String>::sse_decode(deserializer);
+        let mut var_message = <String>::sse_decode(deserializer);
+        return crate::api::studio::types::response::BridgeAgentProfileDiagnostic {
+            path: var_path,
+            message: var_message,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::agent_profile::BridgeAgentProfileDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4663,6 +4723,138 @@ impl SseDecode for crate::api::studio::types::agent_profile::BridgeAgentProfileD
             system: var_system,
             enabled: var_enabled,
             workspace_mode: var_workspaceMode,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::response::BridgeAgentProfilesData {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_profiles =
+            <Vec<crate::api::studio::types::agent_profile::BridgeAgentProfileDto>>::sse_decode(
+                deserializer,
+            );
+        let mut var_diagnostics = <Vec<
+            crate::api::studio::types::response::BridgeAgentProfileDiagnostic,
+        >>::sse_decode(deserializer);
+        return crate::api::studio::types::response::BridgeAgentProfilesData {
+            profiles: var_profiles,
+            diagnostics: var_diagnostics,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::response::BridgeAgentProfilesState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::runtime::BridgeUninitializedResource>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::response::BridgeAgentProfilesState::Uninitialized(var_field0);
+            }
+            1 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::runtime::BridgeLoadingResource>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::response::BridgeAgentProfilesState::Loading(
+                    var_field0,
+                );
+            }
+            2 => {
+                let mut var_resource =
+                    <crate::api::studio::types::runtime::BridgeReadyResource>::sse_decode(
+                        deserializer,
+                    );
+                let mut var_value =
+                    <crate::api::studio::types::response::BridgeAgentProfilesData>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::response::BridgeAgentProfilesState::Ready {
+                    resource: var_resource,
+                    value: var_value,
+                };
+            }
+            3 => {
+                let mut var_resource =
+                    <crate::api::studio::types::runtime::BridgeRefreshingResource>::sse_decode(
+                        deserializer,
+                    );
+                let mut var_value =
+                    <crate::api::studio::types::response::BridgeAgentProfilesData>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::response::BridgeAgentProfilesState::Refreshing {
+                    resource: var_resource,
+                    value: var_value,
+                };
+            }
+            4 => {
+                let mut var_resource =
+                    <crate::api::studio::types::runtime::BridgeStaleResource>::sse_decode(
+                        deserializer,
+                    );
+                let mut var_value =
+                    <crate::api::studio::types::response::BridgeAgentProfilesData>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::response::BridgeAgentProfilesState::Stale {
+                    resource: var_resource,
+                    value: var_value,
+                };
+            }
+            5 => {
+                let mut var_resource =
+                    <crate::api::studio::types::runtime::BridgeDegradedResource>::sse_decode(
+                        deserializer,
+                    );
+                let mut var_value =
+                    <crate::api::studio::types::response::BridgeAgentProfilesData>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::response::BridgeAgentProfilesState::Degraded {
+                    resource: var_resource,
+                    value: var_value,
+                };
+            }
+            6 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::runtime::BridgeFailedResource>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::response::BridgeAgentProfilesState::Failed(
+                    var_field0,
+                );
+            }
+            7 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::runtime::BridgeStoppedResource>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::response::BridgeAgentProfilesState::Stopped(
+                    var_field0,
+                );
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseDecode for crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_state =
+            <crate::api::studio::types::response::BridgeAgentProfilesState>::sse_decode(
+                deserializer,
+            );
+        return crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot {
+            state: var_state,
         };
     }
 }
@@ -6426,9 +6618,6 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSn
         let mut var_statisticsPending = <bool>::sse_decode(deserializer);
         let mut var_statisticsGap = <bool>::sse_decode(deserializer);
         let mut var_readFailed = <bool>::sse_decode(deserializer);
-        let mut var_sessionCosts = <Vec<
-            crate::api::studio::types::response::BridgeSessionCostSnapshot,
-        >>::sse_decode(deserializer);
         let mut var_summaries = <Vec<
             crate::api::studio::types::response::BridgeModelPerformanceSummary,
         >>::sse_decode(deserializer);
@@ -6441,7 +6630,6 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSn
             statistics_pending: var_statisticsPending,
             statistics_gap: var_statisticsGap,
             read_failed: var_readFailed,
-            session_costs: var_sessionCosts,
             summaries: var_summaries,
             history: var_history,
         };
@@ -6599,6 +6787,23 @@ impl SseDecode for crate::api::studio::types::response::BridgePersistenceQueueSn
     }
 }
 
+impl SseDecode for crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_revision = <u64>::sse_decode(deserializer);
+        let mut var_updatedAt = <i64>::sse_decode(deserializer);
+        let mut var_queue =
+            <crate::api::studio::types::response::BridgePersistenceQueueSnapshot>::sse_decode(
+                deserializer,
+            );
+        return crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot {
+            revision: var_revision,
+            updated_at: var_updatedAt,
+            queue: var_queue,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::response::BridgePersistenceState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -6675,6 +6880,126 @@ impl SseDecode for crate::api::studio::types::response::BridgePersistenceStateSn
             revision: var_revision,
             state: var_state,
         };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::product_topic::BridgeProductBaseline {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::response::BridgeProjectDirectoryState>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::ProjectDirectory(var_field0);
+            }
+            1 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::response::BridgeThreadDirectoryPage>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::ThreadDirectory(var_field0);
+            }
+            2 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::response::BridgeAgentDirectoryState>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::AgentDirectory(var_field0);
+            }
+            3 => {
+                let mut var_field0 = <Box<
+                    crate::api::studio::types::response::BridgeSettingsStateSnapshot,
+                >>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::Settings(
+                    var_field0,
+                );
+            }
+            4 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::response::BridgeRecoveryStateSnapshot>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::Recovery(
+                    var_field0,
+                );
+            }
+            5 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::response::BridgeMcpStateSnapshot>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::Mcp(
+                    var_field0,
+                );
+            }
+            6 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::response::BridgeLspStateSnapshot>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::Lsp(
+                    var_field0,
+                );
+            }
+            7 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::response::BridgeSkillsStateSnapshot>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::Skills(
+                    var_field0,
+                );
+            }
+            8 => {
+                let mut var_field0 = <crate::api::studio::types::response::BridgeThreadModeCatalogSnapshot>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::ThreadModeCatalog(var_field0);
+            }
+            9 => {
+                let mut var_field0 = <crate::api::studio::types::response::BridgeProviderUsageStateSnapshot>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::ProviderUsage(var_field0);
+            }
+            10 => {
+                let mut var_field0 = <crate::api::studio::types::response::BridgeModelPerformanceSnapshot>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::ModelPerformance(var_field0);
+            }
+            11 => {
+                let mut var_field0 = <Box<
+                    crate::api::studio::types::response::BridgeSessionCostsState,
+                >>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::SessionCosts(var_field0);
+            }
+            12 => {
+                let mut var_field0 =
+                    <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::Updater(
+                    var_field0,
+                );
+            }
+            13 => {
+                let mut var_field0 = <crate::api::studio::types::response::BridgePersistenceStateSnapshot>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::Persistence(var_field0);
+            }
+            14 => {
+                let mut var_field0 = <Box<
+                    crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot,
+                >>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::PersistenceQueue(var_field0);
+            }
+            15 => {
+                let mut var_field0 = <Box<
+                    crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot,
+                >>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductBaseline::AgentProfiles(var_field0);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -6768,21 +7093,33 @@ impl SseDecode for crate::api::studio::types::event::BridgeProductEventPayload {
                 return crate::api::studio::types::event::BridgeProductEventPayload::ModelPerformanceStateChanged(var_field0);
             }
             11 => {
+                let mut var_field0 = <Box<
+                    crate::api::studio::types::response::BridgeSessionCostsState,
+                >>::sse_decode(deserializer);
+                return crate::api::studio::types::event::BridgeProductEventPayload::SessionCostsChanged(var_field0);
+            }
+            12 => {
                 let mut var_field0 =
                     <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_decode(
                         deserializer,
                     );
                 return crate::api::studio::types::event::BridgeProductEventPayload::UpdaterStateChanged(var_field0);
             }
-            12 => {
+            13 => {
                 let mut var_field0 = <crate::api::studio::types::response::BridgePersistenceStateSnapshot>::sse_decode(deserializer);
                 return crate::api::studio::types::event::BridgeProductEventPayload::PersistenceStateChanged(var_field0);
             }
-            13 => {
-                let mut var_laggedEvents = <u64>::sse_decode(deserializer);
-                return crate::api::studio::types::event::BridgeProductEventPayload::Stale {
-                    lagged_events: var_laggedEvents,
-                };
+            14 => {
+                let mut var_field0 = <Box<
+                    crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot,
+                >>::sse_decode(deserializer);
+                return crate::api::studio::types::event::BridgeProductEventPayload::PersistenceQueueStateChanged(var_field0);
+            }
+            15 => {
+                let mut var_field0 = <Box<
+                    crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot,
+                >>::sse_decode(deserializer);
+                return crate::api::studio::types::event::BridgeProductEventPayload::AgentProfilesStateChanged(var_field0);
             }
             _ => {
                 unimplemented!("");
@@ -6791,28 +7128,107 @@ impl SseDecode for crate::api::studio::types::event::BridgeProductEventPayload {
     }
 }
 
-impl SseDecode for crate::api::studio::subscription::BridgeProductStreamEnvelope {
+impl SseDecode for crate::api::studio::types::product_topic::BridgeProductTopic {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut tag_ = <i32>::sse_decode(deserializer);
         match tag_ {
             0 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::ProjectDirectory;
+            }
+            1 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::ThreadDirectory;
+            }
+            2 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::AgentDirectory;
+            }
+            3 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::Settings;
+            }
+            4 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::Recovery;
+            }
+            5 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::Mcp;
+            }
+            6 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::Lsp;
+            }
+            7 => {
+                let mut var_projectId = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductTopic::Skills {
+                    project_id: var_projectId,
+                };
+            }
+            8 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::ThreadModeCatalog;
+            }
+            9 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::ProviderUsage;
+            }
+            10 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::ModelPerformance;
+            }
+            11 => {
+                let mut var_rootThreadId = <String>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductTopic::SessionCosts{root_thread_id: var_rootThreadId};
+            }
+            12 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::Updater;
+            }
+            13 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::Persistence;
+            }
+            14 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::PersistenceQueue;
+            }
+            15 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopic::AgentProfiles;
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseDecode for crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_topic =
+                    <crate::api::studio::types::product_topic::BridgeProductTopic>::sse_decode(
+                        deserializer,
+                    );
+                let mut var_revision = <u64>::sse_decode(deserializer);
+                let mut var_state = <Box<
+                    crate::api::studio::types::product_topic::BridgeProductBaseline,
+                >>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Baseline{topic: var_topic, revision: var_revision, state: var_state};
+            }
+            1 => {
                 let mut var_event = <Box<
                     crate::api::studio::types::event::BridgeProductEventEnvelope,
                 >>::sse_decode(deserializer);
-                return crate::api::studio::subscription::BridgeProductStreamEnvelope::Data {
-                    event: var_event,
-                };
-            }
-            1 => {
-                let mut var_error =
-                    <crate::api::studio::types::error::BridgeError>::sse_decode(deserializer);
-                return crate::api::studio::subscription::BridgeProductStreamEnvelope::Failure {
-                    error: var_error,
-                };
+                return crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Data{event: var_event};
             }
             2 => {
-                return crate::api::studio::subscription::BridgeProductStreamEnvelope::Closed;
+                let mut var_topic =
+                    <crate::api::studio::types::product_topic::BridgeProductTopic>::sse_decode(
+                        deserializer,
+                    );
+                let mut var_dropped = <u64>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Lagged{topic: var_topic, dropped: var_dropped};
+            }
+            3 => {
+                let mut var_error =
+                    <crate::api::studio::types::error::BridgeError>::sse_decode(deserializer);
+                return crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Failure{error: var_error};
+            }
+            4 => {
+                return crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Closed;
             }
             _ => {
                 unimplemented!("");
@@ -7597,6 +8013,31 @@ impl SseDecode for crate::api::studio::types::response::BridgeSessionCostSnapsho
     }
 }
 
+impl SseDecode for crate::api::studio::types::response::BridgeSessionCostsState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_rootThreadId = <String>::sse_decode(deserializer);
+        let mut var_revision = <u64>::sse_decode(deserializer);
+        let mut var_updatedAt = <i64>::sse_decode(deserializer);
+        let mut var_statisticsPending = <bool>::sse_decode(deserializer);
+        let mut var_statisticsGap = <bool>::sse_decode(deserializer);
+        let mut var_readFailed = <bool>::sse_decode(deserializer);
+        let mut var_cost =
+            <Option<crate::api::studio::types::response::BridgeSessionCostSnapshot>>::sse_decode(
+                deserializer,
+            );
+        return crate::api::studio::types::response::BridgeSessionCostsState {
+            root_thread_id: var_rootThreadId,
+            revision: var_revision,
+            updated_at: var_updatedAt,
+            statistics_pending: var_statisticsPending,
+            statistics_gap: var_statisticsGap,
+            read_failed: var_readFailed,
+            cost: var_cost,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::response::BridgeSettingsStateData {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -8255,12 +8696,23 @@ impl SseDecode for crate::api::studio::types::response::BridgeStudioStateSnapsho
             <crate::api::studio::types::response::BridgeModelPerformanceSnapshot>::sse_decode(
                 deserializer,
             );
+        let mut var_sessionCosts = <Vec<
+            crate::api::studio::types::response::BridgeSessionCostsState,
+        >>::sse_decode(deserializer);
         let mut var_updater =
             <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_decode(
                 deserializer,
             );
         let mut var_persistence =
             <crate::api::studio::types::response::BridgePersistenceStateSnapshot>::sse_decode(
+                deserializer,
+            );
+        let mut var_persistenceQueue =
+            <crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot>::sse_decode(
+                deserializer,
+            );
+        let mut var_agentProfiles =
+            <crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot>::sse_decode(
                 deserializer,
             );
         return crate::api::studio::types::response::BridgeStudioStateSnapshot {
@@ -8276,8 +8728,11 @@ impl SseDecode for crate::api::studio::types::response::BridgeStudioStateSnapsho
             thread_mode_catalog: var_threadModeCatalog,
             provider_usage: var_providerUsage,
             model_performance: var_modelPerformance,
+            session_costs: var_sessionCosts,
             updater: var_updater,
             persistence: var_persistence,
+            persistence_queue: var_persistenceQueue,
+            agent_profiles: var_agentProfiles,
         };
     }
 }
@@ -10721,6 +11176,22 @@ impl SseDecode for Vec<crate::api::studio::types::runtime::BridgeAgentDirectoryE
     }
 }
 
+impl SseDecode for Vec<crate::api::studio::types::response::BridgeAgentProfileDiagnostic> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::response::BridgeAgentProfileDiagnostic>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::studio::types::agent_profile::BridgeAgentProfileDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -11169,14 +11640,14 @@ impl SseDecode for Vec<crate::api::studio::types::thread_stream::BridgeRuntimeCo
     }
 }
 
-impl SseDecode for Vec<crate::api::studio::types::response::BridgeSessionCostSnapshot> {
+impl SseDecode for Vec<crate::api::studio::types::response::BridgeSessionCostsState> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut len_ = <i32>::sse_decode(deserializer);
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
             ans_.push(
-                <crate::api::studio::types::response::BridgeSessionCostSnapshot>::sse_decode(
+                <crate::api::studio::types::response::BridgeSessionCostsState>::sse_decode(
                     deserializer,
                 ),
             );
@@ -11948,6 +12419,21 @@ impl SseDecode
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::studio::types::response::BridgeSessionCostSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(
+                <crate::api::studio::types::response::BridgeSessionCostSnapshot>::sse_decode(
+                    deserializer,
+                ),
+            );
         } else {
             return None;
         }
@@ -12826,100 +13312,103 @@ fn pde_ffi_dispatcher_primary_impl(
 8 => wire__crate__api__studio__handlers__chat__BridgeChatView_read_item_impl(port, ptr, rust_vec_len, data_len),
 9 => wire__crate__api__studio__handlers__chat__BridgeChatView_snapshot_impl(port, ptr, rust_vec_len, data_len),
 10 => wire__crate__api__studio__subscription__BridgeEventSubscription_cancel_impl(port, ptr, rust_vec_len, data_len),
-11 => wire__crate__api__studio__subscription__BridgeEventSubscription_product_stream_impl(port, ptr, rust_vec_len, data_len),
+11 => wire__crate__api__studio__subscription__BridgeEventSubscription_product_topic_stream_impl(port, ptr, rust_vec_len, data_len),
 12 => wire__crate__api__studio__subscription__BridgeEventSubscription_shutdown_stream_impl(port, ptr, rust_vec_len, data_len),
-13 => wire__crate__api__studio__subscription__BridgeEventSubscription_thread_stream_impl(port, ptr, rust_vec_len, data_len),
-14 => wire__crate__api__studio__handlers__updater__BridgeStudioUpdateOperation_cancel_impl(port, ptr, rust_vec_len, data_len),
-15 => wire__crate__api__studio__handlers__updater__BridgeStudioUpdateOperation_finish_handoff_impl(port, ptr, rust_vec_len, data_len),
-16 => wire__crate__api__studio__handlers__updater__BridgeStudioUpdateOperation_progress_stream_impl(port, ptr, rust_vec_len, data_len),
-17 => wire__crate__api__studio__handlers__lifecycle__activate_project_impl(port, ptr, rust_vec_len, data_len),
-18 => wire__crate__api__studio__handlers__attachment__admit_attachment_drafts_impl(port, ptr, rust_vec_len, data_len),
-19 => wire__crate__api__studio__handlers__lifecycle__archive_project_impl(port, ptr, rust_vec_len, data_len),
-20 => wire__crate__api__studio__handlers__thread__archive_thread_impl(port, ptr, rust_vec_len, data_len),
-21 => wire__crate__api__studio__handlers__lifecycle__begin_runtime_exit_impl(port, ptr, rust_vec_len, data_len),
-22 => wire__crate__api__studio__types__thread_stream__bridge_cache_usage_summary_default_impl(port, ptr, rust_vec_len, data_len),
-23 => wire__crate__api__studio__types__runtime__bridge_closed_agent_default_impl(port, ptr, rust_vec_len, data_len),
-24 => wire__crate__api__studio__types__runtime__bridge_closing_agent_default_impl(port, ptr, rust_vec_len, data_len),
-25 => wire__crate__api__studio__types__settings__bridge_general_settings_dto_default_impl(port, ptr, rust_vec_len, data_len),
-26 => wire__crate__api__studio__types__runtime__bridge_idle_agent_default_impl(port, ptr, rust_vec_len, data_len),
-27 => wire__crate__api__studio__types__event__bridge_product_event_envelope_stale_impl(port, ptr, rust_vec_len, data_len),
-28 => wire__crate__api__studio__types__thread_activity__bridge_thread_activity_tools_default_impl(port, ptr, rust_vec_len, data_len),
-29 => wire__crate__api__studio__handlers__ssh__browse_remote_directories_impl(port, ptr, rust_vec_len, data_len),
-30 => wire__crate__api__studio__handlers__providers__check_provider_usage_impl(port, ptr, rust_vec_len, data_len),
-31 => wire__crate__api__studio__handlers__updater__check_studio_update_impl(port, ptr, rust_vec_len, data_len),
-32 => wire__crate__api__studio__handlers__agent_profiles__cleanup_preserved_worktree_impl(port, ptr, rust_vec_len, data_len),
-33 => wire__crate__api__studio__subscription__create_product_subscription_impl(port, ptr, rust_vec_len, data_len),
-34 => wire__crate__api__studio__handlers__ssh__delete_ssh_server_impl(port, ptr, rust_vec_len, data_len),
-35 => wire__crate__api__studio__handlers__providers__discover_skills_impl(port, ptr, rust_vec_len, data_len),
-36 => wire__crate__api__studio__handlers__lifecycle__finish_shutdown_diagnostics_impl(port, ptr, rust_vec_len, data_len),
-37 => wire__crate__api__studio__handlers__lifecycle__init_app_impl(port, ptr, rust_vec_len, data_len),
-38 => wire__crate__api__studio__handlers__updater__install_studio_update_impl(port, ptr, rust_vec_len, data_len),
-39 => wire__crate__api__studio__handlers__prompt__interrupt_turn_impl(port, ptr, rust_vec_len, data_len),
-40 => wire__crate__api__studio__handlers__ssh__list_ssh_servers_impl(port, ptr, rust_vec_len, data_len),
-41 => wire__crate__api__studio__handlers__history__list_thread_turns_impl(port, ptr, rust_vec_len, data_len),
-42 => wire__crate__api__studio__handlers__history__list_threads_page_impl(port, ptr, rust_vec_len, data_len),
-43 => wire__crate__api__studio__handlers__history__list_timeline_items_impl(port, ptr, rust_vec_len, data_len),
-44 => wire__crate__api__studio__handlers__settings__load_provider_catalog_impl(port, ptr, rust_vec_len, data_len),
-45 => wire__crate__api__studio__handlers__chat__open_chat_view_impl(port, ptr, rust_vec_len, data_len),
-46 => wire__crate__api__studio__handlers__lifecycle__open_project_impl(port, ptr, rust_vec_len, data_len),
-47 => wire__crate__api__studio__handlers__ssh__open_remote_project_impl(port, ptr, rust_vec_len, data_len),
-48 => wire__crate__api__studio__handlers__external_state__probe_lsp_server_impl(port, ptr, rust_vec_len, data_len),
-49 => wire__crate__api__studio__handlers__history__query_threads_impl(port, ptr, rust_vec_len, data_len),
-50 => wire__crate__api__studio__handlers__agent_profiles__read_agent_profiles_impl(port, ptr, rust_vec_len, data_len),
-51 => wire__crate__api__studio__handlers__attachment__read_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
-52 => wire__crate__api__studio__handlers__settings__read_deepseek_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-53 => wire__crate__api__studio__handlers__external_state__read_lsp_state_impl(port, ptr, rust_vec_len, data_len),
-54 => wire__crate__api__studio__handlers__external_state__read_mcp_state_impl(port, ptr, rust_vec_len, data_len),
-55 => wire__crate__api__studio__handlers__persistence__read_persistence_queue_impl(port, ptr, rust_vec_len, data_len),
-56 => wire__crate__api__studio__handlers__providers__read_provider_usage_state_impl(port, ptr, rust_vec_len, data_len),
-57 => wire__crate__api__studio__handlers__lifecycle__read_recovery_state_impl(port, ptr, rust_vec_len, data_len),
-58 => wire__crate__api__studio__handlers__settings__read_settings_state_impl(port, ptr, rust_vec_len, data_len),
-59 => wire__crate__api__studio__handlers__providers__read_skills_state_impl(port, ptr, rust_vec_len, data_len),
-61 => wire__crate__api__studio__handlers__snapshot__read_studio_state_impl(port, ptr, rust_vec_len, data_len),
-62 => wire__crate__api__studio__handlers__updater__read_studio_update_state_impl(port, ptr, rust_vec_len, data_len),
-63 => wire__crate__api__studio__handlers__history__read_thread_impl(port, ptr, rust_vec_len, data_len),
-64 => wire__crate__api__studio__handlers__history__read_thread_activity_detail_impl(port, ptr, rust_vec_len, data_len),
-65 => wire__crate__api__studio__handlers__attachment__read_thread_attachment_impl(port, ptr, rust_vec_len, data_len),
-66 => wire__crate__api__studio__handlers__history__read_timeline_item_impl(port, ptr, rust_vec_len, data_len),
-67 => wire__crate__api__studio__handlers__settings__read_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-68 => wire__crate__api__studio__handlers__ssh__reconnect_ssh_server_impl(port, ptr, rust_vec_len, data_len),
-69 => wire__crate__api__studio__handlers__settings__refresh_model_catalog_impl(port, ptr, rust_vec_len, data_len),
-70 => wire__crate__api__studio__handlers__settings__reload_settings_from_disk_impl(port, ptr, rust_vec_len, data_len),
-71 => wire__crate__api__studio__handlers__attachment__remove_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
-72 => wire__crate__api__studio__handlers__lifecycle__rename_project_impl(port, ptr, rust_vec_len, data_len),
-73 => wire__crate__api__studio__handlers__thread__rename_thread_impl(port, ptr, rust_vec_len, data_len),
-74 => wire__crate__api__studio__handlers__external_state__repair_lsp_server_impl(port, ptr, rust_vec_len, data_len),
-75 => wire__crate__api__studio__handlers__external_state__reset_lsp_impl(port, ptr, rust_vec_len, data_len),
-76 => wire__crate__api__studio__handlers__external_state__reset_mcp_impl(port, ptr, rust_vec_len, data_len),
-77 => wire__crate__api__studio__handlers__prompt__respond_interaction_impl(port, ptr, rust_vec_len, data_len),
-78 => wire__crate__api__studio__handlers__thread__restore_thread_impl(port, ptr, rust_vec_len, data_len),
-79 => wire__crate__api__studio__handlers__persistence__resume_thread_history_impl(port, ptr, rust_vec_len, data_len),
-80 => wire__crate__api__studio__handlers__persistence__retry_persistence_impl(port, ptr, rust_vec_len, data_len),
-81 => wire__crate__api__studio__handlers__lifecycle__retry_recovery_impl(port, ptr, rust_vec_len, data_len),
-82 => wire__crate__api__studio__handlers__persistence__retry_thread_history_impl(port, ptr, rust_vec_len, data_len),
-83 => wire__crate__api__studio__handlers__settings__save_deepseek_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-84 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
-85 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
-86 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
-87 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
-88 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
-89 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
-90 => wire__crate__api__studio__handlers__ssh__save_ssh_server_impl(port, ptr, rust_vec_len, data_len),
-91 => wire__crate__api__studio__handlers__agent_profiles__save_user_agent_profile_impl(port, ptr, rust_vec_len, data_len),
-92 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-93 => wire__crate__api__studio__handlers__providers__search_skills_impl(port, ptr, rust_vec_len, data_len),
-94 => wire__crate__api__studio__handlers__settings__set_mode_model_route_impl(port, ptr, rust_vec_len, data_len),
-95 => wire__crate__api__studio__handlers__settings__set_model_role_impl(port, ptr, rust_vec_len, data_len),
-96 => wire__crate__api__studio__handlers__agent_profiles__set_system_agent_enabled_impl(port, ptr, rust_vec_len, data_len),
-97 => wire__crate__api__studio__handlers__thread__set_thread_mode_impl(port, ptr, rust_vec_len, data_len),
-98 => wire__crate__api__studio__handlers__thread__set_thread_model_route_impl(port, ptr, rust_vec_len, data_len),
-99 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
-100 => wire__crate__api__studio__handlers__thread__start_new_thread_impl(port, ptr, rust_vec_len, data_len),
-101 => wire__crate__api__studio__handlers__lifecycle__start_studio_runtime_impl(port, ptr, rust_vec_len, data_len),
-102 => wire__crate__api__studio__handlers__prompt__submit_prompt_impl(port, ptr, rust_vec_len, data_len),
-103 => wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(port, ptr, rust_vec_len, data_len),
-104 => wire__crate__api__studio__subscription__subscribe_thread_impl(port, ptr, rust_vec_len, data_len),
-105 => wire__crate__api__studio__handlers__ssh__test_ssh_connection_impl(port, ptr, rust_vec_len, data_len),
+13 => wire__crate__api__studio__subscription__BridgeEventSubscription_startup_stream_impl(port, ptr, rust_vec_len, data_len),
+14 => wire__crate__api__studio__subscription__BridgeEventSubscription_thread_stream_impl(port, ptr, rust_vec_len, data_len),
+15 => wire__crate__api__studio__handlers__updater__BridgeStudioUpdateOperation_cancel_impl(port, ptr, rust_vec_len, data_len),
+16 => wire__crate__api__studio__handlers__updater__BridgeStudioUpdateOperation_finish_handoff_impl(port, ptr, rust_vec_len, data_len),
+17 => wire__crate__api__studio__handlers__updater__BridgeStudioUpdateOperation_progress_stream_impl(port, ptr, rust_vec_len, data_len),
+18 => wire__crate__api__studio__handlers__lifecycle__activate_project_impl(port, ptr, rust_vec_len, data_len),
+19 => wire__crate__api__studio__handlers__attachment__admit_attachment_drafts_impl(port, ptr, rust_vec_len, data_len),
+20 => wire__crate__api__studio__handlers__lifecycle__archive_project_impl(port, ptr, rust_vec_len, data_len),
+21 => wire__crate__api__studio__handlers__thread__archive_thread_impl(port, ptr, rust_vec_len, data_len),
+22 => wire__crate__api__studio__handlers__lifecycle__begin_runtime_exit_impl(port, ptr, rust_vec_len, data_len),
+23 => wire__crate__api__studio__types__thread_stream__bridge_cache_usage_summary_default_impl(port, ptr, rust_vec_len, data_len),
+24 => wire__crate__api__studio__types__runtime__bridge_closed_agent_default_impl(port, ptr, rust_vec_len, data_len),
+25 => wire__crate__api__studio__types__runtime__bridge_closing_agent_default_impl(port, ptr, rust_vec_len, data_len),
+26 => wire__crate__api__studio__types__settings__bridge_general_settings_dto_default_impl(port, ptr, rust_vec_len, data_len),
+27 => wire__crate__api__studio__types__runtime__bridge_idle_agent_default_impl(port, ptr, rust_vec_len, data_len),
+28 => wire__crate__api__studio__types__product_topic__bridge_product_topic_validate_scope_impl(port, ptr, rust_vec_len, data_len),
+29 => wire__crate__api__studio__types__thread_activity__bridge_thread_activity_tools_default_impl(port, ptr, rust_vec_len, data_len),
+30 => wire__crate__api__studio__handlers__ssh__browse_remote_directories_impl(port, ptr, rust_vec_len, data_len),
+31 => wire__crate__api__studio__handlers__providers__check_provider_usage_impl(port, ptr, rust_vec_len, data_len),
+32 => wire__crate__api__studio__handlers__updater__check_studio_update_impl(port, ptr, rust_vec_len, data_len),
+33 => wire__crate__api__studio__handlers__agent_profiles__cleanup_preserved_worktree_impl(port, ptr, rust_vec_len, data_len),
+34 => wire__crate__api__studio__subscription__product_topic__create_product_topic_subscription_impl(port, ptr, rust_vec_len, data_len),
+35 => wire__crate__api__studio__handlers__ssh__delete_ssh_server_impl(port, ptr, rust_vec_len, data_len),
+36 => wire__crate__api__studio__handlers__providers__discover_skills_impl(port, ptr, rust_vec_len, data_len),
+37 => wire__crate__api__studio__handlers__lifecycle__finish_shutdown_diagnostics_impl(port, ptr, rust_vec_len, data_len),
+38 => wire__crate__api__studio__handlers__lifecycle__init_app_impl(port, ptr, rust_vec_len, data_len),
+39 => wire__crate__api__studio__handlers__updater__install_studio_update_impl(port, ptr, rust_vec_len, data_len),
+40 => wire__crate__api__studio__handlers__prompt__interrupt_turn_impl(port, ptr, rust_vec_len, data_len),
+41 => wire__crate__api__studio__handlers__ssh__list_ssh_servers_impl(port, ptr, rust_vec_len, data_len),
+42 => wire__crate__api__studio__handlers__history__list_thread_turns_impl(port, ptr, rust_vec_len, data_len),
+43 => wire__crate__api__studio__handlers__history__list_threads_page_impl(port, ptr, rust_vec_len, data_len),
+44 => wire__crate__api__studio__handlers__history__list_timeline_items_impl(port, ptr, rust_vec_len, data_len),
+45 => wire__crate__api__studio__handlers__settings__load_provider_catalog_impl(port, ptr, rust_vec_len, data_len),
+46 => wire__crate__api__studio__handlers__chat__open_chat_view_impl(port, ptr, rust_vec_len, data_len),
+47 => wire__crate__api__studio__handlers__lifecycle__open_project_impl(port, ptr, rust_vec_len, data_len),
+48 => wire__crate__api__studio__handlers__ssh__open_remote_project_impl(port, ptr, rust_vec_len, data_len),
+49 => wire__crate__api__studio__handlers__lifecycle__prepare_startup_attempt_impl(port, ptr, rust_vec_len, data_len),
+50 => wire__crate__api__studio__handlers__external_state__probe_lsp_server_impl(port, ptr, rust_vec_len, data_len),
+51 => wire__crate__api__studio__handlers__history__query_threads_impl(port, ptr, rust_vec_len, data_len),
+52 => wire__crate__api__studio__handlers__agent_profiles__read_agent_profiles_state_impl(port, ptr, rust_vec_len, data_len),
+53 => wire__crate__api__studio__handlers__attachment__read_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
+54 => wire__crate__api__studio__handlers__settings__read_deepseek_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+55 => wire__crate__api__studio__handlers__external_state__read_lsp_state_impl(port, ptr, rust_vec_len, data_len),
+56 => wire__crate__api__studio__handlers__external_state__read_mcp_state_impl(port, ptr, rust_vec_len, data_len),
+57 => wire__crate__api__studio__handlers__persistence__read_persistence_queue_impl(port, ptr, rust_vec_len, data_len),
+58 => wire__crate__api__studio__handlers__providers__read_provider_usage_state_impl(port, ptr, rust_vec_len, data_len),
+59 => wire__crate__api__studio__handlers__lifecycle__read_recovery_state_impl(port, ptr, rust_vec_len, data_len),
+60 => wire__crate__api__studio__handlers__settings__read_settings_state_impl(port, ptr, rust_vec_len, data_len),
+61 => wire__crate__api__studio__handlers__providers__read_skills_state_impl(port, ptr, rust_vec_len, data_len),
+62 => wire__crate__api__studio__handlers__snapshot__read_studio_state_impl(port, ptr, rust_vec_len, data_len),
+63 => wire__crate__api__studio__handlers__updater__read_studio_update_state_impl(port, ptr, rust_vec_len, data_len),
+64 => wire__crate__api__studio__handlers__history__read_thread_impl(port, ptr, rust_vec_len, data_len),
+65 => wire__crate__api__studio__handlers__history__read_thread_activity_detail_impl(port, ptr, rust_vec_len, data_len),
+66 => wire__crate__api__studio__handlers__attachment__read_thread_attachment_impl(port, ptr, rust_vec_len, data_len),
+67 => wire__crate__api__studio__handlers__history__read_timeline_item_impl(port, ptr, rust_vec_len, data_len),
+68 => wire__crate__api__studio__handlers__settings__read_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+69 => wire__crate__api__studio__handlers__ssh__reconnect_ssh_server_impl(port, ptr, rust_vec_len, data_len),
+70 => wire__crate__api__studio__handlers__settings__refresh_model_catalog_impl(port, ptr, rust_vec_len, data_len),
+71 => wire__crate__api__studio__handlers__settings__reload_settings_from_disk_impl(port, ptr, rust_vec_len, data_len),
+72 => wire__crate__api__studio__handlers__attachment__remove_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
+73 => wire__crate__api__studio__handlers__lifecycle__rename_project_impl(port, ptr, rust_vec_len, data_len),
+74 => wire__crate__api__studio__handlers__thread__rename_thread_impl(port, ptr, rust_vec_len, data_len),
+75 => wire__crate__api__studio__handlers__external_state__repair_lsp_server_impl(port, ptr, rust_vec_len, data_len),
+76 => wire__crate__api__studio__handlers__external_state__reset_lsp_impl(port, ptr, rust_vec_len, data_len),
+77 => wire__crate__api__studio__handlers__external_state__reset_mcp_impl(port, ptr, rust_vec_len, data_len),
+78 => wire__crate__api__studio__handlers__prompt__respond_interaction_impl(port, ptr, rust_vec_len, data_len),
+79 => wire__crate__api__studio__handlers__thread__restore_thread_impl(port, ptr, rust_vec_len, data_len),
+80 => wire__crate__api__studio__handlers__persistence__resume_thread_history_impl(port, ptr, rust_vec_len, data_len),
+81 => wire__crate__api__studio__handlers__persistence__retry_persistence_impl(port, ptr, rust_vec_len, data_len),
+82 => wire__crate__api__studio__handlers__lifecycle__retry_recovery_impl(port, ptr, rust_vec_len, data_len),
+83 => wire__crate__api__studio__handlers__persistence__retry_thread_history_impl(port, ptr, rust_vec_len, data_len),
+84 => wire__crate__api__studio__handlers__settings__save_deepseek_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+85 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
+86 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
+87 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
+88 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
+89 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
+90 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
+91 => wire__crate__api__studio__handlers__ssh__save_ssh_server_impl(port, ptr, rust_vec_len, data_len),
+92 => wire__crate__api__studio__handlers__agent_profiles__save_user_agent_profile_impl(port, ptr, rust_vec_len, data_len),
+93 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+94 => wire__crate__api__studio__handlers__providers__search_skills_impl(port, ptr, rust_vec_len, data_len),
+95 => wire__crate__api__studio__handlers__settings__set_mode_model_route_impl(port, ptr, rust_vec_len, data_len),
+96 => wire__crate__api__studio__handlers__settings__set_model_role_impl(port, ptr, rust_vec_len, data_len),
+97 => wire__crate__api__studio__handlers__agent_profiles__set_system_agent_enabled_impl(port, ptr, rust_vec_len, data_len),
+98 => wire__crate__api__studio__handlers__thread__set_thread_mode_impl(port, ptr, rust_vec_len, data_len),
+99 => wire__crate__api__studio__handlers__thread__set_thread_model_route_impl(port, ptr, rust_vec_len, data_len),
+100 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
+101 => wire__crate__api__studio__handlers__thread__start_new_thread_impl(port, ptr, rust_vec_len, data_len),
+102 => wire__crate__api__studio__handlers__lifecycle__start_studio_runtime_impl(port, ptr, rust_vec_len, data_len),
+103 => wire__crate__api__studio__handlers__prompt__submit_prompt_impl(port, ptr, rust_vec_len, data_len),
+104 => wire__crate__api__studio__subscription__shutdown__subscribe_shutdown_progress_impl(port, ptr, rust_vec_len, data_len),
+105 => wire__crate__api__studio__subscription__startup__subscribe_startup_progress_impl(port, ptr, rust_vec_len, data_len),
+106 => wire__crate__api__studio__subscription__thread__subscribe_thread_impl(port, ptr, rust_vec_len, data_len),
+107 => wire__crate__api__studio__handlers__ssh__test_ssh_connection_impl(port, ptr, rust_vec_len, data_len),
                         _ => unreachable!(),
                     }
 }
@@ -12932,11 +13421,6 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        60 => wire__crate__api__studio__handlers__lifecycle__read_startup_stage_impl(
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
         _ => unreachable!(),
     }
 }
@@ -13170,6 +13654,31 @@ impl
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgeAgentProfileDiagnostic
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.path.into_into_dart().into_dart(),
+            self.message.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgeAgentProfileDiagnostic
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::response::BridgeAgentProfileDiagnostic,
+    > for crate::api::studio::types::response::BridgeAgentProfileDiagnostic
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::BridgeAgentProfileDiagnostic {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::agent_profile::BridgeAgentProfileDto
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -13202,6 +13711,124 @@ impl
     > for crate::api::studio::types::agent_profile::BridgeAgentProfileDto
 {
     fn into_into_dart(self) -> crate::api::studio::types::agent_profile::BridgeAgentProfileDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgeAgentProfilesData
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.profiles.into_into_dart().into_dart(),
+            self.diagnostics.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgeAgentProfilesData
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::BridgeAgentProfilesData>
+    for crate::api::studio::types::response::BridgeAgentProfilesData
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::BridgeAgentProfilesData {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgeAgentProfilesState
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::studio::types::response::BridgeAgentProfilesState::Uninitialized(
+                field0,
+            ) => [0.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::response::BridgeAgentProfilesState::Loading(field0) => {
+                [1.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::response::BridgeAgentProfilesState::Ready {
+                resource,
+                value,
+            } => [
+                2.into_dart(),
+                resource.into_into_dart().into_dart(),
+                value.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::studio::types::response::BridgeAgentProfilesState::Refreshing {
+                resource,
+                value,
+            } => [
+                3.into_dart(),
+                resource.into_into_dart().into_dart(),
+                value.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::studio::types::response::BridgeAgentProfilesState::Stale {
+                resource,
+                value,
+            } => [
+                4.into_dart(),
+                resource.into_into_dart().into_dart(),
+                value.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::studio::types::response::BridgeAgentProfilesState::Degraded {
+                resource,
+                value,
+            } => [
+                5.into_dart(),
+                resource.into_into_dart().into_dart(),
+                value.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::studio::types::response::BridgeAgentProfilesState::Failed(field0) => {
+                [6.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::response::BridgeAgentProfilesState::Stopped(field0) => {
+                [7.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgeAgentProfilesState
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::BridgeAgentProfilesState>
+    for crate::api::studio::types::response::BridgeAgentProfilesState
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::BridgeAgentProfilesState {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [self.state.into_into_dart().into_dart()].into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot,
+    > for crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot {
         self
     }
 }
@@ -15401,7 +16028,6 @@ impl flutter_rust_bridge::IntoDart
             self.statistics_pending.into_into_dart().into_dart(),
             self.statistics_gap.into_into_dart().into_dart(),
             self.read_failed.into_into_dart().into_dart(),
-            self.session_costs.into_into_dart().into_dart(),
             self.summaries.into_into_dart().into_dart(),
             self.history.into_into_dart().into_dart(),
         ]
@@ -15621,6 +16247,34 @@ impl
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.revision.into_into_dart().into_dart(),
+            self.updated_at.into_into_dart().into_dart(),
+            self.queue.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot,
+    > for crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::BridgePersistenceState {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -15717,6 +16371,79 @@ impl
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::product_topic::BridgeProductBaseline
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::studio::types::product_topic::BridgeProductBaseline::ProjectDirectory(
+                field0,
+            ) => [0.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::product_topic::BridgeProductBaseline::ThreadDirectory(
+                field0,
+            ) => [1.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::product_topic::BridgeProductBaseline::AgentDirectory(
+                field0,
+            ) => [2.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Settings(field0) => {
+                [3.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Recovery(field0) => {
+                [4.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Mcp(field0) => {
+                [5.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Lsp(field0) => {
+                [6.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Skills(field0) => {
+                [7.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::ThreadModeCatalog(
+                field0,
+            ) => [8.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::product_topic::BridgeProductBaseline::ProviderUsage(
+                field0,
+            ) => [9.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::product_topic::BridgeProductBaseline::ModelPerformance(
+                field0,
+            ) => [10.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::product_topic::BridgeProductBaseline::SessionCosts(
+                field0,
+            ) => [11.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Updater(field0) => {
+                [12.into_dart(), field0.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Persistence(
+                field0,
+            ) => [13.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::product_topic::BridgeProductBaseline::PersistenceQueue(
+                field0,
+            ) => [14.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::product_topic::BridgeProductBaseline::AgentProfiles(
+                field0,
+            ) => [15.into_dart(), field0.into_into_dart().into_dart()].into_dart(),
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::product_topic::BridgeProductBaseline
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::product_topic::BridgeProductBaseline,
+    > for crate::api::studio::types::product_topic::BridgeProductBaseline
+{
+    fn into_into_dart(self) -> crate::api::studio::types::product_topic::BridgeProductBaseline {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::event::BridgeProductEventEnvelope
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -15765,12 +16492,16 @@ crate::api::studio::types::event::BridgeProductEventPayload::ProviderUsageStateC
 field0.into_into_dart().into_dart()].into_dart() }
 crate::api::studio::types::event::BridgeProductEventPayload::ModelPerformanceStateChanged(field0) => { [10.into_dart(),
 field0.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::event::BridgeProductEventPayload::UpdaterStateChanged(field0) => { [11.into_dart(),
+crate::api::studio::types::event::BridgeProductEventPayload::SessionCostsChanged(field0) => { [11.into_dart(),
 field0.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::event::BridgeProductEventPayload::PersistenceStateChanged(field0) => { [12.into_dart(),
+crate::api::studio::types::event::BridgeProductEventPayload::UpdaterStateChanged(field0) => { [12.into_dart(),
 field0.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::event::BridgeProductEventPayload::Stale{lagged_events} => { [13.into_dart(),
-lagged_events.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::event::BridgeProductEventPayload::PersistenceStateChanged(field0) => { [13.into_dart(),
+field0.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::event::BridgeProductEventPayload::PersistenceQueueStateChanged(field0) => { [14.into_dart(),
+field0.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::event::BridgeProductEventPayload::AgentProfilesStateChanged(field0) => { [15.into_dart(),
+field0.into_into_dart().into_dart()].into_dart() }
  _ => { unimplemented!(""); }}
     }
 }
@@ -15787,18 +16518,57 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::event::BridgeP
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
-    for crate::api::studio::subscription::BridgeProductStreamEnvelope
+    for crate::api::studio::types::product_topic::BridgeProductTopic
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
-            crate::api::studio::subscription::BridgeProductStreamEnvelope::Data { event } => {
-                [0.into_dart(), event.into_into_dart().into_dart()].into_dart()
+            crate::api::studio::types::product_topic::BridgeProductTopic::ProjectDirectory => {
+                [0.into_dart()].into_dart()
             }
-            crate::api::studio::subscription::BridgeProductStreamEnvelope::Failure { error } => {
-                [1.into_dart(), error.into_into_dart().into_dart()].into_dart()
+            crate::api::studio::types::product_topic::BridgeProductTopic::ThreadDirectory => {
+                [1.into_dart()].into_dart()
             }
-            crate::api::studio::subscription::BridgeProductStreamEnvelope::Closed => {
+            crate::api::studio::types::product_topic::BridgeProductTopic::AgentDirectory => {
                 [2.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Settings => {
+                [3.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Recovery => {
+                [4.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Mcp => {
+                [5.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Lsp => {
+                [6.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Skills { project_id } => {
+                [7.into_dart(), project_id.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::ThreadModeCatalog => {
+                [8.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::ProviderUsage => {
+                [9.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::ModelPerformance => {
+                [10.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::SessionCosts {
+                root_thread_id,
+            } => [11.into_dart(), root_thread_id.into_into_dart().into_dart()].into_dart(),
+            crate::api::studio::types::product_topic::BridgeProductTopic::Updater => {
+                [12.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Persistence => {
+                [13.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::PersistenceQueue => {
+                [14.into_dart()].into_dart()
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::AgentProfiles => {
+                [15.into_dart()].into_dart()
             }
             _ => {
                 unimplemented!("");
@@ -15807,14 +16577,48 @@ impl flutter_rust_bridge::IntoDart
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::studio::subscription::BridgeProductStreamEnvelope
+    for crate::api::studio::types::product_topic::BridgeProductTopic
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::product_topic::BridgeProductTopic>
+    for crate::api::studio::types::product_topic::BridgeProductTopic
+{
+    fn into_into_dart(self) -> crate::api::studio::types::product_topic::BridgeProductTopic {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Baseline{topic,revision,state} => { [0.into_dart(),
+topic.into_into_dart().into_dart(),
+revision.into_into_dart().into_dart(),
+state.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Data{event} => { [1.into_dart(),
+event.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Lagged{topic,dropped} => { [2.into_dart(),
+topic.into_into_dart().into_dart(),
+dropped.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Failure{error} => { [3.into_dart(),
+error.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Closed => { [4.into_dart()].into_dart() }
+ _ => { unimplemented!(""); }}
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope
 {
 }
 impl
-    flutter_rust_bridge::IntoIntoDart<crate::api::studio::subscription::BridgeProductStreamEnvelope>
-    for crate::api::studio::subscription::BridgeProductStreamEnvelope
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope,
+    > for crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope
 {
-    fn into_into_dart(self) -> crate::api::studio::subscription::BridgeProductStreamEnvelope {
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope {
         self
     }
 }
@@ -16684,6 +17488,34 @@ impl
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgeSessionCostsState
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.root_thread_id.into_into_dart().into_dart(),
+            self.revision.into_into_dart().into_dart(),
+            self.updated_at.into_into_dart().into_dart(),
+            self.statistics_pending.into_into_dart().into_dart(),
+            self.statistics_gap.into_into_dart().into_dart(),
+            self.read_failed.into_into_dart().into_dart(),
+            self.cost.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgeSessionCostsState
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::BridgeSessionCostsState>
+    for crate::api::studio::types::response::BridgeSessionCostsState
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::BridgeSessionCostsState {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::response::BridgeSettingsStateData
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -17374,8 +18206,11 @@ impl flutter_rust_bridge::IntoDart
             self.thread_mode_catalog.into_into_dart().into_dart(),
             self.provider_usage.into_into_dart().into_dart(),
             self.model_performance.into_into_dart().into_dart(),
+            self.session_costs.into_into_dart().into_dart(),
             self.updater.into_into_dart().into_dart(),
             self.persistence.into_into_dart().into_dart(),
+            self.persistence_queue.into_into_dart().into_dart(),
+            self.agent_profiles.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -21190,7 +22025,7 @@ impl SseEncode
 
 impl SseEncode
     for StreamSink<
-        crate::api::studio::subscription::BridgeProductStreamEnvelope,
+        crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope,
         flutter_rust_bridge::for_generated::SseCodec,
     >
 {
@@ -21203,6 +22038,18 @@ impl SseEncode
 impl SseEncode
     for StreamSink<
         crate::api::studio::types::event::BridgeShutdownProgress,
+        flutter_rust_bridge::for_generated::SseCodec,
+    >
+{
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        unimplemented!("")
+    }
+}
+
+impl SseEncode
+    for StreamSink<
+        crate::api::studio::types::runtime::BridgeStartupStage,
         flutter_rust_bridge::for_generated::SseCodec,
     >
 {
@@ -21262,6 +22109,15 @@ impl SseEncode for bool {
     }
 }
 
+impl SseEncode for Box<crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot>::sse_encode(
+            *self, serializer,
+        );
+    }
+}
+
 impl SseEncode for Box<crate::api::studio::types::thread_stream::BridgeInteractionRequest> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -21271,10 +22127,37 @@ impl SseEncode for Box<crate::api::studio::types::thread_stream::BridgeInteracti
     }
 }
 
+impl SseEncode for Box<crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot>::sse_encode(
+            *self, serializer,
+        );
+    }
+}
+
+impl SseEncode for Box<crate::api::studio::types::product_topic::BridgeProductBaseline> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::studio::types::product_topic::BridgeProductBaseline>::sse_encode(
+            *self, serializer,
+        );
+    }
+}
+
 impl SseEncode for Box<crate::api::studio::types::event::BridgeProductEventEnvelope> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::studio::types::event::BridgeProductEventEnvelope>::sse_encode(
+            *self, serializer,
+        );
+    }
+}
+
+impl SseEncode for Box<crate::api::studio::types::response::BridgeSessionCostsState> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::studio::types::response::BridgeSessionCostsState>::sse_encode(
             *self, serializer,
         );
     }
@@ -21470,6 +22353,14 @@ impl SseEncode for crate::api::studio::types::response::BridgeAgentDirectoryStat
     }
 }
 
+impl SseEncode for crate::api::studio::types::response::BridgeAgentProfileDiagnostic {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.path, serializer);
+        <String>::sse_encode(self.message, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::agent_profile::BridgeAgentProfileDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -21489,6 +22380,114 @@ impl SseEncode for crate::api::studio::types::agent_profile::BridgeAgentProfileD
         <crate::api::studio::types::agent_profile::BridgeAgentWorkspaceMode>::sse_encode(
             self.workspace_mode,
             serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::studio::types::response::BridgeAgentProfilesData {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<crate::api::studio::types::agent_profile::BridgeAgentProfileDto>>::sse_encode(
+            self.profiles,
+            serializer,
+        );
+        <Vec<crate::api::studio::types::response::BridgeAgentProfileDiagnostic>>::sse_encode(
+            self.diagnostics,
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::studio::types::response::BridgeAgentProfilesState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::studio::types::response::BridgeAgentProfilesState::Uninitialized(
+                field0,
+            ) => {
+                <i32>::sse_encode(0, serializer);
+                <crate::api::studio::types::runtime::BridgeUninitializedResource>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::response::BridgeAgentProfilesState::Loading(field0) => {
+                <i32>::sse_encode(1, serializer);
+                <crate::api::studio::types::runtime::BridgeLoadingResource>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::response::BridgeAgentProfilesState::Ready {
+                resource,
+                value,
+            } => {
+                <i32>::sse_encode(2, serializer);
+                <crate::api::studio::types::runtime::BridgeReadyResource>::sse_encode(
+                    resource, serializer,
+                );
+                <crate::api::studio::types::response::BridgeAgentProfilesData>::sse_encode(
+                    value, serializer,
+                );
+            }
+            crate::api::studio::types::response::BridgeAgentProfilesState::Refreshing {
+                resource,
+                value,
+            } => {
+                <i32>::sse_encode(3, serializer);
+                <crate::api::studio::types::runtime::BridgeRefreshingResource>::sse_encode(
+                    resource, serializer,
+                );
+                <crate::api::studio::types::response::BridgeAgentProfilesData>::sse_encode(
+                    value, serializer,
+                );
+            }
+            crate::api::studio::types::response::BridgeAgentProfilesState::Stale {
+                resource,
+                value,
+            } => {
+                <i32>::sse_encode(4, serializer);
+                <crate::api::studio::types::runtime::BridgeStaleResource>::sse_encode(
+                    resource, serializer,
+                );
+                <crate::api::studio::types::response::BridgeAgentProfilesData>::sse_encode(
+                    value, serializer,
+                );
+            }
+            crate::api::studio::types::response::BridgeAgentProfilesState::Degraded {
+                resource,
+                value,
+            } => {
+                <i32>::sse_encode(5, serializer);
+                <crate::api::studio::types::runtime::BridgeDegradedResource>::sse_encode(
+                    resource, serializer,
+                );
+                <crate::api::studio::types::response::BridgeAgentProfilesData>::sse_encode(
+                    value, serializer,
+                );
+            }
+            crate::api::studio::types::response::BridgeAgentProfilesState::Failed(field0) => {
+                <i32>::sse_encode(6, serializer);
+                <crate::api::studio::types::runtime::BridgeFailedResource>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::response::BridgeAgentProfilesState::Stopped(field0) => {
+                <i32>::sse_encode(7, serializer);
+                <crate::api::studio::types::runtime::BridgeStoppedResource>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
+impl SseEncode for crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::studio::types::response::BridgeAgentProfilesState>::sse_encode(
+            self.state, serializer,
         );
     }
 }
@@ -22889,10 +23888,6 @@ impl SseEncode for crate::api::studio::types::response::BridgeModelPerformanceSn
         <bool>::sse_encode(self.statistics_pending, serializer);
         <bool>::sse_encode(self.statistics_gap, serializer);
         <bool>::sse_encode(self.read_failed, serializer);
-        <Vec<crate::api::studio::types::response::BridgeSessionCostSnapshot>>::sse_encode(
-            self.session_costs,
-            serializer,
-        );
         <Vec<crate::api::studio::types::response::BridgeModelPerformanceSummary>>::sse_encode(
             self.summaries,
             serializer,
@@ -23002,6 +23997,17 @@ impl SseEncode for crate::api::studio::types::response::BridgePersistenceQueueSn
     }
 }
 
+impl SseEncode for crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u64>::sse_encode(self.revision, serializer);
+        <i64>::sse_encode(self.updated_at, serializer);
+        <crate::api::studio::types::response::BridgePersistenceQueueSnapshot>::sse_encode(
+            self.queue, serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::studio::types::response::BridgePersistenceState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -23075,6 +24081,129 @@ impl SseEncode for crate::api::studio::types::response::BridgePersistenceStateSn
     }
 }
 
+impl SseEncode for crate::api::studio::types::product_topic::BridgeProductBaseline {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::studio::types::product_topic::BridgeProductBaseline::ProjectDirectory(
+                field0,
+            ) => {
+                <i32>::sse_encode(0, serializer);
+                <crate::api::studio::types::response::BridgeProjectDirectoryState>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::ThreadDirectory(
+                field0,
+            ) => {
+                <i32>::sse_encode(1, serializer);
+                <crate::api::studio::types::response::BridgeThreadDirectoryPage>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::AgentDirectory(
+                field0,
+            ) => {
+                <i32>::sse_encode(2, serializer);
+                <crate::api::studio::types::response::BridgeAgentDirectoryState>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Settings(field0) => {
+                <i32>::sse_encode(3, serializer);
+                <Box<crate::api::studio::types::response::BridgeSettingsStateSnapshot>>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Recovery(field0) => {
+                <i32>::sse_encode(4, serializer);
+                <crate::api::studio::types::response::BridgeRecoveryStateSnapshot>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Mcp(field0) => {
+                <i32>::sse_encode(5, serializer);
+                <crate::api::studio::types::response::BridgeMcpStateSnapshot>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Lsp(field0) => {
+                <i32>::sse_encode(6, serializer);
+                <crate::api::studio::types::response::BridgeLspStateSnapshot>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Skills(field0) => {
+                <i32>::sse_encode(7, serializer);
+                <crate::api::studio::types::response::BridgeSkillsStateSnapshot>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::ThreadModeCatalog(
+                field0,
+            ) => {
+                <i32>::sse_encode(8, serializer);
+                <crate::api::studio::types::response::BridgeThreadModeCatalogSnapshot>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::ProviderUsage(
+                field0,
+            ) => {
+                <i32>::sse_encode(9, serializer);
+                <crate::api::studio::types::response::BridgeProviderUsageStateSnapshot>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::ModelPerformance(
+                field0,
+            ) => {
+                <i32>::sse_encode(10, serializer);
+                <crate::api::studio::types::response::BridgeModelPerformanceSnapshot>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::SessionCosts(
+                field0,
+            ) => {
+                <i32>::sse_encode(11, serializer);
+                <Box<crate::api::studio::types::response::BridgeSessionCostsState>>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Updater(field0) => {
+                <i32>::sse_encode(12, serializer);
+                <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::Persistence(
+                field0,
+            ) => {
+                <i32>::sse_encode(13, serializer);
+                <crate::api::studio::types::response::BridgePersistenceStateSnapshot>::sse_encode(
+                    field0, serializer,
+                );
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::PersistenceQueue(
+                field0,
+            ) => {
+                <i32>::sse_encode(14, serializer);
+                <Box<crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot>>::sse_encode(field0, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductBaseline::AgentProfiles(
+                field0,
+            ) => {
+                <i32>::sse_encode(15, serializer);
+                <Box<crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot>>::sse_encode(field0, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
 impl SseEncode for crate::api::studio::types::event::BridgeProductEventEnvelope {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -23113,37 +24242,99 @@ crate::api::studio::types::event::BridgeProductEventPayload::ProviderUsageStateC
  }
 crate::api::studio::types::event::BridgeProductEventPayload::ModelPerformanceStateChanged(field0) => { <i32>::sse_encode(10, serializer); <crate::api::studio::types::response::BridgeModelPerformanceSnapshot>::sse_encode(field0, serializer);
  }
-crate::api::studio::types::event::BridgeProductEventPayload::UpdaterStateChanged(field0) => { <i32>::sse_encode(11, serializer); <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_encode(field0, serializer);
+crate::api::studio::types::event::BridgeProductEventPayload::SessionCostsChanged(field0) => { <i32>::sse_encode(11, serializer); <Box<crate::api::studio::types::response::BridgeSessionCostsState>>::sse_encode(field0, serializer);
  }
-crate::api::studio::types::event::BridgeProductEventPayload::PersistenceStateChanged(field0) => { <i32>::sse_encode(12, serializer); <crate::api::studio::types::response::BridgePersistenceStateSnapshot>::sse_encode(field0, serializer);
+crate::api::studio::types::event::BridgeProductEventPayload::UpdaterStateChanged(field0) => { <i32>::sse_encode(12, serializer); <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_encode(field0, serializer);
  }
-crate::api::studio::types::event::BridgeProductEventPayload::Stale{lagged_events} => { <i32>::sse_encode(13, serializer); <u64>::sse_encode(lagged_events, serializer);
+crate::api::studio::types::event::BridgeProductEventPayload::PersistenceStateChanged(field0) => { <i32>::sse_encode(13, serializer); <crate::api::studio::types::response::BridgePersistenceStateSnapshot>::sse_encode(field0, serializer);
+ }
+crate::api::studio::types::event::BridgeProductEventPayload::PersistenceQueueStateChanged(field0) => { <i32>::sse_encode(14, serializer); <Box<crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot>>::sse_encode(field0, serializer);
+ }
+crate::api::studio::types::event::BridgeProductEventPayload::AgentProfilesStateChanged(field0) => { <i32>::sse_encode(15, serializer); <Box<crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot>>::sse_encode(field0, serializer);
  }
  _ => { unimplemented!(""); }}
     }
 }
 
-impl SseEncode for crate::api::studio::subscription::BridgeProductStreamEnvelope {
+impl SseEncode for crate::api::studio::types::product_topic::BridgeProductTopic {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         match self {
-            crate::api::studio::subscription::BridgeProductStreamEnvelope::Data { event } => {
+            crate::api::studio::types::product_topic::BridgeProductTopic::ProjectDirectory => {
                 <i32>::sse_encode(0, serializer);
-                <Box<crate::api::studio::types::event::BridgeProductEventEnvelope>>::sse_encode(
-                    event, serializer,
-                );
             }
-            crate::api::studio::subscription::BridgeProductStreamEnvelope::Failure { error } => {
+            crate::api::studio::types::product_topic::BridgeProductTopic::ThreadDirectory => {
                 <i32>::sse_encode(1, serializer);
-                <crate::api::studio::types::error::BridgeError>::sse_encode(error, serializer);
             }
-            crate::api::studio::subscription::BridgeProductStreamEnvelope::Closed => {
+            crate::api::studio::types::product_topic::BridgeProductTopic::AgentDirectory => {
                 <i32>::sse_encode(2, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Settings => {
+                <i32>::sse_encode(3, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Recovery => {
+                <i32>::sse_encode(4, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Mcp => {
+                <i32>::sse_encode(5, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Lsp => {
+                <i32>::sse_encode(6, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Skills { project_id } => {
+                <i32>::sse_encode(7, serializer);
+                <String>::sse_encode(project_id, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::ThreadModeCatalog => {
+                <i32>::sse_encode(8, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::ProviderUsage => {
+                <i32>::sse_encode(9, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::ModelPerformance => {
+                <i32>::sse_encode(10, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::SessionCosts {
+                root_thread_id,
+            } => {
+                <i32>::sse_encode(11, serializer);
+                <String>::sse_encode(root_thread_id, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Updater => {
+                <i32>::sse_encode(12, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::Persistence => {
+                <i32>::sse_encode(13, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::PersistenceQueue => {
+                <i32>::sse_encode(14, serializer);
+            }
+            crate::api::studio::types::product_topic::BridgeProductTopic::AgentProfiles => {
+                <i32>::sse_encode(15, serializer);
             }
             _ => {
                 unimplemented!("");
             }
         }
+    }
+}
+
+impl SseEncode for crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Baseline{topic,revision,state} => { <i32>::sse_encode(0, serializer); <crate::api::studio::types::product_topic::BridgeProductTopic>::sse_encode(topic, serializer);
+<u64>::sse_encode(revision, serializer);
+<Box<crate::api::studio::types::product_topic::BridgeProductBaseline>>::sse_encode(state, serializer);
+ }
+crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Data{event} => { <i32>::sse_encode(1, serializer); <Box<crate::api::studio::types::event::BridgeProductEventEnvelope>>::sse_encode(event, serializer);
+ }
+crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Lagged{topic,dropped} => { <i32>::sse_encode(2, serializer); <crate::api::studio::types::product_topic::BridgeProductTopic>::sse_encode(topic, serializer);
+<u64>::sse_encode(dropped, serializer);
+ }
+crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Failure{error} => { <i32>::sse_encode(3, serializer); <crate::api::studio::types::error::BridgeError>::sse_encode(error, serializer);
+ }
+crate::api::studio::types::product_topic::BridgeProductTopicStreamEnvelope::Closed => { <i32>::sse_encode(4, serializer);  }
+ _ => { unimplemented!(""); }}
     }
 }
 
@@ -23748,6 +24939,21 @@ impl SseEncode for crate::api::studio::types::response::BridgeSessionCostSnapsho
     }
 }
 
+impl SseEncode for crate::api::studio::types::response::BridgeSessionCostsState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.root_thread_id, serializer);
+        <u64>::sse_encode(self.revision, serializer);
+        <i64>::sse_encode(self.updated_at, serializer);
+        <bool>::sse_encode(self.statistics_pending, serializer);
+        <bool>::sse_encode(self.statistics_gap, serializer);
+        <bool>::sse_encode(self.read_failed, serializer);
+        <Option<crate::api::studio::types::response::BridgeSessionCostSnapshot>>::sse_encode(
+            self.cost, serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::studio::types::response::BridgeSettingsStateData {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -24293,12 +25499,24 @@ impl SseEncode for crate::api::studio::types::response::BridgeStudioStateSnapsho
             self.model_performance,
             serializer,
         );
+        <Vec<crate::api::studio::types::response::BridgeSessionCostsState>>::sse_encode(
+            self.session_costs,
+            serializer,
+        );
         <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_encode(
             self.updater,
             serializer,
         );
         <crate::api::studio::types::response::BridgePersistenceStateSnapshot>::sse_encode(
             self.persistence,
+            serializer,
+        );
+        <crate::api::studio::types::response::BridgePersistenceQueueStateSnapshot>::sse_encode(
+            self.persistence_queue,
+            serializer,
+        );
+        <crate::api::studio::types::response::BridgeAgentProfilesStateSnapshot>::sse_encode(
+            self.agent_profiles,
             serializer,
         );
     }
@@ -26012,6 +27230,18 @@ impl SseEncode for Vec<crate::api::studio::types::runtime::BridgeAgentDirectoryE
     }
 }
 
+impl SseEncode for Vec<crate::api::studio::types::response::BridgeAgentProfileDiagnostic> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::response::BridgeAgentProfileDiagnostic>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::studio::types::agent_profile::BridgeAgentProfileDto> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -26352,12 +27582,12 @@ impl SseEncode for Vec<crate::api::studio::types::thread_stream::BridgeRuntimeCo
     }
 }
 
-impl SseEncode for Vec<crate::api::studio::types::response::BridgeSessionCostSnapshot> {
+impl SseEncode for Vec<crate::api::studio::types::response::BridgeSessionCostsState> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
-            <crate::api::studio::types::response::BridgeSessionCostSnapshot>::sse_encode(
+            <crate::api::studio::types::response::BridgeSessionCostsState>::sse_encode(
                 item, serializer,
             );
         }
@@ -26956,6 +28186,18 @@ impl SseEncode
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason>::sse_encode(
+                value, serializer,
+            );
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::studio::types::response::BridgeSessionCostSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::studio::types::response::BridgeSessionCostSnapshot>::sse_encode(
                 value, serializer,
             );
         }

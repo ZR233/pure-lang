@@ -463,6 +463,7 @@ impl StudioRuntime {
                 ..Default::default()
             })
             .await?;
+        self.model_performance.refresh_directory_visibility().await;
         Ok(ThreadRecord::from_directory_thread(restored))
     }
 

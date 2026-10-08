@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show listEquals;
+
 import 'studio_state_snapshots.dart';
 
 /// 持久化 owner 发布的单调快照。
@@ -150,6 +152,31 @@ class PersistenceQueueSnapshot {
   final List<ThreadPersistenceSnapshot> threads;
 
   bool get isBacklogged => pendingOperations > 0 || pendingBytes > 0;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PersistenceQueueSnapshot &&
+          statisticsGap == other.statisticsGap &&
+          pendingOperations == other.pendingOperations &&
+          pendingBytes == other.pendingBytes &&
+          inFlightBytes == other.inFlightBytes &&
+          oldestPendingAgeMillis == other.oldestPendingAgeMillis &&
+          lastError == other.lastError &&
+          pressurePaused == other.pressurePaused &&
+          listEquals(threads, other.threads);
+
+  @override
+  int get hashCode => Object.hash(
+    statisticsGap,
+    pendingOperations,
+    pendingBytes,
+    inFlightBytes,
+    oldestPendingAgeMillis,
+    lastError,
+    pressurePaused,
+    Object.hashAll(threads),
+  );
 }
 
 /// 单个 Thread 的持久化水位与队列压力。
@@ -198,4 +225,45 @@ class ThreadPersistenceSnapshot {
   final int inFlightBytes;
   final String? lastError;
   final bool pressurePaused;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ThreadPersistenceSnapshot &&
+          threadId == other.threadId &&
+          faultGeneration == other.faultGeneration &&
+          fault == other.fault &&
+          stateDirtyRevision == other.stateDirtyRevision &&
+          stateSavingRevision == other.stateSavingRevision &&
+          stateDurableRevision == other.stateDurableRevision &&
+          historyAdmittedSequence == other.historyAdmittedSequence &&
+          historyDurableSequence == other.historyDurableSequence &&
+          callsAdmittedSequence == other.callsAdmittedSequence &&
+          callsDurableSequence == other.callsDurableSequence &&
+          pendingOperations == other.pendingOperations &&
+          pendingBytes == other.pendingBytes &&
+          oldestPendingAgeMillis == other.oldestPendingAgeMillis &&
+          inFlightBytes == other.inFlightBytes &&
+          lastError == other.lastError &&
+          pressurePaused == other.pressurePaused;
+
+  @override
+  int get hashCode => Object.hash(
+    threadId,
+    faultGeneration,
+    fault,
+    stateDirtyRevision,
+    stateSavingRevision,
+    stateDurableRevision,
+    historyAdmittedSequence,
+    historyDurableSequence,
+    callsAdmittedSequence,
+    callsDurableSequence,
+    pendingOperations,
+    pendingBytes,
+    oldestPendingAgeMillis,
+    inFlightBytes,
+    lastError,
+    pressurePaused,
+  );
 }

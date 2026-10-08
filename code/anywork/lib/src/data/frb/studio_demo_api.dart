@@ -18,7 +18,14 @@ class DemoStudioApi
 
   /// 是否周期推进 demo LSP 索引活动；GUI demo 构建开启，测试默认关闭保持确定性。
   final bool lspActivityLoop;
-  final _productEvents = StreamController<Object>.broadcast();
+
+  /// 每 topic 的 typed fanout 接收者：receiver 先登记其 sink，再取得该 topic 基线；
+  /// 无关领域不进入该 receiver 的缓冲。发布只走已登记 sink，不做全局 mixed bus。
+  final Map<ProductTopic, Set<void Function(ProductTopicEventPayload)>>
+  _topicSinks = {};
+  int _productEventSequence = 0;
+  int _threadDirectoryRevision = 0;
+  int _agentProfilesRevision = 0;
   final _threadEvents = StreamController<ThreadStreamFrame>.broadcast();
   final _shutdownEvents = StreamController<StudioShutdownProgress>.broadcast();
 
@@ -266,6 +273,7 @@ class DemoStudioApi
             ? _demoDirectoryCursor(directoryPageSize - 1)
             : null,
         hasMore: directory.length > directoryPageSize,
+        revision: _threadDirectoryRevision,
       ),
       agentDirectory: AgentDirectoryState.fromState(
         state: _demoInitialResource(),
@@ -313,6 +321,36 @@ class DemoStudioApi
         ),
       ),
       modelPerformance: _demoModelPerformance(_fixtureNow!),
+      persistenceQueueState: const PersistenceQueueStateView(
+        revision: 0,
+        queue: PersistenceQueueSnapshot.empty(),
+      ),
+      agentProfilesState: null,
+      sessionCostsByRoot: {
+        'thread-main': SessionCostsStateView(
+          rootThreadId: 'thread-main',
+          revision: 1,
+          updatedAt: _fixtureNow!,
+          cost: const SessionCostView(
+            rootThreadId: 'thread-main',
+            estimatedCosts: [
+              RuntimeCostView(currency: 'CNY', amount: 0.14),
+              RuntimeCostView(currency: 'USD', amount: 0.02),
+            ],
+            hasUnpricedUsage: false,
+          ),
+        ),
+        'thread-alt': SessionCostsStateView(
+          rootThreadId: 'thread-alt',
+          revision: 1,
+          updatedAt: _fixtureNow!,
+          cost: const SessionCostView(
+            rootThreadId: 'thread-alt',
+            estimatedCosts: [],
+            hasUnpricedUsage: true,
+          ),
+        ),
+      },
       updaterState: UpdaterStateSnapshot.idle(
         revision: 0,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
@@ -428,21 +466,6 @@ class DemoStudioApi
     return ModelPerformanceSnapshotView(
       revision: 3,
       updatedAt: now,
-      sessionCosts: const [
-        SessionCostView(
-          rootThreadId: 'thread-main',
-          estimatedCosts: [
-            RuntimeCostView(currency: 'CNY', amount: 0.14),
-            RuntimeCostView(currency: 'USD', amount: 0.02),
-          ],
-          hasUnpricedUsage: false,
-        ),
-        SessionCostView(
-          rootThreadId: 'thread-alt',
-          estimatedCosts: [],
-          hasUnpricedUsage: true,
-        ),
-      ],
       summaries: const [deepseekHigh, deepseekNone, openai],
       history: [
         ModelPerformanceSampleView(
@@ -655,6 +678,7 @@ class DemoStudioApi
     return ThreadDirectoryPage(
       threads: rows.skip(offset).take(limit).toList(),
       nextCursor: offset + limit < rows.length ? '${offset + limit}' : null,
+      revision: _threadDirectoryRevision,
     );
   }
 
@@ -688,6 +712,7 @@ class DemoStudioApi
       nextCursor: nextLastIndex < directory.length - 1
           ? _demoDirectoryCursor(nextLastIndex)
           : null,
+      revision: _threadDirectoryRevision,
     );
   }
 
@@ -850,75 +875,12 @@ class DemoStudioApi
   Future<ProviderCatalogView> loadProviderCatalog() async => _providerCatalog;
 
   @override
-  Future<List<AgentProfileView>> readAgentProfiles() async {
-    return [
-      AgentProfileView(
-        id: 'explorer',
-        displayName: 'Explorer',
-        description: '只读探索代码、文档和现场事实。',
-        whenToUse: '需要定位边界、依赖或验证事实时。',
-        systemInstructions: '优先收集事实并引用文件与命令。',
-        providerId: 'demo',
-        model: 'demo',
-        effort: 'medium',
-        source: 'studio-builtin',
-        revision: 'studio-system-agent-v1',
-        contentHash: 'demo-explorer',
-        system: true,
-        enabled: !_disabledSystemAgents.contains('explorer'),
-        workspaceMode: AgentWorkspaceMode.unrestricted,
-      ),
-      AgentProfileView(
-        id: 'executor',
-        displayName: 'Executor',
-        description: '在项目目录内实施边界明确的修改。',
-        whenToUse: '需要限制 糊来帮内置文件写工具的修改目录时。',
-        systemInstructions: '遵守冻结的 writablePaths。',
-        providerId: 'demo',
-        model: 'demo',
-        effort: 'medium',
-        source: 'studio-builtin',
-        revision: 'studio-system-agent-v2',
-        contentHash: 'demo-executor',
-        system: true,
-        enabled: !_disabledSystemAgents.contains('executor'),
-        workspaceMode: AgentWorkspaceMode.directory,
-      ),
-      AgentProfileView(
-        id: 'worktree_executor',
-        displayName: 'Worktree Executor',
-        description: '在独立 Git worktree 内实施修改。',
-        whenToUse: '需要物理隔离并显式整合 commit 时。',
-        systemInstructions: '只修改分配的 worktree，不自动整合。',
-        providerId: 'demo',
-        model: 'demo',
-        effort: 'medium',
-        source: 'studio-builtin',
-        revision: 'studio-system-agent-v2',
-        contentHash: 'demo-worktree-executor',
-        system: true,
-        enabled: !_disabledSystemAgents.contains('worktree_executor'),
-        workspaceMode: AgentWorkspaceMode.worktree,
-      ),
-      AgentProfileView(
-        id: 'reviewer',
-        displayName: 'Reviewer',
-        description: '独立审查实现和验证证据。',
-        whenToUse: '需要复核实现质量时。',
-        systemInstructions: '只读审查并报告具体证据。',
-        providerId: 'demo',
-        model: 'demo',
-        effort: 'medium',
-        source: 'studio-builtin',
-        revision: 'studio-system-agent-v2',
-        contentHash: 'demo-reviewer',
-        system: true,
-        enabled: !_disabledSystemAgents.contains('reviewer'),
-        workspaceMode: AgentWorkspaceMode.unrestricted,
-      ),
-      ..._userAgentProfiles.values,
-    ];
-  }
+  Future<AgentProfilesStateView> readAgentProfilesState() async =>
+      readAgentProfilesStateSync();
+
+  @override
+  Future<List<AgentProfileView>> readAgentProfiles() async =>
+      _demoAgentProfilesSync();
 
   @override
   Future<SettingsStateSnapshot> setSystemAgentEnabled({
@@ -945,6 +907,7 @@ class DemoStudioApi
       _disabledSystemAgents.add(profileId);
     }
     _settingsRevision += 1;
+    _emitAgentProfilesUpdate();
     return (await readStudioState()).settingsState;
   }
 
@@ -980,6 +943,7 @@ class DemoStudioApi
       workspaceMode: draft.workspaceMode,
     );
     _settingsRevision += 1;
+    _emitAgentProfilesUpdate();
     return (await readStudioState()).settingsState;
   }
 
@@ -1239,14 +1203,107 @@ class DemoStudioApi
   }
 
   void _emitThreadDirectoryUpdate(StudioThread thread) {
-    _productEvents.add(
-      StudioBridgeEvent(
-        payload: ThreadDirectoryChangedPayload(
-          upserted: [thread],
-          removed: const [],
+    _threadDirectoryRevision += 1;
+    _publishProductPayload(
+      ThreadDirectoryChangedPayload(
+        revision: _threadDirectoryRevision,
+        upserted: [thread],
+        removed: const [],
+      ),
+    );
+  }
+
+  /// 配置级 Profiles 变化同样发布 typed topic 事实（保存命令返回 Settings snapshot，
+  /// 但 Profiles 目录自身是独立资源；订阅者按 revision 前进）。
+  void _emitAgentProfilesUpdate() {
+    _agentProfilesRevision += 1;
+    _publishProductPayload(
+      AgentProfilesStateChangedPayload(readAgentProfilesStateSync()),
+    );
+  }
+
+  AgentProfilesStateView readAgentProfilesStateSync() {
+    return AgentProfilesStateView(
+      state: ReadyObservedResource(
+        revision: _agentProfilesRevision,
+        updatedAt: 0,
+        lastCheckedAt: null,
+        value: AgentProfilesDataView(
+          profiles: _demoAgentProfilesSync(),
+          diagnostics: const [],
         ),
       ),
     );
+  }
+
+  List<AgentProfileView> _demoAgentProfilesSync() {
+    return [
+      AgentProfileView(
+        id: 'explorer',
+        displayName: 'Explorer',
+        description: '只读探索代码、文档和现场事实。',
+        whenToUse: '需要定位边界、依赖或验证事实时。',
+        systemInstructions: '优先收集事实并引用文件与命令。',
+        providerId: 'demo',
+        model: 'demo',
+        effort: 'medium',
+        source: 'studio-builtin',
+        revision: 'studio-system-agent-v1',
+        contentHash: 'demo-explorer',
+        system: true,
+        enabled: !_disabledSystemAgents.contains('explorer'),
+        workspaceMode: AgentWorkspaceMode.unrestricted,
+      ),
+      AgentProfileView(
+        id: 'executor',
+        displayName: 'Executor',
+        description: '在项目目录内实施边界明确的修改。',
+        whenToUse: '需要限制 糊来帮内置文件写工具的修改目录时。',
+        systemInstructions: '遵守冻结的 writablePaths。',
+        providerId: 'demo',
+        model: 'demo',
+        effort: 'medium',
+        source: 'studio-builtin',
+        revision: 'studio-system-agent-v2',
+        contentHash: 'demo-executor',
+        system: true,
+        enabled: !_disabledSystemAgents.contains('executor'),
+        workspaceMode: AgentWorkspaceMode.directory,
+      ),
+      AgentProfileView(
+        id: 'worktree_executor',
+        displayName: 'Worktree Executor',
+        description: '在独立 Git worktree 内实施修改。',
+        whenToUse: '需要物理隔离并显式整合 commit 时。',
+        systemInstructions: '只修改分配的 worktree，不自动整合。',
+        providerId: 'demo',
+        model: 'demo',
+        effort: 'medium',
+        source: 'studio-builtin',
+        revision: 'studio-system-agent-v2',
+        contentHash: 'demo-worktree-executor',
+        system: true,
+        enabled: !_disabledSystemAgents.contains('worktree_executor'),
+        workspaceMode: AgentWorkspaceMode.worktree,
+      ),
+      AgentProfileView(
+        id: 'reviewer',
+        displayName: 'Reviewer',
+        description: '独立审查实现和验证证据。',
+        whenToUse: '需要复核实现质量时。',
+        systemInstructions: '只读审查并报告具体证据。',
+        providerId: 'demo',
+        model: 'demo',
+        effort: 'medium',
+        source: 'studio-builtin',
+        revision: 'studio-system-agent-v2',
+        contentHash: 'demo-reviewer',
+        system: true,
+        enabled: !_disabledSystemAgents.contains('reviewer'),
+        workspaceMode: AgentWorkspaceMode.unrestricted,
+      ),
+      ..._userAgentProfiles.values,
+    ];
   }
 
   @override
@@ -1312,6 +1369,13 @@ class DemoStudioApi
   ) async => const PersistenceQueueSnapshot.empty();
 
   /// demo 是纯内存实现，没有异步持久化队列，因此队列压力恒为空的 canonical 观测。
+  @override
+  Future<PersistenceQueueStateView> readPersistenceQueueState() async =>
+      const PersistenceQueueStateView(
+        revision: 0,
+        queue: PersistenceQueueSnapshot.empty(),
+      );
+
   @override
   Future<PersistenceQueueSnapshot> readPersistenceQueue() async =>
       const PersistenceQueueSnapshot.empty();
@@ -1502,11 +1566,171 @@ class DemoStudioApi
   }
 
   @override
-  Stream<Object> subscribeProductEvents() {
-    if (lspActivityLoop) {
+  Stream<ProductTopicFrame> subscribeProductTopic(ProductTopic topic) {
+    if (lspActivityLoop && topic == const LspTopic()) {
       _startLspActivityLoop();
     }
-    return _productEvents.stream;
+    var detached = false;
+    var baselineEmitted = false;
+    final pending = <ProductTopicEventPayload>[];
+    late final StreamController<ProductTopicFrame> controller;
+    late final void Function(ProductTopicEventPayload) sink;
+
+    void detach() {
+      if (detached) return;
+      detached = true;
+      final sinks = _topicSinks[topic];
+      if (sinks != null) {
+        sinks.remove(sink);
+        if (sinks.isEmpty) _topicSinks.remove(topic);
+      }
+    }
+
+    void receive(ProductTopicEventPayload payload) {
+      if (detached) return;
+      if (!baselineEmitted) {
+        // 基线尚未交付：本 topic 事件先缓冲，保证先基线后增量（无关领域不进入本 receiver）。
+        pending.add(payload);
+        return;
+      }
+      _emitProductFrame(controller, topic, payload);
+    }
+
+    sink = receive;
+
+    controller = StreamController<ProductTopicFrame>(
+      onListen: () async {
+        // receiver 先登记，再取得 canonical 基线：期间本 topic 的事件不丢。
+        (_topicSinks[topic] ??= <void Function(ProductTopicEventPayload)>{})
+            .add(receive);
+        try {
+          final baseline = await _demoTopicBaseline(topic);
+          if (detached) return;
+          baselineEmitted = true;
+          controller.add(baseline);
+          for (final payload in pending) {
+            _emitProductFrame(controller, topic, payload);
+          }
+          pending.clear();
+        } catch (error, stackTrace) {
+          if (!detached) {
+            controller.addError(error, stackTrace);
+          }
+        }
+      },
+      onCancel: () async {
+        detach();
+      },
+    );
+    return controller.stream;
+  }
+
+  /// 把一个 owner 事实发布给该 topic 的已登记 receiver；无接收者时不缓冲。
+  void _publishProductPayload(ProductTopicEventPayload payload) {
+    final sinks = _topicSinks[payload.topic];
+    if (sinks == null || sinks.isEmpty) return;
+    for (final sink in List.of(sinks)) {
+      sink(payload);
+    }
+  }
+
+  /// 把 payload 包装成 typed Data 帧交付给 receiver。
+  void _emitProductFrame(
+    StreamController<ProductTopicFrame> controller,
+    ProductTopic topic,
+    ProductTopicEventPayload payload,
+  ) {
+    _productEventSequence += 1;
+    controller.add(
+      ProductTopicDataFrame(
+        topic: topic,
+        event: ProductTopicEventEnvelope(
+          eventId: 'demo-${_productEventSequence.toString().padLeft(6, '0')}',
+          sequence: BigInt.from(_productEventSequence),
+          createdAt: DateTime.now(),
+          payload: payload,
+        ),
+      ),
+    );
+  }
+
+  /// Demo 基线从当前内存事实派生；与生产路径一致按领域 revision 表达。
+  Future<ProductTopicBaselineFrame> _demoTopicBaseline(
+    ProductTopic topic,
+  ) async {
+    final state = await readStudioState();
+    final ProductTopicBaselineState baseline = switch (topic) {
+      ProjectDirectoryTopic() => ProjectDirectoryBaseline(
+        state.projectDirectory,
+      ),
+      ThreadDirectoryTopic() => ThreadDirectoryBaseline(
+        ThreadDirectoryPage(
+          threads: state.threadDirectory.threads,
+          nextCursor: state.threadDirectory.nextCursor,
+          revision: state.threadDirectory.revision,
+        ),
+      ),
+      AgentDirectoryTopic() => AgentDirectoryBaseline(state.agentDirectory),
+      SettingsTopic() => SettingsBaseline(state.settingsState),
+      RecoveryTopic() => RecoveryBaseline(state.recoveryState),
+      McpTopic() => McpBaseline(state.mcpState),
+      LspTopic() => LspBaseline(state.lspState),
+      SkillsTopic(:final projectId) => SkillsBaseline(
+        state.skillsByProject[projectId] ??
+            _demoSkillsState(projectId, _skillsRevision),
+      ),
+      ThreadModeCatalogTopic() => ThreadModeCatalogBaseline(
+        state.threadModeCatalog,
+      ),
+      ProviderUsageTopic() => ProviderUsageBaseline(state.providerUsageState),
+      ModelPerformanceTopic() => ModelPerformanceBaseline(
+        state.modelPerformance,
+      ),
+      SessionCostsTopic(:final rootThreadId) => SessionCostsBaseline(
+        state.sessionCostsByRoot[rootThreadId] ??
+            SessionCostsStateView(
+              rootThreadId: rootThreadId,
+              revision: 0,
+              updatedAt: DateTime.now(),
+              cost: null,
+            ),
+      ),
+      UpdaterTopic() => UpdaterBaseline(state.updaterState),
+      PersistenceTopic() => PersistenceBaseline(state.persistenceState),
+      PersistenceQueueTopic() => PersistenceQueueBaseline(
+        state.persistenceQueueState ??
+            const PersistenceQueueStateView(
+              revision: 0,
+              queue: PersistenceQueueSnapshot.empty(),
+            ),
+      ),
+      AgentProfilesTopic() => AgentProfilesBaseline(
+        readAgentProfilesStateSync(),
+      ),
+    };
+    final revision = switch (baseline) {
+      ProjectDirectoryBaseline(:final state) => state.revision,
+      ThreadDirectoryBaseline(:final page) => page.revision,
+      AgentDirectoryBaseline(:final state) => state.revision,
+      SettingsBaseline(:final state) => state.revision,
+      RecoveryBaseline(:final state) => state.revision,
+      McpBaseline(:final state) => state.revision,
+      LspBaseline(:final state) => state.revision,
+      SkillsBaseline(:final state) => state.revision,
+      ThreadModeCatalogBaseline(:final state) => state.revision,
+      ProviderUsageBaseline(:final state) => state.revision,
+      ModelPerformanceBaseline(:final state) => state.revision,
+      SessionCostsBaseline(:final state) => state.revision,
+      UpdaterBaseline(:final state) => state.revision,
+      PersistenceBaseline(:final state) => state.revision,
+      PersistenceQueueBaseline(:final state) => state.revision,
+      AgentProfilesBaseline(:final state) => state.revision,
+    };
+    return ProductTopicBaselineFrame(
+      topic: topic,
+      revision: revision,
+      state: baseline,
+    );
   }
 
   /// 周期发布 LSP 索引活动状态：40→55→70→85→100 后回到 idle，再循环。
@@ -1518,18 +1742,13 @@ class DemoStudioApi
     _lspActivityTimer = Timer.periodic(lspActivityStepDelay, (_) {
       _lspRevision += 1;
       final percentage = cycle[index];
-      _productEvents.add(
-        StudioBridgeEvent(
-          payload: LspStateChangedPayload(
-            percentage == null
-                ? LspStateSnapshot.fromState(
-                    state: _demoReadyResource(
-                      _lspRevision,
-                      const LspStateData(),
-                    ),
-                  )
-                : _demoLspState(percentage: percentage),
-          ),
+      _publishProductPayload(
+        LspStateChangedPayload(
+          percentage == null
+              ? LspStateSnapshot.fromState(
+                  state: _demoReadyResource(_lspRevision, const LspStateData()),
+                )
+              : _demoLspState(percentage: percentage),
         ),
       );
       index = (index + 1) % cycle.length;

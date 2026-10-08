@@ -60,6 +60,13 @@ impl AgentProfileCatalog {
         }
         Ok(())
     }
+
+    /// 只保留启用 Profile 的执行视图；诊断保持原样。
+    pub fn enabled_only(mut self) -> Self {
+        self.profiles.retain(|profile| profile.enabled);
+        self
+    }
+
     pub fn discover(paths: &ConfigPaths, config: &StudioConfig) -> Self {
         Self::discover_with_disabled(paths, config, false)
     }

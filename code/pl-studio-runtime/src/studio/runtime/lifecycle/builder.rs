@@ -106,6 +106,7 @@ impl StudioRuntime {
             },
         );
         thread_observations.install(thread_factory.clone())?;
+        // 持久化观察在 runtime 装配完成后由 `start_persistence_observer` 启动并持有。
         Ok(Self {
             startup_recovery: None,
             persistence_observer: Default::default(),
@@ -156,6 +157,7 @@ impl StudioRuntime {
             title_tasks: Default::default(),
             #[cfg(target_os = "linux")]
             helper_source,
+            profiles_forwarder: Default::default(),
         })
     }
 }

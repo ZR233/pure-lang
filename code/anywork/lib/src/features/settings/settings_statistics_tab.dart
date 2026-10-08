@@ -1,109 +1,99 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/studio_tokens.dart';
+import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_form_select.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
+import 'settings_scope.dart';
 
-class StatisticsTab extends StatefulWidget {
-  const StatisticsTab({required this.snapshot, super.key});
+class StatisticsTab extends ConsumerStatefulWidget {
+  const StatisticsTab({required this.tabIndex, super.key});
 
-  final ModelPerformanceSnapshotView snapshot;
+  /// 本页在设置壳中的 tab 索引，用于「仅在可见时持有租约」。
+  final int tabIndex;
 
   @override
-  State<StatisticsTab> createState() => _StatisticsTabState();
+  ConsumerState<StatisticsTab> createState() => _StatisticsTabState();
 }
 
-class _StatisticsTabState extends State<StatisticsTab> {
+class _StatisticsTabState extends ConsumerState<StatisticsTab> {
   String? _filter;
   bool _mismatchesOnly = false;
 
-  @override
-  void didUpdateWidget(covariant StatisticsTab oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final filter = _filter;
-    if (filter != null &&
-        !widget.snapshot.history.any((item) => item.filterKey == filter) &&
-        !widget.snapshot.summaries.any((item) => item.filterKey == filter)) {
-      _filter = null;
-    }
-  }
+  /// 最近一次可用的 canonical 统计快照；后续刷新保留 last-known，不整页闪回。
+  ModelPerformanceSnapshotView? _lastSnapshot;
 
   @override
   Widget build(BuildContext context) {
+    // 只在「统计」tab 可见时租用模型性能 topic；隐藏页不因 keep-alive 持租约。
+    final visible = ref.watch(settingsVisibleTabProvider) == widget.tabIndex;
+    if (visible) {
+      ref.watch(settingsStatisticsScopeProvider);
+    }
+    final asyncSnapshot = ref.watch(settingsStatisticsProvider);
+    final latest = asyncSnapshot.value;
+    if (latest != null) _lastSnapshot = latest;
+    final snapshot =
+        latest ?? _lastSnapshot ?? const ModelPerformanceSnapshotView();
+    final filter = _filter;
+    // 事件更新后仅在被过滤项消失时清理筛选，绝不重置滚动或筛选本身。
+    if (filter != null &&
+        !snapshot.history.any((item) => item.filterKey == filter) &&
+        !snapshot.summaries.any((item) => item.filterKey == filter)) {
+      _filter = null;
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 760;
         final history = [
-          for (final item in widget.snapshot.history)
+          for (final item in snapshot.history)
             if ((_filter == null || item.filterKey == _filter) &&
                 (!_mismatchesOnly ||
                     item.modelMatchState == ModelMatchState.mismatched))
               item,
         ];
         final hasProjectionIssue =
-            widget.snapshot.statisticsPending ||
-            widget.snapshot.statisticsGap ||
-            widget.snapshot.readFailed;
+            snapshot.statisticsPending ||
+            snapshot.statisticsGap ||
+            snapshot.readFailed;
         return SettingsPageLayout(
           maxWidth: 1120,
-          header: SettingsHeader(
-            title: context.l10n.settingsStatisticsTitle,
-            subtitle: context.l10n.settingsStatisticsSubtitle,
+          header: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SettingsHeader(
+                title: context.l10n.settingsStatisticsTitle,
+                subtitle: context.l10n.settingsStatisticsSubtitle,
+              ),
+              // pending/gap/readFailed 在固定页头轻量显示，不在正文顶部插拔大块。
+              if (visible && hasProjectionIssue)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: _StatisticsStatusLine(snapshot: snapshot),
+                ),
+              if (visible)
+                SettingsTopicStatus(topic: const ModelPerformanceTopic()),
+            ],
           ),
           child: CustomScrollView(
             key: StudioDriverKeys.statisticsHistory,
             slivers: [
-              if (hasProjectionIssue)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Column(
-                      children: [
-                        if (widget.snapshot.readFailed)
-                          SettingsEmptyMessage(
-                            icon: Icons.error_outline,
-                            title:
-                                context.l10n.settingsStatisticsReadFailedTitle,
-                            body: context.l10n.settingsStatisticsReadFailedBody,
-                          ),
-                        if (widget.snapshot.readFailed &&
-                            (widget.snapshot.statisticsGap ||
-                                widget.snapshot.statisticsPending))
-                          const SizedBox(height: 8),
-                        if (widget.snapshot.statisticsGap)
-                          SettingsEmptyMessage(
-                            icon: Icons.warning_amber_rounded,
-                            title: context.l10n.settingsStatisticsGapTitle,
-                            body: context.l10n.settingsStatisticsGapBody,
-                          ),
-                        if (widget.snapshot.statisticsGap &&
-                            widget.snapshot.statisticsPending)
-                          const SizedBox(height: 8),
-                        if (widget.snapshot.statisticsPending)
-                          SettingsEmptyMessage(
-                            icon: Icons.schedule_rounded,
-                            title: context.l10n.settingsStatisticsPendingTitle,
-                            body: context.l10n.settingsStatisticsPendingBody,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
               SliverToBoxAdapter(
                 child: _SummarySection(
                   compact: compact,
-                  summaries: widget.snapshot.summaries,
+                  summaries: snapshot.summaries,
                 ),
               ),
               SliverPadding(
                 padding: const EdgeInsets.symmetric(vertical: 20),
                 sliver: SliverToBoxAdapter(
                   child: _HistoryHeader(
-                    history: widget.snapshot.history,
-                    summaries: widget.snapshot.summaries,
+                    history: snapshot.history,
+                    summaries: snapshot.summaries,
                     value: _filter,
                     onChanged: (value) => setState(() => _filter = value),
                     mismatchesOnly: _mismatchesOnly,
@@ -115,12 +105,12 @@ class _StatisticsTabState extends State<StatisticsTab> {
               if (history.isEmpty) ...[
                 if (_filter != null ||
                     _mismatchesOnly ||
-                    widget.snapshot.history.isNotEmpty ||
+                    snapshot.history.isNotEmpty ||
                     !hasProjectionIssue)
                   SliverToBoxAdapter(
                     child: _EmptyState(
                       label:
-                          widget.snapshot.history.isEmpty &&
+                          snapshot.history.isEmpty &&
                               _filter == null &&
                               !_mismatchesOnly
                           ? context.l10n.settingsStatisticsEmpty
@@ -152,6 +142,68 @@ class _StatisticsTabState extends State<StatisticsTab> {
           ),
         );
       },
+    );
+  }
+}
+
+/// 统计投影的轻量状态行：pending/gap/readFailed 只在固定页头占一行，避免正文顶部
+/// 反复插拔大块导致布局跳动。
+class _StatisticsStatusLine extends StatelessWidget {
+  const _StatisticsStatusLine({required this.snapshot});
+
+  final ModelPerformanceSnapshotView snapshot;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <Widget>[
+      if (snapshot.readFailed)
+        _StatisticsStatusItem(
+          key: const ValueKey('statistics-status-read-failed'),
+          icon: Icons.error_outline,
+          label: context.l10n.settingsStatisticsReadFailedTitle,
+          color: context.colors.error,
+        ),
+      if (snapshot.statisticsGap)
+        _StatisticsStatusItem(
+          key: const ValueKey('statistics-status-gap'),
+          icon: Icons.warning_amber_rounded,
+          label: context.l10n.settingsStatisticsGapTitle,
+          color: context.statusColors.warning,
+        ),
+      if (snapshot.statisticsPending)
+        _StatisticsStatusItem(
+          key: const ValueKey('statistics-status-pending'),
+          icon: Icons.schedule_rounded,
+          label: context.l10n.settingsStatisticsPendingTitle,
+          color: context.colors.onSurfaceVariant,
+        ),
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Wrap(spacing: 16, runSpacing: 4, children: items);
+  }
+}
+
+class _StatisticsStatusItem extends StatelessWidget {
+  const _StatisticsStatusItem({
+    required this.icon,
+    required this.label,
+    required this.color,
+    super.key,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: color),
+        const SizedBox(width: 6),
+        Text(label, style: context.text.bodySmall?.copyWith(color: color)),
+      ],
     );
   }
 }

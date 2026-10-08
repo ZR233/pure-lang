@@ -1,8 +1,8 @@
 use pl_studio_runtime::{PersistenceState, PersistenceStateSnapshot};
 
 use crate::api::studio::types::{
-    BridgePersistenceQueueSnapshot, BridgePersistenceState, BridgePersistenceStateSnapshot,
-    BridgeThreadPersistenceSnapshot,
+    BridgePersistenceQueueSnapshot, BridgePersistenceQueueStateSnapshot, BridgePersistenceState,
+    BridgePersistenceStateSnapshot, BridgeThreadPersistenceSnapshot,
 };
 
 use super::bridge_state_error;
@@ -39,6 +39,17 @@ pub(crate) fn bridge_persistence_state(
     BridgePersistenceStateSnapshot {
         revision: snapshot.revision,
         state,
+    }
+}
+
+/// typed 持久化队列快照：发布 revision + 时间基线 + 协调器真实观测。
+pub(crate) fn bridge_persistence_queue_state(
+    snapshot: pl_studio_runtime::StudioPersistenceQueueStateSnapshot,
+) -> BridgePersistenceQueueStateSnapshot {
+    BridgePersistenceQueueStateSnapshot {
+        revision: snapshot.revision,
+        updated_at: snapshot.updated_at,
+        queue: bridge_persistence_queue(snapshot.queue),
     }
 }
 

@@ -61,6 +61,18 @@ class PurposeCostView {
   final List<RuntimeCostView> estimatedCosts;
   final bool hasUnpricedUsage;
 
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PurposeCostView &&
+          purpose == other.purpose &&
+          listEquals(estimatedCosts, other.estimatedCosts) &&
+          hasUnpricedUsage == other.hasUnpricedUsage;
+
+  @override
+  int get hashCode =>
+      Object.hash(purpose, Object.hashAll(estimatedCosts), hasUnpricedUsage);
+
   String get label {
     final value = formatRuntimeCosts(estimatedCosts);
     return value.isEmpty ? '-' : value;
@@ -79,6 +91,23 @@ class SessionCostView {
   final List<PurposeCostView> purposeCosts;
   final List<RuntimeCostView> estimatedCosts;
   final bool hasUnpricedUsage;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SessionCostView &&
+          rootThreadId == other.rootThreadId &&
+          listEquals(purposeCosts, other.purposeCosts) &&
+          listEquals(estimatedCosts, other.estimatedCosts) &&
+          hasUnpricedUsage == other.hasUnpricedUsage;
+
+  @override
+  int get hashCode => Object.hash(
+    rootThreadId,
+    Object.hashAll(purposeCosts),
+    Object.hashAll(estimatedCosts),
+    hasUnpricedUsage,
+  );
 
   String get label {
     final value = formatRuntimeCosts(estimatedCosts);
@@ -114,6 +143,39 @@ class ModelPerformanceSummaryView {
   final double tokensPerSecond;
   final double averageTtftMillis;
   final double averageResponseMillis;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ModelPerformanceSummaryView &&
+          providerInstanceId == other.providerInstanceId &&
+          providerDisplayName == other.providerDisplayName &&
+          model == other.model &&
+          reasoningEffort == other.reasoningEffort &&
+          sampleCount == other.sampleCount &&
+          completionTokens == other.completionTokens &&
+          totalTtftMillis == other.totalTtftMillis &&
+          totalDecodeMillis == other.totalDecodeMillis &&
+          totalResponseMillis == other.totalResponseMillis &&
+          tokensPerSecond == other.tokensPerSecond &&
+          averageTtftMillis == other.averageTtftMillis &&
+          averageResponseMillis == other.averageResponseMillis;
+
+  @override
+  int get hashCode => Object.hash(
+    providerInstanceId,
+    providerDisplayName,
+    model,
+    reasoningEffort,
+    sampleCount,
+    completionTokens,
+    totalTtftMillis,
+    totalDecodeMillis,
+    totalResponseMillis,
+    tokensPerSecond,
+    averageTtftMillis,
+    averageResponseMillis,
+  );
 
   String get filterKey =>
       jsonEncode(<Object?>[providerInstanceId, model, reasoningEffort]);
@@ -154,17 +216,57 @@ class ModelPerformanceSampleView {
   final int? totalResponseMillis;
   final double? tokensPerSecond;
 
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ModelPerformanceSampleView &&
+          completedAt == other.completedAt &&
+          providerInstanceId == other.providerInstanceId &&
+          providerDisplayName == other.providerDisplayName &&
+          model == other.model &&
+          configuredModel == other.configuredModel &&
+          sentModel == other.sentModel &&
+          reportedModel == other.reportedModel &&
+          modelMatchState == other.modelMatchState &&
+          reasoningEffort == other.reasoningEffort &&
+          completionTokens == other.completionTokens &&
+          ttftMillis == other.ttftMillis &&
+          decodeMillis == other.decodeMillis &&
+          totalResponseMillis == other.totalResponseMillis &&
+          tokensPerSecond == other.tokensPerSecond;
+
+  @override
+  int get hashCode => Object.hash(
+    completedAt,
+    providerInstanceId,
+    providerDisplayName,
+    model,
+    configuredModel,
+    sentModel,
+    reportedModel,
+    modelMatchState,
+    reasoningEffort,
+    completionTokens,
+    ttftMillis,
+    decodeMillis,
+    totalResponseMillis,
+    tokensPerSecond,
+  );
+
   String get filterKey =>
       jsonEncode(<Object?>[providerInstanceId, model, reasoningEffort]);
 
   String get displayModel => sentModel ?? model;
 }
 
+/// 全局模型性能快照：按模型汇总与最近历史窗口，不含按 root 会话费用。
+///
+/// 会话费用是独立的作用域 topic 事实（`SessionCostsStateView`），一次费用更新
+/// 不会重建本快照；值相等保证内容不变时不触发下游投影重建。
 class ModelPerformanceSnapshotView {
   const ModelPerformanceSnapshotView({
     this.revision = 0,
     this.updatedAt,
-    this.sessionCosts = const [],
     this.summaries = const [],
     this.history = const [],
     this.statisticsPending = false,
@@ -174,20 +276,34 @@ class ModelPerformanceSnapshotView {
 
   final int revision;
   final DateTime? updatedAt;
-  final List<SessionCostView> sessionCosts;
   final List<ModelPerformanceSummaryView> summaries;
   final List<ModelPerformanceSampleView> history;
   final bool statisticsPending;
   final bool statisticsGap;
   final bool readFailed;
 
-  SessionCostView? sessionCost(String? rootThreadId) {
-    if (rootThreadId == null) return null;
-    for (final cost in sessionCosts) {
-      if (cost.rootThreadId == rootThreadId) return cost;
-    }
-    return null;
-  }
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ModelPerformanceSnapshotView &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt &&
+          listEquals(summaries, other.summaries) &&
+          listEquals(history, other.history) &&
+          statisticsPending == other.statisticsPending &&
+          statisticsGap == other.statisticsGap &&
+          readFailed == other.readFailed;
+
+  @override
+  int get hashCode => Object.hash(
+    revision,
+    updatedAt,
+    Object.hashAll(summaries),
+    Object.hashAll(history),
+    statisticsPending,
+    statisticsGap,
+    readFailed,
+  );
 }
 
 /// 由已报告输入样本累计出的 prompt cache 有效用量。

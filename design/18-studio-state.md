@@ -25,7 +25,8 @@ Thread 目录 DTO 的 `lastUserMessageAt` 是可空的 Unix 秒时间，仅由�
 字段缺失与保存语义遵循 [17](./17-studio-storage.md)。
 
 StudioState 聚合 projectDirectory、threadDirectory、agentDirectory、modeCatalog、settings、
-recovery、MCP/LSP、provider usage、model performance 与 updater。Thread workspace 单独包含当前
+recovery、MCP/LSP、provider usage、模型统计、根会话费用、Agent Profiles、持久化队列与 updater。
+Thread workspace 单独包含当前
 状态、pending Interaction、ThreadRuntimeView、workflow 投影和有界 Timeline 窗口；不存在
 taskDirectory。Thread 目录条目携带
 会话工作区模式（`local | worktree`）与会话工作区地址 `workspacePath`，只读投影为侧栏与会话
@@ -43,18 +44,57 @@ canonical `modelRoute.revision`。该令牌对应模型路由 extension 的版�
 
 Product event 携带完整领域 snapshot 或明确 revision：ProjectDirectoryChanged、
 ThreadDirectoryChanged、AgentDirectoryChanged、ModeCatalogChanged、ThreadRuntimeChanged
-等。Dart reducer 拒绝旧 revision，并可用一次全量 snapshot 从 stream lag 恢复；它不自行
+等。Dart reducer 拒绝旧 revision，并用受影响领域的基线从 stream lag 恢复；它不自行
 推导 workflow transition。一次目录命令可以同时改变 Project 与 Thread，但每个实际变化的
 领域最多发布一次事件；空 delta 不得提升 revision 或发布空事件。冷记录进入驻留/归档命令
 的内存索引属于 owner 准备步骤，不单独形成产品事实或广播。归档只装载目录，不读取冷历史
 或激活冷 owner；最终业务 mutation 才通过
 directory command 发布 canonical delta。
 
-全量 snapshot resync 按领域 revision 合并 `modelPerformance`，与增量事件使用同一 canonical
+全量 snapshot resync 按领域 revision 合并模型统计与根会话费用，与增量事件使用同一 canonical
 状态；本地已有快照不能遮蔽服务端更新，旧全量快照也不能覆盖已收到的新事件。
 模型统计属于尽力而为的数据库投影：读取已提交数据与发布其展示 revision 串行化，
 待写事实的早期空读不能占用最终落库结果的版本。写入结论到达后发布新快照；读取失败
 保留上次可用数据并显式标记失败，待写与统计缺口也分别可见。
+该投影由启动命令与计费/归档变化推进；基线查询只读取 owner 当前已发布的有界投影，
+不推进 revision、不写产品对象，也不通过全局查询补建作用域费用。未知 root 返回空费用，
+归档清除与读取失败由同一 owner 发布，查询不得重新引入已清除费用。
+累计用量与费用仍归可靠历史/checkpoint 所有；调用库保存绝对统计及有界性能投影，
+领域拆分不改变这份存储归属，也不以调试日志承担计费幂等或执行恢复。
+恢复归档会话的命令重新发布已有统计投影的可见费用，不执行历史工作。费用作用域的
+revision 在空状态缓存淘汰、重新订阅及恢复之间也不得回退；空基线必须足以清除较旧费用。
+
+### 18.2.1 按职责订阅
+
+产品订阅以 typed topic 表达领域，项目 Skills 携带 `projectId`，会话费用携带
+`rootThreadId`；不提供无作用域的 GUI 全事件订阅。全局目录、Settings、Recovery、
+MCP、LSP、Mode catalog、Provider usage、模型统计、Updater、持久化状态与队列、
+配置级 Agent Profiles 各自是独立职责。无关领域不进入订阅者的有效缓冲，不因无关更新
+让该订阅 lag。通道只分发 owner 已发布的事实，不持有另一套业务投影。
+
+订阅先登记接收者，再取得当前领域基线；期间通知按 payload 的领域 revision 合并，
+旧基线不能覆盖较新事件。会话目录基线是有 revision 和 cursor 的分页窗口，不能用 delta
+冒充全量页。过滤后全局 sequence 允许不连续，只有显式 lag 表达无法证明连续；无 durable
+replay。重同步只读取受影响领域，不触发 activation、扫描或 mutation。
+
+Dart 侧以 topic/作用域为身份复用一个可释放的 lease；lease 的帧必须在统一的 data/domain
+接线处一次进入 canonical reducer，再由各页面 selector 读取，页面不得各自复制 reducer 或
+直接消费底层 stream。最后一个观察者释放 lease 后取消该领域订阅；ready 状态以外的
+controller 变化不得导致 lease 重建。收到 `lagged` 时只使对应 topic/作用域进入局部重同步，
+取消旧句柄并重新建立“先接收后基线”的订阅；预算耗尽、`failure` 或 `closed` 保留最后有效
+内容并暴露局部错误，不以静默空状态或无界快速重连掩盖缺口。旧 lease 的 generation 在
+关闭与新 lease 建立期间继续生效，迟到帧不得写入新观察者。
+
+设置领域保持真实职责边界：MCP、LSP、项目 Skills、Provider usage、模型性能、持久化队列、
+Profiles 等分别按当前可见页面或组件取得观察者，不以一个含糊的 `services` 作用域代替多个
+topic；Skills 作用域始终携带当前 project identity。会话可见性变化使用单调生命周期代次，
+快速离开、重新进入或再次离开不得由旧异步收尾清除新窗口、费用或草稿锚点。
+
+模型统计与根会话费用由同一计费 owner 发布，分别交付；会话费用消费者不接收全局历史。
+持久化队列由现有协调器发布真实队列、在途字节、压力与逐 Thread 水位变化，包括 calls
+writer 进度；进程级保存诊断不能替代队列状态。年龄是通知时间基线的展示，不驱动接口轮询。
+Provider 用量等外部查询仍由显式检查命令触发，结果通过 canonical 事件/响应更新，不虚构
+第三方推送。
 
 ## 18.3 Activation
 
@@ -68,8 +108,20 @@ Recovery 使用现有 ObservedResource 发布 loading、ready 和失败状态，
 工具目录问题使用 `ToolCatalog/Retry`，保留诊断但不阻止打开、读历史、停止或继续会话。
 侧栏会话菜单提供重试入口；显式重试同时重新刷新工具目录，即使配置修订未变化，成功才清除诊断。
 显式 `recovery.retry` 重新发起审计，`recovery.read` 只读取当前状态。关闭先停止并等待审计，
-再关闭会话与持久化。启动阶段通过 typed snapshot 向 bridge 提供存储打开、配置读取、
-目录读取、资源准备及终态，不依赖普通产品订阅已经建立。
+再关闭会话与持久化。启动阶段通过可在 runtime 未启动时订阅的 typed progress stream 向
+bridge 提供存储打开、配置读取、目录读取、资源准备及终态，不依赖普通产品订阅已经建立。
+首帧提供当前真实阶段，先订阅再启动，成功/失败结束并释放资源；GUI 不周期读取启动状态。
+进度订阅只是统一初始化协调器的传输投影，必须保留并行准备、备份恢复摘要与类型化启动失败；
+不另立初始化过程，也不把失败细节降为仅有阶段枚举。进程退出的单向闩优先于尝试令牌，
+任何已创建而未安装的运行时仍由现有关闭编排持有并收束。
+每次显式启动尝试先取得进程级尝试令牌，再按该令牌建立进度订阅和执行启动命令。
+准备尝试、订阅与启动的身份必须一致：旧尝试的终态不能结束新尝试的观察，过期或重复启动
+请求明确拒绝，旧观察者不接收新尝试的阶段。在途启动不接受另一尝试覆盖；已 Ready 的
+runtime 保持幂等成功，不重开服务或伪造存储打开阶段。订阅本身不复位启动状态。
+关闭开始后启动尝试立即失效，并通知等待中的进度观察者结束；已停止的 runtime 不支持
+同进程再次启动，迟到的成功阶段不能作为有效启动结果交付。
+严格更新关闭只在空闲检查提交后进入退出：忙碌拒绝不失效当前尝试，也不取消观察者；
+一旦提交则在外部 owner 取消或等待之前失效尝试，不等关闭成功后才通知。
 后台会话恢复与前台 activation 共用 assembler 的逐 Thread preparation reservation；已有
 活动、正在准备或关闭的 owner 不接受后台恢复写入。冷激活在发布 owner 前完成 durable
 settlement。审计结果按当前 lease revision 和已清理问题过滤，不能覆盖后续用户操作。
@@ -99,9 +151,12 @@ Thread 目录事实已经发布而后续步骤失败时，必须先按未启动�
 Mode catalog 直接投影 Studio Mode 注册表的内存 snapshot：内置 Mode 由 Studio 启动时以
 静态描述注册，既不扫描 Skill，也不读取或复制用户目录资源；未来外部 loader 只能先把文件
 解析为同一拥有所有权的 registration，再调用公开注册接口。Agent Profile catalog 合并
-Rust builtin 与用户 TOML；完整 Agent 配置投影属于 Settings snapshot。系统启停、系统
+Rust builtin 与用户 TOML；配置 owner 持有独立的 canonical Agent Profiles 资源，通过
+Agent Profiles 事件发布完整配置和诊断，与运行期 Agent directory 区分。启动、配置命令
+与明确重扫采用目录变化；查询/订阅仅读取已发布资源，不扫描文件、不周期重扫。Mode catalog
+在实际注册/装载变化时按 revision 发布。系统启停、系统
 route 更新、Mode 默认 route 更新和用户 Profile 保存都携带 `expectedSettingsRevision`；成功后返回最新完整
-canonical snapshot，Flutter 原子替换 Settings 领域，不只修改本地 draft。
+canonical snapshot，并发布已更新的 Profiles 资源，Flutter 原子采用相关领域，不只修改本地 draft。
 
 ## 18.5 Shutdown
 
@@ -110,6 +165,10 @@ canonical snapshot，Flutter 原子替换 Settings 领域，不只修改本地 d
 严格调用方（进程内 server 关闭与更新安装）要求报告为真实 Clean 才继续，degraded 或超时都算
 失败，不把超时当成功、不启动后续安装或移交；桌面应用退出接受 Clean 或 Degraded，并按退出
 期限终止进程。
+
+按领域拆分的产品、启动与 Thread 订阅继续加入同一 bridge 订阅 owner 与取消收束，
+不引入另一套退出流程。原有总期限、外部取消 issue、typed 报告和严格调用方的 Clean
+前置条件同样覆盖这些订阅；页面 lease 释放与应用退出均等待真实句柄收束。
 
 关闭按固定依赖 DAG 推进：封闭准入并拒绝新 mutation → 取消当前代次与在途执行 → 有界收束已
 启动资源（Thread 与 title 任务、审计、MCP、LSP、订阅，以及依赖它们的 SSH transport）→ flush

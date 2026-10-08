@@ -142,7 +142,6 @@ abstract class SettingsPageView with _$SettingsPageView {
     required GeneralSettingsView general,
     required WebSearchSettingsView webSearch,
     required DeepSeekWebSearchSettingsView deepSeekWebSearch,
-    required ModelPerformanceSnapshotView modelPerformance,
     required bool runtimeBusy,
   }) = _SettingsPageView;
 
@@ -170,7 +169,6 @@ abstract class SettingsPageView with _$SettingsPageView {
       general: state.general,
       webSearch: state.webSearch,
       deepSeekWebSearch: state.deepSeekWebSearch,
-      modelPerformance: state.modelPerformance,
       runtimeBusy: state.isBusy || state.runtime.hasActiveWorkflow,
     );
   }

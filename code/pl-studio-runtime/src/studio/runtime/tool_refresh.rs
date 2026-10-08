@@ -55,8 +55,11 @@ impl CatalogSources {
             | StudioProductEventKind::McpStateChanged(_)
             | StudioProductEventKind::ProviderUsageStateChanged(_)
             | StudioProductEventKind::ModelPerformanceStateChanged(_)
+            | StudioProductEventKind::SessionCostsChanged(_)
             | StudioProductEventKind::UpdaterStateChanged(_)
-            | StudioProductEventKind::PersistenceStateChanged(_) => None,
+            | StudioProductEventKind::PersistenceStateChanged(_)
+            | StudioProductEventKind::PersistenceQueueStateChanged(_)
+            | StudioProductEventKind::AgentProfilesStateChanged(_) => None,
         };
         if let Some((key, value)) = entry {
             self.0.insert(key, crate::hash::canonical_json_hash(&value));
@@ -73,7 +76,7 @@ impl StudioRuntime {
         let stopping = self.rejected_tools.start();
         let mut settings = self.settings_updates.subscribe();
         let mut mcp = self.external_runtimes.mcp.subscribe();
-        let mut events = self.agent_facility.product_events.subscribe();
+        let mut events = self.agent_facility.product_events.subscribe_internal();
         let mut ssh_ready = self.ssh_manager.subscribe_ready();
         let runtime = self.clone();
         *slot = Some(BackgroundTask::new(tokio::spawn(async move {

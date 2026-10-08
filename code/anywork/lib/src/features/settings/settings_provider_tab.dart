@@ -9,6 +9,7 @@ import 'settings_provider_details.dart';
 import 'settings_provider_drafts.dart';
 import 'settings_provider_editor.dart';
 import 'settings_provider_list.dart';
+import 'settings_scope.dart';
 
 class ProvidersTab extends ConsumerStatefulWidget {
   const ProvidersTab({
@@ -18,6 +19,7 @@ class ProvidersTab extends ConsumerStatefulWidget {
     required this.defaultProviderId,
     required this.modeRoutes,
     required this.roles,
+    required this.tabIndex,
   });
 
   final List<ProviderSettingsView> providers;
@@ -25,6 +27,9 @@ class ProvidersTab extends ConsumerStatefulWidget {
   final String? defaultProviderId;
   final List<ModeModelRouteView> modeRoutes;
   final List<RoleSettingsView> roles;
+
+  /// 本页在设置壳中的 tab 索引，用于「仅在可见时持有租约」。
+  final int tabIndex;
 
   @override
   ConsumerState<ProvidersTab> createState() => _ProvidersTabState();
@@ -70,6 +75,11 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
 
   @override
   Widget build(BuildContext context) {
+    // 只在 Providers tab 可见时租用 Provider usage topic；隐藏页不因 keep-alive 持租约。
+    final visible = ref.watch(settingsVisibleTabProvider) == widget.tabIndex;
+    if (visible) {
+      ref.watch(settingsUsageScopeProvider);
+    }
     final catalog = widget.providerCatalog;
     final defaultProviderId =
         widget.defaultProviderId ?? widget.providers.firstOrNull?.id;
@@ -160,20 +170,29 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         final split = constraints.maxWidth >= 1100 && _showDetails;
         return Padding(
           padding: const EdgeInsets.all(24),
-          child: split
-              ? Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SizedBox(width: 360, child: list),
-                    const SizedBox(width: 24),
-                    const VerticalDivider(width: 1),
-                    const SizedBox(width: 24),
-                    Expanded(child: details),
-                  ],
-                )
-              : _showDetails
-              ? details
-              : list,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (visible)
+                SettingsTopicStatus(topic: const ProviderUsageTopic()),
+              Expanded(
+                child: split
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(width: 360, child: list),
+                          const SizedBox(width: 24),
+                          const VerticalDivider(width: 1),
+                          const SizedBox(width: 24),
+                          Expanded(child: details),
+                        ],
+                      )
+                    : _showDetails
+                    ? details
+                    : list,
+              ),
+            ],
+          ),
         );
       },
     );

@@ -9,12 +9,13 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
+import 'settings_scope.dart';
 
 class McpTab extends ConsumerStatefulWidget {
-  const McpTab({super.key, required this.settingsServers, required this.state});
+  const McpTab({super.key, required this.tabIndex});
 
-  final List<McpServerSettingsView> settingsServers;
-  final McpStateSnapshot state;
+  /// 本页在设置壳中的 tab 索引，用于「仅在可见时持有租约」。
+  final int tabIndex;
 
   @override
   ConsumerState<McpTab> createState() => _McpTabState();
@@ -27,59 +28,80 @@ class _McpTabState extends ConsumerState<McpTab> {
   String? _error;
 
   @override
-  void didUpdateWidget(covariant McpTab oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final serversById = {
-      for (final server in widget.settingsServers) server.id: server,
-    };
-    _enabledByServer.removeWhere(
-      (id, enabled) =>
-          serversById[id] == null || serversById[id]!.enabled == enabled,
-    );
-    _endpointByServer.removeWhere(
-      (id, endpoint) =>
-          serversById[id] == null || serversById[id]!.endpoint == endpoint,
-    );
-  }
-
-  @override
   void dispose() {
     _saveTimer?.cancel();
     super.dispose();
   }
 
+  List<McpServerSettingsView> _configServers() =>
+      ref.read(studioControllerProvider).value?.mcpServers ??
+      const <McpServerSettingsView>[];
+
   @override
   Widget build(BuildContext context) {
+    // 只在 MCP tab 可见时租用 MCP topic；隐藏页不因 keep-alive 持租约。
+    final visible = ref.watch(settingsVisibleTabProvider) == widget.tabIndex;
+    if (visible) {
+      ref.watch(settingsMcpScopeProvider);
+    }
+    final configServers = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.mcpServers ?? const <McpServerSettingsView>[],
+      ),
+    );
+    final servers =
+        ref
+            .watch(
+              studioControllerProvider.select((state) => state.value?.mcpState),
+            )
+            ?.servers ??
+        const <McpServerSettingsView>[];
+    // 保留本地编辑器草稿：只清理已与 canonical 相等或已消失的覆盖。
+    final configById = {for (final server in configServers) server.id: server};
+    _enabledByServer.removeWhere(
+      (id, enabled) =>
+          configById[id] == null || configById[id]!.enabled == enabled,
+    );
+    _endpointByServer.removeWhere(
+      (id, endpoint) =>
+          configById[id] == null || configById[id]!.endpoint == endpoint,
+    );
     return SettingsPane(
-      header: SettingsHeader(
-        title: context.l10n.settingsMcpTitle,
-        subtitle: context.l10n.settingsMcpSubtitle,
-        trailing: Wrap(
-          spacing: 8,
-          children: [
-            TextButton.icon(
-              key: StudioDriverKeys.mcpRefresh,
-              onPressed: () => unawaited(_run(_refresh)),
-              icon: const Icon(Icons.refresh),
-              label: Text(context.l10n.settingsMcpRefresh),
+      header: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SettingsHeader(
+            title: context.l10n.settingsMcpTitle,
+            subtitle: context.l10n.settingsMcpSubtitle,
+            trailing: Wrap(
+              spacing: 8,
+              children: [
+                TextButton.icon(
+                  key: StudioDriverKeys.mcpRefresh,
+                  onPressed: () => unawaited(_run(_refresh)),
+                  icon: const Icon(Icons.refresh),
+                  label: Text(context.l10n.settingsMcpRefresh),
+                ),
+                TextButton.icon(
+                  key: StudioDriverKeys.mcpResetAll,
+                  onPressed: servers.isEmpty
+                      ? null
+                      : () => unawaited(_confirmResetAll()),
+                  icon: const Icon(Icons.restart_alt),
+                  label: Text(context.l10n.settingsMcpResetAll),
+                ),
+              ],
             ),
-            TextButton.icon(
-              key: StudioDriverKeys.mcpResetAll,
-              onPressed: widget.state.servers.isEmpty
-                  ? null
-                  : () => unawaited(_confirmResetAll()),
-              icon: const Icon(Icons.restart_alt),
-              label: Text(context.l10n.settingsMcpResetAll),
-            ),
-          ],
-        ),
+          ),
+          if (visible) SettingsTopicStatus(topic: const McpTopic()),
+        ],
       ),
       children: [
         const SizedBox(height: 16),
-        if (widget.state.servers.isNotEmpty)
+        if (servers.isNotEmpty)
           SettingsGroup(
             children: [
-              for (final server in widget.state.servers)
+              for (final server in servers)
                 _McpSettingsRow(
                   server: server,
                   enabled: _enabledByServer[server.id] ?? server.enabled,
@@ -103,7 +125,7 @@ class _McpTabState extends ConsumerState<McpTab> {
                 ),
             ],
           ),
-        if (widget.state.servers.isEmpty)
+        if (servers.isEmpty)
           SettingsEmptyMessage(
             icon: Icons.hub_outlined,
             title: context.l10n.settingsMcpEmptyTitle,
@@ -163,12 +185,13 @@ class _McpTabState extends ConsumerState<McpTab> {
   Future<void> _save() async {
     try {
       setState(() => _error = null);
+      final configServers = _configServers();
       await ref
           .read(studioControllerProvider.notifier)
           .saveMcpSettings(
             McpSettingsCommand(
               servers: [
-                for (final server in widget.settingsServers)
+                for (final server in configServers)
                   McpServerCommand(
                     id: server.id,
                     enabled: _enabledByServer[server.id] ?? server.enabled,

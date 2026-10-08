@@ -11,10 +11,30 @@ import '../types/shutdown.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bridge_early_issues_slot`, `bridge_issue`, `publish_startup_stage`, `record_bridge_early_issues`, `record_shutdown_report`, `remaining_ms_u32`, `shutdown_runtime_for_update`, `take_bridge_early_issues`
+// These functions are ignored because they are not marked as `pub`: `attempt_active`, `begin_shutdown`, `begin_start`, `bridge_early_issues_slot`, `bridge_issue`, `bridge_startup_stage`, `disarm`, `fail_start`, `finish_start`, `lock`, `new`, `new`, `prepare`, `publish_stage`, `publish_startup_stage`, `record_bridge_early_issues`, `record_shutdown_report`, `remaining_ms_u32`, `shutdown_runtime_for_update`, `startup_attempt_active`, `subscribe_startup_attempt`, `subscribe`, `take_bridge_early_issues`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `StartClaim`, `StartupDemote`, `StartupFrame`, `StartupOwner`, `StartupPhase`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `drop`
 
-Future<RuntimeSnapshot> startStudioRuntime() =>
-    RustLib.instance.api.crateApiStudioHandlersLifecycleStartStudioRuntime();
+/// 发放一次新的启动尝试令牌；可在 bridge 安装前（pre-installed）调用。
+///
+/// 同一时刻只有一个活跃令牌：start 在途期间明确拒绝；已 Ready（runtime 运行中）同样
+/// 拒绝——重启前必须先 shutdown。新令牌发放后旧令牌立即过期。shutdown 开始后本进程
+/// 不再支持新的启动尝试：bridge 的 OnceCell 与 shutdown 令牌都是一次性资源。
+Future<BigInt> prepareStartupAttempt() =>
+    RustLib.instance.api.crateApiStudioHandlersLifecyclePrepareStartupAttempt();
+
+/// 以指定令牌启动 Studio runtime。
+///
+/// `attempt` 必须是 [`prepare_startup_attempt`] 发放且未过期的令牌；在途期间的重复
+/// start、旧令牌与失败/停机后的复用都被明确拒绝。已 Ready 的同令牌调用幂等成功：
+/// 返回前核对真实 runtime 仍处于 Ready 且 shutdown 未开始，否则以 `runtime_stopped`
+/// 明确失败而不是虚报快照；不重开 runtime、不虚发 `OpeningStorage`，进度流保持
+/// `Ready` 终态。start 在途的失败与任务取消都把本尝试落为 `Failed` 终态，不会永久
+/// 卡在 in-progress。
+Future<RuntimeSnapshot> startStudioRuntime({required BigInt attempt}) => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersLifecycleStartStudioRuntime(attempt: attempt);
 
 /// Early application-exit entry: seal the one-way exit latch and fence the installed runtime
 /// **before** the caller performs its own bounded cancellations.
@@ -28,6 +48,9 @@ Future<RuntimeSnapshot> startStudioRuntime() =>
 ///   `start_studio_runtime` can never publish a runtime once exit has begun;
 /// - fixes the single first deadline from the caller's remaining cleanup budget, so a later
 ///   `shutdown_runtime` never extends it;
+/// - invalidates the startup attempt token synchronously (before any await and independent of an
+///   installed runtime) and wakes a pre-active startup observer, so a concurrent attempt can never
+///   publish a runtime once exit has begun;
 /// - when a runtime is already installed, synchronously fences domain admission and broadcasts
 ///   cancellation to the runtime's independent owners.
 ///
@@ -99,9 +122,6 @@ Future<ProjectDto> renameProject({
   projectId: projectId,
   name: name,
 );
-
-BridgeStartupStage readStartupStage() =>
-    RustLib.instance.api.crateApiStudioHandlersLifecycleReadStartupStage();
 
 Future<BridgeRecoveryStateSnapshot> readRecoveryState() =>
     RustLib.instance.api.crateApiStudioHandlersLifecycleReadRecoveryState();

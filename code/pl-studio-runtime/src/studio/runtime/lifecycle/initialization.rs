@@ -265,10 +265,33 @@ impl StudioRuntime {
         if let Some(error) = failures.into_iter().reduce(prefer_environment) {
             return Err(error);
         }
+        // 有界展示投影在启动时显式建立一次：已有调用的统计/费用立即成为最新首帧；
+        // 查询路径只读该投影，不再承担建立/写盘职责。
+        self.model_performance.initialize_projection().await;
         check_cancelled(cancellation)?;
         self.publish_settings_state(settings)
             .map_err(|error| internal("publish_settings", error))?;
         observer(StudioStartupStage::StartingServices);
+        // Mode catalog 只在真实注册变化时发布；内置注册是第一次装载事实。
+        let _ = self
+            .agent_facility
+            .product_events
+            .emit_thread_mode_catalog(self.thread_modes.snapshot().catalog().clone());
+        // Agent Profiles 资源由配置 owner 持有；先发布已装载事实，再转发后续命令变更。
+        // 首帧发布失败不让启动失败：订阅者仍可通过查询基线取得当前事实。
+        match self.read_agent_profiles_state() {
+            Ok(state) => {
+                let _ = self
+                    .agent_facility
+                    .product_events
+                    .emit_agent_profiles_state(state);
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Agent Profiles initial publication failed");
+            }
+        }
+        // 配置 watch 转发由 runtime 持有；失败路径由 `dispose_startup` 取消并等待。
+        self.start_agent_profiles_forwarder().await;
         self.store.calls().start().await;
         let writer = self
             .agent_facility
@@ -317,7 +340,8 @@ impl StudioRuntime {
             self.stop_tool_refresh(),
             self.stop_mcp_startup_reconcile(),
             self.stop_mcp_health_watcher(),
-            self.stop_lsp_state_watcher()
+            self.stop_lsp_state_watcher(),
+            self.stop_agent_profiles_forwarder()
         );
         let observer = background_task::stop(&self.persistence_observer).await;
         let mcp = self.external_runtimes.mcp.shutdown().await;
@@ -339,7 +363,7 @@ impl StudioRuntime {
         let storage = self.store.close().await;
         catalogs.map_err(|error| internal("stop_model_catalogs", error))?;
         for result in [
-            results.0, results.1, results.2, results.3, results.4, results.5,
+            results.0, results.1, results.2, results.3, results.4, results.5, results.6,
         ] {
             result.map_err(|error| internal("stop_services", error))?;
         }

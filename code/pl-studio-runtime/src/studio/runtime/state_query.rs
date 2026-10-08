@@ -43,6 +43,7 @@ impl StudioRuntime {
                 ));
             }
         }
+        let (model_performance, session_costs) = self.model_performance.snapshot_and_costs().await;
         Ok(StudioStateSnapshot {
             runtime,
             project_directory,
@@ -61,9 +62,12 @@ impl StudioRuntime {
             skills_by_project,
             thread_mode_catalog: self.read_thread_mode_catalog(),
             provider_usage: self.read_provider_usage_state().await,
-            model_performance: self.model_performance.snapshot().await,
+            model_performance,
+            session_costs,
             updater: self.read_update_state().await,
             persistence: self.agent_facility.product_events.persistence_state(),
+            persistence_queue: self.agent_facility.product_events.persistence_queue_state(),
+            agent_profiles: self.read_agent_profiles_state()?,
         })
     }
 
@@ -143,12 +147,5 @@ impl StudioRuntime {
     /// Reads the current process-wide Thread Mode catalog.
     pub fn read_thread_mode_catalog(&self) -> pl_protocol::ThreadModeCatalogSnapshot {
         self.thread_modes.snapshot().catalog().clone()
-    }
-
-    /// Subscribes to canonical low-frequency product events.
-    pub fn subscribe_product(
-        &self,
-    ) -> tokio::sync::broadcast::Receiver<crate::StudioProductEventEnvelope> {
-        self.agent_facility.product_events.subscribe()
     }
 }

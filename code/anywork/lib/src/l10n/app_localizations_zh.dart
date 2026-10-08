@@ -2267,6 +2267,24 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarLocal => '本地';
 
   @override
+  String get sidebarDetailUpdatedNow => '刚刚更新';
+
+  @override
+  String sidebarDetailUpdatedMinutesAgo(int count) {
+    return '$count 分钟前更新';
+  }
+
+  @override
+  String sidebarDetailUpdatedHoursAgo(int count) {
+    return '$count 小时前更新';
+  }
+
+  @override
+  String sidebarDetailUpdatedDaysAgo(int count) {
+    return '$count 天前更新';
+  }
+
+  @override
   String get sidebarNotChecked => '未检测';
 
   @override

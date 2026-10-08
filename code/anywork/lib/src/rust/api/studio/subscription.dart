@@ -8,8 +8,10 @@ import '../../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 
+import 'types/agent_profile.dart';
 import 'types/error.dart';
 import 'types/event.dart';
+import 'types/product_topic.dart';
 import 'types/response.dart';
 import 'types/runtime.dart';
 import 'types/settings.dart';
@@ -18,35 +20,10 @@ import 'types/thread_stream.dart';
 import 'types/updater.dart';
 part 'subscription.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bridge_shutdown_progress`, `broadcast_cancel`, `cancel_and_wait`, `is_settled`, `is_settled`, `join_cancelled`, `new`, `next_id`, `owned_completion`, `register`, `shutdown_issue`, `signal_cancel`, `unregister`, `wait_stopped`
+// These functions are ignored because they are not marked as `pub`: `broadcast_cancel`, `cancel_and_wait`, `is_settled`, `is_settled`, `join_cancelled`, `new`, `next_id`, `owned_completion`, `register`, `send_or_cancel`, `shutdown_issue`, `signal_cancel`, `unregister`, `wait_stopped`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeSubscriptionInner`, `BridgeSubscriptionKind`, `BridgeTaskRegistry`, `PendingSubscriptionCancellation`, `SubscriptionCompletionFacts`, `SubscriptionOwner`, `SubscriptionStop`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`
-
-/// 订阅一个 Thread 的**状态流**：Turn、活动、交互、运行时与 lagged 帧。
-///
-/// 内容不在状态流里：条目与流式正文只由 ChatView 窗口交付。内容帧的过滤发生在生产端
-/// （runtime 的状态流不再转发 `Item*`/`Delta`），所以这里没有“末端丢弃内容帧”的开关，客户端
-/// 也不会再因为过滤内容帧而看到 revision 空洞。状态流的 envelope `revision` 只按状态帧递增，
-/// 与 ChatView 窗口的内容 revision 相互独立。
-Future<BridgeEventSubscription> subscribeThread({required String threadId}) =>
-    RustLib.instance.api.crateApiStudioSubscriptionSubscribeThread(
-      threadId: threadId,
-    );
-
-Future<BridgeEventSubscription> createProductSubscription() =>
-    RustLib.instance.api.crateApiStudioSubscriptionCreateProductSubscription();
-
-/// Creates an independently owned shutdown-progress subscription, including during retry.
-///
-/// The caller cancels this handle before cancelling its Dart stream, so failed shutdown
-/// does not leave stream cancellation waiting for a future progress event.
-///
-/// When no runtime is installed yet, this returns an immediately-closed (empty) stream without
-/// triggering initialization or surfacing a spurious `NotInitialized`. A second instance whose
-/// startup failed has no owner and must observe a benign "no progress" stream, not a fake error.
-Future<BridgeEventSubscription> subscribeShutdownProgress() =>
-    RustLib.instance.api.crateApiStudioSubscriptionSubscribeShutdownProgress();
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeEventSubscription>>
 abstract class BridgeEventSubscription implements RustOpaqueInterface {
@@ -58,7 +35,11 @@ abstract class BridgeEventSubscription implements RustOpaqueInterface {
   /// strong owner; a failure keeps the owner so a later exit pass still observes it.
   Future<void> cancel();
 
-  Stream<BridgeProductStreamEnvelope> productStream();
+  /// 打开该 topic 订阅的产品流；每个订阅只能打开一次。
+  ///
+  /// # Errors
+  /// 拒绝其他订阅种类或第二个流消费者。
+  Stream<BridgeProductTopicStreamEnvelope> productTopicStream();
 
   /// Opens this shutdown subscription once. Cancellation closes the native sink.
   ///
@@ -66,21 +47,19 @@ abstract class BridgeEventSubscription implements RustOpaqueInterface {
   /// Rejects another subscription kind or a second stream consumer.
   Stream<BridgeShutdownProgress> shutdownStream();
 
+  /// 打开启动进度流；首帧为本尝试的当前阶段，`Ready`/`Failed` 后结束。
+  ///
+  /// 新一代尝试开始后流直接终止：旧观察者不接收新世代阶段。
+  ///
+  /// # Errors
+  /// 拒绝其他订阅种类或第二个流消费者。
+  Stream<BridgeStartupStage> startupStream();
+
+  /// 打开该 Thread 订阅的状态流；每个订阅只能打开一次。
+  ///
+  /// # Errors
+  /// 拒绝其他订阅种类或第二个流消费者。
   Stream<BridgeThreadStreamEnvelope> threadStream();
-}
-
-@freezed
-sealed class BridgeProductStreamEnvelope with _$BridgeProductStreamEnvelope {
-  const BridgeProductStreamEnvelope._();
-
-  const factory BridgeProductStreamEnvelope.data({
-    required BridgeProductEventEnvelope event,
-  }) = BridgeProductStreamEnvelope_Data;
-  const factory BridgeProductStreamEnvelope.failure({
-    required BridgeError error,
-  }) = BridgeProductStreamEnvelope_Failure;
-  const factory BridgeProductStreamEnvelope.closed() =
-      BridgeProductStreamEnvelope_Closed;
 }
 
 @freezed

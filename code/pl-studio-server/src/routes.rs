@@ -111,6 +111,79 @@ fn query_rejection(rejection: QueryRejection) -> ApiError {
     ApiError(StudioError::invalid_argument("invalid query parameters"))
 }
 
+/// typed 产品 topic 的查询参数；`projectId`/`rootThreadId` 只服务带作用域 topic。
+///
+/// 字段按 camelCase 反序列化并与 OpenAPI 文档一致；未知查询参数直接 400，
+/// 不允许以 snake_case 或多余身份静默扩大输入。
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ProductTopicQuery {
+    pub(crate) topic: String,
+    pub(crate) project_id: Option<String>,
+    pub(crate) root_thread_id: Option<String>,
+}
+
+/// 把 HTTP 查询参数解析为 typed 产品 topic。
+///
+/// 未知 topic、缺失/多余的作用域身份都是 400 协议错误，不静默落到全局订阅。
+pub(crate) fn parse_product_topic(
+    query: &ProductTopicQuery,
+) -> Result<pl_studio_runtime::StudioProductTopic, ApiError> {
+    use pl_studio_runtime::StudioProductTopic;
+    let invalid =
+        |message: &str| ApiError(pl_protocol::studio::StudioError::invalid_argument(message));
+    let topic = match query.topic.trim() {
+        "projectDirectory" => StudioProductTopic::ProjectDirectory,
+        "threadDirectory" => StudioProductTopic::ThreadDirectory,
+        "agentDirectory" => StudioProductTopic::AgentDirectory,
+        "settings" => StudioProductTopic::Settings,
+        "recovery" => StudioProductTopic::Recovery,
+        "mcp" => StudioProductTopic::Mcp,
+        "lsp" => StudioProductTopic::Lsp,
+        "skills" => StudioProductTopic::Skills {
+            // scope 身份原样保留（不 trim），与 runtime / FRB 保持同一身份；`validate()` 只用
+            // trim 判定 blank，不做归一化，也不扩大允许的输入。
+            project_id: query.project_id.clone().unwrap_or_default(),
+        },
+        "threadModeCatalog" => StudioProductTopic::ThreadModeCatalog,
+        "providerUsage" => StudioProductTopic::ProviderUsage,
+        "modelPerformance" => StudioProductTopic::ModelPerformance,
+        "sessionCosts" => StudioProductTopic::SessionCosts {
+            root_thread_id: query.root_thread_id.clone().unwrap_or_default(),
+        },
+        "updater" => StudioProductTopic::Updater,
+        "persistence" => StudioProductTopic::Persistence,
+        "persistenceQueue" => StudioProductTopic::PersistenceQueue,
+        "agentProfiles" => StudioProductTopic::AgentProfiles,
+        other => {
+            return Err(invalid(&format!("unknown product topic: {other}")));
+        }
+    };
+    match (
+        &topic,
+        query.project_id.is_some(),
+        query.root_thread_id.is_some(),
+    ) {
+        (StudioProductTopic::Skills { .. }, true, false) => {}
+        (StudioProductTopic::SessionCosts { .. }, false, true) => {}
+        (StudioProductTopic::Skills { .. } | StudioProductTopic::SessionCosts { .. }, _, _) => {
+            return Err(invalid(
+                "scoped product topic requires exactly one scope parameter",
+            ));
+        }
+        (_, false, false) => {}
+        _ => {
+            return Err(invalid(
+                "global product topics do not accept scope parameters",
+            ));
+        }
+    }
+    if topic.validate().is_err() {
+        return Err(invalid("product topic scope must be a non-empty identity"));
+    }
+    Ok(topic)
+}
+
 pub(crate) fn api_router() -> OpenApiRouter<AppState> {
     let attachment_upload = OpenApiRouter::new()
         .routes(routes!(upload_attachment_drafts))
@@ -118,6 +191,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::with_openapi(StudioApi::openapi())
         .routes(routes!(health))
         .routes(routes!(read_state))
+        .routes(routes!(read_product_baseline))
         .routes(routes!(open_project))
         .routes(routes!(activate_project))
         .routes(routes!(archive_project))
@@ -193,6 +267,32 @@ async fn health(State(_state): State<AppState>) -> Result<Json<HealthResponse>, 
 async fn read_state(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
         state.runtime.read_state().await.map_err(ApiError::from)?,
+    ))
+}
+
+/// 读取一个 typed 产品 topic 的当前 canonical 基线；纯查询，无生命周期副作用。
+#[utoipa::path(
+    get,
+    path = "/api/v1/state/product",
+    operation_id = "studio.readProductBaseline",
+    params(
+        ("topic" = String, Query, description = "typed 产品 topic（camelCase 标签）"),
+        ("projectId" = Option<String>, Query, description = "Skills topic 的项目作用域"),
+        ("rootThreadId" = Option<String>, Query, description = "SessionCosts topic 的根会话作用域")
+    ),
+    responses(StudioApiErrors, (status = 200, description = "Canonical topic baseline"))
+)]
+async fn read_product_baseline(
+    State(state): State<AppState>,
+    ApiQuery(query): ApiQuery<ProductTopicQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let topic = parse_product_topic(&query)?;
+    Ok(Json(
+        state
+            .runtime
+            .read_product_baseline(&topic)
+            .await
+            .map_err(ApiError::from)?,
     ))
 }
 

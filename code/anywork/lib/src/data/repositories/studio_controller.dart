@@ -9,8 +9,10 @@ import '../../domain/models/studio_models.dart';
 import '../../platform/clipboard_image_reader.dart';
 import '../frb/studio_api.dart';
 import 'studio_api_provider.dart';
+import 'studio_product_topics.dart';
 import 'studio_state_reducer.dart';
 import 'studio_stream_coordinators.dart';
+import 'studio_topic_reducer.dart';
 
 part 'studio_controller.g.dart';
 
@@ -22,8 +24,27 @@ enum _ChatWindowLoad { older, newer, extendLatest }
 class StudioController extends _$StudioController {
   static bool _startupProjectActivated = false;
 
-  late ProductStreamCoordinator _productCoordinator;
+  late ProductTopicRegistry _topics;
   late ThreadStreamCoordinator _threadCoordinator;
+
+  /// Shell 常驻产品 topics 租约（导航目录/公共配置/诊断 summary）。
+  ProductTopicLeaseBundle? _shellLease;
+
+  /// 选中会话所属 root 的费用租约；随会话切换/离开释放。
+  ProductTopicLease? _sessionCostsLease;
+
+  /// 会话阅读面可见性：不可见时不持有 Thread 状态流/ChatView 窗口/费用租约。
+  bool _conversationVisible = true;
+
+  /// 会话阅读面可见性的单调生命周期代次：快速离开/重入/再离开时，旧异步收尾
+  /// （旧 false continuation）不得清除后来 true 建立的窗口/费用租约。
+  int _visibilityGeneration = 0;
+
+  /// 串行化可见性切换与订阅建立的 barrier。
+  Future<void> _visibilityBarrier = Future<void>.value();
+
+  /// 当前已建立状态流订阅的会话；可见时等于选中会话，不可见时为 null。
+  String? _subscribedThreadId;
   final Set<String> _historyRequests = {};
   final Map<String, int> _windowLoadGeneration = {};
   StudioChatWindow? _chatWindow;
@@ -66,10 +87,10 @@ class StudioController extends _$StudioController {
 
   @override
   Future<StudioState> build() async {
-    _productCoordinator = ProductStreamCoordinator(
+    _topics = ProductTopicRegistry(
       _api,
-      _handleProductEvent,
-      _onProductStreamTerminated,
+      onFrame: _handleTopicFrame,
+      onTopicConnection: _handleTopicConnection,
     );
     _threadCoordinator = ThreadStreamCoordinator(
       _api,
@@ -78,7 +99,11 @@ class StudioController extends _$StudioController {
     );
     ref.onDispose(() {
       _closeChatWindow();
-      unawaited(_productCoordinator.dispose());
+      final shellLease = _shellLease;
+      _shellLease = null;
+      if (shellLease != null) unawaited(shellLease.release());
+      _releaseSessionCostsLease();
+      unawaited(_topics.releaseAll());
       unawaited(_threadCoordinator.dispose());
       _windowLoadGeneration.clear();
       _streamEpochByThread.clear();
@@ -95,7 +120,12 @@ class StudioController extends _$StudioController {
         preferredThreadId: snapshot.selectedThreadId,
       ),
     );
-    _productCoordinator.start();
+    // 先提交 bootstrap 状态再建立 Shell 常驻 topics：Baseline 首帧到达时
+    // reducer 已能读到 state（帧不会被 AsyncLoading 阶段丢弃）。
+    state = AsyncData(bootstrapped);
+    // Shell 常驻 topics：导航目录、公共配置与诊断 summary。其余 topics 只随
+    // 可见页面/面板按需租用（设置 tab、持久化面板、会话费用）。
+    _shellLease = _topics.acquireBundle(shellProductTopics);
     // 启动只读取全局配置、工作区与会话目录，并恢复“选择”；首个 GUI 帧
     // 不加载会话状态或历史。GUI 在首帧之后通过 openSelectedThread 打开当前会话，
     // 不自动恢复模型或工具执行。
@@ -103,13 +133,158 @@ class StudioController extends _$StudioController {
     debugPrint(
       'startup_stage=controller_ready elapsed_ms=${startupWatch.elapsedMilliseconds}',
     );
-    return bootstrapped;
+    // 返回当前 canonical state：Shell 租约建立时写入的局部传输连接状态已并入，
+    // 避免 build 完成时的 data(...) 回写覆盖这些条目。
+    return state.value ?? bootstrapped;
   }
 
   /// 重置启动激活 guard，仅用于隔离测试。
   @visibleForTesting
   static void resetStartupProjectActivation() {
     _startupProjectActivated = false;
+  }
+
+  /// 单个 topic 的局部传输连接状态；`null` 表示该 topic 的租约已全部释放。
+  ///
+  /// 连接状态是独立于业务 snapshot 的 transport 事实：Failure/closed 时 canonical
+  /// 领域数据保持 last-known value，只在此呈现局部错误/reconnecting。释放时清理
+  /// 该 topic 的连接墓碑，并对不再选中/租用的 session costs、skills 作用域条目做
+  /// release cleanup，避免无界增长。
+  void _handleTopicConnection(
+    ProductTopic topic,
+    ProductTopicConnectionStateView? view,
+  ) {
+    if (!ref.mounted) return;
+    final current = state.value;
+    if (current == null) return;
+    if (view != null) {
+      if (current.topicConnections[topic] == view) return;
+      state = AsyncData(
+        current.copyWith(
+          topicConnections: {...current.topicConnections, topic: view},
+        ),
+      );
+      return;
+    }
+    final connections = {...current.topicConnections}..remove(topic);
+    var costs = current.sessionCostsByRoot;
+    var skills = current.skillsByProject;
+    if (topic is SessionCostsTopic) {
+      final selectedRoot = current.selectedRootThread?.id;
+      if (topic.rootThreadId != selectedRoot &&
+          costs.containsKey(topic.rootThreadId)) {
+        costs = {...costs}..remove(topic.rootThreadId);
+      }
+    } else if (topic is SkillsTopic) {
+      if (topic.projectId != current.selectedProjectId &&
+          skills.containsKey(topic.projectId)) {
+        skills = {...skills}..remove(topic.projectId);
+      }
+    }
+    final unchanged =
+        connections.length == current.topicConnections.length &&
+        identical(costs, current.sessionCostsByRoot) &&
+        identical(skills, current.skillsByProject);
+    if (unchanged) return;
+    state = AsyncData(
+      current.copyWith(
+        topicConnections: connections,
+        sessionCostsByRoot: costs,
+        skillsByProject: skills,
+      ),
+    );
+  }
+
+  /// 会话阅读面可见性合同（Shell 进入设置/离开会话页时调用）。
+  ///
+  /// 使用单调生命周期代次 + 串行 barrier，覆盖 `false→true→false`（即使布尔值重复）：
+  /// 被后续调用取代的旧 continuation 不得清除新建立的窗口/费用租约。
+  ///
+  /// `visible = false`：取消 Thread 状态订阅（barrier 等待旧流真正取消）、关闭
+  /// ChatView 窗口并释放所属 root 的 SessionCosts 租约；迟到帧按 generation 拒绝。
+  /// 选择、已打开标记、草稿与阅读锚点全部保留。
+  /// `visible = true`：已打开的当前选择重新建立状态流，首个权威 snapshot 后按
+  /// 保留的锚点恢复阅读窗口。
+  Future<void> setConversationVisible(bool visible) {
+    _conversationVisible = visible;
+    final generation = ++_visibilityGeneration;
+    final operation = _visibilityBarrier.then((_) async {
+      if (generation != _visibilityGeneration) return;
+      if (!visible) {
+        _threadCoordinator.switchThread(null);
+        await _threadCoordinator.switchBarrier;
+        if (generation != _visibilityGeneration) return;
+        _closeChatWindow();
+        _releaseSessionCostsLease();
+        _subscribedThreadId = null;
+        return;
+      }
+      final current = state.value;
+      final threadId = current?.selectedThreadId;
+      if (current == null || threadId == null) return;
+      if (!current.openedThreadIds.contains(threadId)) return;
+      if (_subscribedThreadId == threadId) return;
+      await _subscribeThread(threadId);
+    });
+    _visibilityBarrier = operation.then(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
+  }
+
+  /// 按设置页可见 tab 获取 topics 租约；隐藏 tab 应 release，不持有订阅。
+  ProductTopicLeaseBundle acquireSettingsScope(SettingsProductScopeKind kind) {
+    return _topics.acquireBundle(
+      settingsScopeTopics(kind, state.value?.selectedProjectId),
+    );
+  }
+
+  /// 持久化队列诊断面板的按需租约：面板打开时获取，关闭时释放（替代周期轮询）。
+  ProductTopicLease acquirePersistenceQueueScope() {
+    return _topics.acquire(const PersistenceQueueTopic());
+  }
+
+  /// 显式获取某个 root 会话的费用租约（阅读面自身管理时使用）。
+  ProductTopicLease acquireSessionCostsScope(String rootThreadId) {
+    return _topics.acquire(SessionCostsTopic(rootThreadId: rootThreadId));
+  }
+
+  /// 只读诊断：活动 topic 与引用计数，供人工核对租约释放（不含凭据/内容）。
+  Map<String, int> activeTopicRefCountViews() =>
+      _topics.activeTopicRefCountViews();
+
+  /// 显式重试某个 topic 的订阅：取消当前句柄、重置退避预算并重新接收基线。
+  /// 供可见组件在局部 failure/closed 后由用户触发；该 topic 未租用时为空操作。
+  void retryProductTopic(ProductTopic topic) => _topics.retry(topic);
+
+  void _releaseSessionCostsLease() {
+    final lease = _sessionCostsLease;
+    _sessionCostsLease = null;
+    unawaited(lease?.release());
+  }
+
+  /// 会话状态租约与当前选择对齐：切换/清空时释放旧 root 费用租约。
+  void _syncSessionCostsLease(String? threadId) {
+    final current = state.value;
+    final rootId = threadId == null
+        ? null
+        : current?.threads
+                  .where((thread) => thread.id == threadId)
+                  .firstOrNull
+                  ?.effectiveRootThreadId ??
+              threadId;
+    final existing = _sessionCostsLease;
+    if (existing != null) {
+      if (rootId != null &&
+          existing.topic == SessionCostsTopic(rootThreadId: rootId)) {
+        return;
+      }
+      _releaseSessionCostsLease();
+    }
+    if (rootId == null || rootId.isEmpty || !_conversationVisible) return;
+    final lease = _topics.acquire(SessionCostsTopic(rootThreadId: rootId));
+    _sessionCostsLease = lease;
   }
 
   void _activateStartupProject(StudioState bootstrapped) {
@@ -399,6 +574,7 @@ class StudioController extends _$StudioController {
       state = AsyncData(
         applyThreadDirectoryDelta(
           latest,
+          revision: latest.threadDirectory.revision,
           upserted: [renamed],
           removed: const [],
         ),
@@ -552,7 +728,16 @@ class StudioController extends _$StudioController {
 
   Future<void> _subscribeThread(String? threadId) async {
     if (_chatWindowThreadId != threadId) _closeChatWindow();
+    if (!_conversationVisible) {
+      // 阅读面不可见：不建立状态流/费用租约；可见性恢复时按当前选择重开。
+      _subscribedThreadId = null;
+      _threadCoordinator.switchThread(null);
+      _releaseSessionCostsLease();
+      return;
+    }
+    _subscribedThreadId = threadId;
     final generation = _threadCoordinator.switchThread(threadId);
+    _syncSessionCostsLease(threadId);
     if (!ref.mounted || threadId == null) return;
     // 重订阅开启新的广播生命周期：旧 epoch 立即失效。
     _streamEpochByThread.remove(threadId);
@@ -1236,7 +1421,9 @@ class StudioController extends _$StudioController {
         error: null,
       ),
     );
-    final request = _performActivityDetailLoad(threadId, activity);
+    // 可见性代次：阅读面切换后，旧在途详情的迟到返回不得写进新窗口/新活动状态。
+    final visibility = _visibilityGeneration;
+    final request = _performActivityDetailLoad(threadId, activity, visibility);
     _activityDetailInFlight = request;
     await request;
     if (identical(_activityDetailInFlight, request)) {
@@ -1258,13 +1445,14 @@ class StudioController extends _$StudioController {
   Future<void> _performActivityDetailLoad(
     String threadId,
     ThreadActivityView activity,
+    int visibility,
   ) async {
     try {
       final detail = await _api.readThreadActivityDetail(
         threadId,
         activity.identity,
       );
-      if (!ref.mounted) return;
+      if (!ref.mounted || visibility != _visibilityGeneration) return;
       final latest = state.value;
       if (latest == null || latest.selectedThreadId != threadId) return;
       // 迟到的旧身份结果不得覆盖新身份（身份变化即丢弃）。
@@ -1284,7 +1472,7 @@ class StudioController extends _$StudioController {
         ),
       );
     } catch (error) {
-      if (!ref.mounted) return;
+      if (!ref.mounted || visibility != _visibilityGeneration) return;
       final latest = state.value;
       if (latest == null || latest.selectedThreadId != threadId) return;
       // 与成功路径同规：迟到的旧身份失败同样不得写进 `activityDetail`，否则会把新身份的
@@ -1322,7 +1510,7 @@ class StudioController extends _$StudioController {
   }
 
   /// 侧栏触底加载下一页会话目录；内存未命中时由 bridge 从数据库分页取回。
-  /// 测试入口：显式触发一次 product reload（等价 StalePayload 路径）。
+  /// 测试入口：显式触发一次全量 canonical 重同步（显式命令路径，非轮询）。
   @visibleForTesting
   Future<void> debugReloadForTest() => _reloadProductState();
 
@@ -1731,6 +1919,7 @@ class StudioController extends _$StudioController {
         active.submissionRevision == submissionRevision;
     var next = applyThreadDirectoryDelta(
       latest,
+      revision: latest.threadDirectory.revision,
       upserted: [result.thread],
       removed: const [],
     );
@@ -2529,15 +2718,17 @@ class StudioController extends _$StudioController {
     correlationId: 'client-interaction-conflict',
   );
 
-  void _handleProductEvent(Object event) {
+  /// typed topic 帧入口：Baseline/Event 走同一领域 apply（revision 拒旧）；
+  /// Lagged/Failure 保留旧数据，单域恢复由订阅注册表完成。
+  void _handleTopicFrame(ProductTopicFrame frame) {
     final current = state.value;
-    if (current == null || event is! StudioBridgeEvent) return;
-    if (event.payload is StalePayload) {
-      unawaited(_reloadProductState());
+    if (current == null) return;
+    if (frame is ProductTopicLaggedFrame || frame is ProductTopicFailureFrame) {
       return;
     }
     final previousThreadId = current.selectedThreadId;
-    var next = reduceStudioEvent(current, event).state;
+    var next = applyProductTopicFrame(current, frame);
+    if (identical(next, current)) return;
     // 归档/关闭会从 workspaces 移除该会话：立即释放它的会话级 map。
     for (final threadId in current.workspacesByThread.keys) {
       if (!next.workspacesByThread.containsKey(threadId)) {
@@ -2552,15 +2743,16 @@ class StudioController extends _$StudioController {
       // 非显式选择变化不继承“已打开”：新选中会话保持未打开，等待用户交互（§6.1）。
       next = _markThreadUnopened(next, next.selectedThreadId);
       state = AsyncData(next);
+      // 目录事件把选择移到别的 Thread：按“旧选中取消、不自动打开新 Thread”语义
+      // 收束旧 Thread 状态 stream 与 root SessionCosts 租约。先提交新选择再释放，
+      // 使连接状态 release cleanup 以新 selectedRoot 判定。迟到的旧帧按 generation
+      // 拒绝；不建立新订阅。
+      _subscribedThreadId = null;
+      _threadCoordinator.switchThread(null);
+      _releaseSessionCostsLease();
       return;
     }
     state = AsyncData(next);
-  }
-
-  /// Product 流终止（bridge 的 failure/closed）不是正常结束：读取一次 canonical
-  /// snapshot 重同步；协调器随后有界重订阅，内存状态与实时更新都不会静默停摆。
-  void _onProductStreamTerminated() {
-    unawaited(_reloadProductState());
   }
 
   Future<void> _reloadProductState({
@@ -2747,10 +2939,17 @@ class StudioController extends _$StudioController {
 
 StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
   var next = applyProjectDirectory(current, incoming.projectDirectory);
-  // 目录是分页窗口：resync snapshot 的首页整体替换当前窗口；选择采纳
-  // incoming 携带的显式解析结果（_resolveSelection 是唯一解析点）。
+  // 目录是分页窗口：resync snapshot 的首页按基线语义合并（保留已加载更远页）；
+  // 选择采纳 incoming 携带的显式解析结果（_resolveSelection 是唯一解析点）。
   next = next.copyWith(
-    threadDirectory: incoming.threadDirectory,
+    threadDirectory: next.threadDirectory.applyBaselinePage(
+      ThreadDirectoryPage(
+        threads: incoming.threadDirectory.threads,
+        nextCursor: incoming.threadDirectory.nextCursor,
+        revision: incoming.threadDirectory.revision,
+      ),
+      revision: incoming.threadDirectory.revision,
+    ),
     selectedProjectId: incoming.selectedProjectId,
     selectedThreadId: incoming.selectedThreadId,
   );
@@ -2763,8 +2962,26 @@ StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
   next = applyProviderUsageState(next, incoming.providerUsageState);
   next = applyModelPerformanceState(next, incoming.modelPerformance);
   next = applyUpdaterState(next, incoming.updaterState);
+  next = applySessionCostsMerge(next, incoming);
+  final incomingQueue = incoming.persistenceQueueState;
+  if (incomingQueue != null) {
+    next = applyPersistenceQueueState(next, incomingQueue);
+  }
+  final incomingProfiles = incoming.agentProfilesState;
+  if (incomingProfiles != null) {
+    next = applyAgentProfilesState(next, incomingProfiles);
+  }
   for (final snapshot in incoming.skillsByProject.values) {
     next = applySkillsState(next, snapshot);
+  }
+  return next;
+}
+
+/// 全量快照携带的每个 root 费用状态逐条按 revision 合并（含显式清除）。
+StudioState applySessionCostsMerge(StudioState current, StudioState incoming) {
+  var next = current;
+  for (final state in incoming.sessionCostsByRoot.values) {
+    next = applySessionCostsState(next, state);
   }
   return next;
 }
@@ -2907,6 +3124,7 @@ StudioState _applyArchiveResult(
   final removed = result.removedThreadIds.toSet();
   var next = applyThreadDirectoryDelta(
     current,
+    revision: current.threadDirectory.revision,
     upserted: const [],
     removed: result.removedThreadIds,
   );

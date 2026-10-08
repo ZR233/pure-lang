@@ -1,6 +1,6 @@
 use crate::api::studio::bridge_runtime::{
     BridgeRuntime, active_bridge, arm_exit_latch, fix_exit_deadline, install_bridge_runtime,
-    late_install_refused, lifecycle_gate, remaining_until,
+    installed_bridge, late_install_refused, lifecycle_gate, remaining_until,
 };
 use crate::api::studio::convert::runtime::{
     bridge_shutdown_report, runtime_shutdown_issue, runtime_snapshot,
@@ -11,6 +11,7 @@ use crate::api::studio::types::{
 };
 use anyhow::Context;
 use flutter_rust_bridge::frb;
+use pl_studio_runtime::StudioRuntimeStateKind;
 use std::time::{Duration, Instant};
 
 use super::updater::{
@@ -58,16 +59,57 @@ pub fn init_app() {
     crate::diagnostics::initialize();
 }
 
-pub async fn start_studio_runtime() -> Result<RuntimeSnapshot, BridgeError> {
-    publish_startup_stage(pl_studio_runtime::StudioStartupStage::OpeningStorage);
-    let bridge = match install_bridge_runtime().await {
-        Ok(bridge) => bridge,
-        Err(error) => {
-            publish_startup_stage(pl_studio_runtime::StudioStartupStage::Failed);
-            return Err(error.into());
+/// 发放一次新的启动尝试令牌；可在 bridge 安装前（pre-installed）调用。
+///
+/// 同一时刻只有一个活跃令牌：start 在途期间明确拒绝；已 Ready（runtime 运行中）同样
+/// 拒绝——重启前必须先 shutdown。新令牌发放后旧令牌立即过期。shutdown 开始后本进程
+/// 不再支持新的启动尝试：bridge 的 OnceCell 与 shutdown 令牌都是一次性资源。
+pub async fn prepare_startup_attempt() -> Result<u64, BridgeError> {
+    STARTUP.prepare()
+}
+
+/// 以指定令牌启动 Studio runtime。
+///
+/// `attempt` 必须是 [`prepare_startup_attempt`] 发放且未过期的令牌；在途期间的重复
+/// start、旧令牌与失败/停机后的复用都被明确拒绝。已 Ready 的同令牌调用幂等成功：
+/// 返回前核对真实 runtime 仍处于 Ready 且 shutdown 未开始，否则以 `runtime_stopped`
+/// 明确失败而不是虚报快照；不重开 runtime、不虚发 `OpeningStorage`，进度流保持
+/// `Ready` 终态。start 在途的失败与任务取消都把本尝试落为 `Failed` 终态，不会永久
+/// 卡在 in-progress。
+pub async fn start_studio_runtime(attempt: u64) -> Result<RuntimeSnapshot, BridgeError> {
+    match STARTUP.begin_start(attempt)? {
+        StartClaim::AlreadyReady => {
+            let bridge = installed_bridge()?;
+            // 幂等窗口必须锚定真实 runtime：shutdown 在途/完成后不得返回假成功。
+            if bridge.shutdown.is_cancelled() {
+                return Err(BridgeError::runtime_stopped());
+            }
+            let snapshot = bridge.studio.runtime_snapshot().await?;
+            if snapshot.state.kind() != StudioRuntimeStateKind::Ready
+                || bridge.shutdown.is_cancelled()
+            {
+                return Err(BridgeError::runtime_stopped());
+            }
+            Ok(runtime_snapshot(snapshot))
         }
-    };
-    Ok(runtime_snapshot(bridge.studio.runtime_snapshot().await?))
+        StartClaim::Execute => {
+            let mut demote = StartupDemote::new(attempt);
+            let bridge = match install_bridge_runtime().await {
+                Ok(bridge) => bridge,
+                // 安装失败也是启动失败：守卫降级把进度流推到 Failed 终态。
+                Err(error) => return Err(error.into()),
+            };
+            // main 的唯一初始化入口已在安装时返回 Ready runtime：这里只读取 canonical 快照，
+            // 不再调用第二套 start。
+            let snapshot = bridge.studio.runtime_snapshot().await?;
+            if bridge.shutdown.is_cancelled() || !STARTUP.attempt_active(attempt) {
+                return Err(BridgeError::runtime_stopped());
+            }
+            demote.disarm();
+            STARTUP.finish_start(attempt);
+            Ok(runtime_snapshot(snapshot))
+        }
+    }
 }
 
 /// Early application-exit entry: seal the one-way exit latch and fence the installed runtime
@@ -82,6 +124,9 @@ pub async fn start_studio_runtime() -> Result<RuntimeSnapshot, BridgeError> {
 ///   `start_studio_runtime` can never publish a runtime once exit has begun;
 /// - fixes the single first deadline from the caller's remaining cleanup budget, so a later
 ///   `shutdown_runtime` never extends it;
+/// - invalidates the startup attempt token synchronously (before any await and independent of an
+///   installed runtime) and wakes a pre-active startup observer, so a concurrent attempt can never
+///   publish a runtime once exit has begun;
 /// - when a runtime is already installed, synchronously fences domain admission and broadcasts
 ///   cancellation to the runtime's independent owners.
 ///
@@ -99,6 +144,10 @@ pub async fn begin_runtime_exit(remaining_ms: u32) -> Result<(), BridgeError> {
     let bridge = arm_exit_latch();
     // Fix the single first deadline; a later `shutdown_runtime` can only reuse or shorten it.
     let _ = fix_exit_deadline(remaining_ms);
+    // Exit has begun: invalidate the startup token and wake any not-yet-settled pre-active startup
+    // observer synchronously, before the first await below and independent of whether a runtime is
+    // installed, so a later `start_studio_runtime` attempt can never publish.
+    STARTUP.begin_shutdown();
     if let Some(bridge) = bridge {
         // Broadcast native subscription cancellation early (a synchronous token cancel with no
         // await/join): the content streams wind down so Dart's later cancel ACK completes faster.
@@ -141,6 +190,9 @@ pub async fn shutdown_runtime(
     // runtime that a concurrent install published first.
     let bridge = arm_exit_latch();
     let deadline = fix_exit_deadline(remaining_ms);
+    // Invalidate the startup token and wake a pre-active observer before the first await (the
+    // bounded lifecycle-gate lock below): once exit has begun no attempt may still publish.
+    STARTUP.begin_shutdown();
     let started = Instant::now();
 
     // Bounded observation of the lifecycle gate: if initialization is still in flight we give up
@@ -278,6 +330,12 @@ pub(super) async fn shutdown_runtime_for_update(
     let deadline = Instant::now() + UPDATE_SHUTDOWN_BUDGET;
     let hook: pl_studio_runtime::ShutdownExternalHook = Box::new(move || {
         Box::pin(async move {
+            // The runtime has committed the strict shutdown when this hook runs: invalidate the
+            // startup token synchronously as the first step, before any await / cancel / join of the
+            // hook, so a not-yet-settled pre-active startup observer is woken immediately. The idle
+            // check itself never invalidates the token: a busy runtime that refuses to shut down
+            // keeps its current attempt.
+            STARTUP.begin_shutdown();
             bridge.shutdown.cancel();
             // Phase 1: signal every independent owner (no joins).
             let pending_subscriptions = bridge.subscriptions.broadcast_cancel(deadline).await;
@@ -306,6 +364,7 @@ pub(super) async fn shutdown_runtime_for_update(
             tracing::info!("Studio runtime shutdown completed for update");
             Ok(true)
         }
+        // 空闲检查未通过：没有发生 shutdown，不得凭猜测失效当前令牌。
         Ok(None) => Ok(false),
         Err(error) => Err(error.into()),
     }
@@ -384,16 +443,279 @@ pub async fn rename_project(project_id: String, name: String) -> Result<ProjectD
         .into())
 }
 
-static STARTUP: std::sync::LazyLock<
-    tokio::sync::watch::Sender<super::super::types::BridgeStartupStage>,
-> = std::sync::LazyLock::new(|| {
-    tokio::sync::watch::channel(super::super::types::BridgeStartupStage::OpeningStorage).0
-});
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
+/// 启动进度帧：阶段只归属其 attempt；旧订阅者据此终止而不是接收新一代阶段。
+pub(crate) struct StartupFrame {
+    pub(crate) attempt: u64,
+    pub(crate) stage: super::super::types::BridgeStartupStage,
+}
+
+/// 单一启动 owner：同一时刻至多一个活跃尝试令牌。
+struct StartupOwner {
+    sender: tokio::sync::watch::Sender<StartupFrame>,
+    phase: Mutex<StartupPhase>,
+    next_attempt: AtomicU64,
+}
+
+/// 启动尝试令牌的 owner 状态机；prepare 与 start 的竞态都在这里串行裁决。
+enum StartupPhase {
+    /// 进程尚未发放任何令牌。
+    Initial,
+    /// 令牌已发放、start 未执行；新 prepare 取代旧令牌，旧令牌立即过期。
+    Prepared { attempt: u64 },
+    /// start 在途；prepare 与重复 start 都被拒绝。
+    Starting { attempt: u64 },
+    /// 本次尝试已 Ready；同令牌 start 幂等成功（返回前核对真实 runtime）。
+    Ready { attempt: u64 },
+    /// 本次尝试失败；重新启动需要新的 prepare。
+    Failed { attempt: u64 },
+    /// shutdown 已开始（无论后续成败）；进程不支持同进程新 startup，旧令牌全部失效。
+    Stopped { attempt: u64 },
+}
+
+/// start 占用结果：执行启动，或同令牌已 Ready 的幂等窗口。
+enum StartClaim {
+    Execute,
+    AlreadyReady,
+}
+
+/// start 在途守卫：任务取消（Drop）时把在途尝试落为 Failed，不永久卡 in-progress。
+struct StartupDemote(Option<u64>);
+
+impl StartupDemote {
+    fn new(attempt: u64) -> Self {
+        Self(Some(attempt))
+    }
+
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for StartupDemote {
+    fn drop(&mut self) {
+        if let Some(attempt) = self.0.take() {
+            STARTUP.fail_start(attempt);
+        }
+    }
+}
+
+static STARTUP: std::sync::LazyLock<StartupOwner> = std::sync::LazyLock::new(StartupOwner::new);
+
+impl StartupOwner {
+    fn new() -> Self {
+        let (sender, _) = tokio::sync::watch::channel(StartupFrame {
+            attempt: 0,
+            stage: super::super::types::BridgeStartupStage::OpeningStorage,
+        });
+        Self {
+            sender,
+            phase: Mutex::new(StartupPhase::Initial),
+            next_attempt: AtomicU64::new(1),
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, StartupPhase> {
+        self.phase.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn prepare(&self) -> Result<u64, BridgeError> {
+        let mut phase = self.lock();
+        match *phase {
+            StartupPhase::Starting { .. } => Err(BridgeError::invalid_argument(
+                "a startup attempt is already in progress; wait for Ready or Failed first",
+            )),
+            StartupPhase::Ready { .. } => Err(BridgeError::invalid_argument(
+                "Studio runtime is already running; shutdown before preparing a new attempt",
+            )),
+            // shutdown 令牌与 bridge OnceCell 都是一次性进程资源：真实重开不可达，
+            // 不得对 Stopped 发新令牌或虚报 OpeningStorage。
+            StartupPhase::Stopped { .. } => Err(BridgeError::invalid_argument(
+                "Studio runtime has been shut down; same-process restart is not supported",
+            )),
+            StartupPhase::Initial | StartupPhase::Prepared { .. } | StartupPhase::Failed { .. } => {
+                let attempt = self.next_attempt.fetch_add(1, Ordering::Relaxed);
+                *phase = StartupPhase::Prepared { attempt };
+                // 新尝试的站立阶段：订阅首帧是本尝试的真实阶段，绝不会先拿到旧终态。
+                self.sender.send_replace(StartupFrame {
+                    attempt,
+                    stage: super::super::types::BridgeStartupStage::OpeningStorage,
+                });
+                Ok(attempt)
+            }
+        }
+    }
+
+    fn subscribe(
+        &self,
+        attempt: u64,
+    ) -> Result<tokio::sync::watch::Receiver<StartupFrame>, BridgeError> {
+        let phase = self.lock();
+        let current = match *phase {
+            StartupPhase::Initial => {
+                return Err(BridgeError::invalid_argument(
+                    "prepare a startup attempt before subscribing to startup progress",
+                ));
+            }
+            StartupPhase::Prepared { attempt: current }
+            | StartupPhase::Starting { attempt: current }
+            | StartupPhase::Ready { attempt: current } => current,
+            StartupPhase::Failed { attempt: current } => {
+                if attempt == current {
+                    return Err(BridgeError::invalid_argument(
+                        "startup attempt already finished; prepare a new attempt to retry",
+                    ));
+                }
+                return Err(BridgeError::invalid_argument(
+                    "unknown or expired startup attempt",
+                ));
+            }
+            StartupPhase::Stopped { attempt: current } => {
+                if attempt == current {
+                    return Err(BridgeError::invalid_argument(
+                        "startup attempt stopped with the runtime shutdown; same-process restart is not supported",
+                    ));
+                }
+                return Err(BridgeError::invalid_argument(
+                    "unknown or expired startup attempt",
+                ));
+            }
+        };
+        if attempt != current {
+            return Err(BridgeError::invalid_argument(
+                "unknown or expired startup attempt",
+            ));
+        }
+        Ok(self.sender.subscribe())
+    }
+
+    fn begin_start(&self, attempt: u64) -> Result<StartClaim, BridgeError> {
+        let mut phase = self.lock();
+        match *phase {
+            StartupPhase::Prepared { attempt: current } if current == attempt => {
+                *phase = StartupPhase::Starting { attempt };
+                Ok(StartClaim::Execute)
+            }
+            StartupPhase::Ready { attempt: current } if current == attempt => {
+                Ok(StartClaim::AlreadyReady)
+            }
+            StartupPhase::Starting { .. } => Err(BridgeError::invalid_argument(
+                "a startup attempt is already in progress",
+            )),
+            StartupPhase::Initial => Err(BridgeError::invalid_argument(
+                "prepare a startup attempt before starting the runtime",
+            )),
+            StartupPhase::Stopped { attempt: current } => {
+                if attempt == current {
+                    // shutdown 已开始：明确 runtime_stopped，不落回过期令牌话术。
+                    return Err(BridgeError::runtime_stopped());
+                }
+                Err(BridgeError::invalid_argument(
+                    "unknown or expired startup attempt",
+                ))
+            }
+            StartupPhase::Prepared { .. }
+            | StartupPhase::Ready { .. }
+            | StartupPhase::Failed { .. } => Err(BridgeError::invalid_argument(
+                "unknown or expired startup attempt",
+            )),
+        }
+    }
+
+    /// start 成功：本尝试进入 Ready 并发布终态帧（runtime 观察者可能已发布过 Ready）。
+    fn finish_start(&self, attempt: u64) {
+        let mut phase = self.lock();
+        if matches!(*phase, StartupPhase::Starting { attempt: current } if current == attempt) {
+            *phase = StartupPhase::Ready { attempt };
+            self.sender.send_replace(StartupFrame {
+                attempt,
+                stage: super::super::types::BridgeStartupStage::Ready,
+            });
+        }
+    }
+
+    /// start 失败或被取消：本尝试落 Failed 终态，重新启动需要新的 prepare。
+    fn fail_start(&self, attempt: u64) {
+        let mut phase = self.lock();
+        if matches!(*phase, StartupPhase::Starting { attempt: current } if current == attempt) {
+            *phase = StartupPhase::Failed { attempt };
+            self.sender.send_replace(StartupFrame {
+                attempt,
+                stage: super::super::types::BridgeStartupStage::Failed,
+            });
+        }
+    }
+
+    /// shutdown 开始即失效当前令牌，并以 Failed 终态唤醒 pre-active 观察者。
+    /// 进度流交付 Ready 前仍以 [`StartupOwner::attempt_active`] 拒绝已失效尝试。
+    fn begin_shutdown(&self) {
+        let mut phase = self.lock();
+        match *phase {
+            StartupPhase::Initial => {}
+            StartupPhase::Prepared { attempt }
+            | StartupPhase::Starting { attempt }
+            | StartupPhase::Ready { attempt }
+            | StartupPhase::Failed { attempt }
+            | StartupPhase::Stopped { attempt } => {
+                *phase = StartupPhase::Stopped { attempt };
+                // 唤醒尚未读到终态的 pre-active 观察者；它们不依赖 runtime 订阅注册表取消。
+                self.sender.send_replace(StartupFrame {
+                    attempt,
+                    stage: super::super::types::BridgeStartupStage::Failed,
+                });
+            }
+        }
+    }
+
+    /// 进度流交付 `Ready` 终态前的令牌有效性检查：shutdown 已把尝试落为 Stopped 后，
+    /// 未读的终态不得作为新成功交付。
+    fn attempt_active(&self, attempt: u64) -> bool {
+        let phase = self.lock();
+        matches!(
+            *phase,
+            StartupPhase::Starting { attempt: current }
+            | StartupPhase::Ready { attempt: current }
+            if current == attempt
+        )
+    }
+
+    /// runtime 阶段回调只归属当前在途尝试；其他世代来源的阶段不发布。
+    fn publish_stage(&self, stage: pl_studio_runtime::StudioStartupStage) {
+        let phase = self.lock();
+        if let StartupPhase::Starting { attempt } = *phase {
+            self.sender.send_replace(StartupFrame {
+                attempt,
+                stage: bridge_startup_stage(stage),
+            });
+        }
+    }
+}
+
+/// runtime 的阶段回调入口；由 bridge 安装时注入 runtime 构造。
 pub(crate) fn publish_startup_stage(stage: pl_studio_runtime::StudioStartupStage) {
+    STARTUP.publish_stage(stage);
+}
+
+/// 启动进度 watch 的订阅入口；`RustLib.init` 后、runtime 安装前即可使用。
+pub(crate) fn subscribe_startup_attempt(
+    attempt: u64,
+) -> Result<tokio::sync::watch::Receiver<StartupFrame>, BridgeError> {
+    STARTUP.subscribe(attempt)
+}
+
+/// startup 进度流在交付 `Ready` 终态前核对令牌仍有效（shutdown 开始即失效）。
+pub(crate) fn startup_attempt_active(attempt: u64) -> bool {
+    STARTUP.attempt_active(attempt)
+}
+
+fn bridge_startup_stage(
+    stage: pl_studio_runtime::StudioStartupStage,
+) -> super::super::types::BridgeStartupStage {
     use super::super::types::BridgeStartupStage as Target;
     use pl_studio_runtime::StudioStartupStage as Source;
-    STARTUP.send_replace(match stage {
+    match stage {
         Source::Preparing => Target::Preparing,
         Source::WaitingForSteps => Target::WaitingForSteps,
         Source::ClosingResources => Target::ClosingResources,
@@ -406,12 +728,7 @@ pub(crate) fn publish_startup_stage(stage: pl_studio_runtime::StudioStartupStage
         Source::PreparingResources => Target::PreparingResources,
         Source::Ready => Target::Ready,
         Source::Failed => Target::Failed,
-    });
-}
-
-#[frb(sync)]
-pub fn read_startup_stage() -> super::super::types::BridgeStartupStage {
-    *STARTUP.borrow()
+    }
 }
 
 pub async fn read_recovery_state()

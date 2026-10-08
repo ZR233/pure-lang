@@ -24,9 +24,14 @@ class SessionModeSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(studioControllerProvider).value;
-    final discovered =
-        state?.threadModeCatalog.modes ?? const <ThreadModeDescriptorView>[];
+    // 只订阅 Mode catalog 本身；无关领域事件不重建该选择器。
+    final discovered = ref.watch(
+      studioControllerProvider.select(
+        (state) =>
+            state.value?.threadModeCatalog.modes ??
+            const <ThreadModeDescriptorView>[],
+      ),
+    );
     final options = discovered.isEmpty
         ? ThreadModeId.values
         : discovered.map((descriptor) => descriptor.mode).toList();

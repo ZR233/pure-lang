@@ -188,8 +188,29 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> projectRow(String id) =>
       ValueKey<String>('project-row-$id');
 
+  static ValueKey<String> projectExpand(String id) =>
+      ValueKey<String>('project-expand-$id');
+
+  static ValueKey<String> projectMenu(String id) =>
+      ValueKey<String>('project-menu-$id');
+
   static ValueKey<String> threadRow(String id) =>
       ValueKey<String>('thread-row-$id');
+
+  static ValueKey<String> pinThread(String id) =>
+      ValueKey<String>('thread-pin-$id');
+
+  static ValueKey<String> threadMenu(String id) =>
+      ValueKey<String>('thread-menu-$id');
+
+  static ValueKey<String> copyThreadWorkspace(String id) =>
+      ValueKey<String>('thread-menu-copy-workspace-$id');
+
+  static ValueKey<String> openThreadVsCode(String id) =>
+      ValueKey<String>('thread-menu-open-vscode-$id');
+
+  static ValueKey<String> openThreadTerminal(String id) =>
+      ValueKey<String>('thread-menu-open-terminal-$id');
 
   static ValueKey<String> archiveThread(String id) =>
       ValueKey<String>('thread-archive-$id');

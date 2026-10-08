@@ -9,12 +9,13 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
+import 'settings_scope.dart';
 
 class LspTab extends ConsumerStatefulWidget {
-  const LspTab({super.key, required this.projectId, required this.state});
+  const LspTab({super.key, required this.tabIndex});
 
-  final String? projectId;
-  final LspStateSnapshot state;
+  /// 本页在设置壳中的 tab 索引，用于「仅在可见时持有租约」。
+  final int tabIndex;
 
   @override
   ConsumerState<LspTab> createState() => _LspTabState();
@@ -25,46 +26,68 @@ class _LspTabState extends ConsumerState<LspTab> {
 
   @override
   Widget build(BuildContext context) {
+    // 只在 LSP tab 可见时租用 LSP topic；隐藏页不因 keep-alive 持租约。
+    final visible = ref.watch(settingsVisibleTabProvider) == widget.tabIndex;
+    if (visible) {
+      ref.watch(settingsLspScopeProvider);
+    }
+    final projectId = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.selectedProjectId,
+      ),
+    );
+    final servers =
+        ref
+            .watch(
+              studioControllerProvider.select((state) => state.value?.lspState),
+            )
+            ?.servers ??
+        const <LspServerStateView>[];
     return SettingsPane(
-      header: SettingsHeader(
-        title: context.l10n.settingsLspTitle,
-        subtitle: context.l10n.settingsLspSubtitle,
-        trailing: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            TextButton.icon(
-              key: StudioDriverKeys.lspRefresh,
-              onPressed: () => unawaited(_run(_refresh)),
-              icon: const Icon(Icons.refresh),
-              label: Text(context.l10n.settingsLspRefresh),
+      header: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SettingsHeader(
+            title: context.l10n.settingsLspTitle,
+            subtitle: context.l10n.settingsLspSubtitle,
+            trailing: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                TextButton.icon(
+                  key: StudioDriverKeys.lspRefresh,
+                  onPressed: () => unawaited(_run(_refresh)),
+                  icon: const Icon(Icons.refresh),
+                  label: Text(context.l10n.settingsLspRefresh),
+                ),
+                TextButton.icon(
+                  key: StudioDriverKeys.lspProbe,
+                  onPressed: projectId == null
+                      ? null
+                      : () => unawaited(_run(_probe)),
+                  icon: const Icon(Icons.monitor_heart_outlined),
+                  label: Text(context.l10n.settingsLspProbe),
+                ),
+                TextButton.icon(
+                  key: StudioDriverKeys.lspResetWorkspace,
+                  onPressed: projectId == null || servers.isEmpty
+                      ? null
+                      : () => unawaited(_run(_resetWorkspace)),
+                  icon: const Icon(Icons.restart_alt),
+                  label: Text(context.l10n.settingsLspResetWorkspace),
+                ),
+              ],
             ),
-            TextButton.icon(
-              key: StudioDriverKeys.lspProbe,
-              onPressed: widget.projectId == null
-                  ? null
-                  : () => unawaited(_run(_probe)),
-              icon: const Icon(Icons.monitor_heart_outlined),
-              label: Text(context.l10n.settingsLspProbe),
-            ),
-            TextButton.icon(
-              key: StudioDriverKeys.lspResetWorkspace,
-              onPressed:
-                  widget.projectId == null || widget.state.servers.isEmpty
-                  ? null
-                  : () => unawaited(_run(_resetWorkspace)),
-              icon: const Icon(Icons.restart_alt),
-              label: Text(context.l10n.settingsLspResetWorkspace),
-            ),
-          ],
-        ),
+          ),
+          if (visible) SettingsTopicStatus(topic: const LspTopic()),
+        ],
       ),
       children: [
         const SizedBox(height: 16),
-        if (widget.state.servers.isNotEmpty)
+        if (servers.isNotEmpty)
           SettingsGroup(
             children: [
-              for (final server in widget.state.servers)
+              for (final server in servers)
                 _LspSettingsRow(
                   server: server,
                   onRepair: switch (server.state) {
@@ -75,7 +98,7 @@ class _LspTabState extends ConsumerState<LspTab> {
                     LspUnavailableState() ||
                     LspDisabledState() => null,
                   },
-                  onReset: widget.projectId == null
+                  onReset: projectId == null
                       ? null
                       : () => unawaited(_run(() => _resetServer(server.id))),
                 ),

@@ -129,8 +129,8 @@ impl QueryTool {
         match self.kind {
             Kind::Profiles => {
                 let _: Empty = serde_json::from_str(input.content())?;
-                let catalog =
-                    tokio::task::spawn_blocking(move || services.config.agent_profiles()).await??;
+                // Agent Profiles 由配置 owner 的缓存提供；查询不扫描文件。
+                let catalog = services.config.agent_profiles()?;
                 output(&Profiles {
                     profiles: catalog.profiles,
                     diagnostics: catalog.diagnostics,

@@ -514,6 +514,24 @@ impl ThreadPersistenceCoordinator {
         self.refresh();
     }
 
+    /// Reports the global call-write queue pressure only when it actually changed.
+    ///
+    /// Watch-driven publishers call this from inside their own wakeup path; reporting
+    /// unchanged metrics would `refresh()` (which always notifies) and wake the publisher
+    /// again, so only real progress may re-enter the watch.
+    pub(crate) fn refresh_calls_metrics(&self, metrics: CallsQueueMetrics) -> bool {
+        let changed = *self
+            .0
+            .calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            != metrics;
+        if changed {
+            self.report_calls(metrics);
+        }
+        changed
+    }
+
     /// Seeds the summary from a loaded checkpoint without overwriting a fresher reported value.
     pub(crate) fn seed_usage(&self, thread_id: &str, summary: UsageSummary) {
         self.0

@@ -9,23 +9,12 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
+import 'settings_scope.dart';
 
 class SkillsTab extends ConsumerStatefulWidget {
-  const SkillsTab({
-    super.key,
-    required this.skills,
-    required this.fallbackSkillNames,
-    required this.settings,
-    required this.projectId,
-    required this.catalogRevision,
-    required this.tabIndex,
-  });
+  const SkillsTab({super.key, required this.tabIndex});
 
-  final List<SkillSummaryView> skills;
-  final List<String> fallbackSkillNames;
-  final SkillsSettingsView settings;
-  final String? projectId;
-  final int catalogRevision;
+  /// 本页在设置壳中的 tab 索引，用于「仅在可见时持有租约」。
   final int tabIndex;
 
   @override
@@ -34,86 +23,112 @@ class SkillsTab extends ConsumerStatefulWidget {
 
 class _SkillsTabState extends ConsumerState<SkillsTab> {
   String _query = '';
-  TabController? _tabs;
-  bool _selected = false;
+  bool _visibleCache = false;
   bool _discovering = false;
   String? _discoverError;
   String? _saveError;
   Timer? _searchTimer;
   int _searchRequest = 0;
   List<SkillSummaryView>? _searchMatches;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_refreshSkillsState());
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final tabs = DefaultTabController.maybeOf(context);
-    if (identical(tabs, _tabs)) return;
-    _tabs?.removeListener(_handleTabChange);
-    _tabs = tabs;
-    _selected = tabs?.index == widget.tabIndex;
-    tabs?.addListener(_handleTabChange);
-  }
-
-  void _handleTabChange() {
-    final selected = _tabs?.index == widget.tabIndex;
-    if (selected && !_selected) unawaited(_refreshSkillsState());
-    _selected = selected;
-  }
-
-  @override
-  void didUpdateWidget(covariant SkillsTab oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.projectId != widget.projectId ||
-        oldWidget.catalogRevision != widget.catalogRevision) {
-      _searchTimer?.cancel();
-      _searchRequest += 1;
-      _searchMatches = null;
-      if (_query.isNotEmpty) {
-        _scheduleSearch(_query);
-      }
-    }
-  }
+  String? _lastProjectId;
+  int? _lastCatalogRevision;
 
   @override
   void dispose() {
     _searchTimer?.cancel();
-    _tabs?.removeListener(_handleTabChange);
     super.dispose();
+  }
+
+  /// 变为可见时补一次显式读取；隐藏时释放租约（保留筛选/草稿 UI 状态）。
+  void _syncVisibility(bool visible) {
+    if (visible == _visibleCache) return;
+    _visibleCache = visible;
+    if (visible) unawaited(_refreshSkillsState());
+  }
+
+  String? _currentProjectId() =>
+      ref.read(studioControllerProvider).value?.selectedProjectId;
+
+  int _currentCatalogRevision() {
+    final value = ref.read(studioControllerProvider).value;
+    final projectId = value?.selectedProjectId;
+    if (projectId == null) return 0;
+    return value?.skillsByProject[projectId]?.catalogRevision ?? 0;
   }
 
   @override
   Widget build(BuildContext context) {
+    // 只在 Skills tab 可见时租用当前 project 的 Skills topic；隐藏页不持租约。
+    final visible = ref.watch(settingsVisibleTabProvider) == widget.tabIndex;
+    _syncVisibility(visible);
+    if (visible) {
+      ref.watch(settingsSkillsScopeProvider);
+    }
+    // 只 watch 选中项目 identity 与 canonical 快照身份；无关领域更新不重建本页。
+    final selection = ref.watch(
+      studioControllerProvider.select((state) {
+        final value = state.value;
+        final projectId = value?.selectedProjectId;
+        return (
+          projectId: projectId,
+          catalog: projectId == null ? null : value?.skillsByProject[projectId],
+          settings: value?.skills,
+          activeSkills: value?.runtime.activeSkills,
+        );
+      }),
+    );
+    final projectId = selection.projectId;
+    final catalog = selection.catalog;
+    final settings = selection.settings;
+    final summaries = catalog?.summaries ?? const <SkillSummaryView>[];
+    final catalogRevision = catalog?.catalogRevision ?? 0;
+    // 项目/catalog 身份变化时释放旧搜索：不把旧 project 的结果混进新作用域。
+    if (projectId != _lastProjectId ||
+        catalogRevision != _lastCatalogRevision) {
+      _lastProjectId = projectId;
+      _lastCatalogRevision = catalogRevision;
+      _searchTimer?.cancel();
+      _searchRequest += 1;
+      _searchMatches = null;
+      if (_query.isNotEmpty) _scheduleSearch(_query);
+    }
+    final fallbackNames = <String>{
+      ...?selection.activeSkills,
+      ...?catalog?.skills,
+      ...?settings?.disabled,
+    }.toList();
     final skills = _query.isEmpty
-        ? _allSkills()
+        ? _allSkills(summaries, fallbackNames)
         : (_searchMatches ?? const <SkillSummaryView>[]);
-    final disabledSkills = widget.settings.disabled.toSet();
+    final disabledSkills = settings?.disabled.toSet() ?? const <String>{};
     return SettingsPane(
-      header: SettingsHeader(
-        title: context.l10n.settingsSkillsTitle,
-        subtitle: context.l10n.settingsSkillsSubtitle,
-        trailing: FilledButton.icon(
-          key: StudioDriverKeys.skillsDiscover,
-          icon: _discovering
-              ? const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.travel_explore),
-          label: Text(
-            _discovering
-                ? context.l10n.settingsDiscovering
-                : context.l10n.settingsDiscover,
+      header: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SettingsHeader(
+            title: context.l10n.settingsSkillsTitle,
+            subtitle: context.l10n.settingsSkillsSubtitle,
+            trailing: FilledButton.icon(
+              key: StudioDriverKeys.skillsDiscover,
+              icon: _discovering
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.travel_explore),
+              label: Text(
+                _discovering
+                    ? context.l10n.settingsDiscovering
+                    : context.l10n.settingsDiscover,
+              ),
+              onPressed: projectId == null || _discovering
+                  ? null
+                  : _discoverSkills,
+            ),
           ),
-          onPressed: widget.projectId == null || _discovering
-              ? null
-              : _discoverSkills,
-        ),
+          if (visible && projectId != null)
+            SettingsTopicStatus(topic: SkillsTopic(projectId: projectId)),
+        ],
       ),
       toolbar: SettingsSearchField(
         hintText: context.l10n.settingsFilterSkills,
@@ -179,10 +194,10 @@ class _SkillsTabState extends ConsumerState<SkillsTab> {
           const SizedBox(height: 12),
           SettingsEmptyMessage(
             icon: Icons.extension_outlined,
-            title: widget.projectId == null
+            title: projectId == null
                 ? context.l10n.settingsOpenProjectToDiscoverSkills
                 : context.l10n.settingsNoSkillsMatchFilter,
-            body: widget.projectId == null
+            body: projectId == null
                 ? context.l10n.settingsSkillsDiscoverySources
                 : context.l10n.settingsClearSearchOrDiscoverAgain,
           ),
@@ -199,9 +214,12 @@ class _SkillsTabState extends ConsumerState<SkillsTab> {
     );
   }
 
-  List<SkillSummaryView> _allSkills() {
-    final byName = {for (final skill in widget.skills) skill.name: skill};
-    for (final name in widget.fallbackSkillNames) {
+  List<SkillSummaryView> _allSkills(
+    List<SkillSummaryView> summaries,
+    List<String> fallbackNames,
+  ) {
+    final byName = {for (final skill in summaries) skill.name: skill};
+    for (final name in fallbackNames) {
       byName.putIfAbsent(
         name,
         () => SkillSummaryView(
@@ -252,8 +270,8 @@ class _SkillsTabState extends ConsumerState<SkillsTab> {
       if (!mounted || request != _searchRequest || result == null) {
         return;
       }
-      if (result.projectId != widget.projectId ||
-          result.catalogRevision != widget.catalogRevision) {
+      if (result.projectId != _currentProjectId() ||
+          result.catalogRevision != _currentCatalogRevision()) {
         return;
       }
       setState(() => _searchMatches = result.matches);
@@ -267,18 +285,20 @@ class _SkillsTabState extends ConsumerState<SkillsTab> {
   Future<void> _saveDisabled(Set<String> disabled) async {
     try {
       setState(() => _saveError = null);
+      final settings = ref.read(studioControllerProvider).value?.skills;
+      if (settings == null) return;
       await ref
           .read(studioControllerProvider.notifier)
           .saveSkillsSettings(
             SkillsSettingsCommand(
-              enabled: widget.settings.enabled,
-              autoLearn: widget.settings.autoLearn,
-              systemEnabled: widget.settings.systemEnabled,
-              projectDir: widget.settings.projectDir,
-              userDir: widget.settings.userDir,
-              externalDirs: widget.settings.externalDirs,
+              enabled: settings.enabled,
+              autoLearn: settings.autoLearn,
+              systemEnabled: settings.systemEnabled,
+              projectDir: settings.projectDir,
+              userDir: settings.userDir,
+              externalDirs: settings.externalDirs,
               disabled: disabled.toList()..sort(),
-              autoLearnMinToolCalls: widget.settings.autoLearnMinToolCalls,
+              autoLearnMinToolCalls: settings.autoLearnMinToolCalls,
             ),
           );
     } catch (error) {

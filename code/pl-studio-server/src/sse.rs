@@ -9,6 +9,7 @@ use pl_protocol::{
     ChatWindowQuery, ChatWindowUpdate, ThreadNotification, ThreadSubscriptionRequest,
     ThreadSubscriptionUpdate,
 };
+use pl_studio_runtime::StudioProductFrame;
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -16,14 +17,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
 use crate::error::ApiError;
-use crate::routes::{ApiQuery, StudioApiErrors};
+use crate::routes::{ApiQuery, ProductTopicQuery, StudioApiErrors, parse_product_topic};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StaleEvent {
     reason: &'static str,
     dropped: Option<u64>,
-    resync: &'static str,
+    resync: String,
 }
 
 /// Product 事件是可合并的目录/状态更新：缓冲满时丢弃该条并经一次 `stale` 让客户端
@@ -38,24 +39,41 @@ enum Delivery {
     Closed,
 }
 
+/// typed 产品 topic 订阅：先登记接收者，再由 runtime 读取该领域基线。
+///
+/// 首帧是 `baseline` 事件（含 topic 与领域 revision），其后只交付该 topic 的领域
+/// 事件；缓冲合并后以一次 `stale` 通知客户端仅重读该 topic 的基线。SSE 没有 durable
+/// replay：带 `Last-Event-ID` 重连同样先收到 `stale`。
 #[utoipa::path(
     get,
     path = "/api/v1/events/product",
     operation_id = "studio.subscribeProduct",
-    responses(StudioApiErrors, (status = 200, description = "Product event stream", body = String, content_type = "text/event-stream"))
+    params(
+        ("topic" = String, Query, description = "typed 产品 topic（camelCase 标签）"),
+        ("projectId" = Option<String>, Query, description = "Skills topic 的项目作用域"),
+        ("rootThreadId" = Option<String>, Query, description = "SessionCosts topic 的根会话作用域")
+    ),
+    responses(StudioApiErrors, (status = 200, description = "Product topic event stream", body = String, content_type = "text/event-stream"))
 )]
 pub(crate) async fn product_events(
     State(state): State<AppState>,
+    ApiQuery(query): ApiQuery<ProductTopicQuery>,
     headers: HeaderMap,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let topic = parse_product_topic(&query)?;
     let permit = state
         .streams
         .clone()
         .try_acquire_owned()
         .map_err(|_| ApiError::overloaded())?;
-    let mut events = state.runtime.subscribe_product();
+    let mut events = state
+        .runtime
+        .subscribe_product_topic(topic)
+        .await
+        .map_err(ApiError::from)?;
     let shutdown = state.shutdown.clone();
     let has_cursor = headers.contains_key("last-event-id");
+    let resync = topic_resync_path(events.topic());
     let (sender, receiver) = mpsc::channel(64);
     tokio::spawn(async move {
         let _permit = permit;
@@ -66,7 +84,7 @@ pub(crate) async fn product_events(
                 StaleEvent {
                     reason: "replayUnsupported",
                     dropped: None,
-                    resync: "/api/v1/state",
+                    resync: resync.clone(),
                 },
             )
             .await
@@ -74,46 +92,55 @@ pub(crate) async fn product_events(
             return;
         }
         loop {
-            tokio::select! {
+            let frame = tokio::select! {
                 _ = shutdown.cancelled() => break,
-                event = events.recv() => match event {
-                    Ok(event) => {
-                        match try_send_json(&sender, "event", Some(&event.event_id), &event) {
-                            Delivery::Sent => {}
-                            Delivery::Stalled => {
-                                if !flush_stale(
-                                    &sender,
-                                    &shutdown,
-                                    StaleEvent {
-                                        reason: "slowConsumer",
-                                        dropped: None,
-                                        resync: "/api/v1/state",
-                                    },
-                                )
-                                .await
-                                {
-                                    return;
-                                }
+                frame = events.recv() => match frame {
+                    Ok(Some(frame)) => frame,
+                    Ok(None) | Err(_) => break,
+                },
+            };
+            match frame {
+                StudioProductFrame::Baseline(baseline) => {
+                    let event_id = format!("topic:{}", baseline.revision);
+                    if !send_json(&sender, "baseline", Some(&event_id), &*baseline).await {
+                        return;
+                    }
+                }
+                StudioProductFrame::Event(event) => {
+                    match try_send_json(&sender, "event", Some(&event.event_id), &event) {
+                        Delivery::Sent => {}
+                        Delivery::Stalled => {
+                            if !flush_stale(
+                                &sender,
+                                &shutdown,
+                                StaleEvent {
+                                    reason: "slowConsumer",
+                                    dropped: None,
+                                    resync: resync.clone(),
+                                },
+                            )
+                            .await
+                            {
+                                return;
                             }
-                            Delivery::Closed => return,
                         }
+                        Delivery::Closed => return,
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(dropped)) => {
-                        if !flush_stale(
-                            &sender,
-                            &shutdown,
-                            StaleEvent {
-                                reason: "lagged",
-                                dropped: Some(dropped),
-                                resync: "/api/v1/state",
-                            },
-                        )
-                        .await
-                        {
-                            return;
-                        }
+                }
+                StudioProductFrame::Lagged { dropped, .. } => {
+                    if !flush_stale(
+                        &sender,
+                        &shutdown,
+                        StaleEvent {
+                            reason: "lagged",
+                            dropped: Some(dropped),
+                            resync: resync.clone(),
+                        },
+                    )
+                    .await
+                    {
+                        return;
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         }
@@ -122,6 +149,51 @@ pub(crate) async fn product_events(
     });
     Ok(Sse::new(ReceiverStream::new(receiver))
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("")))
+}
+
+/// 该 topic 基线端点的查询串；`stale` 的 resync 指令指向它。
+///
+/// 作用域值经 form-urlencoded 百分号编码：身份不假设为 UUID 等安全字符集。
+fn topic_resync_path(topic: &pl_studio_runtime::StudioProductTopic) -> String {
+    use pl_studio_runtime::StudioProductTopic;
+    let mut query = url::form_urlencoded::Serializer::new(String::from("/api/v1/state/product"));
+    match topic {
+        StudioProductTopic::Skills { project_id } => {
+            query.append_pair("topic", "skills");
+            query.append_pair("projectId", project_id);
+        }
+        StudioProductTopic::SessionCosts { root_thread_id } => {
+            query.append_pair("topic", "sessionCosts");
+            query.append_pair("rootThreadId", root_thread_id);
+        }
+        other => {
+            query.append_pair("topic", topic_token(other));
+        }
+    }
+    query.finish()
+}
+
+/// topic 的查询标签；与 `parse_product_topic` 接受的标签一一对应。
+fn topic_token(topic: &pl_studio_runtime::StudioProductTopic) -> &'static str {
+    use pl_studio_runtime::StudioProductTopic;
+    match topic {
+        StudioProductTopic::ProjectDirectory => "projectDirectory",
+        StudioProductTopic::ThreadDirectory => "threadDirectory",
+        StudioProductTopic::AgentDirectory => "agentDirectory",
+        StudioProductTopic::Settings => "settings",
+        StudioProductTopic::Recovery => "recovery",
+        StudioProductTopic::Mcp => "mcp",
+        StudioProductTopic::Lsp => "lsp",
+        StudioProductTopic::Skills { .. } => "skills",
+        StudioProductTopic::ThreadModeCatalog => "threadModeCatalog",
+        StudioProductTopic::ProviderUsage => "providerUsage",
+        StudioProductTopic::ModelPerformance => "modelPerformance",
+        StudioProductTopic::SessionCosts { .. } => "sessionCosts",
+        StudioProductTopic::Updater => "updater",
+        StudioProductTopic::Persistence => "persistence",
+        StudioProductTopic::PersistenceQueue => "persistenceQueue",
+        StudioProductTopic::AgentProfiles => "agentProfiles",
+    }
 }
 
 /// 状态订阅：只转发当前执行、活动、交互与运行时状态。
@@ -169,7 +241,7 @@ pub(crate) async fn thread_events(
                 &StaleEvent {
                     reason: "replayUnsupported",
                     dropped: None,
-                    resync: "resubscribe",
+                    resync: "resubscribe".to_string(),
                 },
             )
             .await

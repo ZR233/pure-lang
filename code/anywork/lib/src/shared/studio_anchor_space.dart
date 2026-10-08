@@ -2,6 +2,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+/// Placement policy around the real trigger; all policies share the same
+/// framework-owned overlay and safe-area measurements.
+enum StudioAnchorPlacement { vertical, beside }
+
 /// Shared layout rules for an anchored popup surface around its real trigger.
 ///
 /// The delegate runs inside the framework-owned overlay: [RawMenuAnchor]
@@ -27,7 +31,8 @@ class StudioAnchorLayout extends SingleChildLayoutDelegate {
     this._textDirection, {
     this.userConstraints,
     this.fixedWidth,
-    this.gap = const Offset(0, 6),
+    this.placement = StudioAnchorPlacement.vertical,
+    this.gap = const Offset(6, 6),
   }) : safeRect = _reservedMargin.deflateRect(
          _padding.deflateRect(
            _viewInsets.deflateRect(Offset.zero & _overlaySize),
@@ -53,6 +58,10 @@ class StudioAnchorLayout extends SingleChildLayoutDelegate {
   /// null and size to their widest row.
   final double? fixedWidth;
 
+  /// Menus keep their vertical placement; sidebar readouts stay beside the row
+  /// so that the surface cannot cover another row in the same column.
+  final StudioAnchorPlacement placement;
+
   /// Space kept free between the trigger and the surface on both sides.
   final Offset gap;
 
@@ -65,6 +74,24 @@ class StudioAnchorLayout extends SingleChildLayoutDelegate {
 
   /// Usable height above the trigger (gap excluded).
   double get above => (_anchorRect.top - gap.dy) - safeRect.top;
+
+  double get _left => (_anchorRect.left - gap.dx) - safeRect.left;
+
+  double get _right => safeRect.right - (_anchorRect.right + gap.dx);
+
+  double get _availableWidth => math.max(
+    0.0,
+    placement == StudioAnchorPlacement.beside
+        ? math.max(_left, _right)
+        : safeRect.width,
+  );
+
+  double get _availableHeight => math.max(
+    0.0,
+    placement == StudioAnchorPlacement.beside
+        ? safeRect.height
+        : math.max(below, above),
+  );
 
   /// Whether the anchor currently intersects the safe area at all; surfaces
   /// must not stay open for a trigger that left the visible region.
@@ -99,18 +126,32 @@ class StudioAnchorLayout extends SingleChildLayoutDelegate {
   }
 
   /// Whether the effective surface size for this layout is still non-zero.
-  bool get hasUsableSpace => StudioAnchorLayout.hasUsableSpaceIn(
-    safeWidth: safeRect.width,
-    below: below,
-    above: above,
-    userConstraints: userConstraints,
-    fixedWidth: fixedWidth,
-  );
+  bool get hasUsableSpace {
+    // A beside readout may refuse an unreadably narrow side, but never falls
+    // back to covering rows below its trigger. Existing vertical menus retain
+    // their original cap/clamp semantics.
+    if (placement == StudioAnchorPlacement.beside) {
+      final effectiveWidth = math.min(
+        fixedWidth ?? userConstraints?.maxWidth ?? double.infinity,
+        _availableWidth,
+      );
+      if (effectiveWidth < (userConstraints?.minWidth ?? 0.0)) {
+        return false;
+      }
+    }
+    return StudioAnchorLayout.hasUsableSpaceIn(
+      safeWidth: _availableWidth,
+      below: _availableHeight,
+      above: _availableHeight,
+      userConstraints: userConstraints,
+      fixedWidth: fixedWidth,
+    );
+  }
 
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
-    final availableWidth = math.max(0.0, safeRect.width);
-    final maxSide = math.max(below, above);
+    final availableWidth = _availableWidth;
+    final maxSide = _availableHeight;
     final maxHeight = math.max(
       0.0,
       math.min(userConstraints?.maxHeight ?? double.infinity, maxSide),
@@ -139,6 +180,32 @@ class StudioAnchorLayout extends SingleChildLayoutDelegate {
 
   @override
   Offset getPositionForChild(Size size, Size childSize) {
+    if (placement == StudioAnchorPlacement.beside) {
+      // Prefer the text-direction trailing side when the actual laid-out
+      // width fits, otherwise flip. Constraints used the larger side, so the
+      // card can shrink to that side without overlapping the trigger column.
+      final preferRight = _textDirection == TextDirection.ltr;
+      final preferredSpace = preferRight ? _right : _left;
+      final oppositeSpace = preferRight ? _left : _right;
+      final useRight = preferredSpace >= childSize.width
+          ? preferRight
+          : oppositeSpace >= childSize.width
+          ? !preferRight
+          : _right >= _left;
+      final x = useRight
+          ? _anchorRect.right + gap.dx
+          : _anchorRect.left - gap.dx - childSize.width;
+      return Offset(
+        x.clamp(
+          safeRect.left,
+          math.max(safeRect.left, safeRect.right - childSize.width),
+        ),
+        _anchorRect.top.clamp(
+          safeRect.top,
+          math.max(safeRect.top, safeRect.bottom - childSize.height),
+        ),
+      );
+    }
     // Align to the leading text-direction edge of the trigger, clamped to the
     // safe rectangle so both LTR and RTL keep the window margin.
     final rightBound = math.max(
@@ -182,6 +249,7 @@ class StudioAnchorLayout extends SingleChildLayoutDelegate {
         _textDirection != oldDelegate._textDirection ||
         userConstraints != oldDelegate.userConstraints ||
         fixedWidth != oldDelegate.fixedWidth ||
+        placement != oldDelegate.placement ||
         gap != oldDelegate.gap;
   }
 
@@ -196,9 +264,10 @@ class StudioAnchorLayout extends SingleChildLayoutDelegate {
   static bool canAnchorSurface(
     BuildContext context, {
     required GlobalKey anchorKey,
-    Offset gap = const Offset(0, 6),
+    Offset gap = const Offset(6, 6),
     BoxConstraints? userConstraints,
     double? fixedWidth,
+    StudioAnchorPlacement placement = StudioAnchorPlacement.vertical,
   }) {
     if (!context.mounted) {
       return false;
@@ -222,24 +291,17 @@ class StudioAnchorLayout extends SingleChildLayoutDelegate {
       Offset.zero & anchorObject.size,
     );
     final mediaQuery = MediaQuery.maybeOf(context);
-    final allowedRect = _reservedMargin.deflateRect(
-      (mediaQuery?.padding ?? EdgeInsets.zero).deflateRect(
-        (mediaQuery?.viewInsets ?? EdgeInsets.zero).deflateRect(
-          Offset.zero & overlayObject.size,
-        ),
-      ),
-    );
-    final below = allowedRect.bottom - (anchorRect.bottom + gap.dy);
-    final above = (anchorRect.top - gap.dy) - allowedRect.top;
-    if (!hasUsableSpaceIn(
-      safeWidth: allowedRect.width,
-      below: below,
-      above: above,
+    final layout = StudioAnchorLayout(
+      anchorRect,
+      overlayObject.size,
+      mediaQuery?.padding ?? EdgeInsets.zero,
+      mediaQuery?.viewInsets ?? EdgeInsets.zero,
+      Directionality.of(context),
       userConstraints: userConstraints,
       fixedWidth: fixedWidth,
-    )) {
-      return false;
-    }
-    return anchorRect.overlaps(allowedRect);
+      placement: placement,
+      gap: gap,
+    );
+    return layout.anchorVisible && layout.hasUsableSpace;
   }
 }

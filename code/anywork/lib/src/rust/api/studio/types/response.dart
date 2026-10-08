@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
+import 'agent_profile.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
@@ -15,7 +16,7 @@ import 'updater.dart';
 part 'response.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class ArchiveThreadResult {
   final String archivedRootId;
@@ -89,6 +90,98 @@ sealed class BridgeAgentDirectoryState with _$BridgeAgentDirectoryState {
   const factory BridgeAgentDirectoryState.stopped(
     BridgeStoppedResource field0,
   ) = BridgeAgentDirectoryState_Stopped;
+}
+
+/// 单个 Profile 文件的诊断；只排除对应 Profile，不阻断其余配置。
+class BridgeAgentProfileDiagnostic {
+  final String path;
+  final String message;
+
+  const BridgeAgentProfileDiagnostic({
+    required this.path,
+    required this.message,
+  });
+
+  @override
+  int get hashCode => path.hashCode ^ message.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeAgentProfileDiagnostic &&
+          runtimeType == other.runtimeType &&
+          path == other.path &&
+          message == other.message;
+}
+
+/// 完整 Profile 配置与逐文件诊断。
+class BridgeAgentProfilesData {
+  final List<BridgeAgentProfileDto> profiles;
+  final List<BridgeAgentProfileDiagnostic> diagnostics;
+
+  const BridgeAgentProfilesData({
+    required this.profiles,
+    required this.diagnostics,
+  });
+
+  @override
+  int get hashCode => profiles.hashCode ^ diagnostics.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeAgentProfilesData &&
+          runtimeType == other.runtimeType &&
+          profiles == other.profiles &&
+          diagnostics == other.diagnostics;
+}
+
+@freezed
+sealed class BridgeAgentProfilesState with _$BridgeAgentProfilesState {
+  const BridgeAgentProfilesState._();
+
+  const factory BridgeAgentProfilesState.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeAgentProfilesState_Uninitialized;
+  const factory BridgeAgentProfilesState.loading(BridgeLoadingResource field0) =
+      BridgeAgentProfilesState_Loading;
+  const factory BridgeAgentProfilesState.ready({
+    required BridgeReadyResource resource,
+    required BridgeAgentProfilesData value,
+  }) = BridgeAgentProfilesState_Ready;
+  const factory BridgeAgentProfilesState.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeAgentProfilesData value,
+  }) = BridgeAgentProfilesState_Refreshing;
+  const factory BridgeAgentProfilesState.stale({
+    required BridgeStaleResource resource,
+    required BridgeAgentProfilesData value,
+  }) = BridgeAgentProfilesState_Stale;
+  const factory BridgeAgentProfilesState.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeAgentProfilesData value,
+  }) = BridgeAgentProfilesState_Degraded;
+  const factory BridgeAgentProfilesState.failed(BridgeFailedResource field0) =
+      BridgeAgentProfilesState_Failed;
+  const factory BridgeAgentProfilesState.stopped(BridgeStoppedResource field0) =
+      BridgeAgentProfilesState_Stopped;
+}
+
+/// 配置级 Agent Profiles 的 canonical 资源快照；与运行期 Agent directory 互不替代。
+class BridgeAgentProfilesStateSnapshot {
+  final BridgeAgentProfilesState state;
+
+  const BridgeAgentProfilesStateSnapshot({required this.state});
+
+  @override
+  int get hashCode => state.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeAgentProfilesStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          state == other.state;
 }
 
 enum BridgeDirectoryFilter { all, running, attention }
@@ -329,13 +422,13 @@ class BridgeModelPerformanceSample {
           tokensPerSecond == other.tokensPerSecond;
 }
 
+/// 全局模型性能快照：按模型汇总与最近历史窗口，不含按 root 会话费用。
 class BridgeModelPerformanceSnapshot {
   final BigInt revision;
   final PlatformInt64 updatedAt;
   final bool statisticsPending;
   final bool statisticsGap;
   final bool readFailed;
-  final List<BridgeSessionCostSnapshot> sessionCosts;
   final List<BridgeModelPerformanceSummary> summaries;
   final List<BridgeModelPerformanceSample> history;
 
@@ -345,7 +438,6 @@ class BridgeModelPerformanceSnapshot {
     required this.statisticsPending,
     required this.statisticsGap,
     required this.readFailed,
-    required this.sessionCosts,
     required this.summaries,
     required this.history,
   });
@@ -357,7 +449,6 @@ class BridgeModelPerformanceSnapshot {
       statisticsPending.hashCode ^
       statisticsGap.hashCode ^
       readFailed.hashCode ^
-      sessionCosts.hashCode ^
       summaries.hashCode ^
       history.hashCode;
 
@@ -371,7 +462,6 @@ class BridgeModelPerformanceSnapshot {
           statisticsPending == other.statisticsPending &&
           statisticsGap == other.statisticsGap &&
           readFailed == other.readFailed &&
-          sessionCosts == other.sessionCosts &&
           summaries == other.summaries &&
           history == other.history;
 }
@@ -489,6 +579,34 @@ class BridgePersistenceQueueSnapshot {
           lastError == other.lastError &&
           pressurePaused == other.pressurePaused &&
           threads == other.threads;
+}
+
+/// 持久化队列的 typed 快照：发布 revision + 时间基线 + 协调器真实观测。
+///
+/// `updatedAt` 是本次发布的时间基线；展示"最老待保存年龄"由基线与 payload 的现有
+/// age 字段共同表达，不驱动每秒事件或轮询。
+class BridgePersistenceQueueStateSnapshot {
+  final BigInt revision;
+  final PlatformInt64 updatedAt;
+  final BridgePersistenceQueueSnapshot queue;
+
+  const BridgePersistenceQueueStateSnapshot({
+    required this.revision,
+    required this.updatedAt,
+    required this.queue,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ updatedAt.hashCode ^ queue.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePersistenceQueueStateSnapshot &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt &&
+          queue == other.queue;
 }
 
 @freezed
@@ -782,6 +900,50 @@ class BridgeSessionCostSnapshot {
           hasUnpricedUsage == other.hasUnpricedUsage;
 }
 
+/// 一个根会话的作用域费用事实；`cost == null` 是显式清除，不是零费用。
+class BridgeSessionCostsState {
+  final String rootThreadId;
+  final BigInt revision;
+  final PlatformInt64 updatedAt;
+  final bool statisticsPending;
+  final bool statisticsGap;
+  final bool readFailed;
+  final BridgeSessionCostSnapshot? cost;
+
+  const BridgeSessionCostsState({
+    required this.rootThreadId,
+    required this.revision,
+    required this.updatedAt,
+    required this.statisticsPending,
+    required this.statisticsGap,
+    required this.readFailed,
+    this.cost,
+  });
+
+  @override
+  int get hashCode =>
+      rootThreadId.hashCode ^
+      revision.hashCode ^
+      updatedAt.hashCode ^
+      statisticsPending.hashCode ^
+      statisticsGap.hashCode ^
+      readFailed.hashCode ^
+      cost.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSessionCostsState &&
+          runtimeType == other.runtimeType &&
+          rootThreadId == other.rootThreadId &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt &&
+          statisticsPending == other.statisticsPending &&
+          statisticsGap == other.statisticsGap &&
+          readFailed == other.readFailed &&
+          cost == other.cost;
+}
+
 class BridgeSettingsStateData {
   final BigInt modelCatalogRevision;
   final BridgeStudioSettingsDto settings;
@@ -972,8 +1134,11 @@ class BridgeStudioStateSnapshot {
   final BridgeThreadModeCatalogSnapshot threadModeCatalog;
   final BridgeProviderUsageStateSnapshot providerUsage;
   final BridgeModelPerformanceSnapshot modelPerformance;
+  final List<BridgeSessionCostsState> sessionCosts;
   final BridgeUpdaterStateSnapshot updater;
   final BridgePersistenceStateSnapshot persistence;
+  final BridgePersistenceQueueStateSnapshot persistenceQueue;
+  final BridgeAgentProfilesStateSnapshot agentProfiles;
 
   const BridgeStudioStateSnapshot({
     required this.runtime,
@@ -988,8 +1153,11 @@ class BridgeStudioStateSnapshot {
     required this.threadModeCatalog,
     required this.providerUsage,
     required this.modelPerformance,
+    required this.sessionCosts,
     required this.updater,
     required this.persistence,
+    required this.persistenceQueue,
+    required this.agentProfiles,
   });
 
   @override
@@ -1006,8 +1174,11 @@ class BridgeStudioStateSnapshot {
       threadModeCatalog.hashCode ^
       providerUsage.hashCode ^
       modelPerformance.hashCode ^
+      sessionCosts.hashCode ^
       updater.hashCode ^
-      persistence.hashCode;
+      persistence.hashCode ^
+      persistenceQueue.hashCode ^
+      agentProfiles.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1026,8 +1197,11 @@ class BridgeStudioStateSnapshot {
           threadModeCatalog == other.threadModeCatalog &&
           providerUsage == other.providerUsage &&
           modelPerformance == other.modelPerformance &&
+          sessionCosts == other.sessionCosts &&
           updater == other.updater &&
-          persistence == other.persistence;
+          persistence == other.persistence &&
+          persistenceQueue == other.persistenceQueue &&
+          agentProfiles == other.agentProfiles;
 }
 
 @freezed

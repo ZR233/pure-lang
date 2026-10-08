@@ -1,37 +1,41 @@
 part of 'studio_shell.dart';
 
+/// 侧栏紧凑单行条目：标题单行省略，右侧固定状态区与按需快捷操作区。
+///
+/// 快捷操作在悬停或键盘聚焦时可见，但通过 [Visibility] 保持占位，
+/// 出现与消失不挤动标题。触控输入模式下（最近指针输入为触摸/触笔，
+/// 见 `_SidebarState` 的输入模式检测）所有行的操作常显并放大命中区，
+/// 整个侧栏使用同一种输入模式，不做逐行切换。选中使用拿铁底色与
+/// [StudioSelectionMarker] 的细蓝标记。本组件不承载业务状态；状态指示
+/// 由调用方在 [trailing] 中以各自的 canonical 事实组装。
 class _SidebarTile extends StatefulWidget {
   const _SidebarTile({
     required this.selected,
-    required this.icon,
-    required this.iconColor,
     required this.title,
-    this.showTitleTooltip = true,
-    this.titleIcon,
-    required this.subtitle,
-    required this.dense,
     required this.onTap,
     required this.trailing,
-    this.markerColor,
+    this.actions,
+    this.focusNode,
+    this.touchMode = false,
   });
 
   final bool selected;
-  final IconData icon;
-  final Color iconColor;
   final String title;
-
-  /// 是否在标题文本上提供完整名称 Tooltip；存在 recovery issue 时由
-  /// 整行诊断 Tooltip 接管，避免名称提示覆盖诊断。
-  final bool showTitleTooltip;
-
-  /// 标题旁的只读标识（例如会话工作树图标）；不承载可交互状态。
-  final Widget? titleIcon;
-
-  final String subtitle;
-  final bool dense;
   final VoidCallback? onTap;
+
+  /// 右侧常驻状态区（例如会话工作树标识与行级运行状态）。
   final Widget trailing;
-  final Color? markerColor;
+
+  /// 悬停或聚焦时出现的快捷操作；为 null 时不占位。
+  final Widget? actions;
+
+  /// 行本体的真实焦点节点。存在时由外部（按需详情宿主）与锚定面共享同一
+  /// 节点，避免叠加额外可聚焦包装层而改变第一焦点停点；为 null 时由
+  /// [InkWell] 自建内部节点。
+  final FocusNode? focusNode;
+
+  /// 触控输入模式：操作常显，行高与命中区按触控密度放大。
+  final bool touchMode;
 
   @override
   State<_SidebarTile> createState() => _SidebarTileState();
@@ -46,27 +50,7 @@ class _SidebarTileState extends State<_SidebarTile> {
     final foreground = widget.selected
         ? context.colors.onPrimaryContainer
         : context.colors.onSurface;
-    final trailingVisible =
-        widget.markerColor == null || widget.selected || _hovering || _focused;
-    final titleText = Text(
-      widget.title,
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
-      style: context.text.labelLarge?.copyWith(
-        color: foreground,
-        fontWeight: widget.selected ? FontWeight.w600 : FontWeight.w500,
-      ),
-    );
-    final titleContent = widget.titleIcon == null
-        ? titleText
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Flexible(child: titleText),
-              const SizedBox(width: 4),
-              widget.titleIcon!,
-            ],
-          );
+    final actions = widget.actions;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: MouseRegion(
@@ -83,74 +67,56 @@ class _SidebarTileState extends State<_SidebarTile> {
           child: StudioSelectionMarker(
             selected: widget.selected,
             child: InkWell(
+              focusNode: widget.focusNode,
               onFocusChange: (focused) => setState(() => _focused = focused),
               onTap: widget.onTap,
               hoverColor: context.colors.surface.withValues(alpha: 0.72),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(
                   10,
-                  widget.dense ? 6 : 8,
+                  widget.touchMode ? 12 : 7,
                   4,
-                  widget.dense ? 6 : 8,
+                  widget.touchMode ? 12 : 7,
                 ),
                 child: Row(
                   children: [
-                    if (widget.markerColor == null)
-                      Icon(widget.icon, size: 17, color: widget.iconColor)
-                    else
-                      SizedBox(
-                        width: 17,
-                        child: Center(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: widget.markerColor,
-                              borderRadius: BorderRadius.circular(
-                                StudioRadii.pill,
-                              ),
-                            ),
-                            child: const SizedBox.square(dimension: 5),
-                          ),
-                        ),
-                      ),
-                    const SizedBox(width: 10),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          widget.showTitleTooltip
-                              ? Tooltip(
-                                  message: widget.title,
-                                  child: titleContent,
-                                )
-                              : titleContent,
-                          if (widget.subtitle.isNotEmpty) ...[
-                            const SizedBox(height: 1),
-                            Text(
-                              widget.subtitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: context.text.bodySmall?.copyWith(
-                                color: widget.selected
-                                    ? context.colors.onSurfaceVariant
-                                    : context.colors.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    Visibility(
-                      visible: trailingVisible,
-                      maintainSize: true,
-                      maintainAnimation: true,
-                      maintainState: true,
-                      child: IconTheme.merge(
-                        data: IconThemeData(
-                          color: context.colors.onSurfaceVariant,
+                      child: Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.text.labelLarge?.copyWith(
+                          color: foreground,
+                          fontWeight: widget.selected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
                         ),
-                        child: widget.trailing,
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    IconTheme.merge(
+                      data: IconThemeData(
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                      child: widget.trailing,
+                    ),
+                    if (actions != null)
+                      Visibility(
+                        visible:
+                            widget.touchMode ||
+                            widget.selected ||
+                            _hovering ||
+                            _focused,
+                        maintainSize: true,
+                        maintainAnimation: true,
+                        maintainState: true,
+                        child: IconTheme.merge(
+                          data: IconThemeData(
+                            color: context.colors.onSurfaceVariant,
+                          ),
+                          child: actions,
+                        ),
+                      ),
                   ],
                 ),
               ),

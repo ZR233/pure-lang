@@ -61,12 +61,19 @@ pub use protocol::{
     StudioLspStateSnapshot, StudioMcpHealth, StudioMcpServer, StudioMcpServerState,
     StudioMcpStateData, StudioMcpStateSnapshot, StudioModelPerformanceSample,
     StudioModelPerformanceSnapshot, StudioModelPerformanceSummary, StudioPendingPersistence,
-    StudioProductEventEnvelope, StudioProductEventKind, StudioProjectDirectoryData,
-    StudioProjectDirectoryState, StudioPurposeCostSnapshot, StudioRecoveryStateSnapshot,
-    StudioSessionCostSnapshot, StudioSettingsStateSnapshot, StudioShutdownIssue,
-    StudioShutdownOutcome, StudioShutdownProgress, StudioShutdownReport, StudioSkillsStateSnapshot,
-    StudioStartupStage, StudioStateSnapshot, StudioThreadDirectoryData, StudioThreadDirectoryDelta,
+    StudioProductBaseline, StudioProductBaselineState, StudioProductEventEnvelope,
+    StudioProductEventKind, StudioProductFrame, StudioProductTopic, StudioProductTopicScopeError,
+    StudioProjectDirectoryData, StudioProjectDirectoryState, StudioPurposeCostSnapshot,
+    StudioRecoveryStateSnapshot, StudioSessionCostSnapshot, StudioSessionCostsState,
+    StudioSettingsStateSnapshot, StudioShutdownIssue, StudioShutdownOutcome,
+    StudioShutdownProgress, StudioShutdownReport, StudioSkillsStateSnapshot, StudioStartupStage,
+    StudioStateSnapshot, StudioThreadDirectoryData, StudioThreadDirectoryDelta,
     StudioThreadDirectoryPage, StudioThreadDirectoryPageData, StudioThreadDirectoryState,
+};
+
+pub use protocol::{
+    StudioAgentProfileDiagnostic, StudioAgentProfilesData, StudioAgentProfilesStateSnapshot,
+    StudioPersistenceQueueStateSnapshot,
 };
 pub use provider_usage::{
     DeepSeekBalanceInfo, DeepSeekBalanceUsage, FailedProviderUsage, MissingCredentialProviderUsage,
@@ -79,12 +86,13 @@ pub use studio::{
     AttachmentRecord, ChatWindowHandle, ChatWindowStream, PersistenceState,
     PersistenceStateSnapshot, ProductEventBus, ProjectRecord, ProviderUsageStateData,
     ProviderUsageStateSnapshot, ShutdownExternalHook, SkillSearchResult, SkillsStateSnapshot,
-    StudioDatabaseError, StudioHostKind, StudioRecoveryIssue, StudioRecoveryIssueAction,
-    StudioRecoveryIssueCategory, StudioRecoveryIssueScope, StudioRecoveryWorktreeOwner,
-    StudioRuntime, StudioRuntimeLifecycleState, StudioRuntimeOptions, StudioRuntimeSnapshot,
-    StudioRuntimeStateKind, StudioStartNewThreadResponse, StudioStartupError,
-    StudioStartupErrorKind, StudioStartupRecovery, StudioStore, StudioThreadSubscription,
-    StudioUpdateStateSnapshot, StudioWorktreeRecoveryPreview, ThreadRecord,
+    StudioDatabaseError, StudioHostKind, StudioProductTopicSubscription, StudioRecoveryIssue,
+    StudioRecoveryIssueAction, StudioRecoveryIssueCategory, StudioRecoveryIssueScope,
+    StudioRecoveryWorktreeOwner, StudioRuntime, StudioRuntimeLifecycleState, StudioRuntimeOptions,
+    StudioRuntimeSnapshot, StudioRuntimeStateKind, StudioStartNewThreadResponse,
+    StudioStartupError, StudioStartupErrorKind, StudioStartupRecovery, StudioStore,
+    StudioThreadSubscription, StudioUpdateStateSnapshot, StudioWorktreeRecoveryPreview,
+    ThreadRecord,
 };
 pub use updater::{
     StudioUpdate, StudioUpdateAsset, StudioUpdateCancellation, StudioUpdateCheck,

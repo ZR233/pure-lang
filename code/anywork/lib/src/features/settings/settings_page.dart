@@ -14,34 +14,104 @@ import 'settings_instructions_tab.dart';
 import 'settings_lsp_tab.dart';
 import 'settings_mcp_tab.dart';
 import 'settings_provider_tab.dart';
+import 'settings_scope.dart';
 import 'settings_security_tab.dart';
 import 'settings_skills_tab.dart';
 import 'settings_ssh_tab.dart';
 import 'settings_statistics_tab.dart';
 
-class SettingsPage extends ConsumerWidget {
+class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends ConsumerState<SettingsPage> {
+  /// 最近一次可用的 canonical 设置视图。
+  ///
+  /// 后续刷新/重连/失败只保留 last-known 内容，不用整页 loading/error 替换已经可见的
+  /// 导航与各页 UI（含编辑器草稿、筛选与滚动位置）。
+  SettingsPageView? _lastView;
+
+  @override
+  Widget build(BuildContext context) {
     final asyncState = ref.watch(settingsPageProvider);
-    return asyncState.when(
-      loading: () =>
-          const Scaffold(body: Center(child: CircularProgressIndicator())),
-      error: (error, stackTrace) =>
-          Scaffold(body: Center(child: Text(error.toString()))),
-      data: (state) => DefaultTabController(
-        length: _settingsTabs.length,
-        child: Scaffold(
-          backgroundColor: context.colors.surface,
-          body: KeyedSubtree(
-            key: StudioDriverKeys.settingsPage,
-            child: _SettingsScaffold(state: state),
+    final view = asyncState.value;
+    if (view != null) _lastView = view;
+    final resolved = view ?? _lastView;
+    if (resolved == null) {
+      // 仅在首帧尚无任何 canonical 设置视图时占位。
+      return asyncState.when(
+        data: (_) => const SizedBox.shrink(),
+        loading: () =>
+            const Scaffold(body: Center(child: CircularProgressIndicator())),
+        error: (error, stackTrace) =>
+            Scaffold(body: Center(child: Text(error.toString()))),
+      );
+    }
+    return DefaultTabController(
+      length: _settingsTabs.length,
+      child: Scaffold(
+        backgroundColor: context.colors.surface,
+        body: KeyedSubtree(
+          key: StudioDriverKeys.settingsPage,
+          child: _SettingsTabVisibilitySync(
+            child: _SettingsScaffold(state: resolved),
           ),
         ),
       ),
     );
   }
+}
+
+/// 把设置壳的 [DefaultTabController] 当前索引同步到 [settingsVisibleTabProvider]。
+///
+/// 设置壳保活已访问过的 tab，但可见性变化必须让各数据页建立/释放自己的 scope 租约。
+/// provider 写入延到微任务，避免在 build/通知阶段直接改 provider。
+class _SettingsTabVisibilitySync extends ConsumerStatefulWidget {
+  const _SettingsTabVisibilitySync({required this.child});
+
+  final Widget child;
+
+  @override
+  ConsumerState<_SettingsTabVisibilitySync> createState() =>
+      _SettingsTabVisibilitySyncState();
+}
+
+class _SettingsTabVisibilitySyncState
+    extends ConsumerState<_SettingsTabVisibilitySync> {
+  TabController? _controller;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final controller = DefaultTabController.of(context);
+    if (identical(controller, _controller)) return;
+    _controller?.removeListener(_sync);
+    _controller = controller;
+    controller.addListener(_sync);
+    _sync();
+  }
+
+  void _sync() {
+    final controller = _controller;
+    if (controller == null) return;
+    final index = controller.index;
+    Future<void>.microtask(() {
+      if (!mounted) return;
+      ref.read(settingsVisibleTabProvider.notifier).select(index);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_sync);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 const _settingsTabs = [
@@ -106,25 +176,15 @@ class _SettingsScaffold extends StatelessWidget {
         defaultProviderId: state.defaultProviderId,
         modeRoutes: state.modeModelRoutes,
         roles: state.roles,
+        tabIndex: _SettingsTab.providers.index,
       ),
       InstructionsTab(settings: state.instructions),
-      SkillsTab(
-        skills: state.catalogSkillSummaries,
-        fallbackSkillNames: {
-          ...state.activeSkills,
-          ...state.catalogSkills,
-          ...state.skills.disabled,
-        }.toList(),
-        settings: state.skills,
-        projectId: state.selectedProjectId,
-        catalogRevision: state.catalogRevision,
-        tabIndex: _SettingsTab.skills.index,
-      ),
-      AgentsTab(providers: state.providers, roles: state.roles),
-      McpTab(settingsServers: state.mcpServers, state: state.mcpState),
-      LspTab(projectId: state.selectedProjectId, state: state.lspState),
+      SkillsTab(tabIndex: _SettingsTab.skills.index),
+      AgentsTab(tabIndex: _SettingsTab.agents.index),
+      McpTab(tabIndex: _SettingsTab.mcp.index),
+      LspTab(tabIndex: _SettingsTab.lsp.index),
       const SshTab(),
-      StatisticsTab(snapshot: state.modelPerformance),
+      StatisticsTab(tabIndex: _SettingsTab.statistics.index),
       SecurityTab(mode: state.permissionMode),
       GeneralTab(
         settings: state.general,

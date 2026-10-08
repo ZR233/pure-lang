@@ -2,14 +2,17 @@
 //! catalog、provider usage、model performance、updater 与 persistence 状态的
 //! 读取、维护与事件发射。
 
+use std::sync::atomic::Ordering;
+
 use tokio::sync::watch;
 
 use crate::{
     PersistenceStateSnapshot, ProviderUsageStateSnapshot, SkillsStateSnapshot,
     StudioAgentDirectoryData, StudioAgentDirectoryEntry, StudioAgentDirectoryState,
-    StudioLspStateSnapshot, StudioMcpStateSnapshot, StudioModelPerformanceSnapshot,
+    StudioAgentProfilesStateSnapshot, StudioLspStateSnapshot, StudioMcpStateSnapshot,
+    StudioModelPerformanceSnapshot, StudioPersistenceQueueStateSnapshot,
     StudioProductEventEnvelope, StudioProductEventKind, StudioRecoveryStateSnapshot,
-    StudioSettingsStateSnapshot, StudioUpdateStateSnapshot,
+    StudioSessionCostsState, StudioSettingsStateSnapshot, StudioUpdateStateSnapshot,
 };
 
 use super::ProductEventBus;
@@ -72,11 +75,18 @@ impl ProductEventBus {
         self.emit(StudioProductEventKind::SkillsStateChanged(state.into()))
     }
 
+    /// Mode catalog 只在真实注册/装载变化时发布；同一 revision 重复装载不产生事件。
     pub fn emit_thread_mode_catalog(
         &self,
         state: pl_protocol::ThreadModeCatalogSnapshot,
-    ) -> StudioProductEventEnvelope {
-        self.emit(StudioProductEventKind::ThreadModeCatalogChanged(state))
+    ) -> Option<StudioProductEventEnvelope> {
+        let published = self.mode_catalog_revision.load(Ordering::Acquire);
+        if state.revision == 0 || state.revision == published {
+            return None;
+        }
+        self.mode_catalog_revision
+            .store(state.revision, Ordering::Release);
+        Some(self.emit(StudioProductEventKind::ThreadModeCatalogChanged(state)))
     }
 
     pub fn emit_provider_usage_state(
@@ -91,6 +101,21 @@ impl ProductEventBus {
         state: StudioModelPerformanceSnapshot,
     ) -> StudioProductEventEnvelope {
         self.emit(StudioProductEventKind::ModelPerformanceStateChanged(state))
+    }
+
+    /// 发布一个 root 会话的作用域费用事实；清除（`cost == None`）也是显式事件。
+    pub fn emit_session_costs(&self, state: StudioSessionCostsState) -> StudioProductEventEnvelope {
+        self.emit(StudioProductEventKind::SessionCostsChanged(state))
+    }
+
+    /// 发布配置级 Agent Profiles 资源快照。
+    pub fn emit_agent_profiles_state(
+        &self,
+        state: StudioAgentProfilesStateSnapshot,
+    ) -> StudioProductEventEnvelope {
+        self.emit(StudioProductEventKind::AgentProfilesStateChanged(Box::new(
+            state,
+        )))
     }
 
     pub fn emit_updater_state(
@@ -114,6 +139,9 @@ impl ProductEventBus {
         let bus = self.clone();
         let mut threads = bus.store.thread_persistence().subscribe();
         bus.update_persistence(state.borrow().clone(), threads.borrow().clone());
+        bus.update_persistence_queue();
+        // 任务由 runtime 持有并在 shutdown 收束；它自身持有 bus（含 writer），不能依赖
+        // sender 关闭退出。
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -124,8 +152,49 @@ impl ProductEventBus {
                     state.borrow_and_update().clone(),
                     threads.borrow_and_update().clone(),
                 );
+                bus.update_persistence_queue();
             }
         })
+    }
+
+    /// 当前已发布的持久化队列快照；纯查询。
+    ///
+    /// 首帧由构造期 observation 显式建立；读取路径不 emit、不推进 revision。
+    pub fn persistence_queue_state(&self) -> StudioPersistenceQueueStateSnapshot {
+        self.persistence_queue
+            .lock()
+            .expect("persistence queue lock poisoned")
+            .snapshot
+            .clone()
+    }
+
+    /// 把协调器的真实队列观测发布为 typed 快照；值未变化时不提升 revision。
+    ///
+    /// 观测在协调器 watch 唤醒时刷新：队列操作数、字节、在途字节、逐 Thread 水位与
+    /// calls writer 进度都来自协调器；calls 侧只在指标真变时回灌，避免自唤醒循环。
+    fn update_persistence_queue(&self) {
+        let coordinator = self.store.thread_persistence();
+        coordinator.refresh_calls_metrics(self.store.calls().metrics());
+        let queue = coordinator.queue_snapshot();
+        let mut current = self
+            .persistence_queue
+            .lock()
+            .expect("persistence queue lock poisoned");
+        if current.published.as_ref() == Some(&queue) {
+            return;
+        }
+        current.revision = current.revision.saturating_add(1);
+        current.published = Some(queue.clone());
+        current.snapshot = StudioPersistenceQueueStateSnapshot {
+            revision: current.revision,
+            updated_at: super::unix_seconds(),
+            queue,
+        };
+        let snapshot = current.snapshot.clone();
+        drop(current);
+        self.emit(StudioProductEventKind::PersistenceQueueStateChanged(
+            snapshot,
+        ));
     }
 
     fn update_persistence(

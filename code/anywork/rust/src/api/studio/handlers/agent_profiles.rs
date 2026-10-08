@@ -1,34 +1,20 @@
 use crate::api::studio::bridge_runtime::active_bridge;
+use crate::api::studio::convert::runtime::bridge_agent_profiles;
 use crate::api::studio::convert::settings::bridge_settings_snapshot;
 use crate::api::studio::types::{
-    BridgeAgentProfileDto, BridgeAgentWorkspaceMode, BridgeError, BridgeSettingsStateSnapshot,
+    BridgeAgentProfilesStateSnapshot, BridgeAgentWorkspaceMode, BridgeError,
+    BridgeSettingsStateSnapshot,
 };
 
-/// Reads every valid Agent Profile for settings, including disabled profiles.
-/// Built-in profiles are immutable and marked with `system: true`.
-pub async fn read_agent_profiles() -> Result<Vec<BridgeAgentProfileDto>, BridgeError> {
+/// 读取配置 owner 已发布的 Agent Profiles 资源快照（完整配置与逐文件诊断）。
+///
+/// 纯缓存读取，不扫描文件；外部手改 Profile 后需要显式 reload 设置。
+pub async fn read_agent_profiles_state() -> Result<BridgeAgentProfilesStateSnapshot, BridgeError> {
     let bridge = active_bridge().await?;
-    let catalog = bridge.studio.read_agent_profiles()?;
-    Ok(catalog
-        .profiles
-        .into_iter()
-        .map(|profile| BridgeAgentProfileDto {
-            profile_id: profile.profile_id,
-            display_name: profile.display_name,
-            description: profile.description,
-            when_to_use: profile.when_to_use,
-            system_instructions: profile.system_instructions,
-            provider_id: profile.provider_id,
-            model: profile.model,
-            effort: profile.effort,
-            source: profile.source,
-            revision: profile.revision,
-            content_hash: profile.content_hash,
-            system: profile.system,
-            enabled: profile.enabled,
-            workspace_mode: profile.workspace_mode.into(),
-        })
-        .collect())
+    let snapshot = bridge.studio.read_agent_profiles_state()?;
+    Ok(BridgeAgentProfilesStateSnapshot {
+        state: bridge_agent_profiles(snapshot.state),
+    })
 }
 
 /// Enables or disables an immutable built-in Agent Profile.

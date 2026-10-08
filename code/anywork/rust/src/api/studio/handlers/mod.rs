@@ -19,6 +19,7 @@ pub use chat::*;
 pub use external_state::*;
 pub use history::*;
 pub use lifecycle::*;
+pub(crate) use lifecycle::{StartupFrame, startup_attempt_active, subscribe_startup_attempt};
 pub use persistence::*;
 pub use prompt::*;
 pub use providers::*;

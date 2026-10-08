@@ -2,6 +2,7 @@
 //!
 //! 职责划分:
 //! - `builder`: 构造与装配(进程锁、store、config 与各子 runtime);
+//! - `forwarders`: runtime 持有的配置/持久化 watch 转发任务;
 //! - `framework`: agent framework 的启动/关闭、Thread 驻留与订阅访问;
 //! - `transitions`: runtime 状态机的 initialize / start / shutdown 转换;
 //! - `snapshot`: runtime 快照与设置/恢复问题状态发布;
@@ -11,6 +12,7 @@
 
 mod builder;
 mod external_state;
+mod forwarders;
 mod framework;
 mod initialization;
 mod project;

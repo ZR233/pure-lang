@@ -106,6 +106,26 @@ pub(crate) fn bridge_thread_directory_page(
     )
 }
 
+pub(crate) fn bridge_agent_profiles(
+    state: ObservedResource<StudioAgentProfilesData>,
+) -> BridgeAgentProfilesState {
+    concrete_observed!(
+        state,
+        |data| BridgeAgentProfilesData {
+            profiles: data.profiles.into_iter().map(Into::into).collect(),
+            diagnostics: data
+                .diagnostics
+                .into_iter()
+                .map(|diagnostic| BridgeAgentProfileDiagnostic {
+                    path: diagnostic.path,
+                    message: diagnostic.message,
+                })
+                .collect(),
+        },
+        BridgeAgentProfilesState
+    )
+}
+
 pub(crate) fn bridge_agent_directory(
     state: ObservedResource<StudioAgentDirectoryData>,
 ) -> BridgeAgentDirectoryState {

@@ -1,6 +1,6 @@
 part of 'studio_api.dart';
 
-StudioBridgeEventPayload _productPayloadFromFrb(
+ProductTopicEventPayload _productPayloadFromFrb(
   frb.BridgeProductEventPayload payload,
 ) {
   return switch (payload) {
@@ -8,6 +8,7 @@ StudioBridgeEventPayload _productPayloadFromFrb(
       ProjectDirectoryChangedPayload(_projectDirectoryFromFrb(field0)),
     frb.BridgeProductEventPayload_ThreadDirectoryChanged(:final field0) =>
       ThreadDirectoryChangedPayload(
+        revision: field0.revision.toInt(),
         upserted: field0.upserted.map(_threadFromFrb).toList(),
         removed: field0.removed.toList(),
       ),
@@ -29,13 +30,209 @@ StudioBridgeEventPayload _productPayloadFromFrb(
       ProviderUsageStateChangedPayload(_providerUsageStateFromFrb(field0)),
     frb.BridgeProductEventPayload_ModelPerformanceStateChanged(:final field0) =>
       ModelPerformanceStateChangedPayload(_modelPerformanceFromFrb(field0)),
+    frb.BridgeProductEventPayload_SessionCostsChanged(:final field0) =>
+      SessionCostsChangedPayload(_sessionCostsStateFromFrb(field0)),
     frb.BridgeProductEventPayload_UpdaterStateChanged(:final field0) =>
       UpdaterStateChangedPayload(updaterStateFromFrb(field0)),
     frb.BridgeProductEventPayload_PersistenceStateChanged(:final field0) =>
       PersistenceStateChangedPayload(_persistenceStateFromFrb(field0)),
-    frb.BridgeProductEventPayload_Stale(:final laggedEvents) => StalePayload(
-      laggedEvents: laggedEvents.toInt(),
+    frb.BridgeProductEventPayload_PersistenceQueueStateChanged(:final field0) =>
+      PersistenceQueueStateChangedPayload(
+        _persistenceQueueStateFromFrb(field0),
+      ),
+    frb.BridgeProductEventPayload_AgentProfilesStateChanged(:final field0) =>
+      AgentProfilesStateChangedPayload(_agentProfilesStateFromFrb(field0)),
+  };
+}
+
+/// 把 FRB topic 帧信封转换成领域帧；`Closed` 由调用方结束流，返回 null。
+///
+/// [subscribedTopic] 只用于 `Failure` 帧（信封不携带 topic）；Baseline/Data/Lagged
+/// 的 topic 以 owner 声明为准。
+ProductTopicFrame? productTopicFrameFromEnvelope(
+  ProductTopic subscribedTopic,
+  frb_topic_types.BridgeProductTopicStreamEnvelope envelope,
+) {
+  return switch (envelope) {
+    frb_topic_types.BridgeProductTopicStreamEnvelope_Baseline(
+      :final topic,
+      :final revision,
+      :final state,
+    ) =>
+      ProductTopicBaselineFrame(
+        topic: _productTopicFromBridge(topic),
+        revision: revision.toInt(),
+        state: _productBaselineFromFrb(state),
+      ),
+    frb_topic_types.BridgeProductTopicStreamEnvelope_Data(:final event) =>
+      ProductTopicDataFrame(
+        topic: _productPayloadTopicFromBridge(event.payload),
+        event: ProductTopicEventEnvelope(
+          eventId: event.eventId,
+          sequence: event.sequence,
+          createdAt: _dateFromUnix(event.createdAt),
+          payload: _productPayloadFromFrb(event.payload),
+        ),
+      ),
+    frb_topic_types.BridgeProductTopicStreamEnvelope_Lagged(
+      :final topic,
+      :final dropped,
+    ) =>
+      ProductTopicLaggedFrame(
+        topic: _productTopicFromBridge(topic),
+        dropped: dropped.toInt(),
+      ),
+    frb_topic_types.BridgeProductTopicStreamEnvelope_Failure(:final error) =>
+      ProductTopicFailureFrame(
+        topic: subscribedTopic,
+        error: _studioFailure(error),
+      ),
+    frb_topic_types.BridgeProductTopicStreamEnvelope_Closed() => null,
+  };
+}
+
+ProductTopic _productTopicFromBridge(frb_topic_types.BridgeProductTopic topic) {
+  return switch (topic) {
+    frb_topic_types.BridgeProductTopic_ProjectDirectory() =>
+      const ProjectDirectoryTopic(),
+    frb_topic_types.BridgeProductTopic_ThreadDirectory() =>
+      const ThreadDirectoryTopic(),
+    frb_topic_types.BridgeProductTopic_AgentDirectory() =>
+      const AgentDirectoryTopic(),
+    frb_topic_types.BridgeProductTopic_Settings() => const SettingsTopic(),
+    frb_topic_types.BridgeProductTopic_Recovery() => const RecoveryTopic(),
+    frb_topic_types.BridgeProductTopic_Mcp() => const McpTopic(),
+    frb_topic_types.BridgeProductTopic_Lsp() => const LspTopic(),
+    frb_topic_types.BridgeProductTopic_Skills(:final projectId) => SkillsTopic(
+      projectId: projectId,
     ),
+    frb_topic_types.BridgeProductTopic_ThreadModeCatalog() =>
+      const ThreadModeCatalogTopic(),
+    frb_topic_types.BridgeProductTopic_ProviderUsage() =>
+      const ProviderUsageTopic(),
+    frb_topic_types.BridgeProductTopic_ModelPerformance() =>
+      const ModelPerformanceTopic(),
+    frb_topic_types.BridgeProductTopic_SessionCosts(:final rootThreadId) =>
+      SessionCostsTopic(rootThreadId: rootThreadId),
+    frb_topic_types.BridgeProductTopic_Updater() => const UpdaterTopic(),
+    frb_topic_types.BridgeProductTopic_Persistence() =>
+      const PersistenceTopic(),
+    frb_topic_types.BridgeProductTopic_PersistenceQueue() =>
+      const PersistenceQueueTopic(),
+    frb_topic_types.BridgeProductTopic_AgentProfiles() =>
+      const AgentProfilesTopic(),
+  };
+}
+
+ProductTopic _productPayloadTopicFromBridge(
+  frb.BridgeProductEventPayload payload,
+) {
+  return switch (payload) {
+    frb.BridgeProductEventPayload_ProjectDirectoryChanged() =>
+      const ProjectDirectoryTopic(),
+    frb.BridgeProductEventPayload_ThreadDirectoryChanged() =>
+      const ThreadDirectoryTopic(),
+    frb.BridgeProductEventPayload_AgentDirectoryChanged() =>
+      const AgentDirectoryTopic(),
+    frb.BridgeProductEventPayload_SettingsStateChanged() =>
+      const SettingsTopic(),
+    frb.BridgeProductEventPayload_RecoveryStateChanged() =>
+      const RecoveryTopic(),
+    frb.BridgeProductEventPayload_McpStateChanged() => const McpTopic(),
+    frb.BridgeProductEventPayload_LspStateChanged() => const LspTopic(),
+    frb.BridgeProductEventPayload_SkillsStateChanged(:final field0) =>
+      SkillsTopic(projectId: field0.projectId),
+    frb.BridgeProductEventPayload_ThreadModeCatalogChanged() =>
+      const ThreadModeCatalogTopic(),
+    frb.BridgeProductEventPayload_ProviderUsageStateChanged() =>
+      const ProviderUsageTopic(),
+    frb.BridgeProductEventPayload_ModelPerformanceStateChanged() =>
+      const ModelPerformanceTopic(),
+    frb.BridgeProductEventPayload_SessionCostsChanged(:final field0) =>
+      SessionCostsTopic(rootThreadId: field0.rootThreadId),
+    frb.BridgeProductEventPayload_UpdaterStateChanged() => const UpdaterTopic(),
+    frb.BridgeProductEventPayload_PersistenceStateChanged() =>
+      const PersistenceTopic(),
+    frb.BridgeProductEventPayload_PersistenceQueueStateChanged() =>
+      const PersistenceQueueTopic(),
+    frb.BridgeProductEventPayload_AgentProfilesStateChanged() =>
+      const AgentProfilesTopic(),
+  };
+}
+
+frb_topic_types.BridgeProductTopic bridgeProductTopic(ProductTopic topic) {
+  return switch (topic) {
+    ProjectDirectoryTopic() =>
+      const frb_topic_types.BridgeProductTopic.projectDirectory(),
+    ThreadDirectoryTopic() =>
+      const frb_topic_types.BridgeProductTopic.threadDirectory(),
+    AgentDirectoryTopic() =>
+      const frb_topic_types.BridgeProductTopic.agentDirectory(),
+    SettingsTopic() => const frb_topic_types.BridgeProductTopic.settings(),
+    RecoveryTopic() => const frb_topic_types.BridgeProductTopic.recovery(),
+    McpTopic() => const frb_topic_types.BridgeProductTopic.mcp(),
+    LspTopic() => const frb_topic_types.BridgeProductTopic.lsp(),
+    SkillsTopic(:final projectId) => frb_topic_types.BridgeProductTopic.skills(
+      projectId: projectId,
+    ),
+    ThreadModeCatalogTopic() =>
+      const frb_topic_types.BridgeProductTopic.threadModeCatalog(),
+    ProviderUsageTopic() =>
+      const frb_topic_types.BridgeProductTopic.providerUsage(),
+    ModelPerformanceTopic() =>
+      const frb_topic_types.BridgeProductTopic.modelPerformance(),
+    SessionCostsTopic(:final rootThreadId) =>
+      frb_topic_types.BridgeProductTopic.sessionCosts(
+        rootThreadId: rootThreadId,
+      ),
+    UpdaterTopic() => const frb_topic_types.BridgeProductTopic.updater(),
+    PersistenceTopic() =>
+      const frb_topic_types.BridgeProductTopic.persistence(),
+    PersistenceQueueTopic() =>
+      const frb_topic_types.BridgeProductTopic.persistenceQueue(),
+    AgentProfilesTopic() =>
+      const frb_topic_types.BridgeProductTopic.agentProfiles(),
+  };
+}
+
+ProductTopicBaselineState _productBaselineFromFrb(
+  frb_topic_types.BridgeProductBaseline baseline,
+) {
+  return switch (baseline) {
+    frb_topic_types.BridgeProductBaseline_ProjectDirectory(:final field0) =>
+      ProjectDirectoryBaseline(_projectDirectoryFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_ThreadDirectory(:final field0) =>
+      ThreadDirectoryBaseline(_threadDirectoryPageFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_AgentDirectory(:final field0) =>
+      AgentDirectoryBaseline(_agentDirectoryFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_Settings(:final field0) =>
+      SettingsBaseline(_settingsStateFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_Recovery(:final field0) =>
+      RecoveryBaseline(_recoveryStateFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_Mcp(:final field0) => McpBaseline(
+      _mcpStateFromFrb(field0),
+    ),
+    frb_topic_types.BridgeProductBaseline_Lsp(:final field0) => LspBaseline(
+      _lspStateFromFrb(field0),
+    ),
+    frb_topic_types.BridgeProductBaseline_Skills(:final field0) =>
+      SkillsBaseline(_skillsStateFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_ThreadModeCatalog(:final field0) =>
+      ThreadModeCatalogBaseline(_threadModeCatalogFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_ProviderUsage(:final field0) =>
+      ProviderUsageBaseline(_providerUsageStateFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_ModelPerformance(:final field0) =>
+      ModelPerformanceBaseline(_modelPerformanceFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_SessionCosts(:final field0) =>
+      SessionCostsBaseline(_sessionCostsStateFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_Updater(:final field0) =>
+      UpdaterBaseline(updaterStateFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_Persistence(:final field0) =>
+      PersistenceBaseline(_persistenceStateFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_PersistenceQueue(:final field0) =>
+      PersistenceQueueBaseline(_persistenceQueueStateFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_AgentProfiles(:final field0) =>
+      AgentProfilesBaseline(_agentProfilesStateFromFrb(field0)),
   };
 }
 
@@ -157,6 +354,7 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioStateSnapshot value) {
       threads: threadPage.threads,
       nextCursor: threadPage.nextCursor,
       hasMore: threadPage.nextCursor != null,
+      revision: threadPage.revision,
     ),
     agentDirectory: _agentDirectoryFromFrb(value.agentDirectory),
     settingsState: _settingsStateFromFrb(value.settings),
@@ -172,6 +370,14 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioStateSnapshot value) {
     modelPerformance: _modelPerformanceFromFrb(value.modelPerformance),
     updaterState: updaterStateFromFrb(value.updater),
     persistenceState: _persistenceStateFromFrb(value.persistence),
+    persistenceQueueState: _persistenceQueueStateFromFrb(
+      value.persistenceQueue,
+    ),
+    agentProfilesState: _agentProfilesStateFromFrb(value.agentProfiles),
+    sessionCostsByRoot: {
+      for (final session in value.sessionCosts)
+        session.rootThreadId: _sessionCostsStateFromFrb(session),
+    },
     selectedProjectId: null,
     selectedThreadId: null,
   );
@@ -267,6 +473,121 @@ PersistenceQueueSnapshot _persistenceQueueFromFrb(
   );
 }
 
+/// 单个 root 会话的作用域费用状态；`cost == null` 是显式清除。
+SessionCostsStateView _sessionCostsStateFromFrb(
+  frb.BridgeSessionCostsState value,
+) {
+  final updatedAt = value.updatedAt.toInt();
+  return SessionCostsStateView(
+    rootThreadId: value.rootThreadId,
+    revision: value.revision.toInt(),
+    updatedAt: updatedAt == 0 ? null : _dateFromUnix(value.updatedAt),
+    statisticsPending: value.statisticsPending,
+    statisticsGap: value.statisticsGap,
+    readFailed: value.readFailed,
+    cost: value.cost == null
+        ? null
+        : SessionCostView(
+            rootThreadId: value.cost!.rootThreadId,
+            purposeCosts: [
+              for (final cost in value.cost!.purposeCosts)
+                PurposeCostView(
+                  purpose: cost.purpose,
+                  estimatedCosts: [
+                    for (final estimate in cost.estimatedCosts)
+                      RuntimeCostView(
+                        currency: estimate.currency,
+                        amount: estimate.amount,
+                      ),
+                  ],
+                  hasUnpricedUsage: cost.hasUnpricedUsage,
+                ),
+            ],
+            estimatedCosts: [
+              for (final cost in value.cost!.estimatedCosts)
+                RuntimeCostView(currency: cost.currency, amount: cost.amount),
+            ],
+            hasUnpricedUsage: value.cost!.hasUnpricedUsage,
+          ),
+  );
+}
+
+/// 持久化队列 typed 观测（发布 revision + 时间基线 + 协调器真实观测）。
+PersistenceQueueStateView _persistenceQueueStateFromFrb(
+  frb.BridgePersistenceQueueStateSnapshot value,
+) {
+  final updatedAt = value.updatedAt.toInt();
+  return PersistenceQueueStateView(
+    revision: value.revision.toInt(),
+    updatedAt: updatedAt == 0 ? null : _dateFromUnix(value.updatedAt),
+    queue: _persistenceQueueFromFrb(value.queue),
+  );
+}
+
+AgentProfileView _agentProfileFromFrb(frb.BridgeAgentProfileDto profile) {
+  return AgentProfileView(
+    id: profile.profileId,
+    displayName: profile.displayName,
+    description: profile.description,
+    whenToUse: profile.whenToUse,
+    systemInstructions: profile.systemInstructions,
+    providerId: profile.providerId,
+    model: profile.model,
+    effort: profile.effort,
+    source: profile.source,
+    revision: profile.revision,
+    contentHash: profile.contentHash,
+    system: profile.system,
+    enabled: profile.enabled,
+    workspaceMode: switch (profile.workspaceMode) {
+      frb.BridgeAgentWorkspaceMode.unrestricted =>
+        AgentWorkspaceMode.unrestricted,
+      frb.BridgeAgentWorkspaceMode.directory => AgentWorkspaceMode.directory,
+      frb.BridgeAgentWorkspaceMode.worktree => AgentWorkspaceMode.worktree,
+    },
+  );
+}
+
+/// 配置级 Agent Profiles 的 canonical 资源快照。
+AgentProfilesStateView _agentProfilesStateFromFrb(
+  frb.BridgeAgentProfilesStateSnapshot snapshot,
+) {
+  AgentProfilesDataView convert(frb.BridgeAgentProfilesData data) =>
+      AgentProfilesDataView(
+        profiles: data.profiles.map(_agentProfileFromFrb).toList(),
+        diagnostics: [
+          for (final diagnostic in data.diagnostics)
+            AgentProfileDiagnosticView(
+              path: diagnostic.path,
+              message: diagnostic.message,
+            ),
+        ],
+      );
+  return AgentProfilesStateView(
+    state: switch (snapshot.state) {
+      frb.BridgeAgentProfilesState_Uninitialized(:final field0) =>
+        _uninitializedResource(field0),
+      frb.BridgeAgentProfilesState_Loading(:final field0) => _loadingResource(
+        field0,
+      ),
+      frb.BridgeAgentProfilesState_Ready(:final resource, :final value) =>
+        _readyResource(resource, convert(value)),
+      frb.BridgeAgentProfilesState_Refreshing(:final resource, :final value) =>
+        _refreshingResource(resource, convert(value)),
+      frb.BridgeAgentProfilesState_Stale(:final resource, :final value) =>
+        _staleResource(resource, convert(value)),
+      frb.BridgeAgentProfilesState_Degraded(:final resource, :final value) =>
+        _degradedResource(resource, convert(value)),
+      frb.BridgeAgentProfilesState_Failed(:final field0) => _failedResource(
+        field0,
+      ),
+      frb.BridgeAgentProfilesState_Stopped(:final field0) => _stoppedResource(
+        field0,
+      ),
+    },
+  );
+}
+
 ProjectDirectoryState _projectDirectoryFromFrb(
   frb.BridgeProjectDirectoryState snapshot,
 ) {
@@ -301,24 +622,27 @@ ProjectDirectoryState _projectDirectoryFromFrb(
 ThreadDirectoryPage _threadDirectoryPageFromFrb(
   frb.BridgeThreadDirectoryPage snapshot,
 ) {
-  ThreadDirectoryPage convert(frb.BridgeThreadDirectoryPageData data) =>
-      ThreadDirectoryPage(
-        threads: data.threads.map(_threadFromFrb).toList(),
-        nextCursor: data.nextCursor,
-      );
+  ThreadDirectoryPage convert(
+    frb.BridgeThreadDirectoryPageData data,
+    int revision,
+  ) => ThreadDirectoryPage(
+    threads: data.threads.map(_threadFromFrb).toList(),
+    nextCursor: data.nextCursor,
+    revision: revision,
+  );
   final resource = switch (snapshot) {
     frb.BridgeThreadDirectoryPage_Uninitialized(:final field0) =>
       _uninitializedResource<ThreadDirectoryPage>(field0),
     frb.BridgeThreadDirectoryPage_Loading(:final field0) =>
       _loadingResource<ThreadDirectoryPage>(field0),
     frb.BridgeThreadDirectoryPage_Ready(:final resource, :final value) =>
-      _readyResource(resource, convert(value)),
+      _readyResource(resource, convert(value, resource.revision.toInt())),
     frb.BridgeThreadDirectoryPage_Refreshing(:final resource, :final value) =>
-      _refreshingResource(resource, convert(value)),
+      _refreshingResource(resource, convert(value, resource.revision.toInt())),
     frb.BridgeThreadDirectoryPage_Stale(:final resource, :final value) =>
-      _staleResource(resource, convert(value)),
+      _staleResource(resource, convert(value, resource.revision.toInt())),
     frb.BridgeThreadDirectoryPage_Degraded(:final resource, :final value) =>
-      _degradedResource(resource, convert(value)),
+      _degradedResource(resource, convert(value, resource.revision.toInt())),
     frb.BridgeThreadDirectoryPage_Failed(:final field0) =>
       _failedResource<ThreadDirectoryPage>(field0),
     frb.BridgeThreadDirectoryPage_Stopped(:final field0) =>
@@ -640,31 +964,6 @@ ModelPerformanceSnapshotView _modelPerformanceFromFrb(
     statisticsPending: value.statisticsPending,
     statisticsGap: value.statisticsGap,
     readFailed: value.readFailed,
-    sessionCosts: [
-      for (final session in value.sessionCosts)
-        SessionCostView(
-          rootThreadId: session.rootThreadId,
-          purposeCosts: [
-            for (final cost in session.purposeCosts)
-              PurposeCostView(
-                purpose: cost.purpose,
-                estimatedCosts: [
-                  for (final estimate in cost.estimatedCosts)
-                    RuntimeCostView(
-                      currency: estimate.currency,
-                      amount: estimate.amount,
-                    ),
-                ],
-                hasUnpricedUsage: cost.hasUnpricedUsage,
-              ),
-          ],
-          estimatedCosts: [
-            for (final cost in session.estimatedCosts)
-              RuntimeCostView(currency: cost.currency, amount: cost.amount),
-          ],
-          hasUnpricedUsage: session.hasUnpricedUsage,
-        ),
-    ],
     summaries: [
       for (final summary in value.summaries)
         ModelPerformanceSummaryView(

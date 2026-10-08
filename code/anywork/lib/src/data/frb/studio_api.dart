@@ -8,6 +8,11 @@ import 'package:flutter/foundation.dart'
 import '../../domain/models/studio_models.dart';
 import '../../platform/error_log.dart';
 import '../../rust/api/studio.dart' as frb;
+import '../../rust/api/studio/subscription/product_topic.dart' as frb_topic_sub;
+import '../../rust/api/studio/subscription/shutdown.dart' as frb_shutdown_sub;
+import '../../rust/api/studio/subscription/startup.dart' as frb_startup_sub;
+import '../../rust/api/studio/subscription/thread.dart' as frb_thread_sub;
+import '../../rust/api/studio/types/product_topic.dart' as frb_topic_types;
 import '../../rust/api/studio/handlers/chat.dart' as frb_chat;
 import '../../rust/api/studio/types/chat.dart' as frb_chat_types;
 import '../../rust/api/studio/handlers/attachment.dart' as frb_attachment;
@@ -20,7 +25,6 @@ import '../../rust/api/studio/types/thread_activity.dart' as frb_activity;
 import '../../rust/frb_generated.dart';
 import '../../shared/studio_driver_state.dart';
 
-part 'studio_bridge_event.dart';
 part 'studio_thread_stream.dart';
 part 'studio_chat_window.dart';
 part 'studio_api_contract.dart';

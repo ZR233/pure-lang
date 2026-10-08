@@ -12,7 +12,12 @@ typedef ThreadModelRouteUpdateResult = ({
 /// 队列压力（排队操作数、字节、最老待保存年龄、在途字节与最近错误）是诊断观测，不是权威
 /// 会话状态。实现本能力的 API 从后端持久化协调器读取真实值；未实现该能力的 API（例如测试
 /// 替身）不提供该观测，调用方据此显示为未知，而不是编造本地推算值。
+///
+/// `readPersistenceQueueState` 返回 typed wrapper（发布 revision + 时间基线）；
+/// `readPersistenceQueue` 是旧 raw 观测的兼容视图，仅解包 wrapper，不另立事实源。
 abstract interface class PersistenceQueueReader {
+  Future<PersistenceQueueStateView> readPersistenceQueueState();
+
   Future<PersistenceQueueSnapshot> readPersistenceQueue();
 }
 
@@ -25,6 +30,14 @@ abstract class StudioApi {
   Future<SettingsStateSnapshot> refreshModelCatalog(String providerId);
   Future<RecoveryStateSnapshot> retryRecovery();
   Future<ProviderCatalogView> loadProviderCatalog();
+
+  /// 配置级 Agent Profiles 的 canonical 资源快照（含 revision 与逐文件诊断）。
+  Future<AgentProfilesStateView> readAgentProfilesState();
+
+  /// 兼容视图：从 [readAgentProfilesState] 解包 Profile 列表。
+  ///
+  /// 设置页已由 AgentProfiles topic 驱动；本方法仅供尚未迁移的一次性读取，
+  /// 不是第二事实源。
   Future<List<AgentProfileView>> readAgentProfiles();
   Future<SettingsStateSnapshot> setSystemAgentEnabled({
     required int expectedSettingsRevision,
@@ -71,6 +84,9 @@ abstract class StudioApi {
   Future<ArchiveThreadResult> archiveThread(String threadId);
   Future<void> archiveProject(String projectId);
   Future<PersistenceStateSnapshot> retryPersistence();
+
+  /// 重试保存的命令响应仍是 raw 队列观测（不带发布 revision）：不伪造领域水位，
+  /// typed 更新由 PersistenceQueue topic 的后续事件交付。
   Future<PersistenceQueueSnapshot> retryThreadHistory(
     String threadId,
     int faultGeneration,
@@ -111,7 +127,14 @@ abstract class StudioApi {
     required String threadId,
     required ThreadModeId mode,
   });
-  Stream<Object> subscribeProductEvents();
+
+  /// 订阅一个 typed 产品 topic；一次订阅只观察一个领域。
+  ///
+  /// 首帧是 register receiver 之后读取的 canonical Baseline（含领域 revision），
+  /// 随后是携带领域 revision 的 owner 事件；`Lagged` 表示无法证明增量连续，调用方
+  /// 只重建该 topic（cancel 后重新订阅、以新 Baseline 首帧恢复），不做全量重读。
+  Stream<ProductTopicFrame> subscribeProductTopic(ProductTopic topic);
+
   Stream<ThreadStreamFrame> subscribeThread(String threadId);
   Stream<StudioShutdownProgress> subscribeShutdownProgress();
 
@@ -423,30 +446,6 @@ class FrbStudioApi
     return _recoveryStateFromFrb(await _bridgeCall(frb.retryRecovery));
   }
 
-  static void _readStartupPhase() {
-    startupProgress.value = switch (frb.readStartupStage()) {
-      frb.BridgeStartupStage.preparing => StudioStartupPhase.preparing,
-      frb.BridgeStartupStage.waitingForSteps =>
-        StudioStartupPhase.waitingForSteps,
-      frb.BridgeStartupStage.closingResources =>
-        StudioStartupPhase.closingResources,
-      frb.BridgeStartupStage.backingUp => StudioStartupPhase.backingUp,
-      frb.BridgeStartupStage.resetting => StudioStartupPhase.resetting,
-      frb.BridgeStartupStage.startingServices =>
-        StudioStartupPhase.startingServices,
-      frb.BridgeStartupStage.openingStorage =>
-        StudioStartupPhase.openingStorage,
-      frb.BridgeStartupStage.loadingConfiguration =>
-        StudioStartupPhase.loadingConfiguration,
-      frb.BridgeStartupStage.readingProjects =>
-        StudioStartupPhase.readingProjects,
-      frb.BridgeStartupStage.preparingResources =>
-        StudioStartupPhase.preparingResources,
-      frb.BridgeStartupStage.ready => StudioStartupPhase.ready,
-      frb.BridgeStartupStage.failed => StudioStartupPhase.failed,
-    };
-  }
-
   static Future<void>? _initFuture;
   static Future<StudioShutdownReport>? _shutdownFuture;
   // 早期退出封闭的单一 one-shot 结果：首次调用锚定，重复 close / dispose / driver 复用，
@@ -623,30 +622,7 @@ class FrbStudioApi
           // 关闭不触发初始化：RustLib.init() 完成后必须再检查单向闩，绝不再调用
           // native startStudioRuntime，也不发布 ready。
           if (_closing) return;
-          final progress = Timer.periodic(
-            const Duration(milliseconds: 100),
-            (_) => _readStartupPhase(),
-          );
-          try {
-            final runtime = await frb.startStudioRuntime();
-            // 迟到的运行时安装：退出已开始，绝不重新发布运行时或把 UI 拉回 ready。
-            if (_closing) {
-              _runtimeReady = false;
-              return;
-            }
-            _runtimeReady = true;
-            final report = runtime.startupRecovery;
-            startupRecovery.value = report == null
-                ? null
-                : StartupRecoveryReport(
-                    backupPath: report.backupPath,
-                    reason: report.reason,
-                    createdAt: report.createdAt.toInt(),
-                  );
-            startupProgress.value = StudioStartupPhase.ready;
-          } finally {
-            progress.cancel();
-          }
+          await _startStudioRuntimeAttempt();
         }
       } catch (error, stackTrace) {
         _runtimeReady = false;
@@ -668,6 +644,140 @@ class FrbStudioApi
   static void sealForShutdown() {
     _closing = true;
     _dartSubscriptionsSealed = true;
+  }
+
+  /// 一次启动尝试：先领取 attempt token 并订阅其进度流，再安装 runtime。
+  ///
+  /// 进度是事件驱动的当前帧（不再 100ms 轮询），完整映射 bridge 的全部启动阶段；
+  /// `Ready`/`Failed` 为终态，成功后发布主线 `ready`。订阅登记为进程级 owned
+  /// cancellation：启动仍 pending 时进入退出也会由 `cancelDartSubscriptions` 在预算内取消并
+  /// 如实回报；本订阅只服务本次尝试，成功/失败/退出后都异步注销，避免重试累积。
+  /// 同一次尝试失败后，重试会领取新的 token（每次调用都 `prepareStartupAttempt`）。
+  static Future<void> _startStudioRuntimeAttempt() async {
+    frb.BridgeEventSubscription? handle;
+    StreamSubscription<frb.BridgeStartupStage>? progress;
+    // 创建决策是否已完成（native 句柄已产出且可取消）：据此区分「真实 create/prepare
+    // 失败、未产句柄」与「start/发布失败、已持有可取消资源」，避免篡改 create-error owner。
+    var creationDecisionCompleted = false;
+
+    Future<void> release() async {
+      // 只有 native cancel 真正 ACK 才丢弃强引用并 dispose；抛错/超时保留 handle，owner
+      // 仍强持有 opaque 句柄直到确认或进程终止，绝不先清后 cancel 让对象被 GC/finalizer。
+      final activeHandle = handle;
+      if (activeHandle != null) {
+        if (RustLib.instance.initialized) {
+          await activeHandle.cancel();
+        }
+        handle = null;
+        activeHandle.dispose();
+      }
+      // native 已 ACK 后再收束本地进度监听；抛错保留这一活动层，不二次 cancel/dispose。
+      final activeProgress = progress;
+      if (activeProgress != null) {
+        await activeProgress.cancel();
+        progress = null;
+      }
+    }
+
+    final tracked = _DartSubscription(
+      'startup',
+      release,
+      _forgetDartSubscription,
+    );
+    _trackDartSubscription(tracked);
+
+    try {
+      // 退出/封闭/已取消时不新建桥订阅；本订阅是 pre-active，不在此触发 _ensureReady
+      // （否则会递归初始化）。
+      if (tracked.cancelRequested || _closing || _dartSubscriptionsSealed) {
+        return;
+      }
+      final attempt = await _bridgeCall(frb.prepareStartupAttempt);
+      // prepare await 期间退出已开始：不再新建订阅。
+      if (tracked.cancelRequested || _dartSubscriptionsSealed || _closing) {
+        return;
+      }
+      final created = await _bridgeCall(
+        () => frb_startup_sub.subscribeStartupProgress(attempt: attempt),
+      );
+      // await create 期间退出已开始：句柄交给 owner 的 release 闭包，由 registry 持有并等
+      // cancel 完成，绝不在这里自行 dispose 后误报 settled。
+      handle = created;
+      creationDecisionCompleted = true;
+      if (tracked.cancelRequested || _dartSubscriptionsSealed || _closing) {
+        return;
+      }
+      progress = created.startupStream().listen(
+        (stage) {
+          // 关闭/已取消：拒迟到帧，绝不把 UI 拉回启动态。
+          if (tracked.cancelRequested || _closing || _dartSubscriptionsSealed) {
+            return;
+          }
+          startupProgress.value = switch (stage) {
+            frb.BridgeStartupStage.preparing => StudioStartupPhase.preparing,
+            frb.BridgeStartupStage.waitingForSteps =>
+              StudioStartupPhase.waitingForSteps,
+            frb.BridgeStartupStage.closingResources =>
+              StudioStartupPhase.closingResources,
+            frb.BridgeStartupStage.backingUp => StudioStartupPhase.backingUp,
+            frb.BridgeStartupStage.resetting => StudioStartupPhase.resetting,
+            frb.BridgeStartupStage.startingServices =>
+              StudioStartupPhase.startingServices,
+            frb.BridgeStartupStage.openingStorage =>
+              StudioStartupPhase.openingStorage,
+            frb.BridgeStartupStage.loadingConfiguration =>
+              StudioStartupPhase.loadingConfiguration,
+            frb.BridgeStartupStage.readingProjects =>
+              StudioStartupPhase.readingProjects,
+            frb.BridgeStartupStage.preparingResources =>
+              StudioStartupPhase.preparingResources,
+            frb.BridgeStartupStage.ready => StudioStartupPhase.ready,
+            frb.BridgeStartupStage.failed => StudioStartupPhase.failed,
+          };
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          // 进度流失败不改变启动结果：成败由 startStudioRuntime 的返回/异常决定。
+          debugPrint('startup_progress_error error=$error');
+        },
+      );
+      // 创建决策（native 句柄 + 本地监听）已完成：立即开创建闩，令退出/取消能真实 cancel
+      // 已持有资源，而不必等待随后 startStudioRuntime 的长 await。
+      tracked.markCreated();
+      // mark 后若已进入退出或收到取消：不再安装运行时（避免退出期间新建 runtime）。
+      if (tracked.cancelRequested || _dartSubscriptionsSealed || _closing) {
+        return;
+      }
+      final runtime = await frb.startStudioRuntime(attempt: attempt);
+      // 迟到的运行时安装：退出已开始，绝不重新发布运行时或把 UI 拉回 ready。
+      if (_closing) {
+        _runtimeReady = false;
+        return;
+      }
+      _runtimeReady = true;
+      final report = runtime.startupRecovery;
+      startupRecovery.value = report == null
+          ? null
+          : StartupRecoveryReport(
+              backupPath: report.backupPath,
+              reason: report.reason,
+              createdAt: report.createdAt.toInt(),
+            );
+      startupProgress.value = StudioStartupPhase.ready;
+    } catch (error, stackTrace) {
+      // 仅「真实 create/prepare 失败、尚未产出可取消句柄」时记录 create failure：owner 据此
+      // 在取消时如实回报，绝不静默成 Clean。start/发布失败已持有可取消资源，仅原样上报
+      // initFuture typed error，不篡改 create-error owner 语义，cleanup 真成功仍可 forget。
+      if (!creationDecisionCompleted) {
+        tracked.recordCreateFailure(_studioFailure(error), stackTrace);
+      }
+      rethrow;
+    } finally {
+      // 完成创建闩，令取消可推进（含 create 未决 / 迟到的 native 句柄）。
+      tracked.markCreated();
+      // 本订阅只服务本次启动尝试：无论成功、失败还是退出都启动唯一 owned cancellation，
+      // 异步注销以免重试累积；退出路径由 registry 在预算内 join 并写入关闭报告。
+      unawaited(tracked.beginCancel());
+    }
   }
 
   /// 共享同一退出 future：重复调用（重复关窗、dispose、driver）复用同一次收束，绝不复位
@@ -983,36 +1093,16 @@ class FrbStudioApi
   }
 
   @override
-  Future<List<AgentProfileView>> readAgentProfiles() async {
+  Future<AgentProfilesStateView> readAgentProfilesState() async {
     await _ensureReady();
-    final profiles = await _bridgeCall(frb.readAgentProfiles);
-    return profiles
-        .map(
-          (profile) => AgentProfileView(
-            id: profile.profileId,
-            displayName: profile.displayName,
-            description: profile.description,
-            whenToUse: profile.whenToUse,
-            systemInstructions: profile.systemInstructions,
-            providerId: profile.providerId,
-            model: profile.model,
-            effort: profile.effort,
-            source: profile.source,
-            revision: profile.revision,
-            contentHash: profile.contentHash,
-            system: profile.system,
-            enabled: profile.enabled,
-            workspaceMode: switch (profile.workspaceMode) {
-              frb.BridgeAgentWorkspaceMode.unrestricted =>
-                AgentWorkspaceMode.unrestricted,
-              frb.BridgeAgentWorkspaceMode.directory =>
-                AgentWorkspaceMode.directory,
-              frb.BridgeAgentWorkspaceMode.worktree =>
-                AgentWorkspaceMode.worktree,
-            },
-          ),
-        )
-        .toList(growable: false);
+    return _agentProfilesStateFromFrb(
+      await _bridgeCall(frb.readAgentProfilesState),
+    );
+  }
+
+  @override
+  Future<List<AgentProfileView>> readAgentProfiles() async {
+    return (await readAgentProfilesState()).data.profiles;
   }
 
   @override
@@ -1344,11 +1434,16 @@ class FrbStudioApi
   }
 
   @override
-  Future<PersistenceQueueSnapshot> readPersistenceQueue() async {
+  Future<PersistenceQueueStateView> readPersistenceQueueState() async {
     await _ensureReady();
-    return _persistenceQueueFromFrb(
+    return _persistenceQueueStateFromFrb(
       await _bridgeCall(frb.readPersistenceQueue),
     );
+  }
+
+  @override
+  Future<PersistenceQueueSnapshot> readPersistenceQueue() async {
+    return (await readPersistenceQueueState()).queue;
   }
 
   @override
@@ -1514,7 +1609,9 @@ class FrbStudioApi
         if (tracked.cancelRequested) {
           return;
         }
-        final created = await _bridgeCall(frb.subscribeShutdownProgress);
+        final created = await _bridgeCall(
+          frb_shutdown_sub.subscribeShutdownProgress,
+        );
         handle = created;
         // 取消在 create 期间到达：不派发任何事件，句柄交给 owner 的 release 真实 cancel。
         if (tracked.cancelRequested) {
@@ -1639,10 +1736,11 @@ class FrbStudioApi
   }
 
   @override
-  Stream<Object> subscribeProductEvents() {
-    late final StreamController<Object> controller;
+  Stream<ProductTopicFrame> subscribeProductTopic(ProductTopic topic) {
+    late final StreamController<ProductTopicFrame> controller;
     frb.BridgeEventSubscription? handle;
-    StreamSubscription<frb.BridgeProductStreamEnvelope>? subscription;
+    StreamSubscription<frb_topic_types.BridgeProductTopicStreamEnvelope>?
+    subscription;
 
     Future<void> release() async {
       // 只有 native cancel 真正 ACK 才丢弃强引用并 dispose；抛错/超时保留 handle，owner
@@ -1681,31 +1779,27 @@ class FrbStudioApi
         if (tracked.cancelRequested || _dartSubscriptionsSealed || _closing) {
           return;
         }
-        final created = await _bridgeCall(frb.createProductSubscription);
+        final created = await _bridgeCall(
+          () => frb_topic_sub.createProductTopicSubscription(
+            topic: bridgeProductTopic(topic),
+          ),
+        );
         // await create 期间关闭：句柄交给 owner 的 release 闭包，由 registry 持有并等
         // cancel 完成，绝不在这里自行 dispose 后误报 settled。
         handle = created;
         if (tracked.cancelRequested || _dartSubscriptionsSealed || _closing) {
           return;
         }
-        final recovery = await _bridgeCall(frb.readRecoveryState);
-        if (tracked.cancelRequested || _dartSubscriptionsSealed || _closing) {
-          return;
-        }
-        controller.add(
-          StudioBridgeEvent(
-            payload: RecoveryStateChangedPayload(
-              _recoveryStateFromFrb(recovery),
-            ),
-          ),
-        );
-        subscription = created.productStream().listen(
-          (envelope) => envelope.when(
-            data: (event) =>
-                controller.add(StudioBridgeEvent.fromProduct(event)),
-            failure: (error) => controller.addError(_studioFailure(error)),
-            closed: controller.close,
-          ),
+        subscription = created.productTopicStream().listen(
+          (envelope) {
+            if (envelope
+                is frb_topic_types.BridgeProductTopicStreamEnvelope_Closed) {
+              controller.close();
+              return;
+            }
+            final frame = productTopicFrameFromEnvelope(topic, envelope);
+            if (frame != null) controller.add(frame);
+          },
           onError: (Object error, StackTrace stackTrace) =>
               controller.addError(_studioFailure(error), stackTrace),
           onDone: controller.close,
@@ -1726,7 +1820,7 @@ class FrbStudioApi
       }
     }
 
-    controller = StreamController<Object>(
+    controller = StreamController<ProductTopicFrame>(
       onListen: () => unawaited(start()),
       onCancel: () async {
         try {
@@ -1784,7 +1878,7 @@ class FrbStudioApi
           return;
         }
         final created = await _bridgeCall(
-          () => frb.subscribeThread(threadId: threadId),
+          () => frb_thread_sub.subscribeThread(threadId: threadId),
         );
         // await create 期间关闭：句柄交给 owner 的 release 闭包，由 registry 持有并等
         // cancel 完成，绝不在这里自行 dispose 后误报 settled。

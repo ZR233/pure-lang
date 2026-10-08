@@ -7,7 +7,7 @@ use crate::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
 use super::model_catalog::{self, Observation};
-use super::{ConfigStore, StudioConfig};
+use super::{AgentProfilesResource, AgentProfilesSnapshot, ConfigStore, StudioConfig};
 use pl_model::config::ProviderId;
 use pl_protocol::studio::StudioModelCatalogStatus;
 use std::collections::BTreeMap;
@@ -21,6 +21,8 @@ pub struct ConfigRuntime {
     command_lock: Arc<Mutex<()>>,
     state: Arc<RwLock<RuntimeState>>,
     catalog_updates: tokio::sync::broadcast::Sender<CatalogChange>,
+    /// 配置 owner 持有的 canonical Agent Profiles 资源；命令路径扫描，查询只读缓存。
+    profiles: AgentProfilesResource,
 }
 
 struct RuntimeState {
@@ -97,6 +99,8 @@ impl ConfigRuntime {
         let config = model_catalog::effective(&desired, &observations)?;
         config.validate_declarations()?;
         super::AgentProfileCatalog::validate_for_startup(store.paths(), &config)?;
+        // canonical Agent Profiles 资源：启动卸载一次扫描，之后查询/订阅只读缓存。
+        let profiles = AgentProfilesResource::new(store.paths(), &config);
         let (catalog_updates, _) = tokio::sync::broadcast::channel(64);
         Ok(Self {
             store,
@@ -114,6 +118,7 @@ impl ConfigRuntime {
                 },
                 observations,
             })),
+            profiles,
         })
     }
 
@@ -125,16 +130,22 @@ impl ConfigRuntime {
             .map_err(|_| config_runtime_poisoned())
     }
 
-    /// 从独立 TOML 目录发现本次可用的 Agent Profile。
+    /// 从已发布缓存取得启用 Profile 的执行视图；不扫描文件。
     pub fn agent_profiles(&self) -> ConfigRuntimeResult<super::AgentProfileCatalog> {
-        let config = self.read()?.config;
-        Ok(super::AgentProfileCatalog::discover(
-            self.store.paths(),
-            &config,
-        ))
+        Ok(self.profiles.read().catalog.enabled_only())
     }
 
-    /// Resolves an enabled Profile and its model from the same snapshot; performs profile-file IO.
+    /// 读取已发布的 Agent Profiles 资源快照（完整配置与诊断）；纯缓存读取。
+    pub fn agent_profiles_snapshot(&self) -> ConfigRuntimeResult<AgentProfilesSnapshot> {
+        Ok(self.profiles.read())
+    }
+
+    /// 订阅 Agent Profiles 资源变更唤醒；值为最新 revision。
+    pub fn subscribe_agent_profiles(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.profiles.subscribe()
+    }
+
+    /// Resolves an enabled Profile and its model from the same snapshot; reads the published cache.
     ///
     /// # Errors
     /// Returns unknown/disabled Profile, configuration or provider route errors.
@@ -148,7 +159,7 @@ impl ConfigRuntime {
             ).into());
         }
         let snapshot = self.read()?;
-        let catalog = super::AgentProfileCatalog::discover(self.store.paths(), &snapshot.config);
+        let catalog = self.profiles.read().catalog.enabled_only();
         let profile = catalog
             .profiles
             .into_iter()
@@ -165,15 +176,6 @@ impl ConfigRuntime {
             profile,
             route,
         })
-    }
-
-    /// 返回设置页使用的 Profile；其中包含被禁用的内置 Profile。
-    pub fn agent_profiles_for_settings(&self) -> ConfigRuntimeResult<super::AgentProfileCatalog> {
-        let config = self.read()?.config;
-        Ok(super::AgentProfileCatalog::discover_for_settings(
-            self.store.paths(),
-            &config,
-        ))
     }
 
     /// 原子创建或替换一个用户 Agent Profile 文件。
@@ -197,6 +199,10 @@ impl ConfigRuntime {
             ..current
         };
         state.snapshot = next.clone();
+        drop(state);
+        // 配置命令采用一次新的目录扫描；资源未变化时不提升 revision、不通知观察者。
+        // scan 不持有 state 写锁（与 `update` / `reload_from_disk` 一致）。
+        self.profiles.adopt_scan(self.store.paths(), &next.config);
         Ok(next)
     }
 
@@ -256,6 +262,9 @@ impl ConfigRuntime {
         state.desired = next_config;
         state.observations = next_observations;
         state.snapshot = next.clone();
+        drop(state);
+        // 配置命令采用一次新的目录扫描；资源未变化时不提升 revision、不通知观察者。
+        self.profiles.adopt_scan(self.store.paths(), &next.config);
         Ok(next)
     }
 
@@ -294,6 +303,9 @@ impl ConfigRuntime {
         state.desired = desired;
         state.observations = next_observations;
         state.snapshot = next.clone();
+        drop(state);
+        // 显式重扫；目录未变化时不提升 revision。
+        self.profiles.adopt_scan(self.store.paths(), &next.config);
         Ok(next)
     }
 }

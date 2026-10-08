@@ -8,63 +8,9 @@ class StudioReduceResult {
   final String? resyncThreadId;
 }
 
-/// Product stream reducer.
-///
-/// Thread-local turn, item, interaction, and runtime facts are deliberately
-/// excluded. They are applied only through [applyThreadSnapshot] and
-/// [applyThreadUpdate].
-StudioReduceResult reduceStudioEvent(
-  StudioState current,
-  StudioBridgeEvent event,
-) {
-  return switch (event.payload) {
-    ProjectDirectoryChangedPayload(:final state) => StudioReduceResult(
-      applyProjectDirectory(current, state),
-    ),
-    ThreadDirectoryChangedPayload(:final upserted, :final removed) =>
-      StudioReduceResult(
-        applyThreadDirectoryDelta(
-          current,
-          upserted: upserted,
-          removed: removed,
-        ),
-      ),
-    AgentDirectoryChangedPayload(:final state) => StudioReduceResult(
-      applyAgentDirectory(current, state),
-    ),
-    SettingsStateChangedPayload(:final state) => StudioReduceResult(
-      applySettingsState(current, state),
-    ),
-    RecoveryStateChangedPayload(:final state) => StudioReduceResult(
-      applyRecoveryState(current, state),
-    ),
-    McpStateChangedPayload(:final state) => StudioReduceResult(
-      applyMcpState(current, state),
-    ),
-    LspStateChangedPayload(:final state) => StudioReduceResult(
-      applyLspState(current, state),
-    ),
-    SkillsStateChangedPayload(:final state) => StudioReduceResult(
-      applySkillsState(current, state),
-    ),
-    ThreadModeCatalogChangedPayload(:final state) => StudioReduceResult(
-      applyThreadModeCatalog(current, state),
-    ),
-    ProviderUsageStateChangedPayload(:final state) => StudioReduceResult(
-      applyProviderUsageState(current, state),
-    ),
-    ModelPerformanceStateChangedPayload(:final state) => StudioReduceResult(
-      applyModelPerformanceState(current, state),
-    ),
-    UpdaterStateChangedPayload(:final state) => StudioReduceResult(
-      applyUpdaterState(current, state),
-    ),
-    PersistenceStateChangedPayload(:final state) => StudioReduceResult(
-      applyPersistenceState(current, state),
-    ),
-    StalePayload() => StudioReduceResult(current),
-  };
-}
+/// Product topic 帧的领域分发入口在 `studio_topic_reducer.dart`；本文件保留
+/// 单领域 apply 函数。Thread-local turn、item、interaction 与 runtime 事实
+/// 刻意不在此处：它们只经 [applyThreadSnapshot] 与 [applyThreadUpdate] 应用。
 
 StudioState applyModelPerformanceState(
   StudioState current,
@@ -80,6 +26,42 @@ StudioState applyPersistenceState(
 ) {
   if (next.revision <= current.persistenceState.revision) return current;
   return current.copyWith(persistenceState: next);
+}
+
+/// 进程级持久化队列诊断：按发布 revision 前进，旧观测被拒绝。
+StudioState applyPersistenceQueueState(
+  StudioState current,
+  PersistenceQueueStateView next,
+) {
+  final previous = current.persistenceQueueState;
+  if (previous != null && next.revision <= previous.revision) return current;
+  return current.copyWith(persistenceQueueState: next);
+}
+
+/// 配置级 Agent Profiles 资源快照：按资源 revision 前进。
+StudioState applyAgentProfilesState(
+  StudioState current,
+  AgentProfilesStateView next,
+) {
+  final previous = current.agentProfilesState;
+  if (previous != null && next.revision <= previous.revision) return current;
+  return current.copyWith(agentProfilesState: next);
+}
+
+/// 按 root 会话作用域的费用状态：`cost == null` 是显式清除的 canonical 事实，
+/// 作为条目保留（调用方与零费用区分展示），不因清费用移除观测。
+StudioState applySessionCostsState(
+  StudioState current,
+  SessionCostsStateView next,
+) {
+  final previous = current.sessionCostsByRoot[next.rootThreadId];
+  if (previous != null && next.revision <= previous.revision) return current;
+  return current.copyWith(
+    sessionCostsByRoot: {
+      ...current.sessionCostsByRoot,
+      next.rootThreadId: next,
+    },
+  );
 }
 
 /// Thread snapshot 只替换当前状态：thread 身份、revision、activeTurn、pending
@@ -757,15 +739,33 @@ StudioState applyProjectDirectory(
   );
 }
 
+/// 目录基线首页：以基线首页为准、保留已加载更远页，revision 拒旧。
+StudioState applyThreadDirectoryBaseline(
+  StudioState current,
+  ThreadDirectoryPage page, {
+  required int revision,
+}) {
+  final window = current.threadDirectory.applyBaselinePage(
+    page,
+    revision: revision,
+  );
+  if (identical(window, current.threadDirectory)) return current;
+  return current.copyWith(threadDirectory: window);
+}
+
+/// 目录增量：携带领域 revision，旧事实被拒绝；同 revision 幂等合并。
 StudioState applyThreadDirectoryDelta(
   StudioState current, {
+  required int revision,
   required List<StudioThread> upserted,
   required List<String> removed,
 }) {
   final window = current.threadDirectory.applyDelta(
+    revision: revision,
     upserted: upserted,
     removed: removed,
   );
+  if (identical(window, current.threadDirectory)) return current;
   final upsertedById = {for (final thread in upserted) thread.id: thread};
   final removedSet = removed.toSet();
   // 分页窗口不是完整目录：选中线程只在被显式移除（归档/清理）时才回退，

@@ -27,10 +27,14 @@ pub struct BridgeStudioStateSnapshot {
     pub thread_mode_catalog: BridgeThreadModeCatalogSnapshot,
     pub provider_usage: BridgeProviderUsageStateSnapshot,
     pub model_performance: BridgeModelPerformanceSnapshot,
+    pub session_costs: Vec<BridgeSessionCostsState>,
     pub updater: BridgeUpdaterStateSnapshot,
     pub persistence: BridgePersistenceStateSnapshot,
+    pub persistence_queue: BridgePersistenceQueueStateSnapshot,
+    pub agent_profiles: BridgeAgentProfilesStateSnapshot,
 }
 
+/// 全局模型性能快照：按模型汇总与最近历史窗口，不含按 root 会话费用。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeModelPerformanceSnapshot {
@@ -39,9 +43,21 @@ pub struct BridgeModelPerformanceSnapshot {
     pub statistics_pending: bool,
     pub statistics_gap: bool,
     pub read_failed: bool,
-    pub session_costs: Vec<BridgeSessionCostSnapshot>,
     pub summaries: Vec<BridgeModelPerformanceSummary>,
     pub history: Vec<BridgeModelPerformanceSample>,
+}
+
+/// 一个根会话的作用域费用事实；`cost == null` 是显式清除，不是零费用。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSessionCostsState {
+    pub root_thread_id: String,
+    pub revision: u64,
+    pub updated_at: i64,
+    pub statistics_pending: bool,
+    pub statistics_gap: bool,
+    pub read_failed: bool,
+    pub cost: Option<BridgeSessionCostSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -111,6 +127,18 @@ pub enum BridgeModelMatchState {
 pub struct BridgePersistenceStateSnapshot {
     pub revision: u64,
     pub state: BridgePersistenceState,
+}
+
+/// 持久化队列的 typed 快照：发布 revision + 时间基线 + 协调器真实观测。
+///
+/// `updatedAt` 是本次发布的时间基线；展示"最老待保存年龄"由基线与 payload 的现有
+/// age 字段共同表达，不驱动每秒事件或轮询。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgePersistenceQueueStateSnapshot {
+    pub revision: u64,
+    pub updated_at: i64,
+    pub queue: BridgePersistenceQueueSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -190,6 +218,54 @@ pub struct BridgeThreadPersistenceSnapshot {
     pub in_flight_bytes: u64,
     pub last_error: Option<String>,
     pub pressure_paused: bool,
+}
+
+/// 配置级 Agent Profiles 的 canonical 资源快照；与运行期 Agent directory 互不替代。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeAgentProfilesStateSnapshot {
+    pub state: BridgeAgentProfilesState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeAgentProfilesState {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeAgentProfilesData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeAgentProfilesData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeAgentProfilesData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeAgentProfilesData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+/// 完整 Profile 配置与逐文件诊断。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeAgentProfilesData {
+    pub profiles: Vec<super::agent_profile::BridgeAgentProfileDto>,
+    pub diagnostics: Vec<BridgeAgentProfileDiagnostic>,
+}
+
+/// 单个 Profile 文件的诊断；只排除对应 Profile，不阻断其余配置。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeAgentProfileDiagnostic {
+    pub path: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

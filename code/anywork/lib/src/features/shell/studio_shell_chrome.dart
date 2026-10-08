@@ -198,11 +198,11 @@ class _SessionOpenWorkspaceMenuState
       onSelected: (target) {
         switch (target) {
           case _WorkspaceTarget.vsCode:
-            _openVsCode(project, thread);
+            _openThreadWorkspaceInVsCode(context, ref, project, thread);
           case _WorkspaceTarget.zed:
-            _openZed(project, thread);
+            _openThreadWorkspaceInZed(context, ref, project, thread);
           case _WorkspaceTarget.terminal:
-            _openTerminal(project, thread);
+            _openThreadWorkspaceInTerminal(context, ref, project, thread);
         }
       },
       childFocusNode: _triggerFocusNode,
@@ -280,139 +280,172 @@ class _SessionOpenWorkspaceMenuState
       errorBuilder: (_, error, stackTrace) => Icon(fallback, size: 20),
     );
   }
+}
 
-  /// 终端不可用的原因按宿主终端入口说明，不猜测其他已安装终端。
-  String _terminalUnavailableReason(BuildContext context) {
-    if (isWindowsPlatform) {
-      return context.l10n.sessionTerminalUnavailableWindows;
-    }
-    if (isLinuxPlatform) {
-      return context.l10n.sessionTerminalUnavailableLinux;
-    }
-    return context.l10n.sessionTerminalUnavailableGeneric;
+/// 终端不可用的原因按宿主终端入口说明，不猜测其他已安装终端；
+/// 页眉菜单与侧栏会话菜单共用。
+String _terminalUnavailableReason(BuildContext context) {
+  if (isWindowsPlatform) {
+    return context.l10n.sessionTerminalUnavailableWindows;
   }
-
-  Future<void> _openVsCode(StudioProject project, StudioThread thread) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    final l10n = context.l10n;
-    // launcher 必须在首个 await 前读取；widget 卸载后再访问 ref 会抛错。
-    final launcher = ref.read(vsCodeLauncherProvider);
-    String? uri;
-    String? failure;
-    if (project.sshAlias case final alias?) {
-      try {
-        final servers = await ref.read(studioApiProvider).listSshServers();
-        // await 恢复后先确认 widget 仍在，再继续启动或反馈 UI。
-        if (!mounted) return;
-        final server = servers
-            .where((server) => server.alias == alias)
-            .firstOrNull;
-        if (server == null) {
-          failure = l10n.sessionOpenServerMissing;
-        } else {
-          uri = buildRemoteVsCodeFolderUri(
-            alias: server.alias,
-            remotePath: thread.workspacePath,
-          );
-        }
-      } on Object {
-        failure = l10n.sessionVsCodeOpenFailed;
-      }
-    } else {
-      uri = buildLocalVsCodeFolderUri(thread.workspacePath);
-    }
-    if (uri != null) {
-      try {
-        await launcher(uri);
-      } on Object {
-        failure = l10n.sessionVsCodeOpenFailed;
-      }
-    }
-    if (failure != null && mounted && messenger != null && messenger.mounted) {
-      messenger.showSnackBar(SnackBar(content: Text(failure)));
-    }
+  if (isLinuxPlatform) {
+    return context.l10n.sessionTerminalUnavailableLinux;
   }
+  return context.l10n.sessionTerminalUnavailableGeneric;
+}
 
-  Future<void> _openZed(StudioProject project, StudioThread thread) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    final l10n = context.l10n;
-    // launcher 必须在首个 await 前读取；widget 卸载后再访问 ref 会抛错。
-    final launcher = ref.read(zedLauncherProvider);
-    ZedWorkspaceTarget? target;
-    String? failure;
-    if (project.sshAlias case final alias?) {
-      try {
-        final servers = await ref.read(studioApiProvider).listSshServers();
-        // await 恢复后先确认 widget 仍在，再继续启动或反馈 UI。
-        if (!mounted) return;
-        final server = servers
-            .where((server) => server.alias == alias)
-            .firstOrNull;
-        if (server == null) {
-          failure = l10n.sessionOpenServerMissing;
-        } else {
-          target = RemoteSshZedWorkspaceTarget(
-            alias: server.alias,
-            remotePath: thread.workspacePath,
-          );
-        }
-      } on Object {
-        failure = l10n.sessionZedOpenFailed;
+/// 会话级「在 VS Code 打开工作区」：目标始终由会话 canonical
+/// `workspacePath` 与项目 SSH 别名决定，远端复用 `~/.ssh/config` 真实
+/// 配置；失败通过 SnackBar 反馈，不新增后端能力。供会话页眉菜单与侧栏
+/// 会话菜单共用。
+Future<void> _openThreadWorkspaceInVsCode(
+  BuildContext context,
+  WidgetRef ref,
+  StudioProject project,
+  StudioThread thread,
+) async {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final l10n = context.l10n;
+  // launcher 必须在首个 await 前读取；context 失效后再访问 ref 会抛错。
+  final launcher = ref.read(vsCodeLauncherProvider);
+  String? uri;
+  String? failure;
+  if (project.sshAlias case final alias?) {
+    try {
+      final servers = await ref.read(studioApiProvider).listSshServers();
+      // await 恢复后先确认 context 仍在，再继续启动或反馈 UI。
+      if (!context.mounted) return;
+      final server = servers
+          .where((server) => server.alias == alias)
+          .firstOrNull;
+      if (server == null) {
+        failure = l10n.sessionOpenServerMissing;
+      } else {
+        uri = buildRemoteVsCodeFolderUri(
+          alias: server.alias,
+          remotePath: thread.workspacePath,
+        );
       }
-    } else {
-      target = LocalZedWorkspaceTarget(directory: thread.workspacePath);
+    } on Object {
+      failure = l10n.sessionVsCodeOpenFailed;
     }
-    if (target != null) {
-      try {
-        await launcher(target);
-      } on Object {
-        failure = l10n.sessionZedOpenFailed;
-      }
-    }
-    if (failure != null && mounted && messenger != null && messenger.mounted) {
-      messenger.showSnackBar(SnackBar(content: Text(failure)));
+  } else {
+    uri = buildLocalVsCodeFolderUri(thread.workspacePath);
+  }
+  if (uri != null) {
+    try {
+      await launcher(uri);
+    } on Object {
+      failure = l10n.sessionVsCodeOpenFailed;
     }
   }
+  if (failure != null &&
+      context.mounted &&
+      messenger != null &&
+      messenger.mounted) {
+    messenger.showSnackBar(SnackBar(content: Text(failure)));
+  }
+}
 
-  Future<void> _openTerminal(StudioProject project, StudioThread thread) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    final l10n = context.l10n;
-    // launcher 必须在首个 await 前读取；widget 卸载后再访问 ref 会抛错。
-    final launcher = ref.read(terminalLauncherProvider);
-    HostTerminalTarget? target;
-    String? failure;
-    if (project.sshAlias case final alias?) {
-      try {
-        final servers = await ref.read(studioApiProvider).listSshServers();
-        // await 恢复后先确认 widget 仍在，再继续启动或反馈 UI。
-        if (!mounted) return;
-        final server = servers
-            .where((server) => server.alias == alias)
-            .firstOrNull;
-        if (server == null) {
-          failure = l10n.sessionOpenServerMissing;
-        } else {
-          target = RemoteSshTerminalTarget(
-            alias: server.alias,
-            remotePath: thread.workspacePath,
-          );
-        }
-      } on Object {
-        failure = l10n.sessionTerminalOpenFailed;
+/// 会话级「在 Zed 打开工作区」，与 [_openThreadWorkspaceInVsCode] 共享
+/// 同一 canonical 打开目标语义。
+Future<void> _openThreadWorkspaceInZed(
+  BuildContext context,
+  WidgetRef ref,
+  StudioProject project,
+  StudioThread thread,
+) async {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final l10n = context.l10n;
+  // launcher 必须在首个 await 前读取；context 失效后再访问 ref 会抛错。
+  final launcher = ref.read(zedLauncherProvider);
+  ZedWorkspaceTarget? target;
+  String? failure;
+  if (project.sshAlias case final alias?) {
+    try {
+      final servers = await ref.read(studioApiProvider).listSshServers();
+      // await 恢复后先确认 context 仍在，再继续启动或反馈 UI。
+      if (!context.mounted) return;
+      final server = servers
+          .where((server) => server.alias == alias)
+          .firstOrNull;
+      if (server == null) {
+        failure = l10n.sessionOpenServerMissing;
+      } else {
+        target = RemoteSshZedWorkspaceTarget(
+          alias: server.alias,
+          remotePath: thread.workspacePath,
+        );
       }
-    } else {
-      target = LocalHostTerminalTarget(directory: thread.workspacePath);
+    } on Object {
+      failure = l10n.sessionZedOpenFailed;
     }
-    if (target != null) {
-      try {
-        await launcher(target);
-      } on Object {
-        failure = l10n.sessionTerminalOpenFailed;
+  } else {
+    target = LocalZedWorkspaceTarget(directory: thread.workspacePath);
+  }
+  if (target != null) {
+    try {
+      await launcher(target);
+    } on Object {
+      failure = l10n.sessionZedOpenFailed;
+    }
+  }
+  if (failure != null &&
+      context.mounted &&
+      messenger != null &&
+      messenger.mounted) {
+    messenger.showSnackBar(SnackBar(content: Text(failure)));
+  }
+}
+
+/// 会话级「在终端打开工作区」，与 [_openThreadWorkspaceInVsCode] 共享
+/// 同一 canonical 打开目标语义。
+Future<void> _openThreadWorkspaceInTerminal(
+  BuildContext context,
+  WidgetRef ref,
+  StudioProject project,
+  StudioThread thread,
+) async {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final l10n = context.l10n;
+  // launcher 必须在首个 await 前读取；context 失效后再访问 ref 会抛错。
+  final launcher = ref.read(terminalLauncherProvider);
+  HostTerminalTarget? target;
+  String? failure;
+  if (project.sshAlias case final alias?) {
+    try {
+      final servers = await ref.read(studioApiProvider).listSshServers();
+      // await 恢复后先确认 context 仍在，再继续启动或反馈 UI。
+      if (!context.mounted) return;
+      final server = servers
+          .where((server) => server.alias == alias)
+          .firstOrNull;
+      if (server == null) {
+        failure = l10n.sessionOpenServerMissing;
+      } else {
+        target = RemoteSshTerminalTarget(
+          alias: server.alias,
+          remotePath: thread.workspacePath,
+        );
       }
+    } on Object {
+      failure = l10n.sessionTerminalOpenFailed;
     }
-    if (failure != null && mounted && messenger != null && messenger.mounted) {
-      messenger.showSnackBar(SnackBar(content: Text(failure)));
+  } else {
+    target = LocalHostTerminalTarget(directory: thread.workspacePath);
+  }
+  if (target != null) {
+    try {
+      await launcher(target);
+    } on Object {
+      failure = l10n.sessionTerminalOpenFailed;
     }
+  }
+  if (failure != null &&
+      context.mounted &&
+      messenger != null &&
+      messenger.mounted) {
+    messenger.showSnackBar(SnackBar(content: Text(failure)));
   }
 }
 
@@ -797,28 +830,6 @@ String _agentDisplayName(BuildContext context, StudioThread thread) {
     return thread.isRoot ? context.l10n.roleEmpty : thread.id;
   }
   return context.roleLabel(role);
-}
-
-String _threadSubtitle(
-  BuildContext context,
-  StudioThread thread,
-  String? modeDisplayName,
-) {
-  final status = switch (thread.status) {
-    ThreadStatusView.idle => context.l10n.settingsLspActivityIdle,
-    ThreadStatusView.queued => context.l10n.agentDetailStatusQueued,
-    ThreadStatusView.running ||
-    ThreadStatusView.waitingTool => context.l10n.sidebarRunning,
-    ThreadStatusView.waitingInteraction => context.l10n.sidebarAttention,
-    ThreadStatusView.cancelling => context.l10n.agentDetailStatusInterrupted,
-    ThreadStatusView.closing => context.l10n.agentDetailStatusClosing,
-    ThreadStatusView.closed => context.l10n.agentDetailStatusShutdown,
-    ThreadStatusView.faulted => context.l10n.agentDetailStatusErrored,
-  };
-  final hour = thread.updatedAt.hour.toString().padLeft(2, '0');
-  final minute = thread.updatedAt.minute.toString().padLeft(2, '0');
-  final date = '${thread.updatedAt.month}/${thread.updatedAt.day}';
-  return '$status · $date $hour:$minute';
 }
 
 class _Footer extends StatelessWidget {

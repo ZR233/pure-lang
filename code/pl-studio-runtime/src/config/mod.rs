@@ -5,6 +5,7 @@
 
 mod agent_profile;
 mod instruction;
+mod profiles_resource;
 pub use instruction::{DEFAULT_PROJECT_DOC_MAX_BYTES, InstructionsConfig};
 mod credential;
 mod execution;
@@ -41,6 +42,7 @@ pub use pl_tool::mcp::config::McpServerSourceKind;
 pub use pl_tool::mcp::config::McpServerStatusKind;
 pub use pl_tool::mcp::config::McpServerTransport;
 pub use pl_tool::mcp::config::validate_mcp_identifier;
+pub use profiles_resource::{AgentProfilesResource, AgentProfilesSnapshot};
 
 pub use pl_model::config::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot, ResolvedAgentProfile};

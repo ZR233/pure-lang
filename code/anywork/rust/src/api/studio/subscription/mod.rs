@@ -1,3 +1,24 @@
+//! Studio 订阅句柄与任务注册表：按订阅种类拆分到同目录子模块。
+//!
+//! - `thread`：Thread 状态流（Turn/活动/交互/运行时；内容走 ChatView 窗口）。
+//! - `product_topic`：typed 产品 topic 订阅（首帧基线 + 该领域事件）。
+//! - `shutdown`：关机进度广播。
+//! - `startup`：pre-active 启动进度 watch，独立于 installed bridge。
+//!
+//! 本模块只保留共用的句柄、取消令牌、owner-published completion 机制与注册表；各订阅
+//! 的具体 producer/sink 在对应子模块构造。不存在无作用域的 GUI 全事件订阅：GUI transport
+//! 必须使用 typed topic 订阅。
+
+pub(crate) mod product_topic;
+pub(crate) mod shutdown;
+pub(crate) mod startup;
+pub(crate) mod thread;
+
+pub use product_topic::create_product_topic_subscription;
+pub use shutdown::subscribe_shutdown_progress;
+pub use startup::subscribe_startup_progress;
+pub use thread::subscribe_thread;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
@@ -10,31 +31,19 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::studio::bridge_runtime::{active_bridge, current_bridge};
-use crate::api::studio::convert::event::bridge_product_event;
-use crate::api::studio::convert::thread_stream::bridge_thread_update;
+use crate::api::studio::bridge_runtime::current_bridge;
+use crate::api::studio::handlers::StartupFrame;
 use crate::api::studio::types::{
-    BridgeError, BridgeProductEventEnvelope, BridgeShutdownIssue, BridgeShutdownProgress,
+    BridgeError, BridgeProductTopicStreamEnvelope, BridgeShutdownIssue,
     BridgeThreadSubscriptionUpdate,
 };
-use crate::frb_generated::StreamSink;
 use pl_studio_runtime::StudioShutdownProgress;
 
+/// Thread 状态流的交付信封。
 #[derive(Debug, Clone)]
 pub enum BridgeThreadStreamEnvelope {
     Data {
         update: Box<BridgeThreadSubscriptionUpdate>,
-    },
-    Failure {
-        error: BridgeError,
-    },
-    Closed,
-}
-
-#[derive(Debug, Clone)]
-pub enum BridgeProductStreamEnvelope {
-    Data {
-        event: Box<BridgeProductEventEnvelope>,
     },
     Failure {
         error: BridgeError,
@@ -164,29 +173,38 @@ fn owned_completion(
     .shared()
 }
 
+/// 一个订阅句柄：取消令牌 + producer/sink 任务与一次性接收端。
 pub struct BridgeEventSubscription {
     inner: Arc<BridgeSubscriptionInner>,
 }
 
-struct BridgeSubscriptionInner {
+pub(crate) struct BridgeSubscriptionInner {
     id: u64,
     kind: BridgeSubscriptionKind,
     cancel: CancellationToken,
     producer_task: Mutex<Option<SubscriptionCompletion>>,
     sink_task: Mutex<Option<SubscriptionCompletion>>,
     thread_receiver: Mutex<Option<mpsc::Receiver<BridgeThreadStreamEnvelope>>>,
-    product_receiver: Mutex<Option<mpsc::Receiver<BridgeProductStreamEnvelope>>>,
+    product_topic_receiver: Mutex<Option<mpsc::Receiver<BridgeProductTopicStreamEnvelope>>>,
     shutdown_receiver: Mutex<Option<tokio::sync::broadcast::Receiver<StudioShutdownProgress>>>,
+    startup_receiver: Mutex<Option<tokio::sync::watch::Receiver<StartupFrame>>>,
     /// Owner-published completion facts for the producer/sink tasks; also the non-blocking pruning
     /// predicate for the registry strong owner.
     facts: Arc<SubscriptionCompletionFacts>,
 }
 
 #[derive(Debug, Clone)]
-enum BridgeSubscriptionKind {
-    Thread { thread_id: String },
-    Product,
+pub(crate) enum BridgeSubscriptionKind {
+    Thread {
+        thread_id: String,
+    },
+    ProductTopic {
+        topic: crate::api::studio::types::BridgeProductTopic,
+    },
     Shutdown,
+    Startup {
+        attempt: u64,
+    },
 }
 
 /// Builds one typed shutdown issue for a subscription-cancellation failure.
@@ -228,92 +246,6 @@ impl BridgeEventSubscription {
             ))
         })
     }
-
-    pub async fn thread_stream(
-        &self,
-        sink: StreamSink<BridgeThreadStreamEnvelope>,
-    ) -> Result<(), BridgeError> {
-        if !matches!(self.inner.kind, BridgeSubscriptionKind::Thread { .. }) {
-            return Err(BridgeError::invalid_argument(
-                "product subscription cannot open a Thread stream",
-            ));
-        }
-        let mut receiver = self
-            .inner
-            .thread_receiver
-            .lock()
-            .await
-            .take()
-            .ok_or_else(|| {
-                BridgeError::invalid_argument("Thread stream can only be opened once")
-            })?;
-        let cancel = self.inner.cancel.clone();
-        let id = self.inner.id;
-        let facts = Arc::clone(&self.inner.facts);
-        self.inner.facts.sink.store(OWNED_PENDING, Ordering::SeqCst);
-        let task = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = cancel.cancelled() => break,
-                    envelope = receiver.recv() => {
-                        let Some(envelope) = envelope else {
-                            break;
-                        };
-                        if sink.add(envelope).is_err() {
-                            cancel.cancel();
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-        *self.inner.sink_task.lock().await =
-            Some(owned_completion(task, id, facts, SubscriptionOwner::Sink));
-        Ok(())
-    }
-
-    pub async fn product_stream(
-        &self,
-        sink: StreamSink<BridgeProductStreamEnvelope>,
-    ) -> Result<(), BridgeError> {
-        if !matches!(self.inner.kind, BridgeSubscriptionKind::Product) {
-            return Err(BridgeError::invalid_argument(
-                "Thread subscription cannot open a product stream",
-            ));
-        }
-        let mut receiver = self
-            .inner
-            .product_receiver
-            .lock()
-            .await
-            .take()
-            .ok_or_else(|| {
-                BridgeError::invalid_argument("product stream can only be opened once")
-            })?;
-        let cancel = self.inner.cancel.clone();
-        let id = self.inner.id;
-        let facts = Arc::clone(&self.inner.facts);
-        self.inner.facts.sink.store(OWNED_PENDING, Ordering::SeqCst);
-        let task = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = cancel.cancelled() => break,
-                    envelope = receiver.recv() => {
-                        let Some(envelope) = envelope else {
-                            break;
-                        };
-                        if sink.add(envelope).is_err() {
-                            cancel.cancel();
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-        *self.inner.sink_task.lock().await =
-            Some(owned_completion(task, id, facts, SubscriptionOwner::Sink));
-        Ok(())
-    }
 }
 
 impl Drop for BridgeEventSubscription {
@@ -333,14 +265,18 @@ impl BridgeSubscriptionInner {
             BridgeSubscriptionKind::Thread { thread_id } => {
                 tracing::trace!(subscription_id = self.id, %thread_id, "cancelling Studio Thread subscription");
             }
+            BridgeSubscriptionKind::ProductTopic { topic } => {
+                tracing::trace!(
+                    subscription_id = self.id,
+                    ?topic,
+                    "cancelling Studio product topic subscription"
+                );
+            }
             BridgeSubscriptionKind::Shutdown => {
                 tracing::trace!("cancelling Studio shutdown progress subscription");
             }
-            BridgeSubscriptionKind::Product => {
-                tracing::trace!(
-                    subscription_id = self.id,
-                    "cancelling Studio product subscription"
-                );
+            BridgeSubscriptionKind::Startup { attempt } => {
+                tracing::trace!(attempt, "cancelling Studio startup progress subscription");
             }
         }
         self.cancel.cancel();
@@ -383,6 +319,22 @@ impl BridgeSubscriptionInner {
     }
 }
 
+/// Lossless 有界发送：取消与接收端关闭都能立即结束等待。
+///
+/// 返回 `true` 表示已交付；`false` 表示已取消或接收端已关闭。producer 的在途帧与
+/// 终态 `Closed` 帧共用本入口，保证 `cancel_and_wait` 不会因为消费者离开后仍满的
+/// 通道而永久阻塞。
+pub(crate) async fn send_or_cancel<T>(
+    cancel: &CancellationToken,
+    sender: &mpsc::Sender<T>,
+    value: T,
+) -> bool {
+    tokio::select! {
+        _ = cancel.cancelled() => false,
+        result = sender.send(value) => result.is_ok(),
+    }
+}
+
 pub(crate) struct BridgeTaskRegistry {
     next_id: AtomicU64,
     /// Strong owners of live bridge-owned content subscriptions.
@@ -410,7 +362,7 @@ impl BridgeTaskRegistry {
         }
     }
 
-    async fn register(&self, inner: &Arc<BridgeSubscriptionInner>) {
+    pub(crate) async fn register(&self, inner: &Arc<BridgeSubscriptionInner>) {
         let mut subscriptions = self.subscriptions.lock().await;
         // Strong owners are retained until the subscription actually settles; a settled entry is
         // pruned here so a normal cancelled subscription never pins residency across resubscribes.
@@ -436,7 +388,7 @@ impl BridgeTaskRegistry {
     /// Signals every registered, bridge-owned content subscription **without joining** any of them.
     ///
     /// The exit contract requires a real ACK for every owner before the runtime finalizes. The
-    /// bridge-owned content streams (Thread/product) are signalled here; the caller-owned
+    /// bridge-owned content streams (Thread/product topic) are signalled here; the caller-owned
     /// shutdown-progress stream is deliberately absent: it uses a self-held token that the early
     /// broadcast must not end, and the caller (Dart) cancels it and reports any unconfirmed ACK
     /// through `external_issues`. Its ACK still gates `Clean` because those external issues are
@@ -549,259 +501,4 @@ enum SubscriptionStop {
     Stopped,
     Failed(Arc<String>),
     TimedOut,
-}
-
-/// 订阅一个 Thread 的**状态流**：Turn、活动、交互、运行时与 lagged 帧。
-///
-/// 内容不在状态流里：条目与流式正文只由 ChatView 窗口交付。内容帧的过滤发生在生产端
-/// （runtime 的状态流不再转发 `Item*`/`Delta`），所以这里没有“末端丢弃内容帧”的开关，客户端
-/// 也不会再因为过滤内容帧而看到 revision 空洞。状态流的 envelope `revision` 只按状态帧递增，
-/// 与 ChatView 窗口的内容 revision 相互独立。
-pub async fn subscribe_thread(thread_id: String) -> Result<BridgeEventSubscription, BridgeError> {
-    let bridge = active_bridge().await?;
-    let mut events = bridge
-        .studio
-        .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
-            thread_id: thread_id.clone(),
-        })
-        .await?;
-    let cancel = bridge.shutdown.child_token();
-    let producer_cancel = cancel.clone();
-    let (sender, receiver) = mpsc::channel(128);
-    // 订阅 = 观察者注册：producer 存活期间钉住驻留，防止 LRU 淘汰正在被
-    // 观察的线程（淘汰后该订阅流会永久静默——bus 无事件也无关闭信号）。
-    let residency_pin = bridge.studio.pin_thread(&thread_id);
-    let producer_task = tokio::spawn(async move {
-        let _residency_pin = residency_pin;
-        loop {
-            tokio::select! {
-                _ = producer_cancel.cancelled() => break,
-                frame = events.recv() => {
-                    let frame = match frame {
-                        Ok(Some(frame)) => frame,
-                        Ok(None) => break,
-                        Err(error) => {
-                            let _ = sender.send(BridgeThreadStreamEnvelope::Failure {
-                                error: BridgeError::from(error),
-                            }).await;
-                            break;
-                        }
-                    };
-                    match bridge_thread_update(frame) {
-                        Ok(Some(update)) => {
-                            if sender
-                                .send(BridgeThreadStreamEnvelope::Data {
-                                    update: Box::new(update),
-                                })
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(error) => {
-                            let _ = sender
-                                .send(BridgeThreadStreamEnvelope::Failure {
-                                    error: BridgeError::from(error),
-                                })
-                                .await;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        let _ = sender.send(BridgeThreadStreamEnvelope::Closed).await;
-    });
-    let id = bridge.subscriptions.next_id();
-    let facts = Arc::new(SubscriptionCompletionFacts::default());
-    facts.producer.store(OWNED_PENDING, Ordering::SeqCst);
-    let inner = Arc::new(BridgeSubscriptionInner {
-        id,
-        kind: BridgeSubscriptionKind::Thread { thread_id },
-        cancel,
-        producer_task: Mutex::new(Some(owned_completion(
-            producer_task,
-            id,
-            Arc::clone(&facts),
-            SubscriptionOwner::Producer,
-        ))),
-        sink_task: Mutex::new(None),
-        thread_receiver: Mutex::new(Some(receiver)),
-        product_receiver: Mutex::new(None),
-        shutdown_receiver: Mutex::new(None),
-        facts,
-    });
-    bridge.subscriptions.register(&inner).await;
-    Ok(BridgeEventSubscription { inner })
-}
-
-pub async fn create_product_subscription() -> Result<BridgeEventSubscription, BridgeError> {
-    let bridge = active_bridge().await?;
-    let mut events = bridge.studio.subscribe_product();
-    let cancel = bridge.shutdown.child_token();
-    let producer_cancel = cancel.clone();
-    let (sender, receiver) = mpsc::channel(64);
-    let producer_task = tokio::spawn(async move {
-        loop {
-            let envelope = tokio::select! {
-                _ = producer_cancel.cancelled() => break,
-                event = events.recv() => match event {
-                    Ok(event) => match bridge_product_event(event) {
-                        Ok(event) => BridgeProductStreamEnvelope::Data {
-                            event: Box::new(event),
-                        },
-                        Err(error) => {
-                            tracing::warn!(
-                                error_bytes = error.to_string().len(),
-                                "failed to convert Studio product event"
-                            );
-                            continue;
-                        }
-                    },
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(events)) => {
-                        BridgeProductStreamEnvelope::Data {
-                            event: Box::new(BridgeProductEventEnvelope::stale(events)),
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            };
-            if sender.send(envelope).await.is_err() {
-                break;
-            }
-        }
-        let _ = sender.send(BridgeProductStreamEnvelope::Closed).await;
-    });
-    let id = bridge.subscriptions.next_id();
-    let facts = Arc::new(SubscriptionCompletionFacts::default());
-    facts.producer.store(OWNED_PENDING, Ordering::SeqCst);
-    let inner = Arc::new(BridgeSubscriptionInner {
-        id,
-        kind: BridgeSubscriptionKind::Product,
-        cancel,
-        producer_task: Mutex::new(Some(owned_completion(
-            producer_task,
-            id,
-            Arc::clone(&facts),
-            SubscriptionOwner::Producer,
-        ))),
-        sink_task: Mutex::new(None),
-        thread_receiver: Mutex::new(None),
-        product_receiver: Mutex::new(Some(receiver)),
-        shutdown_receiver: Mutex::new(None),
-        facts,
-    });
-    bridge.subscriptions.register(&inner).await;
-    Ok(BridgeEventSubscription { inner })
-}
-
-/// Creates an independently owned shutdown-progress subscription, including during retry.
-///
-/// The caller cancels this handle before cancelling its Dart stream, so failed shutdown
-/// does not leave stream cancellation waiting for a future progress event.
-///
-/// When no runtime is installed yet, this returns an immediately-closed (empty) stream without
-/// triggering initialization or surfacing a spurious `NotInitialized`. A second instance whose
-/// startup failed has no owner and must observe a benign "no progress" stream, not a fake error.
-pub async fn subscribe_shutdown_progress() -> Result<BridgeEventSubscription, BridgeError> {
-    let (id, events) = match current_bridge() {
-        Some(bridge) => (
-            bridge.subscriptions.next_id(),
-            bridge.studio.subscribe_shutdown_progress().await,
-        ),
-        None => {
-            // `broadcast::channel(1)` with the sender dropped hands back a receiver that is already
-            // closed, so the shutdown stream ends immediately without owning any runtime.
-            let (sender, receiver) = tokio::sync::broadcast::channel(1);
-            drop(sender);
-            (0, receiver)
-        }
-    };
-    Ok(BridgeEventSubscription {
-        inner: Arc::new(BridgeSubscriptionInner {
-            id,
-            kind: BridgeSubscriptionKind::Shutdown,
-            cancel: CancellationToken::new(),
-            producer_task: Mutex::new(None),
-            sink_task: Mutex::new(None),
-            thread_receiver: Mutex::new(None),
-            product_receiver: Mutex::new(None),
-            shutdown_receiver: Mutex::new(Some(events)),
-            facts: Arc::new(SubscriptionCompletionFacts::default()),
-        }),
-    })
-}
-
-impl BridgeEventSubscription {
-    /// Opens this shutdown subscription once. Cancellation closes the native sink.
-    ///
-    /// # Errors
-    /// Rejects another subscription kind or a second stream consumer.
-    pub async fn shutdown_stream(
-        &self,
-        sink: StreamSink<BridgeShutdownProgress>,
-    ) -> Result<(), BridgeError> {
-        let mut events = self
-            .inner
-            .shutdown_receiver
-            .lock()
-            .await
-            .take()
-            .ok_or_else(|| {
-                BridgeError::invalid_argument(
-                    "shutdown stream can only be opened once on a shutdown subscription",
-                )
-            })?;
-        let cancel = self.inner.cancel.clone();
-        let id = self.inner.id;
-        let facts = Arc::clone(&self.inner.facts);
-        let mut task = self.inner.sink_task.lock().await;
-        if cancel.is_cancelled() {
-            return Ok(());
-        }
-        facts.sink.store(OWNED_PENDING, Ordering::SeqCst);
-        let sink_task = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = cancel.cancelled() => break,
-                    progress = events.recv() => match progress {
-                        Ok(progress) => {
-                            let stopped = progress.is_stopped();
-                            if sink.add(bridge_shutdown_progress(progress)).is_err() || stopped { break; }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    }
-                }
-            }
-        });
-        *task = Some(owned_completion(
-            sink_task,
-            id,
-            facts,
-            SubscriptionOwner::Sink,
-        ));
-        Ok(())
-    }
-}
-
-fn bridge_shutdown_progress(progress: StudioShutdownProgress) -> BridgeShutdownProgress {
-    match progress {
-        StudioShutdownProgress::StoppingSubscriptions(_) => {
-            BridgeShutdownProgress::StoppingSubscriptions
-        }
-        StudioShutdownProgress::CancellingTurns(_) => BridgeShutdownProgress::CancellingTurns,
-        StudioShutdownProgress::FlushingPersistence(progress) => {
-            BridgeShutdownProgress::FlushingPersistence {
-                pending_commits: progress.pending_commits(),
-            }
-        }
-        StudioShutdownProgress::StoppingAgents(_) => BridgeShutdownProgress::StoppingAgents,
-        StudioShutdownProgress::StoppingMcp(_) => BridgeShutdownProgress::StoppingMcp,
-        StudioShutdownProgress::StoppingLsp(_) => BridgeShutdownProgress::StoppingLsp,
-        StudioShutdownProgress::Stopped(_) => BridgeShutdownProgress::Stopped,
-    }
 }

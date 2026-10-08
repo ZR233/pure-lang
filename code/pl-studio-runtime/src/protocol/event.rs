@@ -35,8 +35,11 @@ pub enum StudioProductEventKind {
     ThreadModeCatalogChanged(ThreadModeCatalogSnapshot),
     ProviderUsageStateChanged(ProviderUsageStateSnapshot),
     ModelPerformanceStateChanged(StudioModelPerformanceSnapshot),
+    SessionCostsChanged(StudioSessionCostsState),
     UpdaterStateChanged(StudioUpdateStateSnapshot),
     PersistenceStateChanged(PersistenceStateSnapshot),
+    PersistenceQueueStateChanged(StudioPersistenceQueueStateSnapshot),
+    AgentProfilesStateChanged(Box<StudioAgentProfilesStateSnapshot>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -109,7 +112,10 @@ pub struct StudioSettingsStateSnapshot {
     pub state: ObservedResource<pl_protocol::studio::StudioSettingsSnapshot>,
 }
 
-/// 产品级会话费用与模型性能快照。
+/// 全局模型性能快照：按模型汇总与最近历史窗口，不含按 root 会话费用。
+///
+/// 会话费用由 [`StudioSessionCostsState`] 按 root 作用域单独交付；两者由同一计费
+/// owner 投影生成，不同 scope 数据互不覆盖。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioModelPerformanceSnapshot {
@@ -121,9 +127,63 @@ pub struct StudioModelPerformanceSnapshot {
     pub statistics_gap: bool,
     #[serde(default)]
     pub read_failed: bool,
-    pub session_costs: Vec<StudioSessionCostSnapshot>,
     pub summaries: Vec<StudioModelPerformanceSummary>,
     pub history: Vec<StudioModelPerformanceSample>,
+}
+
+/// 一个根会话的作用域费用事实；revision 按 root 独立单调。
+///
+/// `cost == None` 是显式清除（例如该 root 已归档），不是零费用；清除断言该 root
+/// 不再向此 scope 的消费者提供费用事实。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioSessionCostsState {
+    pub root_thread_id: String,
+    pub revision: u64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub statistics_pending: bool,
+    #[serde(default)]
+    pub statistics_gap: bool,
+    #[serde(default)]
+    pub read_failed: bool,
+    pub cost: Option<StudioSessionCostSnapshot>,
+}
+
+/// 进程级持久化队列快照：协调器真实观测值加上发布 revision 与时间戳基线。
+///
+/// `updated_at` 是本次发布的时间基线；本地展示"最老待保存年龄"由该基线与 payload
+/// 携带的现有 age 字段共同表达，不驱动每秒事件或轮询。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioPersistenceQueueStateSnapshot {
+    pub revision: u64,
+    pub updated_at: i64,
+    pub queue: pl_protocol::PersistenceQueueSnapshot,
+}
+
+/// 配置级 Agent Profiles 的 canonical 资源快照（完整配置与逐文件诊断）。
+///
+/// 由配置 owner 持有；与运行期 Agent directory 是两个领域，互不替代。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioAgentProfilesStateSnapshot {
+    pub state: ObservedResource<StudioAgentProfilesData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioAgentProfilesData {
+    pub profiles: Vec<pl_protocol::AgentProfileSnapshot>,
+    pub diagnostics: Vec<StudioAgentProfileDiagnostic>,
+}
+
+/// 单个 Profile 文件的诊断；只排除对应 Profile，不阻断其余配置。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioAgentProfileDiagnostic {
+    pub path: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -256,6 +316,9 @@ pub struct StudioStateSnapshot {
     pub thread_mode_catalog: ThreadModeCatalogSnapshot,
     pub provider_usage: ProviderUsageStateSnapshot,
     pub model_performance: StudioModelPerformanceSnapshot,
+    pub session_costs: Vec<StudioSessionCostsState>,
     pub updater: StudioUpdateStateSnapshot,
     pub persistence: PersistenceStateSnapshot,
+    pub persistence_queue: StudioPersistenceQueueStateSnapshot,
+    pub agent_profiles: StudioAgentProfilesStateSnapshot,
 }

@@ -72,12 +72,30 @@ void _applyShutdownFaultOverride() {
 
 late final ProviderContainer _container;
 Future<StudioShutdownReport>? _shutdownTask;
+ProviderSubscription<ProductTopicLeaseBundle?>? _driverStatisticsScope;
+ProviderSubscription<ProductTopicLease?>? _driverQueueScope;
 bool _recordingFrames = false;
 int _frameCount = 0;
 int _slowFrames = 0;
 int _verySlowFrames = 0;
 int _maxFrameMicros = 0;
 final List<Map<String, num>> _frameSamples = [];
+
+void _ensureDriverStatisticsScope() {
+  _driverStatisticsScope ??= _container.listen<ProductTopicLeaseBundle?>(
+    settingsStatisticsScopeProvider,
+    (_, _) {},
+    fireImmediately: true,
+  );
+}
+
+void _ensureDriverQueueScope() {
+  _driverQueueScope ??= _container.listen<ProductTopicLease?>(
+    persistenceQueueTopicProvider,
+    (_, _) {},
+    fireImmediately: true,
+  );
+}
 
 void _recordFrameTimings(List<FrameTiming> timings) {
   if (!_recordingFrames) return;
@@ -131,6 +149,8 @@ Future<String> _handleDriverData(String? message) async {
       // stays inside the Driver-only entrypoint.
       return jsonEncode({'pid': pid});
     case 'statistics':
+      // Driver 是显式观察者；产品会话不会因一次请求偷偷常驻全局统计租约。
+      _ensureDriverStatisticsScope();
       final state = switch (_container.read(studioControllerProvider)) {
         AsyncData(:final value) => value,
         _ => null,
@@ -181,9 +201,12 @@ Future<String> _handleDriverData(String? message) async {
         'revision': snapshot.revision,
       });
     case 'persistence-queue':
-      final queue = await _container
-          .read(studioControllerProvider.notifier)
-          .readPersistenceQueue();
+      // Driver 通过显式 topic lease 读取事件缓存，避免恢复已删除的 GUI 周期查询。
+      _ensureDriverQueueScope();
+      final queue = switch (_container.read(persistenceQueueStateProvider)) {
+        AsyncData(:final value) => value?.queue,
+        _ => null,
+      };
       return jsonEncode({
         'pendingOperations': queue?.pendingOperations,
         'threads': [
@@ -303,6 +326,10 @@ Future<String> _handleDriverData(String? message) async {
 }
 
 Future<StudioShutdownReport> _runShutdown() async {
+  _driverStatisticsScope?.close();
+  _driverStatisticsScope = null;
+  _driverQueueScope?.close();
+  _driverQueueScope = null;
   final api = _container.read(studioApiProvider);
   final progress = _container.read(
     studioShutdownProgressStateProvider.notifier,

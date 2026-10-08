@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +22,7 @@ import '../../platform/host_app_icons.dart';
 import '../../platform/terminal_launcher.dart';
 import '../../platform/vscode_launcher.dart';
 import '../../platform/zed_launcher.dart';
+import '../../shared/studio_anchored_surface.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_menu.dart';
 import '../../shared/studio_driver_keys.dart';
@@ -38,6 +40,8 @@ part 'studio_sidebar.dart';
 part 'add_project_dialog.dart';
 part 'sidebar_entries.dart';
 part 'sidebar_tiles.dart';
+part 'sidebar_thread_status.dart';
+part 'sidebar_detail_overlay.dart';
 part 'sidebar_actions.dart';
 part 'runtime_banners.dart';
 part 'studio_shell_chrome.dart';
@@ -72,9 +76,42 @@ class _StudioShellState extends ConsumerState<StudioShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _sidebarKey = GlobalKey<_SidebarState>();
   final _startupClock = Stopwatch()..start();
+
+  /// 会话阅读面可见性 owner。`studioControllerProvider` 是 keepAlive（非
+  /// autoDispose）的常驻 notifier：在合法的 mounted（initState）阶段一次性
+  /// 取得并保存引用，之后（含 dispose 与 await 之后）只使用这份引用，不再
+  /// read `ref`——Riverpod 在 widget 进入卸载阶段时拒绝读取 `ref`，否则离开
+  /// 会话壳（进入设置）时的可见性释放会失败、旧租约不被释放。
+  late final StudioController _controller;
+
   bool _reportedReady = false;
   double? _sidebarWidth;
   bool _sidebarHidden = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = ref.read(studioControllerProvider.notifier);
+    // 进入会话壳：可见阅读面按当前选择重新建立状态流/内容窗口/所属 root 费用租约。
+    unawaited(_setConversationVisible(true));
+  }
+
+  @override
+  void dispose() {
+    // 离开会话壳（进入设置、切换或关闭）：释放旧观察者，保留选择、草稿与阅读锚点。
+    unawaited(_setConversationVisible(false));
+    super.dispose();
+  }
+
+  Future<void> _setConversationVisible(bool visible) async {
+    try {
+      await _controller.setConversationVisible(visible);
+    } on Object catch (error) {
+      debugPrint(
+        'set_conversation_visible_failed visible=$visible error=$error',
+      );
+    }
+  }
 
   void _focusSearch() {
     if (_sidebarKey.currentState == null) {
@@ -129,10 +166,15 @@ class _StudioShellState extends ConsumerState<StudioShell> {
             _newSession,
         const SingleActivator(LogicalKeyboardKey.keyN, meta: true): _newSession,
       },
-      child: asyncChrome.when(
-        loading: () => const _StudioStartup(),
-        error: (error, stackTrace) => _StudioFatalError(error: error),
-        data: (chrome) {
+      child: Builder(
+        builder: (context) {
+          // 初次无数据才使用启动页；已有 chrome 时后续刷新/重连不整页替换已显示内容。
+          final chrome = asyncChrome.value;
+          if (chrome == null) {
+            return asyncChrome.hasError
+                ? _StudioFatalError(error: asyncChrome.error!)
+                : const _StudioStartup();
+          }
           final sidebar = asyncSidebar.value;
           final header = asyncHeader.value;
           StudioDriverState.publishProject(header?.selectedProject);

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'studio_anchor_space.dart';
 
+export 'studio_anchor_space.dart' show StudioAnchorPlacement;
+
 /// Why an anchored surface closed.
 ///
 /// [selection] and [keyboardDismiss] restore focus to the real trigger and
@@ -42,6 +44,7 @@ class StudioAnchoredSurface extends StatefulWidget {
     this.valid = true,
     this.userConstraints,
     this.fixedWidth,
+    this.placement = StudioAnchorPlacement.vertical,
     this.focusTriggerNode,
     this.onOpen,
     this.onClose,
@@ -78,6 +81,10 @@ class StudioAnchoredSurface extends StatefulWidget {
   /// and size to their widest row.
   final double? fixedWidth;
 
+  /// Existing menus open vertically. Sidebar readouts can explicitly stay
+  /// beside their trigger to leave adjacent rows selectable.
+  final StudioAnchorPlacement placement;
+
   /// Focus node of the trigger's real focusable widget; keyboard opens
   /// request focus here, and closing the surface restores focus to it.
   final FocusNode? focusTriggerNode;
@@ -90,7 +97,7 @@ class StudioAnchoredSurface extends StatefulWidget {
 
   /// Vertical gap kept between the trigger and the surface in both
   /// directions.
-  static const Offset gap = Offset(0, 6);
+  static const Offset gap = Offset(6, 6);
 
   @override
   State<StudioAnchoredSurface> createState() => StudioAnchoredSurfaceState();
@@ -216,6 +223,7 @@ class StudioAnchoredSurfaceState extends State<StudioAnchoredSurface> {
           anchorKey: _anchorKey,
           userConstraints: widget.userConstraints,
           fixedWidth: widget.fixedWidth,
+          placement: widget.placement,
         )) {
       // Refuse instead of showing a surface that would cover its own trigger
       // or hang off-screen; the controller stays closed, no session starts,
@@ -347,6 +355,7 @@ class StudioAnchoredSurfaceState extends State<StudioAnchoredSurface> {
       gap: StudioAnchoredSurface.gap,
       userConstraints: widget.userConstraints,
       fixedWidth: widget.fixedWidth,
+      placement: widget.placement,
     );
   }
 
@@ -380,6 +389,7 @@ class StudioAnchoredSurfaceState extends State<StudioAnchoredSurface> {
       Directionality.of(context),
       userConstraints: widget.userConstraints,
       fixedWidth: widget.fixedWidth,
+      placement: widget.placement,
       gap: StudioAnchoredSurface.gap,
     );
     if (!layout.anchorVisible || !layout.hasUsableSpace) {

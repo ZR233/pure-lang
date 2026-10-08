@@ -1253,6 +1253,31 @@
   "sidebarResize": "Resize sidebar; use arrows, Home to reset",
   "planResize": "Resize plan details; use arrows, Home to reset",
   "sidebarLocal": "Local",
+  "sidebarDetailUpdatedNow": "Updated just now",
+  "sidebarDetailUpdatedMinutesAgo": "{count, plural, =1{Updated 1 minute ago} other{Updated {count} minutes ago}}",
+  "@sidebarDetailUpdatedMinutesAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sidebarDetailUpdatedHoursAgo": "{count, plural, =1{Updated 1 hour ago} other{Updated {count} hours ago}}",
+  "@sidebarDetailUpdatedHoursAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sidebarDetailUpdatedDaysAgo": "{count, plural, =1{Updated 1 day ago} other{Updated {count} days ago}}",
+  "@sidebarDetailUpdatedDaysAgo": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "sidebarNotChecked": "Not checked",
   "sidebarConnectionSaved": "Configuration saved; connection failed. Edit or retry",
   "sidebarCopyPath": "Copy path",

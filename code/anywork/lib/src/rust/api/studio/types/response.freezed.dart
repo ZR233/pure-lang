@@ -761,6 +761,754 @@ as BridgeStoppedResource,
 }
 
 /// @nodoc
+mixin _$BridgeAgentProfilesState {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentProfilesState);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeAgentProfilesState()';
+}
+
+
+}
+
+/// @nodoc
+class $BridgeAgentProfilesStateCopyWith<$Res>  {
+$BridgeAgentProfilesStateCopyWith(BridgeAgentProfilesState _, $Res Function(BridgeAgentProfilesState) __);
+}
+
+
+/// Adds pattern-matching-related methods to [BridgeAgentProfilesState].
+extension BridgeAgentProfilesStatePatterns on BridgeAgentProfilesState {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeAgentProfilesState_Uninitialized value)?  uninitialized,TResult Function( BridgeAgentProfilesState_Loading value)?  loading,TResult Function( BridgeAgentProfilesState_Ready value)?  ready,TResult Function( BridgeAgentProfilesState_Refreshing value)?  refreshing,TResult Function( BridgeAgentProfilesState_Stale value)?  stale,TResult Function( BridgeAgentProfilesState_Degraded value)?  degraded,TResult Function( BridgeAgentProfilesState_Failed value)?  failed,TResult Function( BridgeAgentProfilesState_Stopped value)?  stopped,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case BridgeAgentProfilesState_Uninitialized() when uninitialized != null:
+return uninitialized(_that);case BridgeAgentProfilesState_Loading() when loading != null:
+return loading(_that);case BridgeAgentProfilesState_Ready() when ready != null:
+return ready(_that);case BridgeAgentProfilesState_Refreshing() when refreshing != null:
+return refreshing(_that);case BridgeAgentProfilesState_Stale() when stale != null:
+return stale(_that);case BridgeAgentProfilesState_Degraded() when degraded != null:
+return degraded(_that);case BridgeAgentProfilesState_Failed() when failed != null:
+return failed(_that);case BridgeAgentProfilesState_Stopped() when stopped != null:
+return stopped(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeAgentProfilesState_Uninitialized value)  uninitialized,required TResult Function( BridgeAgentProfilesState_Loading value)  loading,required TResult Function( BridgeAgentProfilesState_Ready value)  ready,required TResult Function( BridgeAgentProfilesState_Refreshing value)  refreshing,required TResult Function( BridgeAgentProfilesState_Stale value)  stale,required TResult Function( BridgeAgentProfilesState_Degraded value)  degraded,required TResult Function( BridgeAgentProfilesState_Failed value)  failed,required TResult Function( BridgeAgentProfilesState_Stopped value)  stopped,}){
+final _that = this;
+switch (_that) {
+case BridgeAgentProfilesState_Uninitialized():
+return uninitialized(_that);case BridgeAgentProfilesState_Loading():
+return loading(_that);case BridgeAgentProfilesState_Ready():
+return ready(_that);case BridgeAgentProfilesState_Refreshing():
+return refreshing(_that);case BridgeAgentProfilesState_Stale():
+return stale(_that);case BridgeAgentProfilesState_Degraded():
+return degraded(_that);case BridgeAgentProfilesState_Failed():
+return failed(_that);case BridgeAgentProfilesState_Stopped():
+return stopped(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeAgentProfilesState_Uninitialized value)?  uninitialized,TResult? Function( BridgeAgentProfilesState_Loading value)?  loading,TResult? Function( BridgeAgentProfilesState_Ready value)?  ready,TResult? Function( BridgeAgentProfilesState_Refreshing value)?  refreshing,TResult? Function( BridgeAgentProfilesState_Stale value)?  stale,TResult? Function( BridgeAgentProfilesState_Degraded value)?  degraded,TResult? Function( BridgeAgentProfilesState_Failed value)?  failed,TResult? Function( BridgeAgentProfilesState_Stopped value)?  stopped,}){
+final _that = this;
+switch (_that) {
+case BridgeAgentProfilesState_Uninitialized() when uninitialized != null:
+return uninitialized(_that);case BridgeAgentProfilesState_Loading() when loading != null:
+return loading(_that);case BridgeAgentProfilesState_Ready() when ready != null:
+return ready(_that);case BridgeAgentProfilesState_Refreshing() when refreshing != null:
+return refreshing(_that);case BridgeAgentProfilesState_Stale() when stale != null:
+return stale(_that);case BridgeAgentProfilesState_Degraded() when degraded != null:
+return degraded(_that);case BridgeAgentProfilesState_Failed() when failed != null:
+return failed(_that);case BridgeAgentProfilesState_Stopped() when stopped != null:
+return stopped(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeUninitializedResource field0)?  uninitialized,TResult Function( BridgeLoadingResource field0)?  loading,TResult Function( BridgeReadyResource resource,  BridgeAgentProfilesData value)?  ready,TResult Function( BridgeRefreshingResource resource,  BridgeAgentProfilesData value)?  refreshing,TResult Function( BridgeStaleResource resource,  BridgeAgentProfilesData value)?  stale,TResult Function( BridgeDegradedResource resource,  BridgeAgentProfilesData value)?  degraded,TResult Function( BridgeFailedResource field0)?  failed,TResult Function( BridgeStoppedResource field0)?  stopped,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case BridgeAgentProfilesState_Uninitialized() when uninitialized != null:
+return uninitialized(_that.field0);case BridgeAgentProfilesState_Loading() when loading != null:
+return loading(_that.field0);case BridgeAgentProfilesState_Ready() when ready != null:
+return ready(_that.resource,_that.value);case BridgeAgentProfilesState_Refreshing() when refreshing != null:
+return refreshing(_that.resource,_that.value);case BridgeAgentProfilesState_Stale() when stale != null:
+return stale(_that.resource,_that.value);case BridgeAgentProfilesState_Degraded() when degraded != null:
+return degraded(_that.resource,_that.value);case BridgeAgentProfilesState_Failed() when failed != null:
+return failed(_that.field0);case BridgeAgentProfilesState_Stopped() when stopped != null:
+return stopped(_that.field0);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeUninitializedResource field0)  uninitialized,required TResult Function( BridgeLoadingResource field0)  loading,required TResult Function( BridgeReadyResource resource,  BridgeAgentProfilesData value)  ready,required TResult Function( BridgeRefreshingResource resource,  BridgeAgentProfilesData value)  refreshing,required TResult Function( BridgeStaleResource resource,  BridgeAgentProfilesData value)  stale,required TResult Function( BridgeDegradedResource resource,  BridgeAgentProfilesData value)  degraded,required TResult Function( BridgeFailedResource field0)  failed,required TResult Function( BridgeStoppedResource field0)  stopped,}) {final _that = this;
+switch (_that) {
+case BridgeAgentProfilesState_Uninitialized():
+return uninitialized(_that.field0);case BridgeAgentProfilesState_Loading():
+return loading(_that.field0);case BridgeAgentProfilesState_Ready():
+return ready(_that.resource,_that.value);case BridgeAgentProfilesState_Refreshing():
+return refreshing(_that.resource,_that.value);case BridgeAgentProfilesState_Stale():
+return stale(_that.resource,_that.value);case BridgeAgentProfilesState_Degraded():
+return degraded(_that.resource,_that.value);case BridgeAgentProfilesState_Failed():
+return failed(_that.field0);case BridgeAgentProfilesState_Stopped():
+return stopped(_that.field0);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeUninitializedResource field0)?  uninitialized,TResult? Function( BridgeLoadingResource field0)?  loading,TResult? Function( BridgeReadyResource resource,  BridgeAgentProfilesData value)?  ready,TResult? Function( BridgeRefreshingResource resource,  BridgeAgentProfilesData value)?  refreshing,TResult? Function( BridgeStaleResource resource,  BridgeAgentProfilesData value)?  stale,TResult? Function( BridgeDegradedResource resource,  BridgeAgentProfilesData value)?  degraded,TResult? Function( BridgeFailedResource field0)?  failed,TResult? Function( BridgeStoppedResource field0)?  stopped,}) {final _that = this;
+switch (_that) {
+case BridgeAgentProfilesState_Uninitialized() when uninitialized != null:
+return uninitialized(_that.field0);case BridgeAgentProfilesState_Loading() when loading != null:
+return loading(_that.field0);case BridgeAgentProfilesState_Ready() when ready != null:
+return ready(_that.resource,_that.value);case BridgeAgentProfilesState_Refreshing() when refreshing != null:
+return refreshing(_that.resource,_that.value);case BridgeAgentProfilesState_Stale() when stale != null:
+return stale(_that.resource,_that.value);case BridgeAgentProfilesState_Degraded() when degraded != null:
+return degraded(_that.resource,_that.value);case BridgeAgentProfilesState_Failed() when failed != null:
+return failed(_that.field0);case BridgeAgentProfilesState_Stopped() when stopped != null:
+return stopped(_that.field0);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class BridgeAgentProfilesState_Uninitialized extends BridgeAgentProfilesState {
+  const BridgeAgentProfilesState_Uninitialized(this.field0): super._();
+
+
+ final  BridgeUninitializedResource field0;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeAgentProfilesState_UninitializedCopyWith<BridgeAgentProfilesState_Uninitialized> get copyWith => _$BridgeAgentProfilesState_UninitializedCopyWithImpl<BridgeAgentProfilesState_Uninitialized>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentProfilesState_Uninitialized&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
+
+@override
+String toString() {
+    return 'BridgeAgentProfilesState.uninitialized(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeAgentProfilesState_UninitializedCopyWith<$Res> implements $BridgeAgentProfilesStateCopyWith<$Res> {
+  factory $BridgeAgentProfilesState_UninitializedCopyWith(BridgeAgentProfilesState_Uninitialized value, $Res Function(BridgeAgentProfilesState_Uninitialized) _then) = _$BridgeAgentProfilesState_UninitializedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeUninitializedResource field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeAgentProfilesState_UninitializedCopyWithImpl<$Res>
+    implements $BridgeAgentProfilesState_UninitializedCopyWith<$Res> {
+  _$BridgeAgentProfilesState_UninitializedCopyWithImpl(this._self, this._then);
+
+  final BridgeAgentProfilesState_Uninitialized _self;
+  final $Res Function(BridgeAgentProfilesState_Uninitialized) _then;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeAgentProfilesState_Uninitialized(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeUninitializedResource,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeAgentProfilesState_Loading extends BridgeAgentProfilesState {
+  const BridgeAgentProfilesState_Loading(this.field0): super._();
+
+
+ final  BridgeLoadingResource field0;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeAgentProfilesState_LoadingCopyWith<BridgeAgentProfilesState_Loading> get copyWith => _$BridgeAgentProfilesState_LoadingCopyWithImpl<BridgeAgentProfilesState_Loading>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentProfilesState_Loading&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
+
+@override
+String toString() {
+    return 'BridgeAgentProfilesState.loading(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeAgentProfilesState_LoadingCopyWith<$Res> implements $BridgeAgentProfilesStateCopyWith<$Res> {
+  factory $BridgeAgentProfilesState_LoadingCopyWith(BridgeAgentProfilesState_Loading value, $Res Function(BridgeAgentProfilesState_Loading) _then) = _$BridgeAgentProfilesState_LoadingCopyWithImpl;
+@useResult
+$Res call({
+ BridgeLoadingResource field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeAgentProfilesState_LoadingCopyWithImpl<$Res>
+    implements $BridgeAgentProfilesState_LoadingCopyWith<$Res> {
+  _$BridgeAgentProfilesState_LoadingCopyWithImpl(this._self, this._then);
+
+  final BridgeAgentProfilesState_Loading _self;
+  final $Res Function(BridgeAgentProfilesState_Loading) _then;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeAgentProfilesState_Loading(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeLoadingResource,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeAgentProfilesState_Ready extends BridgeAgentProfilesState {
+  const BridgeAgentProfilesState_Ready({required this.resource, required this.value}): super._();
+
+
+ final  BridgeReadyResource resource;
+ final  BridgeAgentProfilesData value;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeAgentProfilesState_ReadyCopyWith<BridgeAgentProfilesState_Ready> get copyWith => _$BridgeAgentProfilesState_ReadyCopyWithImpl<BridgeAgentProfilesState_Ready>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentProfilesState_Ready&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,resource,value);
+}
+
+@override
+String toString() {
+    return 'BridgeAgentProfilesState.ready(resource: $resource, value: $value)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeAgentProfilesState_ReadyCopyWith<$Res> implements $BridgeAgentProfilesStateCopyWith<$Res> {
+  factory $BridgeAgentProfilesState_ReadyCopyWith(BridgeAgentProfilesState_Ready value, $Res Function(BridgeAgentProfilesState_Ready) _then) = _$BridgeAgentProfilesState_ReadyCopyWithImpl;
+@useResult
+$Res call({
+ BridgeReadyResource resource, BridgeAgentProfilesData value
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeAgentProfilesState_ReadyCopyWithImpl<$Res>
+    implements $BridgeAgentProfilesState_ReadyCopyWith<$Res> {
+  _$BridgeAgentProfilesState_ReadyCopyWithImpl(this._self, this._then);
+
+  final BridgeAgentProfilesState_Ready _self;
+  final $Res Function(BridgeAgentProfilesState_Ready) _then;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
+  return _then(BridgeAgentProfilesState_Ready(
+resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
+as BridgeReadyResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
+as BridgeAgentProfilesData,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeAgentProfilesState_Refreshing extends BridgeAgentProfilesState {
+  const BridgeAgentProfilesState_Refreshing({required this.resource, required this.value}): super._();
+
+
+ final  BridgeRefreshingResource resource;
+ final  BridgeAgentProfilesData value;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeAgentProfilesState_RefreshingCopyWith<BridgeAgentProfilesState_Refreshing> get copyWith => _$BridgeAgentProfilesState_RefreshingCopyWithImpl<BridgeAgentProfilesState_Refreshing>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentProfilesState_Refreshing&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,resource,value);
+}
+
+@override
+String toString() {
+    return 'BridgeAgentProfilesState.refreshing(resource: $resource, value: $value)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeAgentProfilesState_RefreshingCopyWith<$Res> implements $BridgeAgentProfilesStateCopyWith<$Res> {
+  factory $BridgeAgentProfilesState_RefreshingCopyWith(BridgeAgentProfilesState_Refreshing value, $Res Function(BridgeAgentProfilesState_Refreshing) _then) = _$BridgeAgentProfilesState_RefreshingCopyWithImpl;
+@useResult
+$Res call({
+ BridgeRefreshingResource resource, BridgeAgentProfilesData value
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeAgentProfilesState_RefreshingCopyWithImpl<$Res>
+    implements $BridgeAgentProfilesState_RefreshingCopyWith<$Res> {
+  _$BridgeAgentProfilesState_RefreshingCopyWithImpl(this._self, this._then);
+
+  final BridgeAgentProfilesState_Refreshing _self;
+  final $Res Function(BridgeAgentProfilesState_Refreshing) _then;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
+  return _then(BridgeAgentProfilesState_Refreshing(
+resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
+as BridgeRefreshingResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
+as BridgeAgentProfilesData,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeAgentProfilesState_Stale extends BridgeAgentProfilesState {
+  const BridgeAgentProfilesState_Stale({required this.resource, required this.value}): super._();
+
+
+ final  BridgeStaleResource resource;
+ final  BridgeAgentProfilesData value;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeAgentProfilesState_StaleCopyWith<BridgeAgentProfilesState_Stale> get copyWith => _$BridgeAgentProfilesState_StaleCopyWithImpl<BridgeAgentProfilesState_Stale>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentProfilesState_Stale&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,resource,value);
+}
+
+@override
+String toString() {
+    return 'BridgeAgentProfilesState.stale(resource: $resource, value: $value)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeAgentProfilesState_StaleCopyWith<$Res> implements $BridgeAgentProfilesStateCopyWith<$Res> {
+  factory $BridgeAgentProfilesState_StaleCopyWith(BridgeAgentProfilesState_Stale value, $Res Function(BridgeAgentProfilesState_Stale) _then) = _$BridgeAgentProfilesState_StaleCopyWithImpl;
+@useResult
+$Res call({
+ BridgeStaleResource resource, BridgeAgentProfilesData value
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeAgentProfilesState_StaleCopyWithImpl<$Res>
+    implements $BridgeAgentProfilesState_StaleCopyWith<$Res> {
+  _$BridgeAgentProfilesState_StaleCopyWithImpl(this._self, this._then);
+
+  final BridgeAgentProfilesState_Stale _self;
+  final $Res Function(BridgeAgentProfilesState_Stale) _then;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
+  return _then(BridgeAgentProfilesState_Stale(
+resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
+as BridgeStaleResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
+as BridgeAgentProfilesData,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeAgentProfilesState_Degraded extends BridgeAgentProfilesState {
+  const BridgeAgentProfilesState_Degraded({required this.resource, required this.value}): super._();
+
+
+ final  BridgeDegradedResource resource;
+ final  BridgeAgentProfilesData value;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeAgentProfilesState_DegradedCopyWith<BridgeAgentProfilesState_Degraded> get copyWith => _$BridgeAgentProfilesState_DegradedCopyWithImpl<BridgeAgentProfilesState_Degraded>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentProfilesState_Degraded&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,resource,value);
+}
+
+@override
+String toString() {
+    return 'BridgeAgentProfilesState.degraded(resource: $resource, value: $value)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeAgentProfilesState_DegradedCopyWith<$Res> implements $BridgeAgentProfilesStateCopyWith<$Res> {
+  factory $BridgeAgentProfilesState_DegradedCopyWith(BridgeAgentProfilesState_Degraded value, $Res Function(BridgeAgentProfilesState_Degraded) _then) = _$BridgeAgentProfilesState_DegradedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeDegradedResource resource, BridgeAgentProfilesData value
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeAgentProfilesState_DegradedCopyWithImpl<$Res>
+    implements $BridgeAgentProfilesState_DegradedCopyWith<$Res> {
+  _$BridgeAgentProfilesState_DegradedCopyWithImpl(this._self, this._then);
+
+  final BridgeAgentProfilesState_Degraded _self;
+  final $Res Function(BridgeAgentProfilesState_Degraded) _then;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
+  return _then(BridgeAgentProfilesState_Degraded(
+resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
+as BridgeDegradedResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
+as BridgeAgentProfilesData,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeAgentProfilesState_Failed extends BridgeAgentProfilesState {
+  const BridgeAgentProfilesState_Failed(this.field0): super._();
+
+
+ final  BridgeFailedResource field0;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeAgentProfilesState_FailedCopyWith<BridgeAgentProfilesState_Failed> get copyWith => _$BridgeAgentProfilesState_FailedCopyWithImpl<BridgeAgentProfilesState_Failed>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentProfilesState_Failed&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
+
+@override
+String toString() {
+    return 'BridgeAgentProfilesState.failed(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeAgentProfilesState_FailedCopyWith<$Res> implements $BridgeAgentProfilesStateCopyWith<$Res> {
+  factory $BridgeAgentProfilesState_FailedCopyWith(BridgeAgentProfilesState_Failed value, $Res Function(BridgeAgentProfilesState_Failed) _then) = _$BridgeAgentProfilesState_FailedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeFailedResource field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeAgentProfilesState_FailedCopyWithImpl<$Res>
+    implements $BridgeAgentProfilesState_FailedCopyWith<$Res> {
+  _$BridgeAgentProfilesState_FailedCopyWithImpl(this._self, this._then);
+
+  final BridgeAgentProfilesState_Failed _self;
+  final $Res Function(BridgeAgentProfilesState_Failed) _then;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeAgentProfilesState_Failed(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeFailedResource,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeAgentProfilesState_Stopped extends BridgeAgentProfilesState {
+  const BridgeAgentProfilesState_Stopped(this.field0): super._();
+
+
+ final  BridgeStoppedResource field0;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeAgentProfilesState_StoppedCopyWith<BridgeAgentProfilesState_Stopped> get copyWith => _$BridgeAgentProfilesState_StoppedCopyWithImpl<BridgeAgentProfilesState_Stopped>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentProfilesState_Stopped&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
+
+@override
+String toString() {
+    return 'BridgeAgentProfilesState.stopped(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeAgentProfilesState_StoppedCopyWith<$Res> implements $BridgeAgentProfilesStateCopyWith<$Res> {
+  factory $BridgeAgentProfilesState_StoppedCopyWith(BridgeAgentProfilesState_Stopped value, $Res Function(BridgeAgentProfilesState_Stopped) _then) = _$BridgeAgentProfilesState_StoppedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeStoppedResource field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeAgentProfilesState_StoppedCopyWithImpl<$Res>
+    implements $BridgeAgentProfilesState_StoppedCopyWith<$Res> {
+  _$BridgeAgentProfilesState_StoppedCopyWithImpl(this._self, this._then);
+
+  final BridgeAgentProfilesState_Stopped _self;
+  final $Res Function(BridgeAgentProfilesState_Stopped) _then;
+
+/// Create a copy of BridgeAgentProfilesState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeAgentProfilesState_Stopped(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeStoppedResource,
+  ));
+}
+
+
+}
+
+/// @nodoc
 mixin _$BridgeLspStateSnapshot {
 
 

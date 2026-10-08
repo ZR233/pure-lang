@@ -11,6 +11,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'tool_probe.dart';
 
 class ToolProbeExtension extends CommandExtension {
+  static const _mouseDevice = 901;
+  int? _mouseViewId;
+
   @override
   String get commandKind => 'ToolProbe';
   @override
@@ -48,6 +51,7 @@ class ToolProbeExtension extends CommandExtension {
       return {
         'top': offset.dy,
         'left': offset.dx,
+        'width': box.size.width,
         'height': box.size.height,
         'scroll': jsonDecode(
           StudioDriverState.snapshotJson(),
@@ -67,7 +71,32 @@ class ToolProbeExtension extends CommandExtension {
     final samples = <Object?>[sample()];
     final box = target.evaluate().single.renderObject! as RenderBox;
     final top = box.localToGlobal(Offset.zero);
-    if (probe.action == 'tap') {
+    if (probe.action == 'hover') {
+      final viewId = View.of(target.evaluate().single).viewId;
+      final center = top + box.size.center(Offset.zero);
+      if (_mouseViewId != viewId) {
+        _removeMouse();
+        GestureBinding.instance.handlePointerEvent(
+          PointerAddedEvent(
+            device: _mouseDevice,
+            kind: PointerDeviceKind.mouse,
+            position: center,
+            viewId: viewId,
+          ),
+        );
+        _mouseViewId = viewId;
+      }
+      GestureBinding.instance.handlePointerEvent(
+        PointerHoverEvent(
+          device: _mouseDevice,
+          kind: PointerDeviceKind.mouse,
+          position: center,
+          viewId: viewId,
+        ),
+      );
+    } else if (probe.action == 'leaveHover') {
+      _removeMouse();
+    } else if (probe.action == 'tap') {
       // Header, not the center of the whole expanded tile.
       await prober.tapAt(top + Offset(30, 20));
     } else if (probe.action == 'wheelOutside') {
@@ -125,6 +154,19 @@ class ToolProbeExtension extends CommandExtension {
       samples.add(sample());
     }
     return _ProbeResult(samples);
+  }
+
+  void _removeMouse() {
+    final viewId = _mouseViewId;
+    if (viewId == null) return;
+    GestureBinding.instance.handlePointerEvent(
+      PointerRemovedEvent(
+        device: _mouseDevice,
+        kind: PointerDeviceKind.mouse,
+        viewId: viewId,
+      ),
+    );
+    _mouseViewId = null;
   }
 }
 

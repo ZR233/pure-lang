@@ -33,6 +33,43 @@ class AgentProfileView {
   final bool system;
   final bool enabled;
   final AgentWorkspaceMode workspaceMode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AgentProfileView &&
+          id == other.id &&
+          displayName == other.displayName &&
+          description == other.description &&
+          whenToUse == other.whenToUse &&
+          systemInstructions == other.systemInstructions &&
+          providerId == other.providerId &&
+          model == other.model &&
+          effort == other.effort &&
+          source == other.source &&
+          revision == other.revision &&
+          contentHash == other.contentHash &&
+          system == other.system &&
+          enabled == other.enabled &&
+          workspaceMode == other.workspaceMode;
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    displayName,
+    description,
+    whenToUse,
+    systemInstructions,
+    providerId,
+    model,
+    effort,
+    source,
+    revision,
+    contentHash,
+    system,
+    enabled,
+    workspaceMode,
+  );
 }
 
 class AgentProfileDraft {

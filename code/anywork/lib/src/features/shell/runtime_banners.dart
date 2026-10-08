@@ -179,10 +179,11 @@ class _ApplicationRecoveryBannerState
 
 /// 持久化状态与队列压力面板：始终挂载、自行决定是否可见。
 ///
-/// 状态消息来自产品事件流里的 canonical 快照（保存进度、错误、落后量）；队列压力
-/// （排队操作数/字节、在途字节、最老待保存年龄、压力暂停、最近错误、逐 Thread 水位）
-/// 经 `readPersistenceQueue` 按需从持久化协调器读取。不可观测时显示为“未知”，
-/// 而不是编造本地零值；每次 persistence 修订至多刷新一次，避免无界轮询。
+/// 状态消息来自 canonical 快照（保存进度、错误、落后量）；队列压力（排队操作数/字节、
+/// 在途字节、最老待保存年龄、压力暂停、最近错误、逐 Thread 水位与 calls writer）直接
+/// 消费 persistence queue topic 的 canonical 事件缓存，不周期查询接口。年龄以事件通知
+/// 时间基线本地推算，不请求接口。不可观测或传输失败时显示局部错误与显式重试，保留
+/// 最后有效内容，不编造零值。
 class _PersistenceStatusPanel extends ConsumerStatefulWidget {
   const _PersistenceStatusPanel();
 
@@ -193,20 +194,16 @@ class _PersistenceStatusPanel extends ConsumerStatefulWidget {
 
 class _PersistenceStatusPanelState
     extends ConsumerState<_PersistenceStatusPanel> {
-  /// 面板在一次 persistence 修订内最多展示的逐 Thread 水位条数，保持块有界。
+  /// 面板内最多展示的逐 Thread 水位条数，保持块有界。
   static const _maxThreadRows = 3;
 
   /// 展开后的诊断明细高度上界。
   ///
   /// 默认折叠时整条只有一行原因 + 单个动作；展开的多行明细（seq/threadId/字节/原始错误）
-  /// 在这里内部滚动，不会把消息列顶下去（此前默认展开多行约占 176px，且重复两个动作）。
+  /// 在这里内部滚动，不会把消息列顶下去。
   static const _diagnosticsMaxHeight = 132.0;
 
   bool _retrying = false;
-  bool _loadingQueue = false;
-  bool _queueSupported = true;
-  PersistenceQueueSnapshot? _queue;
-  Timer? _historyStatusTimer;
   final Set<String> _retryingThreads = {};
   final Set<String> _resumingThreads = {};
 
@@ -217,31 +214,7 @@ class _PersistenceStatusPanelState
   String? _expandedDiagnosticsIdentity;
 
   @override
-  void initState() {
-    super.initState();
-    unawaited(_refreshQueue());
-    _historyStatusTimer = Timer.periodic(
-      const Duration(seconds: 3),
-      (_) => unawaited(_refreshQueue()),
-    );
-  }
-
-  @override
-  void dispose() {
-    _historyStatusTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    // 保存修订推进（错误出现、恢复、落后量变化）后刷新一次队列压力。
-    ref.listen(shellChromeProvider, (previous, next) {
-      final previousRevision = previous?.value?.persistenceState.revision;
-      final nextRevision = next.value?.persistenceState.revision;
-      if (nextRevision != null && nextRevision != previousRevision) {
-        unawaited(_refreshQueue());
-      }
-    });
     final snapshot =
         ref.watch(shellChromeProvider).value?.persistenceState ??
         const PersistenceStateSnapshot.ready();
@@ -255,7 +228,16 @@ class _PersistenceStatusPanelState
     final block = _storageBlock(workspaces, studio?.selectedThreadId);
     final state = snapshot.state;
     final attention = state.needsAttention;
-    final queue = _queue;
+    // 面板持有持久化队列作用域租约（替代周期轮询）：队列压力与逐 Thread
+    // 故障同样决定横幅是否出现，因此先取得 canonical 队列帧再统一判定，
+    // 不因队列侧事实而在解析前提前隐藏。帧由 controller 单 owner 进入
+    // canonical state，这里只读取 selector 与局部传输状态。
+    ref.watch(persistenceQueueTopicProvider);
+    final queueView = ref.watch(persistenceQueueStateProvider).value;
+    final connection = ref.watch(
+      productTopicConnectionProvider(const PersistenceQueueTopic()),
+    );
+    final queue = queueView?.queue;
     final historyFault =
         queue?.threads.any((thread) => thread.fault != null) ?? false;
     // 存储压力（自动恢复的短背压）：暂停的是新推理准入，不是“执行已经失败”。
@@ -264,7 +246,8 @@ class _PersistenceStatusPanelState
         workspaces.values.any(
           (workspace) => workspace.storage?.pressurePaused == true,
         );
-    // 调用日志缺口属于统计页，不触发可靠保存横幅。
+    // 正常持久化排队与写入不显示诊断横条：只有保存降级、恢复中、阻塞、
+    // 存储压力暂停新推理，或队列报告真实故障时才显示。
     if (!attention && !historyFault && block == null && !pressurePaused) {
       return const SizedBox.shrink();
     }
@@ -335,6 +318,9 @@ class _PersistenceStatusPanelState
                 context,
                 workspaces,
                 primaryThreadId: block?.threadId,
+                queue: queue,
+                updatedAt: queueView?.updatedAt,
+                connection: connection,
               ),
           ],
         ),
@@ -344,21 +330,23 @@ class _PersistenceStatusPanelState
 
   /// 折叠在「展开诊断」之后的明细：水位序号、逐 Thread 原始 id、字节数、原始错误。
   ///
-  /// 只有用户主动展开时才渲染，整块高度有界并在内部滚动，因此不会占据默认主流程，也不会
-  /// 把消息列顶下去。逐 Thread 的动作**不**为主流程已经给过动作的那个会话重复按钮。
+  /// 只消费 canonical persistence queue 事件缓存；没有基线或传输失败时保留已有内容并显示
+  /// 局部状态与显式重试，不编造零值、不清空已渲染的明细。逐 Thread 的动作**不**为主流程
+  /// 已经给过动作的那个会话重复按钮。年龄以事件通知时间基线本地推算，不请求接口。
   Widget _diagnostics(
     BuildContext context,
     Map<String, ThreadWorkspace> workspaces, {
     required String? primaryThreadId,
+    required PersistenceQueueSnapshot? queue,
+    required DateTime? updatedAt,
+    required ProductTopicConnectionStateView? connection,
   }) {
     final colors = Theme.of(context).colorScheme;
-    final queue = _queue;
+    final transportError = connection != null && !connection.isConnected
+        ? connection.errorMessage
+        : null;
     final children = <Widget>[];
-    if (!_queueSupported) {
-      children.add(
-        _diagnosticText(context, context.l10n.persistenceQueueUnavailable),
-      );
-    } else if (queue == null) {
+    if (queue == null) {
       children.addAll(
         _resumeRows(context, workspaces, primaryThreadId: primaryThreadId),
       );
@@ -369,7 +357,7 @@ class _PersistenceStatusPanelState
           queue.pendingBytes,
         ),
         context.l10n.persistenceQueueInFlight(queue.inFlightBytes),
-        if (queue.oldestPendingAgeMillis case final age?)
+        if (_liveOldestAgeMillis(queue, updatedAt) case final age?)
           context.l10n.persistenceQueueOldestAge(age),
         if (queue.pressurePaused) context.l10n.persistenceQueuePressurePaused,
         if (queue.statisticsGap) context.l10n.persistenceStatisticsGap,
@@ -418,6 +406,31 @@ class _PersistenceStatusPanelState
       }
       children.addAll(
         _resumeRows(context, workspaces, primaryThreadId: primaryThreadId),
+      );
+    }
+    if (transportError != null) {
+      children.add(
+        Row(
+          children: [
+            Expanded(
+              child: _diagnosticText(
+                context,
+                '${context.l10n.persistenceQueueUnavailable} · $transportError',
+              ),
+            ),
+            TextButton.icon(
+              // 诊断明细内的刷新入口使用独立 literal key：概览行常驻的
+              // 刷新图标保留 StudioDriverKeys.persistenceQueueRefresh，
+              // 明细展开时两者同时可见也不会让 Driver 唯一 finder 失效。
+              key: const ValueKey('persistence-diagnostics-refresh'),
+              onPressed: () => ref.read(productTopicRetryProvider)(
+                const PersistenceQueueTopic(),
+              ),
+              icon: const Icon(Icons.refresh, size: 16),
+              label: Text(context.l10n.persistenceQueueRefresh),
+            ),
+          ],
+        ),
       );
     }
     return Padding(
@@ -680,10 +693,23 @@ class _PersistenceStatusPanelState
       IconButton(
         key: StudioDriverKeys.persistenceQueueRefresh,
         tooltip: context.l10n.persistenceQueueRefresh,
-        onPressed: _loadingQueue ? null : _refreshQueue,
+        onPressed: () =>
+            ref.read(productTopicRetryProvider)(const PersistenceQueueTopic()),
         icon: const Icon(Icons.refresh, size: 17),
       ),
     ];
+  }
+
+  /// 最老待保存年龄：以事件通知时间基线在本地推算，不请求接口。
+  int? _liveOldestAgeMillis(
+    PersistenceQueueSnapshot queue,
+    DateTime? updatedAt,
+  ) {
+    final base = queue.oldestPendingAgeMillis;
+    if (base == null) return null;
+    if (updatedAt == null) return base;
+    final elapsed = DateTime.now().difference(updatedAt).inMilliseconds;
+    return base + (elapsed > 0 ? elapsed : 0);
   }
 
   /// 诊断明细的折叠身份：会话级阻塞按「会话 + 故障代数 + 阶段」，其余按进程级队列。
@@ -721,32 +747,10 @@ class _PersistenceStatusPanelState
     return context.l10n.persistenceHistoryResumeHint;
   }
 
-  Future<void> _refreshQueue() async {
-    if (_loadingQueue) return;
-    _loadingQueue = true;
-    try {
-      final queue = await ref
-          .read(studioControllerProvider.notifier)
-          .readPersistenceQueue();
-      if (!mounted) return;
-      setState(() {
-        _queueSupported = queue != null;
-        _queue = queue;
-      });
-    } on Object {
-      if (!mounted) return;
-      // 读取失败是“未知”，保留上一次观测，不把它当成零。
-      setState(() => _queueSupported = false);
-    } finally {
-      _loadingQueue = false;
-    }
-  }
-
   Future<void> _retry() async {
     setState(() => _retrying = true);
     try {
       await ref.read(studioControllerProvider.notifier).retryPersistence();
-      await _refreshQueue();
     } finally {
       if (mounted) setState(() => _retrying = false);
     }
@@ -758,15 +762,14 @@ class _PersistenceStatusPanelState
   Future<void> _retryStorage(String threadId, int faultGeneration) async {
     setState(() => _retryingThreads.add(threadId));
     try {
-      final queue = await ref
+      await ref
           .read(studioControllerProvider.notifier)
           .retryThreadHistory(threadId, faultGeneration);
-      if (mounted) setState(() => _queue = queue);
+      // 命令返回值不作为 wrapper snapshot：队列内容由 canonical 事件更新。
     } on Object catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('$error')));
-        await _refreshQueue();
       }
     } finally {
       if (mounted) setState(() => _retryingThreads.remove(threadId));
@@ -792,7 +795,6 @@ class _PersistenceStatusPanelState
     } finally {
       if (mounted) {
         setState(() => _resumingThreads.remove(threadId));
-        await _refreshQueue();
       }
     }
   }

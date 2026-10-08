@@ -26,6 +26,7 @@ pub use persistence::*;
 pub use product_event_bus::ProductEventBus;
 pub use records::{AttachmentRecord, ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility};
 pub use recovery_registry::StudioRecoveryRegistry;
+pub use runtime::StudioProductTopicSubscription;
 pub use runtime::*;
 pub use runtime_lock::{StudioHostKind, StudioRuntimeOptions};
 pub use runtime_state::*;

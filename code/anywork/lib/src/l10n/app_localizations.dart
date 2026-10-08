@@ -4265,6 +4265,30 @@ abstract class AppLocalizations {
   /// **'Local'**
   String get sidebarLocal;
 
+  /// No description provided for @sidebarDetailUpdatedNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated just now'**
+  String get sidebarDetailUpdatedNow;
+
+  /// No description provided for @sidebarDetailUpdatedMinutesAgo.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Updated 1 minute ago} other{Updated {count} minutes ago}}'**
+  String sidebarDetailUpdatedMinutesAgo(int count);
+
+  /// No description provided for @sidebarDetailUpdatedHoursAgo.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Updated 1 hour ago} other{Updated {count} hours ago}}'**
+  String sidebarDetailUpdatedHoursAgo(int count);
+
+  /// No description provided for @sidebarDetailUpdatedDaysAgo.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Updated 1 day ago} other{Updated {count} days ago}}'**
+  String sidebarDetailUpdatedDaysAgo(int count);
+
   /// No description provided for @sidebarNotChecked.
   ///
   /// In en, this message translates to:

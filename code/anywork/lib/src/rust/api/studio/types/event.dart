@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../../../frb_generated.dart';
+import 'agent_profile.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
@@ -32,13 +33,6 @@ class BridgeProductEventEnvelope {
     required this.createdAt,
     required this.payload,
   });
-
-  static Future<BridgeProductEventEnvelope> stale({
-    required BigInt laggedEvents,
-  }) => RustLib.instance.api
-      .crateApiStudioTypesEventBridgeProductEventEnvelopeStale(
-        laggedEvents: laggedEvents,
-      );
 
   @override
   int get hashCode =>
@@ -97,15 +91,21 @@ sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
   const factory BridgeProductEventPayload.modelPerformanceStateChanged(
     BridgeModelPerformanceSnapshot field0,
   ) = BridgeProductEventPayload_ModelPerformanceStateChanged;
+  const factory BridgeProductEventPayload.sessionCostsChanged(
+    BridgeSessionCostsState field0,
+  ) = BridgeProductEventPayload_SessionCostsChanged;
   const factory BridgeProductEventPayload.updaterStateChanged(
     BridgeUpdaterStateSnapshot field0,
   ) = BridgeProductEventPayload_UpdaterStateChanged;
   const factory BridgeProductEventPayload.persistenceStateChanged(
     BridgePersistenceStateSnapshot field0,
   ) = BridgeProductEventPayload_PersistenceStateChanged;
-  const factory BridgeProductEventPayload.stale({
-    required BigInt laggedEvents,
-  }) = BridgeProductEventPayload_Stale;
+  const factory BridgeProductEventPayload.persistenceQueueStateChanged(
+    BridgePersistenceQueueStateSnapshot field0,
+  ) = BridgeProductEventPayload_PersistenceQueueStateChanged;
+  const factory BridgeProductEventPayload.agentProfilesStateChanged(
+    BridgeAgentProfilesStateSnapshot field0,
+  ) = BridgeProductEventPayload_AgentProfilesStateChanged;
 }
 
 @freezed

@@ -136,12 +136,17 @@ class StudioThread {
   }
 }
 
-/// 一次目录分页查询的结果页。
+/// 一次目录分页查询的结果页；`revision` 是目录领域水位。
 class ThreadDirectoryPage {
-  const ThreadDirectoryPage({required this.threads, this.nextCursor});
+  const ThreadDirectoryPage({
+    required this.threads,
+    this.nextCursor,
+    this.revision = 0,
+  });
 
   final List<StudioThread> threads;
   final String? nextCursor;
+  final int revision;
 
   bool get hasMore => nextCursor != null;
 }
@@ -150,24 +155,28 @@ class ThreadDirectoryPage {
 ///
 /// 只保留已加载页的条目；触底通过 `nextCursor` 继续加载，目录增量按身份
 /// 原位合并（新会话前置、归档移除），未加载条目的增量直接忽略。
+/// `revision` 是目录领域水位：基线与增量都只按它前进，旧事实被拒绝。
 class ThreadDirectoryWindow {
   const ThreadDirectoryWindow({
     this.threads = const [],
     this.nextCursor,
     this.hasMore = false,
     this.isLoading = false,
+    this.revision = 0,
   });
 
   final List<StudioThread> threads;
   final String? nextCursor;
   final bool hasMore;
   final bool isLoading;
+  final int revision;
 
   ThreadDirectoryWindow copyWith({
     List<StudioThread>? threads,
     Object? nextCursor = _sentinel,
     bool? hasMore,
     bool? isLoading,
+    int? revision,
   }) {
     return ThreadDirectoryWindow(
       threads: threads ?? this.threads,
@@ -176,17 +185,45 @@ class ThreadDirectoryWindow {
           : nextCursor as String?,
       hasMore: hasMore ?? this.hasMore,
       isLoading: isLoading ?? this.isLoading,
+      revision: revision ?? this.revision,
+    );
+  }
+
+  /// 基线首页合并：首页内容以基线为准，已加载的更远（更旧）页保留不清空。
+  ///
+  /// 基线是订阅建立后的 canonical 首页；它不能冒充全量目录，也不得把用户已
+  /// 触底加载的更旧页裁掉。旧基线（`revision` 不前进）原样返回。
+  ThreadDirectoryWindow applyBaselinePage(
+    ThreadDirectoryPage page, {
+    required int revision,
+  }) {
+    if (revision <= this.revision) return this;
+    final baseIds = {for (final thread in page.threads) thread.id};
+    final last = page.threads.lastOrNull;
+    final retainedOlder = [
+      for (final thread in threads)
+        if (!baseIds.contains(thread.id) &&
+            (last == null || _sortsAfter(thread, last)))
+          thread,
+    ];
+    return copyWith(
+      threads: [...page.threads, ...retainedOlder],
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+      revision: revision,
     );
   }
 
   /// 增量合并：已加载条目原位替换；比当前窗口最新条目更新的前置；
   /// 其余（窗口未覆盖的更旧条目）忽略。
   ThreadDirectoryWindow applyDelta({
+    required int revision,
     required List<StudioThread> upserted,
     required List<String> removed,
   }) {
+    if (revision < this.revision) return this;
     if (upserted.isEmpty && removed.isEmpty) {
-      return this;
+      return revision == this.revision ? this : copyWith(revision: revision);
     }
     final removedSet = removed.toSet();
     final upsertedById = {for (final thread in upserted) thread.id: thread};
@@ -205,7 +242,7 @@ class ThreadDirectoryWindow {
           (thread.directorySortTime.isAtSameMomentAs(first.directorySortTime) &&
               thread.id.compareTo(first.id) > 0);
     }).toList();
-    return copyWith(threads: [...prependable, ...retained]);
+    return copyWith(threads: [...prependable, ...retained], revision: revision);
   }
 
   ThreadDirectoryWindow appendPage(ThreadDirectoryPage page) {
@@ -218,8 +255,21 @@ class ThreadDirectoryWindow {
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
       isLoading: false,
+      // 追加页携带查询时的目录水位；只前进不回退（页本身不驱动目录事件）。
+      revision: page.revision > revision ? page.revision : revision,
     );
   }
+}
+
+/// 目录序为 `(directorySortTime, id)` 倒序；[candidate] 是否排在 [anchor] 之后（更旧）。
+///
+/// 与 [StudioThread.compareDirectoryOrder] 使用同一 canonical 排序键（最近用户消息时间，
+/// 缺失回落到创建时间），保证分页窗口的前置/保留判定与目录排序一致。
+bool _sortsAfter(StudioThread candidate, StudioThread anchor) {
+  final byTime = candidate.directorySortTime.compareTo(
+    anchor.directorySortTime,
+  );
+  return byTime < 0 || (byTime == 0 && candidate.id.compareTo(anchor.id) < 0);
 }
 
 const Object _sentinel = Object();

@@ -3,7 +3,7 @@ use pl_studio_runtime::StudioModelPerformanceSnapshot;
 use crate::api::studio::types::{
     BridgeModelMatchState, BridgeModelPerformanceSample, BridgeModelPerformanceSnapshot,
     BridgeModelPerformanceSummary, BridgePurposeCostSnapshot, BridgeRuntimeCostAmount,
-    BridgeSessionCostSnapshot,
+    BridgeSessionCostSnapshot, BridgeSessionCostsState,
 };
 
 pub(crate) fn bridge_model_performance(
@@ -15,38 +15,6 @@ pub(crate) fn bridge_model_performance(
         statistics_pending: value.statistics_pending,
         statistics_gap: value.statistics_gap,
         read_failed: value.read_failed,
-        session_costs: value
-            .session_costs
-            .into_iter()
-            .map(|session| BridgeSessionCostSnapshot {
-                root_thread_id: session.root_thread_id,
-                purpose_costs: session
-                    .purpose_costs
-                    .into_iter()
-                    .map(|cost| BridgePurposeCostSnapshot {
-                        purpose: cost.purpose,
-                        estimated_costs: cost
-                            .estimated_costs
-                            .into_iter()
-                            .map(|amount| BridgeRuntimeCostAmount {
-                                currency: amount.currency,
-                                amount: amount.amount,
-                            })
-                            .collect(),
-                        has_unpriced_usage: cost.has_unpriced_usage,
-                    })
-                    .collect(),
-                estimated_costs: session
-                    .estimated_costs
-                    .into_iter()
-                    .map(|cost| BridgeRuntimeCostAmount {
-                        currency: cost.currency,
-                        amount: cost.amount,
-                    })
-                    .collect(),
-                has_unpriced_usage: session.has_unpriced_usage,
-            })
-            .collect(),
         summaries: value
             .summaries
             .into_iter()
@@ -92,5 +60,46 @@ pub(crate) fn bridge_model_performance(
                 tokens_per_second: sample.tokens_per_second,
             })
             .collect(),
+    }
+}
+
+pub(crate) fn bridge_session_costs_state(
+    value: pl_studio_runtime::StudioSessionCostsState,
+) -> BridgeSessionCostsState {
+    BridgeSessionCostsState {
+        root_thread_id: value.root_thread_id,
+        revision: value.revision,
+        updated_at: value.updated_at,
+        statistics_pending: value.statistics_pending,
+        statistics_gap: value.statistics_gap,
+        read_failed: value.read_failed,
+        cost: value.cost.map(|cost| BridgeSessionCostSnapshot {
+            root_thread_id: cost.root_thread_id,
+            purpose_costs: cost
+                .purpose_costs
+                .into_iter()
+                .map(|cost| BridgePurposeCostSnapshot {
+                    purpose: cost.purpose,
+                    estimated_costs: cost
+                        .estimated_costs
+                        .into_iter()
+                        .map(|amount| BridgeRuntimeCostAmount {
+                            currency: amount.currency,
+                            amount: amount.amount,
+                        })
+                        .collect(),
+                    has_unpriced_usage: cost.has_unpriced_usage,
+                })
+                .collect(),
+            estimated_costs: cost
+                .estimated_costs
+                .into_iter()
+                .map(|cost| BridgeRuntimeCostAmount {
+                    currency: cost.currency,
+                    amount: cost.amount,
+                })
+                .collect(),
+            has_unpriced_usage: cost.has_unpriced_usage,
+        }),
     }
 }

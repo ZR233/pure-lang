@@ -868,6 +868,7 @@ mod stage_order {
     pub(super) const TOOL_REFRESH: usize = 13;
     pub(super) const PERSISTENCE_OBSERVER: usize = 14;
     pub(super) const SSH: usize = 15;
+    pub(super) const AGENT_PROFILES: usize = 16;
 }
 
 /// 在常驻槽位上只启动一次真正的 stop 工作；已存在则返回同一共享句柄。
@@ -1265,6 +1266,7 @@ impl StudioRuntime {
         background_task::signal(&self.external_runtimes.mcp_health_watcher).await;
         background_task::signal(&self.external_runtimes.lsp_state_watcher).await;
         background_task::signal(&self.persistence_observer).await;
+        background_task::signal(&self.profiles_forwarder).await;
         self.title_tasks.signal_cancel().await;
         // 活动 Turn / 模型 / 工具：通过既有的纯取消入口取消每个驻留 Thread 当前执行代次。
         // 这里只发信号，不 join、也不 close——真正的收束仍由后续唯一 `agentFramework` 阶段完成，
@@ -1471,8 +1473,9 @@ impl StudioRuntime {
             .boxed(),
         );
 
-        // 与 SSH transport 无依赖的本地资源：本地 LSP 状态 watcher 与持久化 observer。它们不被
-        // SSH 依赖闸门等待，只与写入链、远端依赖组并发收束（各自有界），不拖后 SSH 回收。
+        // 与 SSH transport 无依赖的本地资源：本地 LSP 状态 watcher、持久化 observer 与 Agent
+        // Profiles 转发。它们不被 SSH 依赖闸门等待，只与写入链、远端依赖组并发收束（各自有界），
+        // 不拖后 SSH 回收。
         let mut independent: FuturesUnordered<StageBranch> = FuturesUnordered::new();
         independent.push(self.stage_branch(
             budget,
@@ -1491,6 +1494,16 @@ impl StudioRuntime {
                     .await
                     .map_err(|error| anyhow::anyhow!(error.to_string()))
             },
+        ));
+        // Agent Profiles 配置 watch 转发同样由 runtime 拥有：正常退出与失败路径都必须在同一首次
+        // 期限内有界地 signal + join，失败 / 超时经 collector 记为该次退出的 issue，令 `Clean`
+        // 不可达并保留 owner（常驻槽位超时不丢句柄），不得只靠 `dispose_startup` 或 slot Drop 收束。
+        independent.push(self.stage_branch(
+            budget,
+            stage_order::AGENT_PROFILES,
+            "agentProfiles",
+            Some(SERVICE_STAGE_LIMIT),
+            |runtime| async move { runtime.stop_agent_profiles_forwarder().await },
         ));
 
         // 写入生产者依赖的共享完成信号：写入链在生产者收束观测结束后继续持久化；SSH 依赖同一份

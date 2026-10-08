@@ -142,6 +142,7 @@ class StudioMenu<T> extends StatefulWidget {
     this.enabled = true,
     this.onBlockedTap,
     this.menuConstraints,
+    this.onBeforeOpen,
     this.onOpen,
     this.onClose,
     super.key,
@@ -158,6 +159,7 @@ class StudioMenu<T> extends StatefulWidget {
     this.enabled = true,
     this.menuConstraints,
     this.childFocusNode,
+    this.onBeforeOpen,
     this.onOpen,
     this.onClose,
     super.key,
@@ -196,6 +198,13 @@ class StudioMenu<T> extends StatefulWidget {
   /// [StudioMenuController.consumeAutoOpenSuppression]). Hover opens pass
   /// `focusTrigger: false` and leave focus alone.
   final FocusNode? childFocusNode;
+
+  /// Called synchronously before an enabled, non-empty menu attempts to open.
+  ///
+  /// Owners can close a mutually exclusive parent detail here, before creating
+  /// this menu's overlay. The attempt can still be refused for insufficient
+  /// anchoring space; use [onOpen] and [onClose] for actual session state.
+  final VoidCallback? onBeforeOpen;
 
   /// Called after the menu opens.
   final VoidCallback? onOpen;
@@ -252,6 +261,8 @@ class _StudioMenuState<T> extends State<StudioMenu<T>>
     if (!_canOpen) {
       return;
     }
+    widget.onBeforeOpen?.call();
+    if (!mounted || !_canOpen) return;
     _surface?.open(focusTrigger: focusTrigger);
   }
 
@@ -587,6 +598,7 @@ class StudioIconMenu<T> extends StatefulWidget {
     this.visualDensity,
     this.color,
     this.menuConstraints,
+    this.onBeforeOpen,
     this.onOpen,
     this.onClose,
     super.key,
@@ -622,6 +634,9 @@ class StudioIconMenu<T> extends StatefulWidget {
   /// See [StudioMenu.menuConstraints].
   final BoxConstraints? menuConstraints;
 
+  /// See [StudioMenu.onBeforeOpen].
+  final VoidCallback? onBeforeOpen;
+
   /// See [StudioMenu.onOpen].
   final VoidCallback? onOpen;
 
@@ -651,6 +666,7 @@ class _StudioIconMenuState<T> extends State<StudioIconMenu<T>> {
       enabled: widget.enabled,
       menuConstraints: widget.menuConstraints,
       childFocusNode: _triggerFocusNode,
+      onBeforeOpen: widget.onBeforeOpen,
       onOpen: widget.onOpen,
       onClose: widget.onClose,
       triggerBuilder: (context, controller, canOpen) => IconButton(

@@ -35,11 +35,11 @@ pub enum BridgeProductEventPayload {
     ThreadModeCatalogChanged(BridgeThreadModeCatalogSnapshot),
     ProviderUsageStateChanged(BridgeProviderUsageStateSnapshot),
     ModelPerformanceStateChanged(BridgeModelPerformanceSnapshot),
+    SessionCostsChanged(Box<super::response::BridgeSessionCostsState>),
     UpdaterStateChanged(BridgeUpdaterStateSnapshot),
     PersistenceStateChanged(BridgePersistenceStateSnapshot),
-    Stale {
-        lagged_events: u64,
-    },
+    PersistenceQueueStateChanged(Box<super::response::BridgePersistenceQueueStateSnapshot>),
+    AgentProfilesStateChanged(Box<super::response::BridgeAgentProfilesStateSnapshot>),
 }
 
 /// Thread directory 增量事件 payload。
@@ -63,18 +63,4 @@ pub enum BridgeShutdownProgress {
     StoppingMcp,
     StoppingLsp,
     Stopped,
-}
-
-impl BridgeProductEventEnvelope {
-    pub fn stale(lagged_events: u64) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        Self {
-            event_id: format!("bridge-product-stale-{:x}", now.as_nanos()),
-            sequence: 0,
-            created_at: now.as_secs() as i64,
-            payload: BridgeProductEventPayload::Stale { lagged_events },
-        }
-    }
 }

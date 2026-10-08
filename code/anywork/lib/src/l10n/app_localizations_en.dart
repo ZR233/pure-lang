@@ -2375,6 +2375,42 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sidebarLocal => 'Local';
 
   @override
+  String get sidebarDetailUpdatedNow => 'Updated just now';
+
+  @override
+  String sidebarDetailUpdatedMinutesAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Updated $count minutes ago',
+      one: 'Updated 1 minute ago',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String sidebarDetailUpdatedHoursAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Updated $count hours ago',
+      one: 'Updated 1 hour ago',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String sidebarDetailUpdatedDaysAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Updated $count days ago',
+      one: 'Updated 1 day ago',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get sidebarNotChecked => 'Not checked';
 
   @override

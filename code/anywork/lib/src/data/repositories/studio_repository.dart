@@ -2,4 +2,7 @@ export 'studio_api_provider.dart';
 export 'studio_controller.dart';
 export 'studio_selectors.dart';
 export 'studio_state_reducer.dart';
+export 'studio_product_topics.dart';
+export 'studio_topic_providers.dart';
+export 'studio_topic_reducer.dart';
 export 'studio_stream_coordinators.dart';

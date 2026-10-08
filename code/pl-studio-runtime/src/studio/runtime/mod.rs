@@ -18,6 +18,7 @@ mod mcp_health;
 mod model_catalog;
 mod model_performance;
 mod model_refresh;
+mod product_subscription;
 mod prompt_runner;
 mod provider_usage;
 mod rejected_tools;
@@ -33,6 +34,7 @@ mod thread_stream;
 pub(in crate::studio) mod timeline;
 mod tool_refresh;
 pub use chat_window::{ChatWindowHandle, ChatWindowStream};
+pub use product_subscription::StudioProductTopicSubscription;
 pub use thread_stream::StudioThreadSubscription;
 mod thread_observation;
 mod thread_title;
@@ -181,6 +183,10 @@ pub struct StudioRuntime {
     /// 播种为成功前置条件，不吞、不伪成功。std `Mutex`，只在无 await 的短临界区内持有。
     early_exit_issues: std::sync::Arc<std::sync::Mutex<Vec<crate::StudioShutdownIssue>>>,
     title_tasks: ThreadTitleTasks,
+    /// Agent Profiles 配置 watch → product bus 转发任务；runtime 持有，shutdown 先广播取消
+    /// 再在独立资源组以同一首次期限有界 join——失败 / 超时经 collector 令 `Clean` 不可达并
+    /// 保留 owner（常驻槽位超时不丢句柄）。
+    profiles_forwarder: background_task::BackgroundTaskSlot,
 }
 
 #[derive(Clone)]
@@ -222,9 +228,12 @@ impl StudioRuntime {
         ARCHIVE_TREE_SETTLE_TIMEOUT
     }
 
-    /// 返回当前配置目录中可用的 Agent Profile 快照。
-    pub fn read_agent_profiles(&self) -> Result<crate::config::AgentProfileCatalog> {
-        Ok(self.config_runtime.agent_profiles_for_settings()?)
+    /// 读取配置 owner 已发布的 Agent Profiles 资源快照。
+    ///
+    /// 纯缓存读取（完整配置与逐文件诊断），不扫描文件；外部手改 Profile 后需显式
+    /// reload 设置才会形成新事实。
+    pub fn read_agent_profiles_state(&self) -> Result<crate::StudioAgentProfilesStateSnapshot> {
+        Ok(self.config_runtime.agent_profiles_snapshot()?.into())
     }
 
     /// 原子创建或保存一个用户 Agent Profile TOML。
@@ -320,6 +329,11 @@ impl StudioRuntime {
             thread.resume_storage(fault_generation).await?;
         }
         Ok(self.persistence_queue_snapshot())
+    }
+
+    /// 读取已发布的持久化队列 typed 快照（含 revision 与时间基线）。
+    pub fn read_persistence_queue_state(&self) -> crate::StudioPersistenceQueueStateSnapshot {
+        self.agent_facility.product_events.persistence_queue_state()
     }
 
     /// 进程级持久化队列压力与逐 Thread 水位。

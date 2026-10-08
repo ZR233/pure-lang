@@ -4,6 +4,7 @@ import 'collection_extensions.dart';
 import 'composer_models.dart';
 import 'interaction_models.dart';
 import 'persistence_models.dart';
+import 'product_topic_models.dart';
 import 'provider_models.dart';
 import 'recovery_models.dart';
 import 'runtime_models.dart';
@@ -50,6 +51,10 @@ class StudioState {
     this.modelPerformance = const ModelPerformanceSnapshotView(),
     required this.updaterState,
     this.persistenceState = const PersistenceStateSnapshot.ready(),
+    this.persistenceQueueState,
+    this.agentProfilesState,
+    this.sessionCostsByRoot = const {},
+    this.topicConnections = const {},
     this.workspacesByThread = const {},
     this.workspaceUiByThread = const {},
     this.openedThreadIds = const {},
@@ -91,6 +96,25 @@ class StudioState {
   final UpdaterStateSnapshot updaterState;
   final PersistenceStateSnapshot persistenceState;
 
+  /// 进程级持久化队列诊断；由 PersistenceQueue topic/显式读取更新。
+  final PersistenceQueueStateView? persistenceQueueState;
+
+  /// 配置级 Agent Profiles 资源快照；由 AgentProfiles topic/显式读取更新。
+  final AgentProfilesStateView? agentProfilesState;
+
+  /// 按 root 会话作用域的费用状态；`cost == null` 是显式清除。
+  final Map<String, SessionCostsStateView> sessionCostsByRoot;
+
+  /// 每个已租用 topic 的局部传输连接状态（transport，不是业务 snapshot）。
+  ///
+  /// 由 data 层的单一 topic 接线写入：Baseline/Data 表示 connected，Lagged/Failure/
+  /// closed 表示 reconnecting/failed，同时保留 canonical 领域数据。scope 释放后
+  /// 由 data 层清理对应条目，避免无界墓碑。
+  final Map<ProductTopic, ProductTopicConnectionStateView> topicConnections;
+
+  ProductTopicConnectionStateView? topicConnection(ProductTopic topic) =>
+      topicConnections[topic];
+
   List<StudioProject> get projects => projectDirectory.values;
   List<StudioThread> get threads => threadDirectory.threads;
   Map<String, StudioAgentView> get agentsByThread => {
@@ -103,8 +127,12 @@ class StudioState {
   String? get defaultProviderId => settingsState.defaultProviderId;
   List<ModeModelRouteView> get modeModelRoutes => settingsState.modeModelRoutes;
   List<ProviderUsageView> get providerUsages => providerUsageState.usages;
-  SessionCostView? get selectedSessionCost =>
-      modelPerformance.sessionCost(selectedRootThread?.id);
+  SessionCostsStateView? get selectedSessionCostState {
+    final rootId = selectedRootThread?.id;
+    return rootId == null ? null : sessionCostsByRoot[rootId];
+  }
+
+  SessionCostView? get selectedSessionCost => selectedSessionCostState?.cost;
   List<RoleSettingsView> get roles => settingsState.roles;
   List<McpServerSettingsView> get mcpServers => settingsState.mcpServers;
   InstructionsSettingsView get instructions => settingsState.instructions;
@@ -343,6 +371,10 @@ class StudioState {
     ModelPerformanceSnapshotView? modelPerformance,
     UpdaterStateSnapshot? updaterState,
     PersistenceStateSnapshot? persistenceState,
+    Object? persistenceQueueState = _studioStateUnset,
+    Object? agentProfilesState = _studioStateUnset,
+    Map<String, SessionCostsStateView>? sessionCostsByRoot,
+    Map<ProductTopic, ProductTopicConnectionStateView>? topicConnections,
   }) {
     return StudioState(
       workspacesByThread: workspacesByThread ?? this.workspacesByThread,
@@ -375,6 +407,14 @@ class StudioState {
       modelPerformance: modelPerformance ?? this.modelPerformance,
       updaterState: updaterState ?? this.updaterState,
       persistenceState: persistenceState ?? this.persistenceState,
+      persistenceQueueState: identical(persistenceQueueState, _studioStateUnset)
+          ? this.persistenceQueueState
+          : persistenceQueueState as PersistenceQueueStateView?,
+      agentProfilesState: identical(agentProfilesState, _studioStateUnset)
+          ? this.agentProfilesState
+          : agentProfilesState as AgentProfilesStateView?,
+      sessionCostsByRoot: sessionCostsByRoot ?? this.sessionCostsByRoot,
+      topicConnections: topicConnections ?? this.topicConnections,
     );
   }
 }

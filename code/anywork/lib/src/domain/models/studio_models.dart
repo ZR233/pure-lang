@@ -8,6 +8,7 @@ export 'conversation_activity_models.dart';
 export 'failure_models.dart';
 export 'interaction_models.dart';
 export 'persistence_models.dart';
+export 'product_topic_models.dart';
 export 'provider_models.dart';
 export 'model_catalog.dart';
 export 'recovery_models.dart';
