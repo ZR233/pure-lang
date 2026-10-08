@@ -690,6 +690,8 @@
   "settingsStudioUpdateBusy": "请先等待当前轮次或任务结束，再安装更新。",
   "settingsStudioUpdateCheck": "检查更新",
   "settingsStudioUpdateInstall": "下载并安装",
+  "settingsStudioUpdateRestart": "安装并重启",
+  "settingsStudioUpdateReady": "{version} 已下载，将在关闭糊来帮后自动安装。",
   "settingsStudioUpdateReleaseNotes": "发行说明",
   "timelineWebSearchTitle": "网页搜索",
   "timelineWebSearchSearching": "正在搜索网页",

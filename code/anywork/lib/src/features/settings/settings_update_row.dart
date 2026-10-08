@@ -135,7 +135,11 @@ class StudioUpdateSettingsRow extends ConsumerWidget {
             onPressed: runtimeBusy
                 ? null
                 : () => _runAction(context, controller.install),
-            child: Text(context.l10n.settingsStudioUpdateInstall),
+            child: Text(
+              state is ReadyUpdaterStateSnapshot
+                  ? context.l10n.settingsStudioUpdateRestart
+                  : context.l10n.settingsStudioUpdateInstall,
+            ),
           ),
         ],
       );
@@ -191,6 +195,8 @@ class StudioUpdateSettingsRow extends ConsumerWidget {
         ),
       VerifyingUpdaterStateSnapshot(:final update) =>
         context.l10n.settingsStudioUpdateVerifying(update.version),
+      ReadyUpdaterStateSnapshot(:final update) =>
+        context.l10n.settingsStudioUpdateReady(update.version),
       InstallerLaunchedUpdaterStateSnapshot(:final update) =>
         context.l10n.settingsStudioUpdateInstallerLaunched(update.version),
       InstallFailedUpdaterStateSnapshot(:final update) =>
@@ -231,5 +237,6 @@ UpdaterErrorView? _error(UpdaterStateSnapshot state) => switch (state) {
   AvailableUpdaterStateSnapshot() ||
   DownloadingUpdaterStateSnapshot() ||
   VerifyingUpdaterStateSnapshot() ||
+  ReadyUpdaterStateSnapshot() ||
   InstallerLaunchedUpdaterStateSnapshot() => null,
 };

@@ -1063,6 +1063,13 @@
   "settingsStudioUpdateBusy": "Finish the active turn or task before installing.",
   "settingsStudioUpdateCheck": "Check for updates",
   "settingsStudioUpdateInstall": "Download and install",
+  "settingsStudioUpdateRestart": "Install and restart",
+  "settingsStudioUpdateReady": "Version {version} is downloaded and will install when you close anywork.",
+  "@settingsStudioUpdateReady": {
+    "placeholders": {
+      "version": { "type": "String" }
+    }
+  },
   "settingsStudioUpdateReleaseNotes": "Release notes",
   "timelineWebSearchTitle": "Web search",
   "timelineWebSearchSearching": "Searching the web",

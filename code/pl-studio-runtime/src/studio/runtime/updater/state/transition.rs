@@ -5,8 +5,9 @@ use thiserror::Error;
 
 use super::{
     AvailableUpdateState, CheckFailedUpdateState, CheckingUpdateState, DownloadingUpdateState,
-    IdleUpdateState, InstallFailedUpdateState, InstallerLaunchedUpdateState, StudioUpdateCommand,
-    StudioUpdateStateKind, StudioUpdateStateSnapshot, UpToDateUpdateState, VerifyingUpdateState,
+    IdleUpdateState, InstallFailedUpdateState, InstallerLaunchedUpdateState, ReadyUpdateState,
+    StudioUpdateCommand, StudioUpdateStateKind, StudioUpdateStateSnapshot, UpToDateUpdateState,
+    VerifyingUpdateState,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -81,16 +82,17 @@ impl StudioUpdateStateSnapshot {
                         revision,
                         updated_at: *updated_at,
                     }),
-                    Self::Downloading(_) | Self::Verifying(_) | Self::InstallerLaunched(_) => {
-                        Self::Available(AvailableUpdateState {
-                            revision,
-                            checked_at: *updated_at,
-                            update: self
-                                .update()
-                                .expect("install states have an update")
-                                .clone(),
-                        })
-                    }
+                    Self::Downloading(_)
+                    | Self::Verifying(_)
+                    | Self::Ready(_)
+                    | Self::InstallerLaunched(_) => Self::Available(AvailableUpdateState {
+                        revision,
+                        checked_at: *updated_at,
+                        update: self
+                            .update()
+                            .expect("install states have an update")
+                            .clone(),
+                    }),
                     _ => self.clone(),
                 }
             }
@@ -127,7 +129,7 @@ impl StudioUpdateStateSnapshot {
                 update: update.clone(),
             }),
             (
-                Self::Checking(_),
+                Self::Idle(_) | Self::UpToDate(_) | Self::Checking(_) | Self::CheckFailed(_),
                 StudioUpdateCommand::FailCheck {
                     failed_at, error, ..
                 },
@@ -137,7 +139,7 @@ impl StudioUpdateStateSnapshot {
                 error: error.clone(),
             }),
             (
-                Self::Available(_) | Self::InstallFailed(_),
+                Self::Available(_) | Self::Ready(_) | Self::InstallFailed(_),
                 StudioUpdateCommand::BeginDownload { update, .. },
             ) if self.update() != Some(update) => {
                 return Err(StudioUpdateTransitionError::CorrelationMismatch {
@@ -150,7 +152,7 @@ impl StudioUpdateStateSnapshot {
                 });
             }
             (
-                Self::Available(_) | Self::InstallFailed(_),
+                Self::Available(_) | Self::Ready(_) | Self::InstallFailed(_),
                 StudioUpdateCommand::BeginDownload { total: 0, .. },
             ) => {
                 return Err(StudioUpdateTransitionError::InvalidPayload {
@@ -160,7 +162,7 @@ impl StudioUpdateStateSnapshot {
                 });
             }
             (
-                Self::Available(_) | Self::InstallFailed(_),
+                Self::Available(_) | Self::Ready(_) | Self::InstallFailed(_),
                 StudioUpdateCommand::BeginDownload {
                     updated_at,
                     update,
@@ -216,6 +218,13 @@ impl StudioUpdateStateSnapshot {
                     total: current.total,
                 })
             }
+            (Self::Verifying(current), StudioUpdateCommand::MarkReady { ready_at, .. }) => {
+                Self::Ready(ReadyUpdateState {
+                    revision,
+                    ready_at: *ready_at,
+                    update: current.update.clone(),
+                })
+            }
             (
                 Self::Verifying(current),
                 StudioUpdateCommand::MarkInstallerLaunched { launched_at, .. },
@@ -225,36 +234,21 @@ impl StudioUpdateStateSnapshot {
                 update: current.update.clone(),
             }),
             (
-                Self::Downloading(current),
+                Self::Ready(_)
+                | Self::Downloading(_)
+                | Self::Available(_)
+                | Self::Verifying(_)
+                | Self::InstallFailed(_),
                 StudioUpdateCommand::FailInstall {
                     failed_at, error, ..
                 },
             ) => Self::InstallFailed(InstallFailedUpdateState {
                 revision,
                 failed_at: *failed_at,
-                update: current.update.clone(),
-                error: error.clone(),
-            }),
-            (
-                Self::Available(current),
-                StudioUpdateCommand::FailInstall {
-                    failed_at, error, ..
-                },
-            ) => Self::InstallFailed(InstallFailedUpdateState {
-                revision,
-                failed_at: *failed_at,
-                update: current.update.clone(),
-                error: error.clone(),
-            }),
-            (
-                Self::Verifying(current),
-                StudioUpdateCommand::FailInstall {
-                    failed_at, error, ..
-                },
-            ) => Self::InstallFailed(InstallFailedUpdateState {
-                revision,
-                failed_at: *failed_at,
-                update: current.update.clone(),
+                update: self
+                    .update()
+                    .expect("install states have an update")
+                    .clone(),
                 error: error.clone(),
             }),
             _ => {

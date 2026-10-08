@@ -11,7 +11,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'runtime.dart';
 part 'updater.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeAvailableUpdaterState {
   final BigInt revision;
@@ -215,6 +215,30 @@ class BridgeInstallerLaunchedUpdaterState {
           update == other.update;
 }
 
+class BridgeReadyUpdaterState {
+  final BigInt revision;
+  final PlatformInt64 readyAt;
+  final BridgeVerifiedUpdateSummary update;
+
+  const BridgeReadyUpdaterState({
+    required this.revision,
+    required this.readyAt,
+    required this.update,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ readyAt.hashCode ^ update.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeReadyUpdaterState &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          readyAt == other.readyAt &&
+          update == other.update;
+}
+
 class BridgeUpToDateUpdaterState {
   final BigInt revision;
   final PlatformInt64 checkedAt;
@@ -260,6 +284,9 @@ sealed class BridgeUpdaterStateSnapshot with _$BridgeUpdaterStateSnapshot {
   const factory BridgeUpdaterStateSnapshot.verifying(
     BridgeVerifyingUpdaterState field0,
   ) = BridgeUpdaterStateSnapshot_Verifying;
+  const factory BridgeUpdaterStateSnapshot.ready(
+    BridgeReadyUpdaterState field0,
+  ) = BridgeUpdaterStateSnapshot_Ready;
   const factory BridgeUpdaterStateSnapshot.installerLaunched(
     BridgeInstallerLaunchedUpdaterState field0,
   ) = BridgeUpdaterStateSnapshot_InstallerLaunched;

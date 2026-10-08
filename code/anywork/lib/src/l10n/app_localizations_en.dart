@@ -1904,6 +1904,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsStudioUpdateInstall => 'Download and install';
 
   @override
+  String get settingsStudioUpdateRestart => 'Install and restart';
+
+  @override
+  String settingsStudioUpdateReady(String version) {
+    return 'Version $version is downloaded and will install when you close anywork.';
+  }
+
+  @override
   String get settingsStudioUpdateReleaseNotes => 'Release notes';
 
   @override

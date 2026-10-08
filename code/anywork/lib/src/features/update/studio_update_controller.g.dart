@@ -42,7 +42,7 @@ final class StudioUpdateControllerProvider
 }
 
 String _$studioUpdateControllerHash() =>
-    r'e866253683703bb0a5777162a4cdb2915b2bfa15';
+    r'db66bdac10acb03ac18380d876c8a7284ff77675';
 
 abstract class _$StudioUpdateController
     extends $Notifier<UpdaterStateSnapshot> {

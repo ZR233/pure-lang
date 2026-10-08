@@ -61,7 +61,7 @@ extension BridgeUpdaterStateSnapshotPatterns on BridgeUpdaterStateSnapshot {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeUpdaterStateSnapshot_Disabled value)?  disabled,TResult Function( BridgeUpdaterStateSnapshot_Idle value)?  idle,TResult Function( BridgeUpdaterStateSnapshot_Checking value)?  checking,TResult Function( BridgeUpdaterStateSnapshot_UpToDate value)?  upToDate,TResult Function( BridgeUpdaterStateSnapshot_Available value)?  available,TResult Function( BridgeUpdaterStateSnapshot_Downloading value)?  downloading,TResult Function( BridgeUpdaterStateSnapshot_Verifying value)?  verifying,TResult Function( BridgeUpdaterStateSnapshot_InstallerLaunched value)?  installerLaunched,TResult Function( BridgeUpdaterStateSnapshot_CheckFailed value)?  checkFailed,TResult Function( BridgeUpdaterStateSnapshot_InstallFailed value)?  installFailed,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeUpdaterStateSnapshot_Disabled value)?  disabled,TResult Function( BridgeUpdaterStateSnapshot_Idle value)?  idle,TResult Function( BridgeUpdaterStateSnapshot_Checking value)?  checking,TResult Function( BridgeUpdaterStateSnapshot_UpToDate value)?  upToDate,TResult Function( BridgeUpdaterStateSnapshot_Available value)?  available,TResult Function( BridgeUpdaterStateSnapshot_Downloading value)?  downloading,TResult Function( BridgeUpdaterStateSnapshot_Verifying value)?  verifying,TResult Function( BridgeUpdaterStateSnapshot_Ready value)?  ready,TResult Function( BridgeUpdaterStateSnapshot_InstallerLaunched value)?  installerLaunched,TResult Function( BridgeUpdaterStateSnapshot_CheckFailed value)?  checkFailed,TResult Function( BridgeUpdaterStateSnapshot_InstallFailed value)?  installFailed,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case BridgeUpdaterStateSnapshot_Disabled() when disabled != null:
@@ -71,7 +71,8 @@ return checking(_that);case BridgeUpdaterStateSnapshot_UpToDate() when upToDate 
 return upToDate(_that);case BridgeUpdaterStateSnapshot_Available() when available != null:
 return available(_that);case BridgeUpdaterStateSnapshot_Downloading() when downloading != null:
 return downloading(_that);case BridgeUpdaterStateSnapshot_Verifying() when verifying != null:
-return verifying(_that);case BridgeUpdaterStateSnapshot_InstallerLaunched() when installerLaunched != null:
+return verifying(_that);case BridgeUpdaterStateSnapshot_Ready() when ready != null:
+return ready(_that);case BridgeUpdaterStateSnapshot_InstallerLaunched() when installerLaunched != null:
 return installerLaunched(_that);case BridgeUpdaterStateSnapshot_CheckFailed() when checkFailed != null:
 return checkFailed(_that);case BridgeUpdaterStateSnapshot_InstallFailed() when installFailed != null:
 return installFailed(_that);case _:
@@ -92,7 +93,7 @@ return installFailed(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeUpdaterStateSnapshot_Disabled value)  disabled,required TResult Function( BridgeUpdaterStateSnapshot_Idle value)  idle,required TResult Function( BridgeUpdaterStateSnapshot_Checking value)  checking,required TResult Function( BridgeUpdaterStateSnapshot_UpToDate value)  upToDate,required TResult Function( BridgeUpdaterStateSnapshot_Available value)  available,required TResult Function( BridgeUpdaterStateSnapshot_Downloading value)  downloading,required TResult Function( BridgeUpdaterStateSnapshot_Verifying value)  verifying,required TResult Function( BridgeUpdaterStateSnapshot_InstallerLaunched value)  installerLaunched,required TResult Function( BridgeUpdaterStateSnapshot_CheckFailed value)  checkFailed,required TResult Function( BridgeUpdaterStateSnapshot_InstallFailed value)  installFailed,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeUpdaterStateSnapshot_Disabled value)  disabled,required TResult Function( BridgeUpdaterStateSnapshot_Idle value)  idle,required TResult Function( BridgeUpdaterStateSnapshot_Checking value)  checking,required TResult Function( BridgeUpdaterStateSnapshot_UpToDate value)  upToDate,required TResult Function( BridgeUpdaterStateSnapshot_Available value)  available,required TResult Function( BridgeUpdaterStateSnapshot_Downloading value)  downloading,required TResult Function( BridgeUpdaterStateSnapshot_Verifying value)  verifying,required TResult Function( BridgeUpdaterStateSnapshot_Ready value)  ready,required TResult Function( BridgeUpdaterStateSnapshot_InstallerLaunched value)  installerLaunched,required TResult Function( BridgeUpdaterStateSnapshot_CheckFailed value)  checkFailed,required TResult Function( BridgeUpdaterStateSnapshot_InstallFailed value)  installFailed,}){
 final _that = this;
 switch (_that) {
 case BridgeUpdaterStateSnapshot_Disabled():
@@ -102,7 +103,8 @@ return checking(_that);case BridgeUpdaterStateSnapshot_UpToDate():
 return upToDate(_that);case BridgeUpdaterStateSnapshot_Available():
 return available(_that);case BridgeUpdaterStateSnapshot_Downloading():
 return downloading(_that);case BridgeUpdaterStateSnapshot_Verifying():
-return verifying(_that);case BridgeUpdaterStateSnapshot_InstallerLaunched():
+return verifying(_that);case BridgeUpdaterStateSnapshot_Ready():
+return ready(_that);case BridgeUpdaterStateSnapshot_InstallerLaunched():
 return installerLaunched(_that);case BridgeUpdaterStateSnapshot_CheckFailed():
 return checkFailed(_that);case BridgeUpdaterStateSnapshot_InstallFailed():
 return installFailed(_that);}
@@ -119,7 +121,7 @@ return installFailed(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeUpdaterStateSnapshot_Disabled value)?  disabled,TResult? Function( BridgeUpdaterStateSnapshot_Idle value)?  idle,TResult? Function( BridgeUpdaterStateSnapshot_Checking value)?  checking,TResult? Function( BridgeUpdaterStateSnapshot_UpToDate value)?  upToDate,TResult? Function( BridgeUpdaterStateSnapshot_Available value)?  available,TResult? Function( BridgeUpdaterStateSnapshot_Downloading value)?  downloading,TResult? Function( BridgeUpdaterStateSnapshot_Verifying value)?  verifying,TResult? Function( BridgeUpdaterStateSnapshot_InstallerLaunched value)?  installerLaunched,TResult? Function( BridgeUpdaterStateSnapshot_CheckFailed value)?  checkFailed,TResult? Function( BridgeUpdaterStateSnapshot_InstallFailed value)?  installFailed,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeUpdaterStateSnapshot_Disabled value)?  disabled,TResult? Function( BridgeUpdaterStateSnapshot_Idle value)?  idle,TResult? Function( BridgeUpdaterStateSnapshot_Checking value)?  checking,TResult? Function( BridgeUpdaterStateSnapshot_UpToDate value)?  upToDate,TResult? Function( BridgeUpdaterStateSnapshot_Available value)?  available,TResult? Function( BridgeUpdaterStateSnapshot_Downloading value)?  downloading,TResult? Function( BridgeUpdaterStateSnapshot_Verifying value)?  verifying,TResult? Function( BridgeUpdaterStateSnapshot_Ready value)?  ready,TResult? Function( BridgeUpdaterStateSnapshot_InstallerLaunched value)?  installerLaunched,TResult? Function( BridgeUpdaterStateSnapshot_CheckFailed value)?  checkFailed,TResult? Function( BridgeUpdaterStateSnapshot_InstallFailed value)?  installFailed,}){
 final _that = this;
 switch (_that) {
 case BridgeUpdaterStateSnapshot_Disabled() when disabled != null:
@@ -129,7 +131,8 @@ return checking(_that);case BridgeUpdaterStateSnapshot_UpToDate() when upToDate 
 return upToDate(_that);case BridgeUpdaterStateSnapshot_Available() when available != null:
 return available(_that);case BridgeUpdaterStateSnapshot_Downloading() when downloading != null:
 return downloading(_that);case BridgeUpdaterStateSnapshot_Verifying() when verifying != null:
-return verifying(_that);case BridgeUpdaterStateSnapshot_InstallerLaunched() when installerLaunched != null:
+return verifying(_that);case BridgeUpdaterStateSnapshot_Ready() when ready != null:
+return ready(_that);case BridgeUpdaterStateSnapshot_InstallerLaunched() when installerLaunched != null:
 return installerLaunched(_that);case BridgeUpdaterStateSnapshot_CheckFailed() when checkFailed != null:
 return checkFailed(_that);case BridgeUpdaterStateSnapshot_InstallFailed() when installFailed != null:
 return installFailed(_that);case _:
@@ -149,7 +152,7 @@ return installFailed(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeDisabledUpdaterState field0)?  disabled,TResult Function( BridgeIdleUpdaterState field0)?  idle,TResult Function( BridgeCheckingUpdaterState field0)?  checking,TResult Function( BridgeUpToDateUpdaterState field0)?  upToDate,TResult Function( BridgeAvailableUpdaterState field0)?  available,TResult Function( BridgeDownloadingUpdaterState field0)?  downloading,TResult Function( BridgeVerifyingUpdaterState field0)?  verifying,TResult Function( BridgeInstallerLaunchedUpdaterState field0)?  installerLaunched,TResult Function( BridgeCheckFailedUpdaterState field0)?  checkFailed,TResult Function( BridgeInstallFailedUpdaterState field0)?  installFailed,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeDisabledUpdaterState field0)?  disabled,TResult Function( BridgeIdleUpdaterState field0)?  idle,TResult Function( BridgeCheckingUpdaterState field0)?  checking,TResult Function( BridgeUpToDateUpdaterState field0)?  upToDate,TResult Function( BridgeAvailableUpdaterState field0)?  available,TResult Function( BridgeDownloadingUpdaterState field0)?  downloading,TResult Function( BridgeVerifyingUpdaterState field0)?  verifying,TResult Function( BridgeReadyUpdaterState field0)?  ready,TResult Function( BridgeInstallerLaunchedUpdaterState field0)?  installerLaunched,TResult Function( BridgeCheckFailedUpdaterState field0)?  checkFailed,TResult Function( BridgeInstallFailedUpdaterState field0)?  installFailed,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeUpdaterStateSnapshot_Disabled() when disabled != null:
 return disabled(_that.field0);case BridgeUpdaterStateSnapshot_Idle() when idle != null:
@@ -158,7 +161,8 @@ return checking(_that.field0);case BridgeUpdaterStateSnapshot_UpToDate() when up
 return upToDate(_that.field0);case BridgeUpdaterStateSnapshot_Available() when available != null:
 return available(_that.field0);case BridgeUpdaterStateSnapshot_Downloading() when downloading != null:
 return downloading(_that.field0);case BridgeUpdaterStateSnapshot_Verifying() when verifying != null:
-return verifying(_that.field0);case BridgeUpdaterStateSnapshot_InstallerLaunched() when installerLaunched != null:
+return verifying(_that.field0);case BridgeUpdaterStateSnapshot_Ready() when ready != null:
+return ready(_that.field0);case BridgeUpdaterStateSnapshot_InstallerLaunched() when installerLaunched != null:
 return installerLaunched(_that.field0);case BridgeUpdaterStateSnapshot_CheckFailed() when checkFailed != null:
 return checkFailed(_that.field0);case BridgeUpdaterStateSnapshot_InstallFailed() when installFailed != null:
 return installFailed(_that.field0);case _:
@@ -179,7 +183,7 @@ return installFailed(_that.field0);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeDisabledUpdaterState field0)  disabled,required TResult Function( BridgeIdleUpdaterState field0)  idle,required TResult Function( BridgeCheckingUpdaterState field0)  checking,required TResult Function( BridgeUpToDateUpdaterState field0)  upToDate,required TResult Function( BridgeAvailableUpdaterState field0)  available,required TResult Function( BridgeDownloadingUpdaterState field0)  downloading,required TResult Function( BridgeVerifyingUpdaterState field0)  verifying,required TResult Function( BridgeInstallerLaunchedUpdaterState field0)  installerLaunched,required TResult Function( BridgeCheckFailedUpdaterState field0)  checkFailed,required TResult Function( BridgeInstallFailedUpdaterState field0)  installFailed,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeDisabledUpdaterState field0)  disabled,required TResult Function( BridgeIdleUpdaterState field0)  idle,required TResult Function( BridgeCheckingUpdaterState field0)  checking,required TResult Function( BridgeUpToDateUpdaterState field0)  upToDate,required TResult Function( BridgeAvailableUpdaterState field0)  available,required TResult Function( BridgeDownloadingUpdaterState field0)  downloading,required TResult Function( BridgeVerifyingUpdaterState field0)  verifying,required TResult Function( BridgeReadyUpdaterState field0)  ready,required TResult Function( BridgeInstallerLaunchedUpdaterState field0)  installerLaunched,required TResult Function( BridgeCheckFailedUpdaterState field0)  checkFailed,required TResult Function( BridgeInstallFailedUpdaterState field0)  installFailed,}) {final _that = this;
 switch (_that) {
 case BridgeUpdaterStateSnapshot_Disabled():
 return disabled(_that.field0);case BridgeUpdaterStateSnapshot_Idle():
@@ -188,7 +192,8 @@ return checking(_that.field0);case BridgeUpdaterStateSnapshot_UpToDate():
 return upToDate(_that.field0);case BridgeUpdaterStateSnapshot_Available():
 return available(_that.field0);case BridgeUpdaterStateSnapshot_Downloading():
 return downloading(_that.field0);case BridgeUpdaterStateSnapshot_Verifying():
-return verifying(_that.field0);case BridgeUpdaterStateSnapshot_InstallerLaunched():
+return verifying(_that.field0);case BridgeUpdaterStateSnapshot_Ready():
+return ready(_that.field0);case BridgeUpdaterStateSnapshot_InstallerLaunched():
 return installerLaunched(_that.field0);case BridgeUpdaterStateSnapshot_CheckFailed():
 return checkFailed(_that.field0);case BridgeUpdaterStateSnapshot_InstallFailed():
 return installFailed(_that.field0);}
@@ -205,7 +210,7 @@ return installFailed(_that.field0);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeDisabledUpdaterState field0)?  disabled,TResult? Function( BridgeIdleUpdaterState field0)?  idle,TResult? Function( BridgeCheckingUpdaterState field0)?  checking,TResult? Function( BridgeUpToDateUpdaterState field0)?  upToDate,TResult? Function( BridgeAvailableUpdaterState field0)?  available,TResult? Function( BridgeDownloadingUpdaterState field0)?  downloading,TResult? Function( BridgeVerifyingUpdaterState field0)?  verifying,TResult? Function( BridgeInstallerLaunchedUpdaterState field0)?  installerLaunched,TResult? Function( BridgeCheckFailedUpdaterState field0)?  checkFailed,TResult? Function( BridgeInstallFailedUpdaterState field0)?  installFailed,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeDisabledUpdaterState field0)?  disabled,TResult? Function( BridgeIdleUpdaterState field0)?  idle,TResult? Function( BridgeCheckingUpdaterState field0)?  checking,TResult? Function( BridgeUpToDateUpdaterState field0)?  upToDate,TResult? Function( BridgeAvailableUpdaterState field0)?  available,TResult? Function( BridgeDownloadingUpdaterState field0)?  downloading,TResult? Function( BridgeVerifyingUpdaterState field0)?  verifying,TResult? Function( BridgeReadyUpdaterState field0)?  ready,TResult? Function( BridgeInstallerLaunchedUpdaterState field0)?  installerLaunched,TResult? Function( BridgeCheckFailedUpdaterState field0)?  checkFailed,TResult? Function( BridgeInstallFailedUpdaterState field0)?  installFailed,}) {final _that = this;
 switch (_that) {
 case BridgeUpdaterStateSnapshot_Disabled() when disabled != null:
 return disabled(_that.field0);case BridgeUpdaterStateSnapshot_Idle() when idle != null:
@@ -214,7 +219,8 @@ return checking(_that.field0);case BridgeUpdaterStateSnapshot_UpToDate() when up
 return upToDate(_that.field0);case BridgeUpdaterStateSnapshot_Available() when available != null:
 return available(_that.field0);case BridgeUpdaterStateSnapshot_Downloading() when downloading != null:
 return downloading(_that.field0);case BridgeUpdaterStateSnapshot_Verifying() when verifying != null:
-return verifying(_that.field0);case BridgeUpdaterStateSnapshot_InstallerLaunched() when installerLaunched != null:
+return verifying(_that.field0);case BridgeUpdaterStateSnapshot_Ready() when ready != null:
+return ready(_that.field0);case BridgeUpdaterStateSnapshot_InstallerLaunched() when installerLaunched != null:
 return installerLaunched(_that.field0);case BridgeUpdaterStateSnapshot_CheckFailed() when checkFailed != null:
 return checkFailed(_that.field0);case BridgeUpdaterStateSnapshot_InstallFailed() when installFailed != null:
 return installFailed(_that.field0);case _:
@@ -695,6 +701,74 @@ class _$BridgeUpdaterStateSnapshot_VerifyingCopyWithImpl<$Res>
   return _then(BridgeUpdaterStateSnapshot_Verifying(
 null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
 as BridgeVerifyingUpdaterState,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeUpdaterStateSnapshot_Ready extends BridgeUpdaterStateSnapshot {
+  const BridgeUpdaterStateSnapshot_Ready(this.field0): super._();
+
+
+@override final  BridgeReadyUpdaterState field0;
+
+/// Create a copy of BridgeUpdaterStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeUpdaterStateSnapshot_ReadyCopyWith<BridgeUpdaterStateSnapshot_Ready> get copyWith => _$BridgeUpdaterStateSnapshot_ReadyCopyWithImpl<BridgeUpdaterStateSnapshot_Ready>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Ready&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
+
+@override
+String toString() {
+    return 'BridgeUpdaterStateSnapshot.ready(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeUpdaterStateSnapshot_ReadyCopyWith<$Res> implements $BridgeUpdaterStateSnapshotCopyWith<$Res> {
+  factory $BridgeUpdaterStateSnapshot_ReadyCopyWith(BridgeUpdaterStateSnapshot_Ready value, $Res Function(BridgeUpdaterStateSnapshot_Ready) _then) = _$BridgeUpdaterStateSnapshot_ReadyCopyWithImpl;
+@useResult
+$Res call({
+ BridgeReadyUpdaterState field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeUpdaterStateSnapshot_ReadyCopyWithImpl<$Res>
+    implements $BridgeUpdaterStateSnapshot_ReadyCopyWith<$Res> {
+  _$BridgeUpdaterStateSnapshot_ReadyCopyWithImpl(this._self, this._then);
+
+  final BridgeUpdaterStateSnapshot_Ready _self;
+  final $Res Function(BridgeUpdaterStateSnapshot_Ready) _then;
+
+/// Create a copy of BridgeUpdaterStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeUpdaterStateSnapshot_Ready(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeReadyUpdaterState,
   ));
 }
 

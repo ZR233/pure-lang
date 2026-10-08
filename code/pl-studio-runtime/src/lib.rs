@@ -95,8 +95,9 @@ pub use studio::{
     ThreadRecord,
 };
 pub use updater::{
-    StudioUpdate, StudioUpdateAsset, StudioUpdateCancellation, StudioUpdateCheck,
-    StudioUpdateError, StudioUpdateErrorCode, StudioUpdateEvent, StudioUpdater,
+    PreparedStudioUpdate, StudioUpdate, StudioUpdateAsset, StudioUpdateCancellation,
+    StudioUpdateCheck, StudioUpdateError, StudioUpdateErrorCode, StudioUpdateEvent,
+    StudioUpdateLaunch, StudioUpdater,
 };
 pub use worker_assets::RemoteHelperSource;
 

@@ -85,10 +85,54 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\Windows Error Reporting\LocalDum
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchApp,{cm:AppName}}"; Flags: nowait postinstall skipifsilent; Check: not IsAppUpdate
 
-Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: IsAppUpdate
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: ShouldRestartAfterUpdate
 
 [Code]
 function IsAppUpdate: Boolean;
 begin
+  Result := (ExpandConstant('{param:ANYWORKUPDATE|0}') = '1') or
+    (ExpandConstant('{param:ANYWORKUPDATE|0}') = 'exit');
+end;
+
+function ShouldRestartAfterUpdate: Boolean;
+begin
   Result := ExpandConstant('{param:ANYWORKUPDATE|0}') = '1';
+end;
+
+function OpenProcess(Access: LongWord; InheritHandle: Boolean; ProcessId: LongWord): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(Handle: THandle; Milliseconds: LongWord): LongWord;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+function InitializeSetup: Boolean;
+var
+  ProcessId: Integer;
+  ProcessHandle: THandle;
+  WaitResult: LongWord;
+  WaitParameter: String;
+begin
+  Result := True;
+  if not IsAppUpdate then Exit;
+  WaitParameter := ExpandConstant('{param:ANYWORKWAITPID|}');
+  { Older published clients use Restart Manager instead of the new process-wait protocol. }
+  if WaitParameter = '' then Exit;
+  ProcessId := StrToIntDef(WaitParameter, 0);
+  if ProcessId <= 0 then begin
+    Log('Invalid ANYWORKWAITPID; refusing update installation.');
+    Result := False;
+    Exit;
+  end;
+  ProcessHandle := OpenProcess($00100000, False, ProcessId); { SYNCHRONIZE }
+  if ProcessHandle = 0 then begin
+    { ERROR_INVALID_PARAMETER means that the old process has already exited. }
+    Result := DLLGetLastError = 87;
+    if not Result then Log('Could not observe the old application process; refusing installation.');
+    Exit;
+  end;
+  WaitResult := WaitForSingleObject(ProcessHandle, 30000);
+  CloseHandle(ProcessHandle);
+  Result := WaitResult = 0; { WAIT_OBJECT_0 }
+  if not Result then Log('The old application did not exit; refusing installation.');
 end;

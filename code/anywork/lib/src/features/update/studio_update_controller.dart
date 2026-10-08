@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show AppExitType;
 
 import 'package:flutter/services.dart';
@@ -9,6 +10,7 @@ import '../../app/studio_shutdown.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../platform/studio_platform.dart';
+import '../../platform/error_log.dart';
 import '../../rust/api/studio.dart' as frb;
 
 part 'studio_update_controller.g.dart';
@@ -42,6 +44,10 @@ abstract class StudioUpdateApi {
 
   Future<UpdaterStateSnapshot> check();
 
+  Future<void> startAutomaticUpdate();
+
+  Future<void> cancelAutomaticUpdate();
+
   Future<StudioUpdateOperation> startInstall({
     required int expectedRevision,
     required String version,
@@ -74,6 +80,15 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
     await FrbStudioApi.ensureReady();
     return updaterStateFromFrb(await frb.checkStudioUpdate());
   }
+
+  @override
+  Future<void> startAutomaticUpdate() async {
+    await FrbStudioApi.ensureReady();
+    await frb.startStudioBackgroundUpdate();
+  }
+
+  @override
+  Future<void> cancelAutomaticUpdate() => frb.cancelStudioBackgroundUpdate();
 
   @override
   Future<StudioUpdateOperation> startInstall({
@@ -129,6 +144,7 @@ class StudioUpdateController extends _$StudioUpdateController {
   StudioUpdateOperation? _activeOperation;
   Future<void>? _installFuture;
   bool _checking = false;
+  bool _automaticStarted = false;
 
   StudioUpdateApi get _api => ref.read(studioUpdateApiProvider);
 
@@ -152,6 +168,7 @@ class StudioUpdateController extends _$StudioUpdateController {
       if (_enabled && observed != null && observed.revision >= state.revision) {
         state = observed;
       }
+      if (observed != null) _scheduleAutomaticUpdateOnce();
     });
     final observed = ref.read(observedProvider);
     if (!enabled) {
@@ -161,11 +178,29 @@ class StudioUpdateController extends _$StudioUpdateController {
             observed?.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0),
       );
     }
+    if (observed != null) _scheduleAutomaticUpdateOnce();
     return observed ??
         UpdaterStateSnapshot.idle(
           revision: 0,
           updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
         );
+  }
+
+  void _scheduleAutomaticUpdateOnce() {
+    if (!_enabled || _automaticStarted) return;
+    // canonical 更新状态只在运行时成功就绪后出现；启动失败不消耗本进程的一次检查。
+    _automaticStarted = true;
+    scheduleMicrotask(() {
+      if (ref.mounted) unawaited(_startAutomaticUpdate());
+    });
+  }
+
+  Future<void> _startAutomaticUpdate() async {
+    try {
+      await _api.startAutomaticUpdate();
+    } on Object catch (error, stackTrace) {
+      recordDartError(error, stackTrace, stage: 'automatic-update-start');
+    }
   }
 
   Future<void> check() async {
@@ -255,6 +290,7 @@ class StudioUpdateController extends _$StudioUpdateController {
   Future<void> cancelInstall() async {
     final operation = _activeOperation;
     if (operation == null) {
+      await _api.cancelAutomaticUpdate();
       return;
     }
     await operation.cancel();

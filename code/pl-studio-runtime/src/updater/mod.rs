@@ -8,7 +8,7 @@ mod types;
 
 pub use client::StudioUpdater;
 pub use error::*;
-pub use install::StudioUpdateCancellation;
+pub use install::{PreparedStudioUpdate, StudioUpdateCancellation, StudioUpdateLaunch};
 pub use types::*;
 
 pub(crate) use client::STUDIO_VERSION;

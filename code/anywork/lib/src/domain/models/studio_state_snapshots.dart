@@ -566,6 +566,7 @@ sealed class UpdaterStateSnapshot {
     AvailableUpdaterStateSnapshot(:final revision) ||
     DownloadingUpdaterStateSnapshot(:final revision) ||
     VerifyingUpdaterStateSnapshot(:final revision) ||
+    ReadyUpdaterStateSnapshot(:final revision) ||
     InstallerLaunchedUpdaterStateSnapshot(:final revision) ||
     CheckFailedUpdaterStateSnapshot(:final revision) ||
     InstallFailedUpdaterStateSnapshot(:final revision) => revision,
@@ -580,6 +581,7 @@ sealed class UpdaterStateSnapshot {
     UpToDateUpdaterStateSnapshot(:final checkedAt) ||
     AvailableUpdaterStateSnapshot(:final checkedAt) => checkedAt,
     InstallerLaunchedUpdaterStateSnapshot(:final launchedAt) => launchedAt,
+    ReadyUpdaterStateSnapshot(:final readyAt) => readyAt,
     CheckFailedUpdaterStateSnapshot(:final failedAt) ||
     InstallFailedUpdaterStateSnapshot(:final failedAt) => failedAt,
   };
@@ -588,6 +590,7 @@ sealed class UpdaterStateSnapshot {
     AvailableUpdaterStateSnapshot(:final update) ||
     DownloadingUpdaterStateSnapshot(:final update) ||
     VerifyingUpdaterStateSnapshot(:final update) ||
+    ReadyUpdaterStateSnapshot(:final update) ||
     InstallerLaunchedUpdaterStateSnapshot(:final update) ||
     InstallFailedUpdaterStateSnapshot(:final update) => update,
     DisabledUpdaterStateSnapshot() ||
@@ -601,6 +604,7 @@ sealed class UpdaterStateSnapshot {
     AvailableUpdaterStateSnapshot() ||
     DownloadingUpdaterStateSnapshot() ||
     VerifyingUpdaterStateSnapshot() ||
+    ReadyUpdaterStateSnapshot() ||
     InstallFailedUpdaterStateSnapshot() => true,
     DisabledUpdaterStateSnapshot() ||
     IdleUpdaterStateSnapshot() ||
@@ -721,6 +725,20 @@ final class InstallerLaunchedUpdaterStateSnapshot extends UpdaterStateSnapshot {
   @override
   final int revision;
   final DateTime launchedAt;
+  @override
+  final StudioUpdateInfoView update;
+}
+
+final class ReadyUpdaterStateSnapshot extends UpdaterStateSnapshot {
+  const ReadyUpdaterStateSnapshot({
+    required this.revision,
+    required this.readyAt,
+    required this.update,
+  });
+
+  @override
+  final int revision;
+  final DateTime readyAt;
   @override
   final StudioUpdateInfoView update;
 }

@@ -49,6 +49,10 @@ pub enum StudioUpdateCommand {
         expected_revision: u64,
         launched_at: i64,
     },
+    MarkReady {
+        expected_revision: u64,
+        ready_at: i64,
+    },
     FailInstall {
         expected_revision: u64,
         failed_at: i64,
@@ -84,6 +88,9 @@ impl StudioUpdateCommand {
                 expected_revision, ..
             }
             | Self::MarkInstallerLaunched {
+                expected_revision, ..
+            }
+            | Self::MarkReady {
                 expected_revision, ..
             }
             | Self::FailInstall {

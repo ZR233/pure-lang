@@ -351,6 +351,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeReadyResource dco_decode_box_autoadd_bridge_ready_resource(dynamic raw);
 
   @protected
+  BridgeReadyUpdaterState dco_decode_box_autoadd_bridge_ready_updater_state(
+    dynamic raw,
+  );
+
+  @protected
   BridgeRecoveryStateData dco_decode_box_autoadd_bridge_recovery_state_data(
     dynamic raw,
   );
@@ -1154,6 +1159,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeReadyResource dco_decode_bridge_ready_resource(dynamic raw);
+
+  @protected
+  BridgeReadyUpdaterState dco_decode_bridge_ready_updater_state(dynamic raw);
 
   @protected
   BridgeRecoveryIssueAction dco_decode_bridge_recovery_issue_action(
@@ -2555,6 +2563,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeReadyUpdaterState sse_decode_box_autoadd_bridge_ready_updater_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeRecoveryStateData sse_decode_box_autoadd_bridge_recovery_state_data(
     SseDeserializer deserializer,
   );
@@ -3566,6 +3579,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeReadyResource sse_decode_bridge_ready_resource(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeReadyUpdaterState sse_decode_bridge_ready_updater_state(
     SseDeserializer deserializer,
   );
 
@@ -5293,6 +5311,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_ready_updater_state(
+    BridgeReadyUpdaterState self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_recovery_state_data(
     BridgeRecoveryStateData self,
     SseSerializer serializer,
@@ -6498,6 +6522,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_ready_resource(
     BridgeReadyResource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_ready_updater_state(
+    BridgeReadyUpdaterState self,
     SseSerializer serializer,
   );
 

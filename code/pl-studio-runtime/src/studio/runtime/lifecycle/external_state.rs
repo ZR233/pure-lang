@@ -24,8 +24,47 @@ impl StudioRuntime {
         self.updater.read().await
     }
 
-    pub async fn check_studio_update(&self) -> Result<StudioUpdateStateSnapshot> {
-        self.updater.check().await
+    pub async fn check_studio_update(
+        &self,
+        cancellation: &crate::StudioUpdateCancellation,
+    ) -> Result<StudioUpdateStateSnapshot> {
+        self.updater.check_cancellable(cancellation).await
+    }
+
+    /// 桌面后台更新：一次检测和可信准备，不关闭运行时。调用方拥有取消与完成观察。
+    pub async fn prepare_studio_update_on_start(
+        &self,
+        cancellation: crate::StudioUpdateCancellation,
+    ) -> Result<()> {
+        let state = match self.updater.check_cancellable(&cancellation).await {
+            Ok(state) => state,
+            Err(error)
+                if error
+                    .downcast_ref::<crate::StudioUpdateError>()
+                    .is_some_and(|error| {
+                        error.code() == crate::StudioUpdateErrorCode::InstallInProgress
+                    }) =>
+            {
+                // 手动命令已占有更新流程，后台入口没有创建任何待回收资源。
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        if let StudioUpdateStateSnapshot::Available(value) = state {
+            self.updater
+                .prepare(value.update().clone(), cancellation)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// 仅在统一退出已确认全部资源安全停止后交接本进程持有的安装包。
+    pub async fn launch_studio_update_on_exit(&self) -> Result<()> {
+        anyhow::ensure!(
+            self.runtime_snapshot().await?.state.is_stopped(),
+            "Studio runtime has not stopped cleanly"
+        );
+        self.updater.launch_ready_on_exit().await
     }
 
     /// Resolves the exact verified update selected by the desktop host.

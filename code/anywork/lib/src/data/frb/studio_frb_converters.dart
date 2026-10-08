@@ -1055,6 +1055,12 @@ UpdaterStateSnapshot updaterStateFromFrb(
       downloaded: field0.downloaded.toInt(),
       total: field0.total.toInt(),
     ),
+  frb.BridgeUpdaterStateSnapshot_Ready(:final field0) =>
+    ReadyUpdaterStateSnapshot(
+      revision: field0.revision.toInt(),
+      readyAt: _dateFromUnix(field0.readyAt),
+      update: _updateInfoFromFrb(field0.update),
+    ),
   frb.BridgeUpdaterStateSnapshot_InstallerLaunched(:final field0) =>
     InstallerLaunchedUpdaterStateSnapshot(
       revision: field0.revision.toInt(),

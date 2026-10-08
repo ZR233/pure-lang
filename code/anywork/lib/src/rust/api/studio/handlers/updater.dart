@@ -10,7 +10,7 @@ import '../types/updater.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `broadcast_cancel_update_operations_excluding`, `broadcast_cancel_update_operations`, `into_issues`, `is_quiescent`, `is_quiescent`, `is_settled`, `is_settled`, `observe_update_operations`, `owned_completion`, `prune_settled`, `runtime_error`, `sink_ended`, `task_ended`, `update_issue_with_correlation`, `update_issue`, `update_operations`, `wait`
+// These functions are ignored because they are not marked as `pub`: `broadcast_cancel_update_operations_excluding`, `broadcast_cancel_update_operations`, `into_issues`, `is_quiescent`, `is_quiescent`, `is_settled`, `is_settled`, `observe_update_operations`, `owned_completion`, `prune_settled`, `register_update_operation`, `runtime_error`, `sink_ended`, `task_ended`, `update_issue_with_correlation`, `update_issue`, `update_operations`, `wait`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeStudioUpdateOperationInner`, `OperationCompletionFacts`, `OwnerTask`, `PendingUpdateOperations`, `UpdateObservation`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `drop`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`
@@ -20,6 +20,14 @@ Future<BridgeUpdaterStateSnapshot> checkStudioUpdate() =>
 
 Future<BridgeUpdaterStateSnapshot> readStudioUpdateState() =>
     RustLib.instance.api.crateApiStudioHandlersUpdaterReadStudioUpdateState();
+
+/// 首次桌面就绪后启动一次后台检查和下载；操作由桥端拥有，页面或 Dart 句柄不控制其存活。
+Future<void> startStudioBackgroundUpdate() => RustLib.instance.api
+    .crateApiStudioHandlersUpdaterStartStudioBackgroundUpdate();
+
+/// 请求后台下载取消并等待真实完成；完成的准备不再作为活动操作取消。
+Future<void> cancelStudioBackgroundUpdate() => RustLib.instance.api
+    .crateApiStudioHandlersUpdaterCancelStudioBackgroundUpdate();
 
 Future<BridgeStudioUpdateOperation> installStudioUpdate({
   required BigInt expectedRevision,

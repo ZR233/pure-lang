@@ -7,7 +7,7 @@ use crate::StudioUpdate;
 use super::{
     AvailableUpdateState, CheckFailedUpdateState, CheckingUpdateState, DisabledUpdateState,
     DownloadingUpdateState, IdleUpdateState, InstallFailedUpdateState,
-    InstallerLaunchedUpdateState, UpToDateUpdateState, VerifyingUpdateState,
+    InstallerLaunchedUpdateState, ReadyUpdateState, UpToDateUpdateState, VerifyingUpdateState,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,6 +20,7 @@ pub enum StudioUpdateStateKind {
     Available,
     Downloading,
     Verifying,
+    Ready,
     InstallerLaunched,
     CheckFailed,
     InstallFailed,
@@ -35,6 +36,7 @@ pub enum StudioUpdateStateSnapshot {
     Available(AvailableUpdateState),
     Downloading(DownloadingUpdateState),
     Verifying(VerifyingUpdateState),
+    Ready(ReadyUpdateState),
     InstallerLaunched(InstallerLaunchedUpdateState),
     CheckFailed(CheckFailedUpdateState),
     InstallFailed(InstallFailedUpdateState),
@@ -54,6 +56,7 @@ impl StudioUpdateStateSnapshot {
             Self::Available(_) => StudioUpdateStateKind::Available,
             Self::Downloading(_) => StudioUpdateStateKind::Downloading,
             Self::Verifying(_) => StudioUpdateStateKind::Verifying,
+            Self::Ready(_) => StudioUpdateStateKind::Ready,
             Self::InstallerLaunched(_) => StudioUpdateStateKind::InstallerLaunched,
             Self::CheckFailed(_) => StudioUpdateStateKind::CheckFailed,
             Self::InstallFailed(_) => StudioUpdateStateKind::InstallFailed,
@@ -69,6 +72,7 @@ impl StudioUpdateStateSnapshot {
             Self::Available(value) => value.revision,
             Self::Downloading(value) => value.revision,
             Self::Verifying(value) => value.revision,
+            Self::Ready(value) => value.revision,
             Self::InstallerLaunched(value) => value.revision,
             Self::CheckFailed(value) => value.revision,
             Self::InstallFailed(value) => value.revision,
@@ -84,6 +88,7 @@ impl StudioUpdateStateSnapshot {
             Self::Available(value) => value.checked_at,
             Self::Downloading(value) => value.updated_at,
             Self::Verifying(value) => value.updated_at,
+            Self::Ready(value) => value.ready_at,
             Self::InstallerLaunched(value) => value.launched_at,
             Self::CheckFailed(value) => value.failed_at,
             Self::InstallFailed(value) => value.failed_at,
@@ -95,6 +100,7 @@ impl StudioUpdateStateSnapshot {
             Self::Available(value) => Some(&value.update),
             Self::Downloading(value) => Some(&value.update),
             Self::Verifying(value) => Some(&value.update),
+            Self::Ready(value) => Some(&value.update),
             Self::InstallerLaunched(value) => Some(&value.update),
             Self::InstallFailed(value) => Some(&value.update),
             Self::Disabled(_)

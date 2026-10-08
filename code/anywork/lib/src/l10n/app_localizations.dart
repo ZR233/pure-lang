@@ -3377,6 +3377,18 @@ abstract class AppLocalizations {
   /// **'Download and install'**
   String get settingsStudioUpdateInstall;
 
+  /// No description provided for @settingsStudioUpdateRestart.
+  ///
+  /// In en, this message translates to:
+  /// **'Install and restart'**
+  String get settingsStudioUpdateRestart;
+
+  /// No description provided for @settingsStudioUpdateReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version} is downloaded and will install when you close anywork.'**
+  String settingsStudioUpdateReady(String version);
+
   /// No description provided for @settingsStudioUpdateReleaseNotes.
   ///
   /// In en, this message translates to:

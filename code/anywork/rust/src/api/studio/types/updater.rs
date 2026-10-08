@@ -14,6 +14,7 @@ pub enum BridgeUpdaterStateSnapshot {
     Available(BridgeAvailableUpdaterState),
     Downloading(BridgeDownloadingUpdaterState),
     Verifying(BridgeVerifyingUpdaterState),
+    Ready(BridgeReadyUpdaterState),
     InstallerLaunched(BridgeInstallerLaunchedUpdaterState),
     CheckFailed(BridgeCheckFailedUpdaterState),
     InstallFailed(BridgeInstallFailedUpdaterState),
@@ -81,6 +82,14 @@ pub struct BridgeVerifyingUpdaterState {
 pub struct BridgeInstallerLaunchedUpdaterState {
     pub revision: u64,
     pub launched_at: i64,
+    pub update: BridgeVerifiedUpdateSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeReadyUpdaterState {
+    pub revision: u64,
+    pub ready_at: i64,
     pub update: BridgeVerifiedUpdateSummary,
 }
 

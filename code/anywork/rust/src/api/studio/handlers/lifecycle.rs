@@ -239,7 +239,7 @@ pub async fn shutdown_runtime(
             issues.extend(take_bridge_early_issues());
             issues.append(&mut bridge_issues);
             let remaining = remaining_ms_u32(deadline);
-            bridge_shutdown_report(
+            let report = bridge_shutdown_report(
                 bridge
                     .studio
                     .shutdown_runtime_for_exit(
@@ -247,7 +247,28 @@ pub async fn shutdown_runtime(
                         issues.into_iter().map(runtime_shutdown_issue).collect(),
                     )
                     .await,
-            )
+            );
+            if report.outcome == BridgeShutdownOutcome::Clean
+                && !remaining_until(deadline).is_zero()
+            {
+                // 此处只有真实 Clean；交接不访问网络、不重新下载，也不改变可靠关停结论。
+                // 安装器等待旧进程真正退出后才写入，并在普通关闭后保持应用关闭。
+                match tokio::time::timeout(
+                    remaining_until(deadline),
+                    bridge.studio.launch_studio_update_on_exit(),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => {
+                        tracing::error!(error = %error, "Studio exit update handoff failed; verified cache is retained for next start")
+                    }
+                    Err(_) => tracing::error!(
+                        "Studio exit update handoff exceeded the remaining exit budget"
+                    ),
+                }
+            }
+            report
         }
         None if gate_acquired && !late_install_refused() && !external_issues_present => {
             BridgeShutdownReport::not_started()

@@ -57,6 +57,13 @@ pub(crate) fn bridge_update_state(state: StudioUpdateStateSnapshot) -> BridgeUpd
                 total: value.total(),
             })
         }
+        StudioUpdateStateSnapshot::Ready(value) => {
+            BridgeUpdaterStateSnapshot::Ready(BridgeReadyUpdaterState {
+                revision,
+                ready_at: value.ready_at(),
+                update: bridge_update(value.update()),
+            })
+        }
         StudioUpdateStateSnapshot::InstallerLaunched(value) => {
             BridgeUpdaterStateSnapshot::InstallerLaunched(BridgeInstallerLaunchedUpdaterState {
                 revision,

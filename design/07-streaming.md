@@ -285,6 +285,9 @@ product stream。product stream 不携带 Turn/Item delta；Thread directory 变
 
 FRB 与 HTTP SSE 消费同一个 runtime subscription API，不各自实现流状态机。HTTP product stream
 为 `GET /api/v1/events/product`，Thread stream 为 `GET /api/v1/threads/{thread_id}/events`。
+Updater topic 的首帧来自运行时当前更新状态，接收者登记在读取基线之前；
+客户端对首帧和增量使用同一 revision 归并，建立订阅期间结束的后台检查能够恢复真实终态。
+首次订阅与重新订阅遵循同一顺序。
 Thread 首帧固定为 authoritative snapshot，后续发送 notification、lagged、closed；producer 在
 连接存活期间持有 Thread residency pin，断开或 server shutdown 必须取消 producer、释放
 receiver 与 pin。Runtime subscription 在恢复 owner 前取得 pin，并持有至订阅释放；重叠订阅与

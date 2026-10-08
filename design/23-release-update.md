@@ -121,13 +121,21 @@ CI secrets；私钥轮换必须先通过仍受旧密钥信任的应用版本发�
 ## 23.4 更新状态机与安装
 
 Studio 运行时的 updater owner 保存 canonical UpdaterState：Disabled、Idle、Checking、
-UpToDate、Available、Downloading、Verifying、InstallerLaunched、CheckFailed、
+UpToDate、Available、Downloading、Verifying、Ready、InstallerLaunched、CheckFailed、
 InstallFailed；每个状态由独立 payload 承载，update、下载进度和类型化错误不作为平行
 可选字段存在。
 
 - `readUpdateState()` 只读 owner cache，不访问网络。
 - `checkStudioUpdate()` 使用编译时当前版本并返回 UpToDate 或 Available，Flutter 不传
-  currentVersion。
+  currentVersion；本进程已进入 Ready 时返回该已验证状态，保留退出安装资格。
+- 桌面启动完成后，每个进程只在后台检查一次；发现更新后自动下载并验证，成功进入 Ready。
+  后台操作由桥端强持有并纳入既有退出取消与完成观察，界面只消费 canonical 状态；不阻塞
+  启动，不要求运行时空闲，不在页面重建或打开设置时重新检查，失败保留明确状态供手动重试。
+  手动检查、后台准备和手动安装共用登记后放行的所有权协议，退出必须取消并等待每个已登记操作。
+- Ready 表示完整安装包已经验证并由本进程持有只读文件租约。缓存恢复不能恢复租约，必须
+  重新校验后才能再次进入 Ready。下载中退出只取消下载，不在退出期间补下载或延长退出期限。
+  正常退出只有统一关停报告为 Clean 才交接已准备的更新；Degraded、未知保存状态或强制退出
+  均不安装。安装器脱离应用进程树并等待旧进程真正结束后才开始写入，静默安装完成保持关闭。
 - `installStudioUpdate(expectedRevision, version, eventSink)` 流式下载安装器与签名，校验
   声明长度和 512 MiB 上限，计算 SHA-256，使用内置 Minisign 公钥验签，再启动安装器。
 
@@ -157,12 +165,17 @@ bridge 持有的订阅等外部 owner 取消结果作为同一套 shutdown 编�
 证书或响应错误供显示和诊断，不由 GUI 编造状态与 revision。
 
 更新状态持久化到应用设置键 `studioUpdateState:v2`。启动恢复按当前产品版本重新判断
-缓存中的目标版本：已安装的版本转为 UpToDate；中断的检查恢复到 Idle，中断的下载、校验
-与未完成安装交接恢复到 Available，允许重新验证缓存并重试；恢复递增 revision 并持久化，
+缓存中的目标版本：已安装的版本转为 UpToDate；中断的检查恢复到 Idle，中断的下载、校验、
+Ready 与未完成安装交接恢复到 Available，允许重新验证缓存并重试；恢复递增 revision 并持久化，
 不恢复不存在的后台任务。InstallFailed 也可对同一已验证更新重新下载。检查与安装命令
 由同一 owner 串行受理，状态事件不能导致 GUI 释放正在运行的安装操作。
 
+Ready 为现有 v2 状态联合新增载荷，不改变原有载荷与设置键；已有 v2 状态继续正常解码与恢复。
 关闭运行时前必须等待校验阶段的 canonical 状态写入完成；投影失败取消下载并禁止安装交接。
+保存失败由 updater owner 发布明确的内存失败诊断并保留原始错误，不把未保存状态作为持久化事实；
+下次启动从最后可靠缓存恢复。派生失败保留文件租约，只有操作系统确认派生成功才记录内存交接事实。
+真实保存或投影所有者错误仍保留在本进程的退出报告中；业务重试不能抹去该错误，本次退出不安装，
+下次启动重新恢复并校验后才允许自动安装。
 操作流在传递已保存状态后继续传递命令或持久化错误，不以正常结束吞掉失败。更新只读入口
 在安全关停后仍可读取 owner 状态；安装器派生失败且运行时已完整停止时，GUI 重新启动当前
 应用进程并退出旧进程，新进程恢复更新状态后允许重试。关停失败返回独立错误分类并显示
@@ -174,7 +187,7 @@ Windows 安装器与失败恢复的新应用使用专用进程交接工厂脱离
 Restart Manager 的应用重启，安装器的更新启动项是成功安装后启动新版的唯一责任方。
 
 页面打开只显示 canonical
-last-known state，不自动检查。FRB 只公开 typed DTO 和事件（上述三个入口）；安装事件
+last-known state，不自动检查。FRB 只公开 typed DTO、后台启停命令和状态事件；安装事件
 直接携带完整 canonical updater state；Dart 不接收或解析 raw manifest JSON，也不维护
 第二套 install phase。
 

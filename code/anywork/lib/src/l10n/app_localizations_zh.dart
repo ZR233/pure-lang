@@ -1808,6 +1808,14 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsStudioUpdateInstall => '下载并安装';
 
   @override
+  String get settingsStudioUpdateRestart => '安装并重启';
+
+  @override
+  String settingsStudioUpdateReady(String version) {
+    return '$version 已下载，将在关闭糊来帮后自动安装。';
+  }
+
+  @override
   String get settingsStudioUpdateReleaseNotes => '发行说明';
 
   @override

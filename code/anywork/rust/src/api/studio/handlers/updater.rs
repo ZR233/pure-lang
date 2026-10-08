@@ -1,4 +1,6 @@
-use crate::api::studio::bridge_runtime::{active_bridge, installed_bridge};
+use crate::api::studio::bridge_runtime::{
+    active_bridge, exit_latch_armed, installed_bridge, lifecycle_gate,
+};
 use crate::api::studio::convert::runtime::bridge_update_state;
 use crate::api::studio::types::{BridgeError, BridgeShutdownIssue, BridgeUpdaterStateSnapshot};
 use crate::frb_generated::StreamSink;
@@ -7,7 +9,7 @@ use flutter_rust_bridge::frb;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use pl_studio_runtime::{StudioUpdateCancellation, StudioUpdateError, StudioUpdateErrorCode};
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, mpsc};
@@ -89,6 +91,8 @@ impl OperationCompletionFacts {
 static UPDATE_OPERATIONS: OnceLock<Mutex<Vec<Arc<BridgeStudioUpdateOperationInner>>>> =
     OnceLock::new();
 static NEXT_OPERATION_ID: AtomicU64 = AtomicU64::new(1);
+static BACKGROUND_UPDATE_STARTED: AtomicBool = AtomicBool::new(false);
+static BACKGROUND_OPERATION_ID: AtomicU64 = AtomicU64::new(0);
 
 pub struct BridgeStudioUpdateOperation {
     inner: Arc<BridgeStudioUpdateOperationInner>,
@@ -326,9 +330,78 @@ impl BridgeStudioUpdateOperationInner {
 }
 
 pub async fn check_studio_update() -> Result<BridgeUpdaterStateSnapshot, BridgeError> {
+    let gate = lifecycle_gate().lock().await;
     let bridge = active_bridge().await?;
-    let state = bridge.studio.check_studio_update().await?;
-    Ok(bridge_update_state(state))
+    let cancellation = StudioUpdateCancellation::new();
+    let operation_id = NEXT_OPERATION_ID.fetch_add(1, Ordering::Relaxed);
+    let task_cancellation = cancellation.clone();
+    let (checked, result) = tokio::sync::oneshot::channel();
+    register_update_operation(operation_id, cancellation, None, async move {
+        let result = bridge.studio.check_studio_update(&task_cancellation).await;
+        let completion = match &result {
+            Ok(_) => Ok(()),
+            Err(error)
+                if error
+                    .downcast_ref::<StudioUpdateError>()
+                    .is_some_and(|error| {
+                        error.code() == StudioUpdateErrorCode::InstallInProgress
+                    }) =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(format!("Studio update check owner failed: {error:#}")),
+        };
+        let _ = checked.send(result.map(bridge_update_state).map_err(BridgeError::from));
+        completion
+    })
+    .await;
+    drop(gate);
+    result
+        .await
+        .map_err(|error| anyhow::anyhow!("update check task ended without a result: {error}"))?
+}
+
+/// 所有更新入口在持有生命周期门时登记，登记完成且核对退出闩后才允许任务执行。
+#[frb(ignore)]
+async fn register_update_operation(
+    operation_id: u64,
+    cancellation: StudioUpdateCancellation,
+    progress_receiver: Option<mpsc::Receiver<Result<BridgeUpdaterStateSnapshot, BridgeError>>>,
+    task: impl std::future::Future<Output = Result<(), String>> + Send + 'static,
+) -> Arc<BridgeStudioUpdateOperationInner> {
+    let facts = Arc::new(OperationCompletionFacts::default());
+    let inner = Arc::new(BridgeStudioUpdateOperationInner {
+        id: operation_id,
+        cancellation,
+        task: Mutex::new(None),
+        sink: Mutex::new(None),
+        progress_receiver: Mutex::new(progress_receiver),
+        restart_started: Mutex::new(false),
+        facts: Arc::clone(&facts),
+    });
+    let (start, started) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        if started.await.is_err() {
+            return Ok(());
+        }
+        task.await
+    });
+    *inner.task.lock().await = Some(owned_completion(
+        task,
+        operation_id,
+        facts,
+        OwnerTask::Install,
+    ));
+    {
+        let mut registry = update_operations().lock().await;
+        prune_settled(&mut registry);
+        registry.push(Arc::clone(&inner));
+    }
+    if exit_latch_armed() {
+        let _ = inner.cancellation.cancel();
+    }
+    let _ = start.send(());
+    inner
 }
 
 pub async fn read_studio_update_state() -> Result<BridgeUpdaterStateSnapshot, BridgeError> {
@@ -336,10 +409,57 @@ pub async fn read_studio_update_state() -> Result<BridgeUpdaterStateSnapshot, Br
     Ok(bridge_update_state(bridge.studio.read_update_state().await))
 }
 
+/// 首次桌面就绪后启动一次后台检查和下载；操作由桥端拥有，页面或 Dart 句柄不控制其存活。
+pub async fn start_studio_background_update() -> Result<(), BridgeError> {
+    // 最终退出必须先观察同一生命周期门，保证注册晚于早期取消时仍会被最终 collector 收束。
+    let _gate = lifecycle_gate().lock().await;
+    let bridge = active_bridge().await?;
+    if BACKGROUND_UPDATE_STARTED.swap(true, Ordering::Relaxed) {
+        return Ok(());
+    }
+    let cancellation = StudioUpdateCancellation::new();
+    let operation_id = NEXT_OPERATION_ID.fetch_add(1, Ordering::Relaxed);
+    let task_cancellation = cancellation.clone();
+    let task = async move {
+        if let Err(error) = bridge
+            .studio
+            .prepare_studio_update_on_start(task_cancellation)
+            .await
+        {
+            tracing::warn!(error = %error, "Studio background update preparation failed");
+            return Err(format!("Studio background update owner failed: {error:#}"));
+        }
+        // 业务失败已经发布为 canonical 状态；到此所有下载与投影 owner 均已真实完成。
+        Ok(())
+    };
+    register_update_operation(operation_id, cancellation, None, task).await;
+    BACKGROUND_OPERATION_ID.store(operation_id, Ordering::Relaxed);
+    Ok(())
+}
+
+/// 请求后台下载取消并等待真实完成；完成的准备不再作为活动操作取消。
+pub async fn cancel_studio_background_update() -> Result<(), BridgeError> {
+    let id = BACKGROUND_OPERATION_ID.load(Ordering::Relaxed);
+    let operation = update_operations()
+        .lock()
+        .await
+        .iter()
+        .find(|operation| operation.id == id)
+        .cloned();
+    if let Some(inner) = operation
+        && !inner.is_quiescent()
+    {
+        let operation = BridgeStudioUpdateOperation { inner };
+        operation.cancel().await?;
+    }
+    Ok(())
+}
+
 pub async fn install_studio_update(
     expected_revision: u64,
     version: String,
 ) -> Result<BridgeStudioUpdateOperation, BridgeError> {
+    let _gate = lifecycle_gate().lock().await;
     let bridge = active_bridge().await?;
     if bridge.studio.is_busy_for_update().await? {
         return Err(StudioUpdateError::new(
@@ -355,21 +475,11 @@ pub async fn install_studio_update(
     let cancellation = StudioUpdateCancellation::new();
     let (bridge_progress_tx, bridge_progress_rx) = mpsc::channel(64);
     let operation_id = NEXT_OPERATION_ID.fetch_add(1, Ordering::Relaxed);
-    let facts = Arc::new(OperationCompletionFacts::default());
-    let inner = Arc::new(BridgeStudioUpdateOperationInner {
-        id: operation_id,
-        cancellation: cancellation.clone(),
-        task: Mutex::new(None),
-        sink: Mutex::new(None),
-        progress_receiver: Mutex::new(Some(bridge_progress_rx)),
-        restart_started: Mutex::new(false),
-        facts: Arc::clone(&facts),
-    });
-    let task_facts = Arc::clone(&facts);
-    let task = tokio::spawn(async move {
+    let task_cancellation = cancellation.clone();
+    let task = async move {
         let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
         let final_progress_tx = bridge_progress_tx.clone();
-        let forward_cancellation = cancellation.clone();
+        let forward_cancellation = task_cancellation.clone();
         let forward = tokio::spawn(async move {
             while let Some(state) = progress_rx.recv().await {
                 if bridge_progress_tx
@@ -385,18 +495,23 @@ pub async fn install_studio_update(
         let progress_for_install = progress_tx.clone();
         let result = bridge
             .studio
-            .install_studio_update_after(update, progress_for_install, cancellation, || async {
-                if !shutdown_runtime_for_update(bridge, operation_id)
-                    .await
-                    .map_err(runtime_error)?
-                {
-                    return Err(StudioUpdateError::new(
-                        StudioUpdateErrorCode::RuntimeBusy,
-                        "Studio runtime became busy before installer launch",
-                    ));
-                }
-                Ok(())
-            })
+            .install_studio_update_after(
+                update,
+                progress_for_install,
+                task_cancellation,
+                || async {
+                    if !shutdown_runtime_for_update(bridge, operation_id)
+                        .await
+                        .map_err(runtime_error)?
+                    {
+                        return Err(StudioUpdateError::new(
+                            StudioUpdateErrorCode::RuntimeBusy,
+                            "Studio runtime became busy before installer launch",
+                        ));
+                    }
+                    Ok(())
+                },
+            )
             .await;
         drop(progress_tx);
         match forward.await {
@@ -421,18 +536,9 @@ pub async fn install_studio_update(
                 }
             }
         }
-    });
-    *inner.task.lock().await = Some(owned_completion(
-        task,
-        operation_id,
-        task_facts,
-        OwnerTask::Install,
-    ));
-    {
-        let mut registry = update_operations().lock().await;
-        prune_settled(&mut registry);
-        registry.push(Arc::clone(&inner));
-    }
+    };
+    let inner =
+        register_update_operation(operation_id, cancellation, Some(bridge_progress_rx), task).await;
     Ok(BridgeStudioUpdateOperation { inner })
 }
 

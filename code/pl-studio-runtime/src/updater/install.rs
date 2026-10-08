@@ -18,6 +18,37 @@ use url::Url;
 
 const MAX_SIGNATURE_BYTES: u64 = 16 * 1024;
 
+/// 已验证的安装包及只读租约；Windows 上拒绝其他进程写入或删除该文件。
+/// 租约必须保持至安装器真正派生，不能从持久化状态或路径重新构造。
+pub struct PreparedStudioUpdate {
+    path: PathBuf,
+    lease: Option<std::fs::File>,
+}
+
+#[derive(Clone, Copy)]
+pub enum StudioUpdateLaunch {
+    Restart,
+    OnExit,
+}
+
+impl PreparedStudioUpdate {
+    /// 交接给独立安装器；安装器等待当前进程退出后才开始安装。
+    ///
+    /// # Errors
+    /// 当前平台不支持安装，或操作系统拒绝创建安装器进程。
+    pub fn launch(&mut self, mode: StudioUpdateLaunch) -> Result<(), StudioUpdateError> {
+        if self.lease.is_none() {
+            return Err(StudioUpdateError::new(
+                StudioUpdateErrorCode::CancellationTooLate,
+                "the verified installer has already been handed off",
+            ));
+        }
+        launch_installer(&self.path, mode)?;
+        self.lease.take();
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub struct StudioUpdateCancellation {
     inner: Arc<StudioUpdateCancellationInner>,
@@ -67,6 +98,11 @@ impl StudioUpdateCancellation {
                 "the verified installer is already launching",
             )),
         }
+    }
+
+    /// 等待取消广播，不转移操作的完成与回收责任。
+    pub async fn cancelled(&self) {
+        self.inner.token.cancelled().await;
     }
 
     fn check(&self) -> Result<(), StudioUpdateError> {
@@ -152,11 +188,12 @@ where
         let _ = progress.send(StudioUpdateEvent::Started {
             total: update.installer.size,
         });
-        let installer = prepare_installer(updater, &update, &progress, &cancellation).await?;
+        let path = prepare_installer(updater, &update, &progress, &cancellation).await?;
+        let mut installer = lease_verified_installer(updater, &update, path).await?;
         cancellation.check()?;
         cancellation.begin_launch()?;
         before_launch().await?;
-        launch_installer(&installer)?;
+        installer.launch(StudioUpdateLaunch::Restart)?;
         cancellation.mark_installer_launched();
         let _ = progress.send(StudioUpdateEvent::InstallerLaunched);
         Ok(())
@@ -171,6 +208,92 @@ where
     }
     drop(guard);
     result
+}
+
+pub(super) async fn download(
+    updater: &StudioUpdater,
+    update: StudioUpdate,
+    progress: UnboundedSender<StudioUpdateEvent>,
+    cancellation: StudioUpdateCancellation,
+) -> Result<PreparedStudioUpdate, StudioUpdateError> {
+    let _guard = InstallGuard::acquire(updater)?;
+    let result: Result<PreparedStudioUpdate, StudioUpdateError> = async {
+        validate_update(&update)?;
+        cancellation.check()?;
+        let _ = progress.send(StudioUpdateEvent::Started {
+            total: update.installer.size,
+        });
+        let path = prepare_installer(updater, &update, &progress, &cancellation).await?;
+        let prepared = lease_verified_installer(updater, &update, path).await?;
+        cancellation.check()?;
+        Ok(prepared)
+    }
+    .await;
+    if let Err(error) = &result {
+        let _ = progress.send(StudioUpdateEvent::Failed {
+            code: error.code().as_str().to_string(),
+            message: error.to_string(),
+        });
+    }
+    result
+}
+
+async fn lease_verified_installer(
+    updater: &StudioUpdater,
+    update: &StudioUpdate,
+    path: PathBuf,
+) -> Result<PreparedStudioUpdate, StudioUpdateError> {
+    let public_key = updater.public_key;
+    let asset = update.installer.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.share_mode(1); // FILE_SHARE_READ：校验与派生之间不能修改安装包。
+        }
+        let mut lease = options.open(&path).map_err(io_error)?;
+        if lease.metadata().map_err(io_error)?.len() != asset.size {
+            return Err(StudioUpdateError::new(
+                StudioUpdateErrorCode::DownloadIncomplete,
+                "cached installer size changed",
+            ));
+        }
+        let signature_text =
+            std::fs::read_to_string(format!("{}.minisig", path.display())).map_err(io_error)?;
+        let signature = Signature::decode(&signature_text).map_err(signature_error)?;
+        let key = PublicKey::decode(public_key).map_err(signature_error)?;
+        let mut verifier = key.verify_stream(&signature).map_err(signature_error)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = lease.read(&mut buffer).map_err(io_error)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+            verifier.update(&buffer[..count]);
+        }
+        if hex::encode(hasher.finalize()) != asset.sha256 {
+            return Err(StudioUpdateError::new(
+                StudioUpdateErrorCode::HashMismatch,
+                "leased installer SHA-256 does not match the manifest",
+            ));
+        }
+        verifier.finalize().map_err(signature_error)?;
+        Ok(PreparedStudioUpdate {
+            path,
+            lease: Some(lease),
+        })
+    })
+    .await
+    .map_err(|error| {
+        StudioUpdateError::new(
+            StudioUpdateErrorCode::Io,
+            format!("installer lease verification failed: {error}"),
+        )
+    })?
 }
 
 async fn prepare_installer(
@@ -420,7 +543,7 @@ async fn hash_file(path: &Path) -> Result<String, StudioUpdateError> {
     })?
 }
 
-fn launch_installer(path: &Path) -> Result<(), StudioUpdateError> {
+fn launch_installer(path: &Path, mode: StudioUpdateLaunch) -> Result<(), StudioUpdateError> {
     if !cfg!(target_os = "windows") {
         return Err(StudioUpdateError::new(
             StudioUpdateErrorCode::UnsupportedPlatform,
@@ -428,7 +551,8 @@ fn launch_installer(path: &Path) -> Result<(), StudioUpdateError> {
         ));
     }
     let mut command = Command::new(path);
-    command.args(installer_arguments());
+    command.args(installer_arguments(mode));
+    command.arg(format!("/ANYWORKWAITPID={}", std::process::id()));
     pl_remote_helper::process::configure_handoff_std_command(&mut command);
     command.spawn().map(|_| ()).map_err(|error| {
         StudioUpdateError::new(
@@ -438,14 +562,20 @@ fn launch_installer(path: &Path) -> Result<(), StudioUpdateError> {
     })
 }
 
-fn installer_arguments() -> [&'static str; 6] {
+fn installer_arguments(mode: StudioUpdateLaunch) -> [&'static str; 6] {
     [
-        "/SILENT",
+        match mode {
+            StudioUpdateLaunch::Restart => "/SILENT",
+            StudioUpdateLaunch::OnExit => "/VERYSILENT",
+        },
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
         "/NORESTARTAPPLICATIONS",
-        "/CLOSEAPPLICATIONS",
-        "/ANYWORKUPDATE=1",
+        "/NOCLOSEAPPLICATIONS",
+        match mode {
+            StudioUpdateLaunch::Restart => "/ANYWORKUPDATE=1",
+            StudioUpdateLaunch::OnExit => "/ANYWORKUPDATE=exit",
+        },
     ]
 }
 
