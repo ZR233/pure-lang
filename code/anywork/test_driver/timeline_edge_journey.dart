@@ -170,6 +170,33 @@ Future<void> main(List<String> args) async {
     if (rapid['pass'] != true) {
       throw StateError('Repeated wheel input could not return to latest');
     }
+    // Regression: returning to Latest must clear the persisted history intent.
+    // The first subsequent wheel step must enter browseHistory from the tail,
+    // rather than reusing the stale anchor and reopening the oldest window.
+    await driver.sendCommand(RawTap(find.byValueKey('timeline-jump-latest')));
+    final afterJump = await settle();
+    await driver.sendCommand(PointerScroll(timeline, -60));
+    final afterOneOlderWheel = await settle();
+    final jumpThenBrowse = <String, Object?>{
+      'afterJump': summary(afterJump),
+      'afterOneOlderWheel': summary(afterOneOlderWheel),
+      'pass':
+          afterJump['timelineScroll']['followingBottom'] == true &&
+          afterJump['timelineScroll']['detachedByUser'] == false &&
+          afterOneOlderWheel['timelineScroll']['followingBottom'] == false &&
+          afterOneOlderWheel['timelineScroll']['readingIntent'] ==
+              'browseHistory' &&
+          (afterOneOlderWheel['timelineScroll']['pixels'] as num) <
+              (afterJump['timelineScroll']['pixels'] as num) &&
+          (afterOneOlderWheel['timelineWindow']['itemIds'] as List).last ==
+              latestItem,
+    };
+    observations['jump-then-browse'] = jumpThenBrowse;
+    if (jumpThenBrowse['pass'] != true) {
+      throw StateError(
+        'A wheel step after returning to Latest reused a stale history anchor',
+      );
+    }
     if (observations.values.any((value) => (value as Map)['pass'] != true)) {
       throw StateError('Wheel at the history endpoint did not restore Latest');
     }

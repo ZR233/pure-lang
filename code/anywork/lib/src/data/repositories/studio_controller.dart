@@ -1142,6 +1142,25 @@ class StudioController extends _$StudioController {
       // 原生窗口直接交回 canonical Latest。先清空会让已在 Latest 的幂等
       // focus 提前返回后留下空白，也会在异步聚焦期间丢掉正在显示的正文。
       await _focusChatWindow(threadId, null);
+      // `_focusChatWindow` 对已经处于 Latest 的窗口是幂等的，此时仍必须
+      // 清除 UI 保存的 browseHistory 锚点。否则下一次滚轮会按旧阅读意图
+      // 重新打开历史窗口，表现为一次滚动跳回最早内容。
+      final latest = state.value;
+      if (latest != null && latest.selectedThreadId == threadId) {
+        state = AsyncData(
+          _withWorkspaceUi(
+            latest,
+            threadId,
+            (ui) => ui.copyWith(
+              history: ui.history.copyWith(
+                hasNewer: false,
+                detached: false,
+                anchor: null,
+              ),
+            ),
+          ),
+        );
+      }
       return;
     }
     state = AsyncData(jumpTimelineToLatest(current, threadId));
