@@ -5,6 +5,14 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.6.0](https://github.com/ZR233/pure-lang/compare/v6.5.0...v6.6.0) (2026-10-08)
+
+
+### Bug Fixes
+
+* **studio:** 修复历史会话恢复、继续对话与 Windows 构建 ([974f91a](https://github.com/ZR233/pure-lang/commit/974f91af5914359dcd8cbdd87f553765b309f11b))
+* **studio:** 修复在线模型目录下的配置保存 ([8f41be6](https://github.com/ZR233/pure-lang/commit/8f41be66bd10c9c557e5f6c178b29a36305c91ba))
+
 ## [6.5.0](https://github.com/ZR233/pure-lang/compare/v6.4.0...v6.5.0) (2026-10-07)
 
 
