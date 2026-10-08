@@ -71,7 +71,7 @@ struct StudioCompaction {
 }
 impl ContextPreparationHook for StudioCompaction {
     async fn before_step(&self, mut request: ContextPreparationRequest) -> ContextPreparation {
-        let instruction_repair = match restore_current_instructions(
+        let mut instruction_repair = match restore_current_instructions(
             &mut request,
             &self.base_instructions,
             &self.instruction_binding,
@@ -84,6 +84,16 @@ impl ContextPreparationHook for StudioCompaction {
                 };
             }
         };
+        match repair_workflow_graph(&mut request, &self.modes) {
+            Ok(Some(mutation)) => instruction_repair.mutations.push(mutation),
+            Ok(None) => {}
+            Err(error) => {
+                return ContextPreparation::Failed {
+                    error,
+                    mutations: vec![],
+                };
+            }
+        }
         let facts = match current_facts(&request, &self.modes) {
             Ok(facts) => facts,
             Err(error) => {
@@ -444,6 +454,58 @@ fn restore_current_instructions(
         }),
         mutations,
     })
+}
+
+/// Reconcile a saved graph at execution time, without mutating an idle restored checkpoint.
+/// The local preview feeds projection; core commits its mutation and facts together by CAS.
+fn repair_workflow_graph(
+    request: &mut ContextPreparationRequest,
+    modes: &crate::mode::ThreadModeManager,
+) -> Result<Option<ExtensionMutation>, pl_core::model::ModelError> {
+    let Some(record) = request
+        .extensions
+        .get(crate::workflow_tool::WORKFLOW_EXTENSION)
+    else {
+        return Ok(None);
+    };
+    let state =
+        crate::workflow_tool::decode_workflow_state(&record.payload).map_err(receipt_error)?;
+    let Some(run) = &state.current_run else {
+        return Ok(None);
+    };
+    let mode = modes.snapshot().mode(&run.mode_id).ok_or_else(|| {
+        receipt_error(std::io::Error::other(
+            "current workflow mode is unavailable",
+        ))
+    })?;
+    if mode
+        .workflow()
+        .is_some_and(|graph| run.graph_hash == graph.graph_hash())
+    {
+        return Ok(None);
+    }
+    let expected_revision = record.revision;
+    let state = crate::mode::reconcile_workflow_for_turn(
+        Some(state),
+        &mode,
+        &request.model.thread_id,
+        crate::studio::unix_seconds(),
+    )
+    .map_err(receipt_error)?
+    .ok_or_else(|| receipt_error(std::io::Error::other("workflow upgrade lost saved history")))?;
+    let payload = crate::workflow_tool::encode_workflow_state(&state).map_err(receipt_error)?;
+    std::sync::Arc::make_mut(&mut request.extensions).insert(
+        crate::workflow_tool::WORKFLOW_EXTENSION.into(),
+        pl_core::thread::extensions::ExtensionRecord {
+            revision: expected_revision,
+            payload: payload.clone(),
+        },
+    );
+    Ok(Some(ExtensionMutation::Put {
+        id: crate::workflow_tool::WORKFLOW_EXTENSION.into(),
+        expected_revision: Some(expected_revision),
+        payload,
+    }))
 }
 
 /// Each projection consumes only this Thread's frozen extensions, never a parent's state.

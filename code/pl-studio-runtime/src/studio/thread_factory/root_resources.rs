@@ -26,9 +26,10 @@ impl StudioThreadFactory {
         let project = self.project_record(&thread.project_id).await?;
         let config = self.services.config_runtime.read()?.config;
         let protocol_thread: pl_protocol::Thread = thread.clone().into();
-        let checkpoint = super::recovery::load_checkpoint(&self.services.store, &protocol_thread)
-            .await
-            .map_err(|error| resource_error("load Thread checkpoint", error))?;
+        let checkpoint =
+            super::recovery::load_checkpoint_for_recovery(&self.services.store, &protocol_thread)
+                .await
+                .map_err(|error| resource_error("load Thread checkpoint", error))?;
         let saved = checkpoint
             .as_ref()
             .map_or_else(pl_core::thread::ThreadSnapshot::default, |checkpoint| {
@@ -186,20 +187,15 @@ impl StudioThreadFactory {
                 .map_err(|error| resource_error("freeze root project", error))?,
             );
         }
-        if !is_new && mode.workflow().is_some() {
-            let saved = saved
+        // Opening saved history preserves its run, even when the registered graph changed.
+        // Context preparation reconciles the graph only when execution is explicitly resumed.
+        if !is_new
+            && let Some(workflow) = saved
                 .extensions
                 .get(crate::workflow_tool::WORKFLOW_EXTENSION)
-                .ok_or_else(|| {
-                    ThreadAssemblyError::Identity("restored root has no workflow state".into())
-                })?;
-            let workflow = crate::workflow_tool::decode_workflow_state(&saved.payload)
+        {
+            crate::workflow_tool::decode_workflow_state(&workflow.payload)
                 .map_err(|error| resource_error("decode restored workflow", error))?;
-            if crate::mode::workflow_model_context_section(&workflow, &mode).is_none() {
-                return Err(ThreadAssemblyError::Identity(
-                    "restored workflow requires an explicit mode upgrade".into(),
-                ));
-            }
         }
         if cancellation.is_cancelled() {
             return Err(pl_core::thread::ThreadError::Cancelled.into());

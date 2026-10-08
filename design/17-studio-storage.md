@@ -115,11 +115,14 @@ repo/path/branch/base/revision。目录展示与物理 ownership 是不同职责
 
 1. 校验 catalog 身份和祖先关系；
 2. 合并同 Thread 并发打开；
-3. 在短 SQLite 读事务读取并验证最新 checkpoint 与上下文；旧 v2 TOML 先按需迁移；
+3. 先由该会话的唯一历史 writer 完成既有 v2 SQLite 结构与检查点迁移，再在短 SQLite 读事务读取并验证最新 checkpoint 与上下文；旧 v2 TOML 同样先按需迁移；
 4. 纯恢复内存 owner，不执行模型/工具；
 5. 建立增量订阅；
 6. ChatView 在同一订阅边界取得当前内存首帧（最近最多 32 条）；Session 的尾部缓存按需
    从历史 keyset 查询补齐最多 100 条，活跃/待保存条目直接按同一身份合并，无需等待 writer。
+
+显式继续父会话会先核对子会话的终态通知。未加载的子会话也须先由其唯一历史 writer 完成
+既有 v2 结构与检查点迁移，再读取当前检查点和终态历史；此过程不激活子会话，不重放模型或工具。
 
 读取历史页面不激活 owner。离开 GUI 页面只释放订阅和远离窗口的 GUI 数据，不自动停止仍在执行
 的 Thread。空闲、无订阅、无待保存数据且没有必须存活资源的 owner 在最终 checkpoint 后可释放。

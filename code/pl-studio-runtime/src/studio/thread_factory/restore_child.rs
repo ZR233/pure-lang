@@ -30,12 +30,13 @@ impl StudioThreadFactory {
         }
         let project = self.project_record(&thread.project_id).await?;
         let protocol_thread: pl_protocol::Thread = thread.clone().into();
-        let checkpoint = super::recovery::load_checkpoint(&self.services.store, &protocol_thread)
-            .await
-            .map_err(|error| resource_error("load Thread checkpoint", error))?
-            .ok_or_else(|| {
-                ThreadAssemblyError::Identity(format!("child {id} has no saved checkpoint"))
-            })?;
+        let checkpoint =
+            super::recovery::load_checkpoint_for_recovery(&self.services.store, &protocol_thread)
+                .await
+                .map_err(|error| resource_error("load Thread checkpoint", error))?
+                .ok_or_else(|| {
+                    ThreadAssemblyError::Identity(format!("child {id} has no saved checkpoint"))
+                })?;
         let restored = checkpoint.state.clone();
         let saved = restored.extensions.get("studio.workspace").ok_or_else(|| {
             ThreadAssemblyError::Identity(format!("child {id} has no workspace receipt"))

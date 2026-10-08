@@ -479,7 +479,8 @@ impl ThreadObservations {
     }
 
     /// Explicit parent continuation repairs terminal notifications even for unloaded children.
-    /// This reads a checkpoint plus durable history only; no child model or workspace is opened.
+    /// This prepares persisted schemas and reads checkpoints plus durable history only;
+    /// no child owner, model or workspace is opened.
     pub(super) async fn reconcile_children(&self, parent: &str) -> Result<()> {
         let services = &self.0.projector;
         for child in services.store.list_threads_for_root(parent).await? {
@@ -492,8 +493,11 @@ impl ThreadObservations {
             }
             let child = pl_protocol::Thread::from(child);
             let Some(checkpoint) =
-                crate::studio::thread_factory::recovery::load_checkpoint(&services.store, &child)
-                    .await?
+                crate::studio::thread_factory::recovery::load_checkpoint_for_recovery(
+                    &services.store,
+                    &child,
+                )
+                .await?
             else {
                 continue;
             };

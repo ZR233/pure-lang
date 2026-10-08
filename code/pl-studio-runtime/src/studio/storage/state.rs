@@ -103,6 +103,16 @@ impl StateStore {
         self
     }
 
+    /// Explicit recovery upgrades existing SQLite state before decoding the checkpoint.
+    /// Preparing storage does not create a missing history database.
+    pub(crate) async fn load_after_migration(
+        &self,
+        history: &super::history::HistoryStore,
+    ) -> Result<Option<ThreadCheckpoint>> {
+        history.prepare_activation().await?;
+        self.load().await
+    }
+
     pub(crate) async fn load(&self) -> Result<Option<ThreadCheckpoint>> {
         let history = super::history::HistoryStore::open(
             &self.directory.join("history.sqlite"),

@@ -40,6 +40,13 @@ add_definitions(-DUNICODE -D_UNICODE)
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_17)
   target_compile_options(${TARGET} PRIVATE /W4 /WX /wd"4100")
+  # Repository C++ sources are UTF-8, including comments and diagnostics. Keep
+  # MSVC's source decoding independent from the host Windows code page; without
+  # this, warning C4819 is promoted by /WX and the parser reports cascading
+  # errors in otherwise valid declarations.
+  target_compile_options(${TARGET} PRIVATE
+    "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
+  )
   target_compile_options(${TARGET} PRIVATE /EHsc)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")

@@ -605,6 +605,11 @@ impl StudioRuntime {
         let residency_pin = self.residency.pin_many([request.thread_id.clone()]);
         let thread = self.read_protocol_thread(&request.thread_id).await?;
         let source = if thread.parent_thread_id.is_some() && thread.role == "planner" {
+            // Explicitly opening retired history still prepares its persisted schema, but never
+            // installs an execution owner. Regular snapshot and paging queries do not prepare
+            // this SQLite upgrade.
+            let history = self.store.history_writer(&request.thread_id).await?;
+            history.prepare_activation().await?;
             let snapshot = self.thread_snapshot(&request.thread_id).await?;
             // A retired child has no owner to retain its last Turn and its subscription emits only
             // this snapshot, so the newest finished Turn is read once here — bounded, body-free — and
