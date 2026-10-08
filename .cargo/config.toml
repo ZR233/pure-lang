@@ -4,6 +4,13 @@ include = [{ path = "config.local.toml", optional = true }]
 # Bound local HTTP/SSE, git, and SQLite test resource usage on Windows.
 RUST_TEST_THREADS = { value = "4", force = false }
 
+# The MSVC 18 compiler can fail with D8050 while cc-rs emits zstd's C
+# sources with `-Z7` in the development profile. The xtask only needs the
+# library at build time, so keep that native dependency free of debug records
+# without changing debug information for the workspace's Rust crates.
+[profile.dev.package.zstd-sys]
+debug = 0
+
 [alias]
 xtask = "run --target-dir target/xtask -p pl-xtask --"
 flutter = "run --target-dir target/xtask -p pl-xtask -- flutter"
