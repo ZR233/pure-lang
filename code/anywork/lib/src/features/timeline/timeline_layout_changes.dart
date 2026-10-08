@@ -46,7 +46,6 @@ extension on _TimelineViewState {
   void _cancelLayoutRestore() {
     _readingGeneration++;
     _restoreClamped = false;
-    _restoreAttempts = 0;
     _pendingRestore = const _TimelineRestore.bottom();
     _settledAnchor = null;
   }
@@ -129,7 +128,6 @@ extension on _TimelineViewState {
     if (anchor != null || target != null) {
       _pendingRestore = _TimelineRestore.anchor(anchor, target: target);
       _restoreClamped = true;
-      _restoreAttempts = 0;
     }
     _scheduleGeometrySync();
   }
@@ -146,7 +144,6 @@ extension on _TimelineViewState {
           target: _validLayoutTarget,
         );
         _restoreClamped = true;
-        _restoreAttempts = 0;
       }
     }
     _scheduleGeometrySync();

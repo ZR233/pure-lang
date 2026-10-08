@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart'
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/studio_models.dart';
+import '../../domain/models/timeline_commands.dart';
 import '../../platform/clipboard_image_reader.dart';
 import '../frb/studio_api.dart';
 import 'studio_api_provider.dart';
@@ -18,6 +19,25 @@ part 'studio_controller.g.dart';
 
 Duration? _disableStudioRetry(int retryCount, Object error) => null;
 
+final class _ControllerTimelineSession implements TimelineSession {
+  const _ControllerTimelineSession({
+    required this.events,
+    required this.onDispatch,
+    required this.onClose,
+  });
+
+  @override
+  final Stream<TimelineEvent> events;
+  final Future<void> Function(TimelineCommand command) onDispatch;
+  final Future<void> Function() onClose;
+
+  @override
+  Future<void> dispatch(TimelineCommand command) => onDispatch(command);
+
+  @override
+  Future<void> close() => onClose();
+}
+
 enum _ChatWindowLoad { older, newer, extendLatest }
 
 @Riverpod(keepAlive: true, retry: _disableStudioRetry)
@@ -26,6 +46,46 @@ class StudioController extends _$StudioController {
 
   late ProductTopicRegistry _topics;
   late ThreadStreamCoordinator _threadCoordinator;
+
+  final StreamController<TimelineEvent> _timelineEvents =
+      StreamController<TimelineEvent>.broadcast();
+  final Map<String, int> _timelineEventVersions = {};
+
+  /// 当前打开会话的唯一事件流。调用方只能订阅指定 threadId，不会收到其他会话事件。
+  Stream<TimelineEvent> timelineEvents(String threadId) =>
+      _timelineEvents.stream.where((event) => event.threadId == threadId);
+
+  /// 将 TimelineView 的 typed command 路由到当前会话。
+  Future<void> dispatchTimelineCommand(
+    String threadId,
+    TimelineCommand command,
+  ) async {
+    switch (command) {
+      case TimelineLoadOlder():
+        await loadOlderHistory(threadId);
+      case TimelineLoadNewer():
+        await loadNewerHistory(threadId);
+      case TimelineExtendLatest():
+        await extendLatestHistory(threadId);
+      case TimelineJumpToLatest():
+        await jumpToLatest(threadId);
+      case TimelineExpandBody(:final itemId):
+        await loadItemBody(threadId, itemId);
+      case TimelineVisibleBodies(:final itemIds):
+        await ensureItemBodies(threadId, itemIds);
+      case TimelineAnchorChanged(:final anchor):
+        updateTimelineAnchor(threadId, anchor);
+    }
+  }
+
+  TimelineSession timelineSession(String threadId) =>
+      _ControllerTimelineSession(
+        events: timelineEvents(threadId),
+        onDispatch: (command) => dispatchTimelineCommand(threadId, command),
+        onClose: () async {
+          if (_chatWindowThreadId == threadId) _closeChatWindow();
+        },
+      );
 
   /// Shell 常驻产品 topics 租约（导航目录/公共配置/诊断 summary）。
   ProductTopicLeaseBundle? _shellLease;
@@ -108,6 +168,8 @@ class StudioController extends _$StudioController {
       _windowLoadGeneration.clear();
       _streamEpochByThread.clear();
       _historyRequests.clear();
+      _timelineEventVersions.clear();
+      unawaited(_timelineEvents.close());
     });
     final startupWatch = Stopwatch()..start();
     final catalog = await _api.loadProviderCatalog();
@@ -769,6 +831,7 @@ class StudioController extends _$StudioController {
   }
 
   void _closeChatWindow() {
+    final closedThreadId = _chatWindowThreadId;
     _chatWindowOperation++;
     _openingChatWindow = null;
     _chatWindowThreadId = null;
@@ -776,6 +839,10 @@ class StudioController extends _$StudioController {
     final window = _chatWindow;
     _chatWindow = null;
     if (window != null) unawaited(window.close());
+    if (closedThreadId != null) {
+      _timelineEvents.add(TimelineSessionClosed(closedThreadId));
+      _timelineEventVersions.remove(closedThreadId);
+    }
   }
 
   Future<void> _openChatWindow(String threadId) {
@@ -854,6 +921,15 @@ class StudioController extends _$StudioController {
     final current = state.value;
     if (current == null || current.selectedThreadId != threadId) return;
     _chatFocusedItemId = snapshot.focusedItemId;
+    final previousVersion = _timelineEventVersions[threadId];
+    _timelineEventVersions[threadId] = snapshot.version;
+    if (previousVersion != null && snapshot.version > previousVersion) {
+      _timelineEvents.add(
+        TimelineWindowPatch(threadId, previousVersion, snapshot.version),
+      );
+    } else {
+      _timelineEvents.add(TimelineWindowReset(threadId, snapshot.version));
+    }
     state = AsyncData(
       applyChatWindowSnapshot(
         current,
@@ -1013,6 +1089,12 @@ class StudioController extends _$StudioController {
             ? markItemBodyPending(latest, threadId, itemId)
             : applyChatWindowSnapshot(latest, threadId, snapshot),
       );
+      if (snapshot != null) {
+        _timelineEventVersions[threadId] = snapshot.version;
+        _timelineEvents.add(
+          TimelineBodyLoadCompleted(threadId, itemId, snapshot.version),
+        );
+      }
     } catch (error) {
       if (!ref.mounted || _chatWindow != window) return;
       final latest = state.value;
@@ -1311,6 +1393,7 @@ class StudioController extends _$StudioController {
     final direction = request == _ChatWindowLoad.newer
         ? TimelineDirection.newer
         : TimelineDirection.older;
+    _timelineEvents.add(TimelinePagingStarted(threadId, direction));
     if (!_historyRequests.add(threadId)) return;
     final operation = ++_chatWindowOperation;
     final current = state.value;
@@ -1340,8 +1423,12 @@ class StudioController extends _$StudioController {
             TimelineDirection.newer => ChatHistoryCompletion.newer,
           },
         );
+        _timelineEvents.add(
+          TimelinePagingCompleted(threadId, direction, snapshot.version),
+        );
       }
     } catch (error) {
+      _timelineEvents.add(TimelinePagingFailed(threadId, direction, error));
       if (_chatWindow == window && _acceptChatWindow(threadId, operation)) {
         final latest = state.value;
         if (latest != null) {

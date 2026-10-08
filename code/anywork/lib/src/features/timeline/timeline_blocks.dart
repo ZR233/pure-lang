@@ -19,7 +19,7 @@ class _EmptyTimeline extends StatelessWidget {
 ///
 /// 当前活动不再在这里渲染（那会与消息列里的同一行形成两套搬动的渲染）；活动只由
 /// 输入框上方的固定活动条呈现。收束区作为正向区的一部分参与贴底几何
-/// （见 [_BottomAlignedSliver]），这里不再自己撑高、也不再依赖 `minHeight`。
+/// 由 Timeline 的官方 Sliver 布局自然决定，不依赖固定最小高度。
 class _TimelineTail extends StatelessWidget {
   const _TimelineTail({this.planSummary});
 

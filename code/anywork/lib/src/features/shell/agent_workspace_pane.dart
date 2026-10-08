@@ -666,43 +666,11 @@ class _AgentTimelineHost extends ConsumerWidget {
           itemBodyErrors: timeline.history.itemBodyErrors,
           pendingItemBodyIds: timeline.history.pendingItemBodyIds,
           unavailableItemIds: timeline.history.unavailableItemIds,
-          onLoadItemBody: (itemId) => unawaited(
+          onCommand: (command) => unawaited(
             ref
                 .read(studioControllerProvider.notifier)
-                .loadItemBody(threadId, itemId),
+                .dispatchTimelineCommand(threadId, command),
           ),
-          onVisibleItemBodies: (itemIds) => unawaited(
-            ref
-                .read(studioControllerProvider.notifier)
-                .ensureItemBodies(threadId, itemIds),
-          ),
-          onAnchorChanged: (anchor) => ref
-              .read(studioControllerProvider.notifier)
-              .updateTimelineAnchor(threadId, anchor),
-          onJumpToLatest: () => unawaited(
-            ref.read(studioControllerProvider.notifier).jumpToLatest(threadId),
-          ),
-          onLoadNewer: timeline.history.hasNewer
-              ? () => unawaited(
-                  ref
-                      .read(studioControllerProvider.notifier)
-                      .loadNewerHistory(threadId),
-                )
-              : null,
-          onExtendLatest: timeline.history.canExtendLatest
-              ? () => unawaited(
-                  ref
-                      .read(studioControllerProvider.notifier)
-                      .extendLatestHistory(threadId),
-                )
-              : null,
-          onLoadOlder: timeline.hasOlderHistory
-              ? () => unawaited(
-                  ref
-                      .read(studioControllerProvider.notifier)
-                      .loadOlderHistory(threadId),
-                )
-              : null,
         );
       },
     );

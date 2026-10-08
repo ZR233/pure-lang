@@ -1,39 +1,6 @@
 part of 'timeline_view.dart';
 
 extension on _TimelineViewState {
-  double _estimateRowExtent(int? index, double width) {
-    // A positive null-index result tells SuperSliverList that EVERY unmeasured
-    // row has that height, bypassing the per-row estimates below entirely.
-    if (index == null) return 0;
-    if (index >= widget.rows.length) {
-      return widget.planConfirmation == null ? 14 : 80;
-    }
-    final row = widget.rows[index];
-    final text = row.part?.text;
-    if (text != null && text.isNotEmpty) {
-      final scale = _textScale;
-      final prompt =
-          row.type == TimelineRowType.userMessage ||
-          row.type == TimelineRowType.parentAgentMessage;
-      final bodyWidth =
-          math.min(width, prompt ? 560.0 : 700.0) -
-          (row.type == TimelineRowType.userMessage ? 28 : 0);
-      final columns = math.max(1.0, bodyWidth / (8 * scale));
-      // Explicit line breaks matter even when each line is only a few letters.
-      // Do not construct off-screen Markdown merely to measure the scrollbar.
-      var lines = 0;
-      for (final line in LineSplitter.split(text)) {
-        lines += math.max(1, (line.length / columns).ceil());
-      }
-      return 56 + lines * 22.0 * scale;
-    }
-    return switch (row.type) {
-      TimelineRowType.toolGroup => 110,
-      TimelineRowType.reasoningSummary => 80,
-      _ => 100,
-    };
-  }
-
   Widget _buildRow(TimelineRow row) {
     final reasoningExpanded = _expandedReasoningGroups.contains(
       row.reasoningGroup?.id,
@@ -43,23 +10,13 @@ extension on _TimelineViewState {
     final bodyStates = _itemBodyStates(row);
     final bodyState = _itemBodyCacheKey(bodyStates);
     final cached = _rowWidgets[row.id];
-    final defer =
-        _deferStreamingUpdates &&
-        cached != null &&
-        row.part != null &&
-        !isTerminalTimelineStatus(row.part!.status);
     final needsUpdate =
         cached == null ||
         cached.version != version ||
         cached.expanded != reasoningExpanded ||
         cached.toolExpanded != toolExpanded ||
         cached.body != bodyState;
-    if (defer && needsUpdate) {
-      _deferredRowIds.add(row.id);
-    } else {
-      _deferredRowIds.remove(row.id);
-    }
-    if (!defer && needsUpdate) {
+    if (needsUpdate) {
       _rowWidgets[row.id] = (
         version: version,
         expanded: reasoningExpanded,
@@ -195,9 +152,9 @@ extension on _TimelineViewState {
       isPending: pending,
       isUnavailable: unavailable,
       error: error,
-      onLoad: widget.onLoadItemBody == null
+      onLoad: widget.onCommand == null
           ? null
-          : () => widget.onLoadItemBody!(itemId),
+          : () => _dispatch(TimelineExpandBody(itemId)),
     );
   }
 
@@ -231,8 +188,7 @@ extension on _TimelineViewState {
   /// 记录“最靠上的可见行”的锚点。
   ///
   /// 记录的偏移量是**内容自身**的偏移：短内容整体贴底时整段内容被
-  /// [_BottomAlignedSliver] 下移了 `_bottomSlack`，这里减掉它，锚点就与
-  /// 视口是否贴底无关。恢复位置仍然只用 `-offset`，不需要知道当前留白。
+  /// 锚点偏移量直接使用行相对视口的真实绘制位置。
   TimelineAnchor? _captureAnchor({List<TimelineRow>? rows}) {
     final viewport = _viewportKey.currentContext?.findRenderObject();
     if (viewport is! RenderBox || !viewport.hasSize) return null;
@@ -252,7 +208,7 @@ extension on _TimelineViewState {
         ? null
         : TimelineAnchor(
             _anchorItemId(id, rows ?? widget.rows),
-            offset! - _bottomSlack,
+            offset!,
             readingIntent: _readingIntent,
           );
   }
@@ -280,11 +236,11 @@ extension on _TimelineViewState {
         // The backend owns capacity; a full bounded window never falls through to browsing.
         if (underfull &&
             !widget.hasNewer &&
-            widget.onExtendLatest != null &&
+            _canExtendLatest &&
             widget.olderError == null &&
             !_olderLoadRequested) {
           _olderLoadRequested = true;
-          widget.onExtendLatest!();
+          _dispatch(const TimelineExtendLatest());
         }
         return;
       }
@@ -295,33 +251,21 @@ extension on _TimelineViewState {
           (_detachedByUser || underfull) &&
           (underfull ||
               (position?.extentBefore ?? double.infinity) < threshold) &&
-          widget.onLoadOlder != null &&
+          _canLoadOlder &&
           widget.olderError == null &&
           !_olderLoadRequested) {
         _olderLoadRequested = true;
-        widget.onLoadOlder!();
+        _dispatch(const TimelineLoadOlder());
       } else if (!_scrollingOlder &&
           (underfull ||
               (position?.extentAfter ?? double.infinity) < threshold) &&
-          widget.onLoadNewer != null &&
+          _canLoadNewer &&
           widget.newerError == null &&
           !_newerLoadRequested) {
         _newerLoadRequested = true;
-        widget.onLoadNewer!();
+        _dispatch(const TimelineLoadNewer());
       }
     });
-  }
-
-  void _updateLoadingIndicator() {
-    if (!widget.isLoadingOlder && !widget.isLoadingNewer) {
-      _loadingTimer?.cancel();
-      _loadingTimer = null;
-      _showLoading = false;
-    } else {
-      _loadingTimer ??= Timer(const Duration(milliseconds: 150), () {
-        _showLoadingIndicator();
-      });
-    }
   }
 
   Widget _edgeIndicator({required bool older}) {
@@ -348,9 +292,16 @@ extension on _TimelineViewState {
                   ),
                   onPressed: older
                       ? (_followingBottom && !_detachedByUser
-                            ? widget.onExtendLatest
-                            : widget.onLoadOlder)
-                      : widget.onLoadNewer,
+                            ? (widget.onCommand == null
+                                  ? null
+                                  : () =>
+                                        _dispatch(const TimelineExtendLatest()))
+                            : (widget.onCommand == null
+                                  ? null
+                                  : () => _dispatch(const TimelineLoadOlder())))
+                      : (widget.onCommand == null
+                            ? null
+                            : () => _dispatch(const TimelineLoadNewer())),
                   icon: const Icon(Icons.refresh),
                   label: Text(context.l10n.timelineImageRetry),
                 ),

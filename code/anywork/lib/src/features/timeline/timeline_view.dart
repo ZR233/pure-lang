@@ -2,16 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
-import 'package:super_sliver_list/super_sliver_list.dart';
 
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
+import '../../domain/models/timeline_commands.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../platform/external_url_launcher.dart';
@@ -22,7 +21,6 @@ import '../../shared/typed_json.dart';
 import 'markdown_repair.dart';
 
 part 'timeline_blocks.dart';
-part 'timeline_bottom_aligned_sliver.dart';
 part 'timeline_image_blocks.dart';
 part 'timeline_markdown_blocks.dart';
 part 'timeline_plan_blocks.dart';
@@ -30,7 +28,6 @@ part 'timeline_agent_blocks.dart';
 part 'timeline_remote_image_blocks.dart';
 part 'timeline_tool_blocks.dart';
 part 'timeline_paging.dart';
-part 'timeline_scroll_position.dart';
 part 'timeline_layout_changes.dart';
 
 typedef TimelineRemoteImageProviderFactory = ImageProvider Function(String url);
@@ -46,13 +43,9 @@ class TimelineView extends StatefulWidget {
     this.planConfirmation,
     this.planExpanded = false,
     this.onPlanToggle,
-    this.onLoadOlder,
-    this.onExtendLatest,
+    this.onCommand,
     this.isLoadingOlder = false,
     this.isLoadingNewer = false,
-    this.onLoadNewer,
-    this.onJumpToLatest,
-    this.onAnchorChanged,
     this.anchor,
     this.olderError,
     this.newerError,
@@ -65,8 +58,6 @@ class TimelineView extends StatefulWidget {
     this.itemBodyErrors = const {},
     this.pendingItemBodyIds = const {},
     this.unavailableItemIds = const {},
-    this.onLoadItemBody,
-    this.onVisibleItemBodies,
     super.key,
   });
 
@@ -76,15 +67,9 @@ class TimelineView extends StatefulWidget {
   final PlanConfirmationView? planConfirmation;
   final bool planExpanded;
   final VoidCallback? onPlanToggle;
-  final VoidCallback? onLoadOlder;
-
-  /// Canonical capacity to fill a short latest viewport without browsing away from the tail.
-  final VoidCallback? onExtendLatest;
+  final ValueChanged<TimelineCommand>? onCommand;
   final bool isLoadingOlder;
   final bool isLoadingNewer;
-  final VoidCallback? onLoadNewer;
-  final VoidCallback? onJumpToLatest;
-  final ValueChanged<TimelineAnchor>? onAnchorChanged;
   final TimelineAnchor? anchor;
   final String? olderError;
   final String? newerError;
@@ -110,15 +95,6 @@ class TimelineView extends StatefulWidget {
   /// 数据源无法提供完整正文的条目 ID。
   final Set<String> unavailableItemIds;
 
-  /// 按 item identity 回源完整正文；为空时对应条目只显示不可用提示。
-  final ValueChanged<String>? onLoadItemBody;
-
-  /// 当前视口内的文本条目身份（按行几何判定，进入视口即上报）。
-  ///
-  /// 智能体正文永不折叠：正文只以数据源预览到达时，外层据此按同一 ChatView 的 identity
-  /// 自动补齐完整正文，不需要读者点击“加载完整内容”。
-  final ValueChanged<List<String>>? onVisibleItemBodies;
-
   @override
   State<TimelineView> createState() => _TimelineViewState();
 }
@@ -126,14 +102,9 @@ class TimelineView extends StatefulWidget {
 class _TimelineViewState extends State<TimelineView> {
   static const _bottomThreshold = 80.0;
 
-  late final ScrollController _controller = _TimelineScrollController(
-    () => _followingBottom && !_detachedByUser && !_pointerHeld,
+  late final ScrollController _controller = ScrollController(
+    keepScrollOffset: false,
   );
-  final ListController _listController = ListController();
-  Timer? _streamingIdleTimer;
-  bool _deferStreamingUpdates = false;
-  final Set<String> _deferredRowIds = {};
-  int _restoreAttempts = 0;
   final Map<String, _TimelineScrollSnapshot> _threadScroll = {};
   final Set<String> _expandedReasoningGroups = {};
   final Set<String> _expandedToolGroups = {};
@@ -142,6 +113,15 @@ class _TimelineViewState extends State<TimelineView> {
   bool get _followingBottom =>
       _readingIntent == TimelineReadingIntent.followLatest;
   bool get _detachedByUser => !_followingBottom;
+  bool get _canLoadOlder => widget.onCommand != null;
+  bool get _canLoadNewer => widget.onCommand != null;
+  bool get _canExtendLatest => widget.onCommand != null;
+
+  void _dispatch(TimelineCommand command) {
+    final onCommand = widget.onCommand;
+    onCommand?.call(command);
+  }
+
   int _readingGeneration = 0;
   TimelineAnchor? _settledAnchor;
   bool _programmaticScroll = false;
@@ -150,19 +130,11 @@ class _TimelineViewState extends State<TimelineView> {
   bool _userScrollActive = false;
   double _textScale = 1;
   bool _resumeAfterNewerPage = false;
-  bool _bottomScrollScheduled = false;
   bool _olderLoadRequested = false;
   bool _newerLoadRequested = false;
-  Timer? _loadingTimer;
-  bool _showLoading = false;
   bool _prefetchScheduled = false;
   bool _anchorPublishScheduled = false;
 
-  /// 贴底 sliver 在最近一次布局里上报的前导留白（内容比视口长时为 0）。
-  ///
-  /// 只用于把视觉位置换算成内容自身偏移（见 [_captureAnchor]）；几何本身由
-  /// [_BottomAlignedSliver] 在同一帧算出，因此这里不需要 setState。
-  double _bottomSlack = 0;
   double? _viewportWidth;
   bool _geometrySyncScheduled = false;
 
@@ -198,7 +170,6 @@ class _TimelineViewState extends State<TimelineView> {
   bool _scrollingOlder = true;
   int _pendingNewEvents = 0;
   int _contentVersion = 0;
-  int _rowStructureVersion = 0;
   _TimelineRestore _pendingRestore = const _TimelineRestore.bottom();
 
   /// 待恢复的阅读意图（身份 + offset）是否还没被当前布局表达出来。
@@ -282,15 +253,10 @@ class _TimelineViewState extends State<TimelineView> {
       _expandedReasoningGroups.clear();
       _expandedToolGroups.clear();
       _rowWidgets.clear();
-      _deferredRowIds.clear();
       _rowKeys.clear();
       _visibleItemBodySignature = null;
       _lastSelectedText = null;
       _imageLoader.clear();
-      _bottomSlack = 0;
-      _streamingIdleTimer?.cancel();
-      _streamingIdleTimer = null;
-      _deferStreamingUpdates = false;
       _restoreThreadState();
       _contentVersion = _timelineContentVersion(
         widget.rows,
@@ -331,7 +297,6 @@ class _TimelineViewState extends State<TimelineView> {
         !_scrollingOlder) {
       _resumeAfterNewerPage = true;
     }
-    _updateLoadingIndicator();
     _schedulePrefetch();
     final nextContentVersion = _timelineContentVersion(
       widget.rows,
@@ -353,21 +318,7 @@ class _TimelineViewState extends State<TimelineView> {
         oldWidget.rows.indexed.any(
           (entry) => entry.$2.id != widget.rows[entry.$1].id,
         );
-    if (structureChanged) {
-      // SuperSliverList stores heights by index. Dirtying an index does not
-      // replace its previous height, so a new window needs a fresh extent map.
-      // Stable row GlobalKeys retain mounted content; the existing identity
-      // anchor restores the reader after the new list has laid out.
-      _rowStructureVersion++;
-    } else if (_listController.isAttached) {
-      for (var index = 0; index < oldWidget.rows.length; index++) {
-        if (index >= _listController.numberOfItems) break;
-        if (oldWidget.rows[index].renderVersion !=
-            widget.rows[index].renderVersion) {
-          _listController.invalidateExtent(index);
-        }
-      }
-    }
+    if (structureChanged) _readingGeneration++;
 
     // 贴在窗口末尾时，内容变化（追加 / 历史分页 / 窗口替换）都保持跟随：`hasNewer`
     // 只表示窗口之外还有更新条目（由「跳到最新」入口表达），不代表读者离开了末尾。
@@ -395,9 +346,6 @@ class _TimelineViewState extends State<TimelineView> {
     StudioDriverState.publishTimelineScroll(null);
     _controller.removeListener(_handleScrollPositionChanged);
     _controller.dispose();
-    _listController.dispose();
-    _streamingIdleTimer?.cancel();
-    _loadingTimer?.cancel();
     _imageLoader.clear();
     super.dispose();
   }
@@ -411,15 +359,15 @@ class _TimelineViewState extends State<TimelineView> {
         if (anchor != null) _prepareAnchorRestore(anchor);
       }
       _textScale = textScale;
-      _rowStructureVersion++;
+      _readingGeneration++;
     }
     _schedulePrefetch();
     final activeTurn = widget.turn?.state.isBusy == true ? widget.turn : null;
     if (widget.rows.isEmpty &&
         activeTurn == null &&
         widget.planConfirmation == null &&
-        widget.onLoadOlder == null &&
-        widget.onLoadNewer == null &&
+        !_canLoadOlder &&
+        !_canLoadNewer &&
         widget.olderError == null &&
         widget.newerError == null) {
       return const _EmptyTimeline();
@@ -440,7 +388,6 @@ class _TimelineViewState extends State<TimelineView> {
     final activeIds = rows.map((row) => row.id).toSet();
     _rowKeys.removeWhere((id, _) => !activeIds.contains(id));
     _rowWidgets.removeWhere((id, _) => !activeIds.contains(id));
-    _deferredRowIds.retainAll(activeIds);
     _imageLoader.retainWindow(widget.threadId, rows);
     // 展开态按稳定分组身份保存，但只保留仍在窗口内的身份：历史分页淘汰/切回
     // 不留下再也用不到的 id，避免集合无界增长。
@@ -501,11 +448,9 @@ class _TimelineViewState extends State<TimelineView> {
                     ),
                   ),
                 ),
-                if (_showLoading && widget.isLoadingOlder ||
-                    widget.olderError != null)
+                if (widget.isLoadingOlder || widget.olderError != null)
                   _edgeIndicator(older: true),
-                if (_showLoading && widget.isLoadingNewer ||
-                    widget.newerError != null)
+                if (widget.isLoadingNewer || widget.newerError != null)
                   _edgeIndicator(older: false),
               ],
             ),
@@ -528,77 +473,53 @@ class _TimelineViewState extends State<TimelineView> {
         _viewportWidth = constraints.maxWidth;
         return SizedBox(
           key: _viewportKey,
-          child: Listener(
-            onPointerSignal: _handlePointerSignal,
-            onPointerDown: (_) {
-              // 按下即暂停跟随，给滚动条与内容手势相同的优先级。
-              _pointerHeld = true;
-              _cancelLayoutRestore();
-              _deferStreamingDuringScroll();
-            },
-            onPointerUp: (_) => _releasePointer(),
-            onPointerCancel: (_) => _releasePointer(),
-            child: NotificationListener<ScrollMetricsNotification>(
-              onNotification: _handleScrollMetricsChanged,
-              child: NotificationListener<ScrollUpdateNotification>(
-                onNotification: _handleScrollUpdate,
-                child: NotificationListener<ScrollNotification>(
-                  onNotification: (notification) {
-                    if (notification is UserScrollNotification) {
-                      return _handleUserScroll(notification);
-                    }
-                    if (notification is ScrollEndNotification &&
-                        notification.depth == 0 &&
-                        !_programmaticScroll) {
-                      _keyboardScrolling = false;
-                      _userScrollActive = false;
-                      _resumeStreamingAfterIdle();
-                      _saveThreadState(widget.threadId);
-                    }
-                    return false;
-                  },
-                  child: Scrollbar(
+          child: NotificationListener<ScrollMetricsNotification>(
+            onNotification: _handleScrollMetricsChanged,
+            child: NotificationListener<ScrollUpdateNotification>(
+              onNotification: _handleScrollUpdate,
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  if (notification is UserScrollNotification) {
+                    return _handleUserScroll(notification);
+                  }
+                  if (notification is ScrollEndNotification &&
+                      notification.depth == 0 &&
+                      !_programmaticScroll) {
+                    _keyboardScrolling = false;
+                    _userScrollActive = false;
+                    _saveThreadState(widget.threadId);
+                  }
+                  return false;
+                },
+                child: Scrollbar(
+                  controller: _controller,
+                  thumbVisibility: true,
+                  child: CustomScrollView(
+                    scrollBehavior: ScrollConfiguration.of(context)
+                        .copyWith(scrollbars: false),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    key: StudioDriverKeys.timeline,
                     controller: _controller,
-                    thumbVisibility: true,
-                    child: CustomScrollView(
-                      scrollBehavior: ScrollConfiguration.of(context)
-                          .copyWith(scrollbars: false),
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      key: StudioDriverKeys.timeline,
-                      controller: _controller,
-                      scrollCacheExtent: const ScrollCacheExtent.pixels(600),
-                      slivers: [
-                        _BottomAlignedSliver(
-                          onSlackChanged: _handleBottomSlackChanged,
-                          child: SliverPadding(
-                            padding: const EdgeInsets.symmetric(horizontal: 24),
-                            sliver: SuperSliverList(
-                              key: ValueKey((
-                                widget.threadId,
-                                _rowStructureVersion,
-                              )),
-                              listController: _listController,
-                              extentEstimation: _estimateRowExtent,
-                              delayPopulatingCacheArea: false,
-                              delegate: SliverChildBuilderDelegate(
-                                (context, index) => index == rows.length
-                                    ? _TimelineTail(planSummary: planSummary)
-                                    : _buildRow(rows[index]),
-                                childCount: rows.length + 1,
-                                addAutomaticKeepAlives: false,
-                                findChildIndexCallback: (key) {
-                                  if (key is! ValueKey<String>) return null;
-                                  final index = rows.indexWhere(
-                                    (row) => row.id == key.value,
-                                  );
-                                  return index < 0 ? null : index;
-                                },
-                              ),
-                            ),
-                          ),
+                    scrollCacheExtent: const ScrollCacheExtent.pixels(600),
+                    slivers: [
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        sliver: SliverList.builder(
+                          itemCount: rows.length + 1,
+                          addAutomaticKeepAlives: false,
+                          findChildIndexCallback: (key) {
+                            if (key is! ValueKey<String>) return null;
+                            final index = rows.indexWhere(
+                              (row) => row.id == key.value,
+                            );
+                            return index < 0 ? null : index;
+                          },
+                          itemBuilder: (context, index) => index == rows.length
+                              ? _TimelineTail(planSummary: planSummary)
+                              : _buildRow(rows[index]),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -637,47 +558,10 @@ class _TimelineViewState extends State<TimelineView> {
     if (!_controller.hasClients) return false;
     final position = _controller.position;
     if (position.userScrollDirection != ScrollDirection.forward) return false;
-    return widget.onLoadOlder != null ||
-        position.pixels > position.minScrollExtent + 0.5;
-  }
-
-  void _handlePointerSignal(PointerSignalEvent event) {
-    if (event is! PointerScrollEvent ||
-        event.scrollDelta.dy == 0 ||
-        !_controller.hasClients) {
-      return;
-    }
-    // Match Scrollable's axis modifiers: Shift+wheel may belong to a horizontal
-    // code/tool scroller and must not change the timeline's reading intent.
-    if (event.kind == PointerDeviceKind.mouse &&
-        ScrollConfiguration.of(context).pointerAxisModifiers
-            .any(HardwareKeyboard.instance.logicalKeysPressed.contains)) {
-      return;
-    }
-    final older = event.scrollDelta.dy < 0;
-    final canPage = (older ? widget.onLoadOlder : widget.onLoadNewer) != null;
-    final canResumeLatest =
-        !older &&
-        !widget.hasNewer &&
-        (!_followingBottom || _detachedByUser || _restoreClamped);
-    if (!canPage && !canResumeLatest) return;
-    // Scrollable only claims wheel events that move pixels. At a window edge
-    // (including an underfull list), the unclaimed direction still means page
-    // onward or resume Latest. Inner scrollers and normal timeline movement
-    // register first, so they retain ownership of any event they can consume.
-    GestureBinding.instance.pointerSignalResolver.register(event, (_) {
-      if (!mounted) return;
-      _cancelLayoutRestore();
-      _handleScrollPositionChanged(
-        direction: older ? ScrollDirection.forward : ScrollDirection.reverse,
-      );
-      event.respond(allowPlatformDefault: false);
-    });
+    return _canLoadOlder || position.pixels > position.minScrollExtent + 0.5;
   }
 
   void _handleKeyboardScroll(ScrollDirection direction) {
-    _deferStreamingDuringScroll();
-    _resumeStreamingAfterIdle();
     _keyboardScrolling = true;
     _cancelLayoutRestore();
     _programmaticScroll = false;
@@ -690,23 +574,12 @@ class _TimelineViewState extends State<TimelineView> {
     });
   }
 
-  void _releasePointer() {
-    _pointerHeld = false;
-    _resumeStreamingAfterIdle();
-    _scheduleGeometrySync();
-    _schedulePrefetch();
-    if (_followingBottom && !_detachedByUser) _scheduleBottomScroll();
-  }
-
   bool _handleUserScroll(UserScrollNotification notification) {
     if (notification.depth == 0) {
       _userScrollActive = notification.direction != ScrollDirection.idle;
-      if (!_userScrollActive) _resumeStreamingAfterIdle();
     }
     if (notification.depth == 0 &&
         notification.direction != ScrollDirection.idle) {
-      _deferStreamingDuringScroll();
-      _resumeStreamingAfterIdle();
       // 不足一屏时 pixels 不会变化，但用户仍能选择向旧/向新补页。
       _cancelLayoutRestore();
       _handleScrollPositionChanged(direction: notification.direction);
@@ -719,7 +592,6 @@ class _TimelineViewState extends State<TimelineView> {
   /// 同时识别键盘/滚动条引起的位移；内层滚动不改变外层阅读意图。
   bool _handleScrollUpdate(ScrollUpdateNotification notification) {
     if (notification.depth != 0) return false;
-    if (!_programmaticScroll) _resumeStreamingAfterIdle();
     if (notification.dragDetails != null) {
       _userDragUpdates += 1;
       // 读者主动接管位置：放弃尚未被布局表达的恢复意图（不再回落到原锚点）。
@@ -783,7 +655,7 @@ class _TimelineViewState extends State<TimelineView> {
         _followLatestBottom();
         // 用户滚回最新与点击“跳到最新”使用同一命令，恢复 ChatView 的 Latest
         // 聚焦；只改 UI 标志会让后续新消息继续留在历史窗口之外。
-        widget.onJumpToLatest?.call();
+        _dispatch(const TimelineJumpToLatest());
       }
     } else if (direction != ScrollDirection.idle &&
         _readingIntent != TimelineReadingIntent.browseHistory) {
@@ -804,10 +676,7 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _scheduleBottomScroll() {
-    if (_bottomScrollScheduled) return;
-    _bottomScrollScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _bottomScrollScheduled = false;
       if (mounted && !_pointerHeld && _followingBottom && !_detachedByUser) {
         _scrollToBottom();
       }
@@ -838,7 +707,7 @@ class _TimelineViewState extends State<TimelineView> {
     // 阅读方向与最新窗口填充互不影响；扩充由布局与 canonical 容量决定。
     _scrollingOlder = false;
     _followLatestBottom();
-    widget.onJumpToLatest?.call();
+    _dispatch(const TimelineJumpToLatest());
     _scheduleBottomScroll();
   }
 
@@ -852,48 +721,9 @@ class _TimelineViewState extends State<TimelineView> {
       _pendingNewEvents = 0;
       _cancelLayoutRestore();
       _resumeAfterNewerPage = false;
-      _deferStreamingUpdates = false;
     });
     _scheduleBottomScroll();
     _saveThreadState(widget.threadId);
-  }
-
-  void _deferStreamingDuringScroll() {
-    _streamingIdleTimer?.cancel();
-    _streamingIdleTimer = null;
-    if (_detachedByUser || !_isNearBottom()) _deferStreamingUpdates = true;
-  }
-
-  void _resumeStreamingAfterIdle() {
-    _streamingIdleTimer?.cancel();
-    late final Timer timer;
-    timer = Timer(const Duration(milliseconds: 160), () {
-      if (!mounted || !_deferStreamingUpdates || _pointerHeld) return;
-      // Static history has nothing to flush. Creating a restore intent here
-      // would compete with the wheel's position even though no body changed.
-      if (_deferredRowIds.isEmpty) {
-        _deferStreamingUpdates = false;
-        return;
-      }
-      // A timer can fire between pointerScroll and the next layout. Capture the
-      // painted anchor only after that layout, otherwise it describes the old
-      // viewport and restores the very position the user just scrolled away from.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted ||
-            !identical(_streamingIdleTimer, timer) ||
-            !_deferStreamingUpdates ||
-            _pointerHeld) {
-          return;
-        }
-        final anchor = _captureAnchor();
-        setState(() {
-          _deferStreamingUpdates = false;
-          if (_detachedByUser && anchor != null) _prepareAnchorRestore(anchor);
-        });
-      });
-      WidgetsBinding.instance.ensureVisualUpdate();
-    });
-    _streamingIdleTimer = timer;
   }
 
   void _toggleReasoning(String groupId) {
@@ -942,16 +772,6 @@ class _TimelineViewState extends State<TimelineView> {
     });
   }
 
-  /// 记录 [_BottomAlignedSliver] 在**布局期**算出的贴底留白。
-  ///
-  /// 留白已经参与本帧几何，这里只是记下来供锚点换算使用，因此不 setState、
-  /// 不安排下一帧，也不会造成「先顶部再跳底」。
-  void _handleBottomSlackChanged(double slack) {
-    final clamped = slack.isFinite && slack > 0 ? slack : 0.0;
-    if (clamped == _bottomSlack) return;
-    _bottomSlack = clamped;
-  }
-
   /// 帧末做一次几何同步并发布只读滚动诊断（每帧最多一次）。
   ///
   /// 放在帧末是因为两者都依赖本帧最终布局出来的滚动几何：`build` 期间
@@ -968,6 +788,12 @@ class _TimelineViewState extends State<TimelineView> {
 
   void _syncTimelineGeometry() {
     _restoreVisibleAnchor();
+    // SliverList may refine the extent of a very tall lazily built row over
+    // several layouts. Keep followLatest attached to the real max extent;
+    // this is a layout event response, never a timer or polling loop.
+    if (_followingBottom && !_detachedByUser && !_pointerHeld) {
+      _scheduleBottomScroll();
+    }
     // 索引定位和真实几何校正后确认恢复完成，再发布位置。
     if (_refreshRestorePending()) _saveThreadState(widget.threadId);
     if (_resumeAfterNewerPage &&
@@ -983,7 +809,7 @@ class _TimelineViewState extends State<TimelineView> {
           !widget.hasNewer &&
           _isNearBottom()) {
         _followLatestBottom();
-        widget.onJumpToLatest?.call();
+        _dispatch(const TimelineJumpToLatest());
       }
     }
     _publishVisibleItemBodies();
@@ -1000,8 +826,7 @@ class _TimelineViewState extends State<TimelineView> {
   /// 首窗）、**身份进入预览**与**补齐完成**都会重新上报一次，不需要读者滚动去触发补齐；
   /// 上报只在状态真正变化时发生，因此稳定的流式帧不会重复上报、不会自激。
   void _publishVisibleItemBodies() {
-    final onVisible = widget.onVisibleItemBodies;
-    if (onVisible == null) return;
+    if (widget.onCommand == null) return;
     final viewport = _viewportKey.currentContext?.findRenderObject();
     if (viewport is! RenderBox || !viewport.hasSize) return;
     final ids = <String>[];
@@ -1033,7 +858,7 @@ class _TimelineViewState extends State<TimelineView> {
     final next = signature.toString();
     if (next == _visibleItemBodySignature) return;
     _visibleItemBodySignature = next;
-    if (ids.isNotEmpty) onVisible(ids);
+    if (ids.isNotEmpty) _dispatch(TimelineVisibleBodies(ids));
   }
 
   /// Driver reports both window size and actually mounted lazy rows.
@@ -1054,7 +879,7 @@ class _TimelineViewState extends State<TimelineView> {
         maxScrollExtent: position?.maxScrollExtent,
         viewportDimension: position?.viewportDimension,
         extentAfter: position?.extentAfter,
-        bottomSlack: _bottomSlack,
+        bottomSlack: 0,
         hasNewer: widget.hasNewer,
         showJumpToLatest: _showJumpToLatest,
         programmaticScroll: _programmaticScroll,
@@ -1066,10 +891,6 @@ class _TimelineViewState extends State<TimelineView> {
     );
   }
 
-  void _showLoadingIndicator() {
-    if (mounted) setState(() => _showLoading = true);
-  }
-
   void _prepareAnchorRestore(TimelineAnchor anchor) {
     if (_pointerHeld || _keyboardScrolling || _userScrollActive) return;
     _pendingRestore = _TimelineRestore.anchor(
@@ -1077,7 +898,6 @@ class _TimelineViewState extends State<TimelineView> {
       target: _validLayoutTarget,
     );
     _restoreClamped = true;
-    _restoreAttempts = 0;
     _scheduleGeometrySync();
   }
 
@@ -1098,10 +918,8 @@ class _TimelineViewState extends State<TimelineView> {
         ? _TimelineRestore.anchor(anchor)
         : const _TimelineRestore.bottom();
     _restoreClamped = detached;
-    _restoreAttempts = 0;
     _olderLoadRequested = false;
     _newerLoadRequested = false;
-    _updateLoadingIndicator();
   }
 
   void _restorePendingPosition() {
@@ -1117,9 +935,7 @@ class _TimelineViewState extends State<TimelineView> {
         _pointerHeld ||
         _userScrollActive ||
         _keyboardScrolling ||
-        !_controller.hasClients ||
-        !_listController.isAttached ||
-        _restoreAttempts >= 3) {
+        !_controller.hasClients) {
       return;
     }
     final anchor = _pendingRestore.anchor;
@@ -1128,33 +944,26 @@ class _TimelineViewState extends State<TimelineView> {
     final rowId = anchor == null ? null : _anchorRowId(anchor.itemId);
     final index = widget.rows.indexWhere((row) => row.id == rowId);
     if (index < 0 && layoutTarget == null) return;
-    _restoreAttempts++;
+    var moved = false;
     _programmaticScroll = true;
     try {
       final target =
           (layoutTarget == null ? null : _layoutTargetPixels(layoutTarget)) ??
           (anchor == null ? null : _restoreTargetPixels(anchor));
-      if (target == null) {
-        if (index < 0) return;
-        _listController.jumpToItem(
-          index: index,
-          scrollController: _controller,
-          alignment: 0,
-        );
-      } else {
+      if (target != null) {
         final position = _controller.position;
         final clamped = target
             .clamp(position.minScrollExtent, position.maxScrollExtent)
             .toDouble();
         if ((position.pixels - clamped).abs() > 0.5) {
           _controller.jumpTo(clamped);
+          moved = true;
         }
       }
     } finally {
       _programmaticScroll = false;
     }
-    _scheduleGeometrySync();
-    WidgetsBinding.instance.ensureVisualUpdate();
+    if (moved) _scheduleGeometrySync();
   }
 
   double? _restoreTargetPixels(TimelineAnchor anchor) {
@@ -1168,8 +977,7 @@ class _TimelineViewState extends State<TimelineView> {
         !_controller.hasClients) {
       return null;
     }
-    final top =
-        box.localToGlobal(Offset.zero, ancestor: viewport).dy - _bottomSlack;
+    final top = box.localToGlobal(Offset.zero, ancestor: viewport).dy;
     return _controller.position.pixels + top - anchor.offset;
   }
 
@@ -1213,7 +1021,7 @@ class _TimelineViewState extends State<TimelineView> {
         anchor: anchor,
         pendingNewEvents: _pendingNewEvents,
       );
-      widget.onAnchorChanged?.call(anchor);
+      _dispatch(TimelineAnchorChanged(anchor));
     });
   }
 }
