@@ -317,8 +317,14 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
   void _updateCustomModel(int index, ProviderModelView model) {
     _updateDraft((provider) {
       final custom = [...provider.customModels];
-      final previousSlug = custom[index].slug;
+      final previousModel = custom[index];
+      final previousSlug = previousModel.slug;
       custom[index] = model;
+      final connections = {...provider.modelConnectionModes};
+      if (previousSlug != model.slug ||
+          previousModel.wireProtocol != model.wireProtocol) {
+        connections.remove(previousSlug);
+      }
       // 保留既有用户覆盖：同名编辑不得丢覆盖，仅更名时迁移；上下文窗口变化时按新容量
       // 重算安全上限与生效值，模型默认与用户覆盖保持不变。
       final limits = {...provider.autoCompactLimits};
@@ -341,6 +347,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
             );
       return provider.copyWith(
         customModels: custom,
+        modelConnectionModes: connections,
         autoCompactLimits: limits,
         defaultModel: provider.defaultModel == previousSlug
             ? model.slug
@@ -357,6 +364,8 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       custom.removeAt(index);
       final models = [...provider.defaultModels, ...custom];
       final limits = {...provider.autoCompactLimits}..remove(removedSlug);
+      final connections = {...provider.modelConnectionModes}
+        ..remove(removedSlug);
       // 仅当被移除的模型正是当前默认模型时才改写，避免覆盖无法解析的
       // canonical defaultModel。
       final defaultModel = provider.defaultModel == removedSlug
@@ -364,6 +373,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
           : provider.defaultModel;
       return provider.copyWith(
         customModels: custom,
+        modelConnectionModes: connections,
         autoCompactLimits: limits,
         models: models,
         defaultModel: defaultModel,

@@ -76,6 +76,9 @@ snapshot 的生成。pl-model 只消费已经解析好的 provider 和模型信�
 配置 owner 在同一发布边界区分磁盘 desired config 与非持久模型目录 overlay；解析视图合成两者，
 所有 route、Profile、标题与 Settings 展示消费同一有效目录。保存只序列化 desired，不能把发现模型
 塞进 additional_models 后随其他设置写回，也不能将其投影为可编辑 custom model。
+Provider 编辑提交只发送既有或用户显式修改的连接覆盖，不把在线模型的当前默认连接方式
+转成持久覆盖。更换地址或凭据会失效旧目录观察；未改动的连接覆盖与路由仍按既有 desired
+选择保留，不能因此次保存制造对旧在线名单的新引用。
 
 `[ui]` 仅保留 `follow_active_turn`（默认 true）和 `compact_timeline`（默认 false）；主题不
 属于持久化设置。未知 UI 字段按既有规则忽略，正常保存后不再输出；启动不因未知字段重写
@@ -117,6 +120,11 @@ catalog，被禁用的用户 Profile 仍可编辑并重新启用。
 来自模型目录（见 [06](./06-model.md)），角色配置不保存第二份候选或默认值。provider 不
 保存 `default_model`，模型选择只由路由决定；历史结构按 20.1 转换，缺失必需路由或无效
 引用明确报错，不能静默重置用户选择。
+保存 provider 字段时，未改动的 Mode 与 child route 原样提交，包括暂不可用的模型和 effort。
+只有显式选择默认 provider 或删除路由所属 provider 才重新选择相应模型与默认 effort；实例
+更名只迁移 provider 引用。编辑命令的空 effort 表示省略该选择，不从当前目录补入默认候选。
+完整 child route 提交不构造备用路由；只有缺失角色需要补齐时才解析明确的默认 provider。
+未承担新路由的在线实例允许其展示默认模型为空，不能让其合法空目录阻塞其他实例保存。
 
 ## 20.4 TOML 示例
 

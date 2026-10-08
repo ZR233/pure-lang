@@ -152,16 +152,23 @@ abstract final class ProviderSettingsCommandBuilder {
             providerIds.contains(providerId) && provider != null
             ? provider
             : fallback;
-        final model = selectAsSimpleDefault
-            ? safeProvider.defaultModel
-            : safeProvider.allModels.any(
-                (candidate) => candidate.slug == route.model,
-              )
+        // Online observations can withdraw an existing selection. A provider
+        // field edit must keep that desired route, including its effort.
+        final preserveSelection =
+            !selectAsSimpleDefault &&
+            route.providerId != removedProviderId &&
+            safeProvider.id == providerId &&
+            (safeProvider.modelCatalog.supported ||
+                safeProvider.allModels.any(
+                  (candidate) => candidate.slug == route.model,
+                ));
+        final model = preserveSelection
             ? route.model
             : safeProvider.defaultModel;
         final selectedModel = _modelBySlug(safeProvider.allModels, model);
-        final effort =
-            selectedModel?.reasoningEfforts.contains(route.effort) == true
+        final effort = preserveSelection
+            ? route.effort
+            : selectedModel?.reasoningEfforts.contains(route.effort) == true
             ? route.effort
             : selectedModel?.defaultReasoningEffort.isNotEmpty == true
             ? selectedModel!.defaultReasoningEffort
@@ -206,15 +213,20 @@ abstract final class ProviderSettingsCommandBuilder {
             providerIds.contains(providerId) && provider != null
             ? provider
             : fallback;
-        final model =
-            safeProvider.allModels.any(
-              (candidate) => candidate.slug == role.model,
-            )
+        final preserveSelection =
+            role.providerId != removedProviderId &&
+            safeProvider.id == providerId &&
+            (safeProvider.modelCatalog.supported ||
+                safeProvider.allModels.any(
+                  (candidate) => candidate.slug == role.model,
+                ));
+        final model = preserveSelection
             ? role.model
             : safeProvider.defaultModel;
         final selectedModel = _modelBySlug(safeProvider.allModels, model);
-        final effort =
-            selectedModel?.reasoningEfforts.contains(role.effort) == true
+        final effort = preserveSelection
+            ? role.effort
+            : selectedModel?.reasoningEfforts.contains(role.effort) == true
             ? role.effort
             : selectedModel?.defaultReasoningEffort.isNotEmpty == true
             ? selectedModel!.defaultReasoningEffort
@@ -258,10 +270,10 @@ abstract final class ProviderSettingsCommandBuilder {
                 ),
             ],
             modelConnectionModes: [
-              for (final model in provider.allModels)
+              for (final override in provider.modelConnectionModes.entries)
                 ProviderModelConnectionCommand(
-                  slug: model.slug.trim(),
-                  connectionMode: model.connectionMode,
+                  slug: override.key.trim(),
+                  connectionMode: override.value,
                 ),
             ],
             modelAutoCompactLimits: _autoCompactCommands(provider),

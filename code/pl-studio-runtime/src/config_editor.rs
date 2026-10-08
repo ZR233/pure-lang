@@ -143,7 +143,9 @@ impl ProviderEdit {
         let base_url = trim_optional(self.base_url.as_deref()).ok_or_else(|| {
             PureError::ConfigError("provider base_url must not be empty".to_string())
         })?;
-        let default_model = non_empty_trimmed(&self.default_model, "provider default_model")?;
+        // The display default can be empty after a successful empty observation.
+        // Route construction validates it only when a new selection needs it.
+        let default_model = self.default_model.trim().to_string();
         let bearer_token = trim_optional(self.bearer_token.as_deref());
         let current_models = current
             .map(ProviderConfig::editable_models)
@@ -312,7 +314,7 @@ impl ProviderSettingsEdit {
                 })
                 .collect::<Result<BTreeMap<_, _>>>()?
         } else {
-            role_edits_to_routes(&self.roles, &providers, &default_models)?
+            role_edits_to_routes(&self.roles, &providers, &default_models, &fallback_provider)?
         };
         let mode_model_routes = if self.mode_routes.is_empty() {
             current
@@ -357,17 +359,9 @@ fn role_edits_to_routes(
     edits: &[RoleEdit],
     providers: &BTreeMap<ProviderId, ProviderConfig>,
     default_models: &BTreeMap<ProviderId, String>,
+    fallback_provider: &ProviderId,
 ) -> Result<BTreeMap<pl_model::config::AgentRoleId, ModelRouteConfig>> {
-    let fallback_provider = providers
-        .keys()
-        .next()
-        .ok_or_else(|| PureError::ConfigError("at least one provider is required".to_string()))?
-        .clone();
-    let fallback_route = route_for_provider_default(providers, default_models, &fallback_provider)?;
-    let mut routes = StudioRole::child_roles()
-        .into_iter()
-        .map(|role| (role.id(), fallback_route.clone()))
-        .collect::<BTreeMap<_, _>>();
+    let mut routes = BTreeMap::new();
     let mut seen = BTreeSet::new();
 
     for edit in edits {
@@ -387,6 +381,19 @@ fn role_edits_to_routes(
             )));
         }
         routes.insert(role.id(), role_edit_to_route(edit, providers, role)?);
+    }
+
+    // Complete requests never need a default from an unrelated provider, whose
+    // online inventory may be empty or may have withdrawn its old selection.
+    let child_roles = StudioRole::child_roles();
+    if routes.len() < child_roles.len() {
+        let fallback_route =
+            route_for_provider_default(providers, default_models, fallback_provider)?;
+        for role in child_roles {
+            routes
+                .entry(role.id())
+                .or_insert_with(|| fallback_route.clone());
+        }
     }
 
     Ok(routes)
@@ -440,20 +447,13 @@ fn route_values_to_route(
 ) -> Result<ModelRouteConfig> {
     let provider_key = non_empty_trimmed(provider_value, "route provider")?;
     let provider_id = ProviderId::new(provider_key.clone())?;
-    let provider = providers.get(&provider_id).ok_or_else(|| {
-        PureError::ConfigError(format!(
+    if !providers.contains_key(&provider_id) {
+        return Err(PureError::ConfigError(format!(
             "{subject} references missing provider: {provider_key}"
-        ))
-    })?;
+        )));
+    }
     let model_slug = non_empty_trimmed(model_value, "route model")?;
-    let models = provider.effective_models()?;
-    let model = models.iter().find(|model| model.slug == model_slug);
-    let effort = effort_value.trim();
-    let effort = if effort.is_empty() {
-        model.and_then(ModelInfo::default_effort)
-    } else {
-        Some(effort.to_string())
-    };
+    let effort = trim_optional(Some(effort_value));
 
     Ok(ModelRouteConfig {
         provider: provider_id,
