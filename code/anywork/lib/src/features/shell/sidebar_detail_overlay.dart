@@ -187,6 +187,10 @@ class _SidebarHoverDetailState extends State<_SidebarHoverDetail> {
         thumbVisibility: true,
         child: SingleChildScrollView(
           controller: _scrollController,
+          // 详情卡内容使用明确的内缩网格。共享锚定面负责卡片外框，
+          // 这里负责内容本身的留白，使标题、前置图标和复制按钮共用
+          // 同一组左右边界。
+          padding: const EdgeInsets.fromLTRB(14, 4, 10, 4),
           child: widget.detailBuilder(context),
         ),
       ),
@@ -209,14 +213,19 @@ class _SidebarDetailRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox.square(dimension: 15, child: Center(child: leading)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(value, style: context.text.bodySmall)),
-          if (trailing != null) ...[const SizedBox(width: 4), trailing!],
+          SizedBox.square(dimension: 18, child: Center(child: leading)),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              value,
+              style: context.text.bodySmall?.copyWith(height: 1.3),
+            ),
+          ),
+          if (trailing != null) ...[const SizedBox(width: 8), trailing!],
         ],
       ),
     );

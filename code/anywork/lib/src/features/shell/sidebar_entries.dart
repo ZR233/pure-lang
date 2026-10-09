@@ -278,8 +278,9 @@ class _ThreadTile extends ConsumerWidget {
   final StudioRecoveryIssue? recoveryIssue;
   final VoidCallback? onNavigate;
 
-  /// 触控输入模式：快捷操作常显，命中区放大到 44px；由 `_SidebarState`
-  /// 按最近指针输入对整个侧栏统一判定。
+  /// 触控输入模式：快捷操作常显，命中区放大到 44px；桌面使用 30px 的紧凑
+  /// 操作槽，避免三个连续图标之间出现过宽留白。由 `_SidebarState` 按最近
+  /// 指针输入对整个侧栏统一判定。
   final bool touchMode;
 
   @override
@@ -297,37 +298,38 @@ class _ThreadTile extends ConsumerWidget {
     final zedAvailable = ref.watch(zedAvailabilityProvider).value ?? false;
     final terminalAvailable =
         ref.watch(terminalAvailabilityProvider).value ?? false;
-    // 状态区使用固定宽度槽位（工作区标识槽 + 状态槽），工作树有无、
-    // 空闲与运行之间的切换都不改变标题可用宽度。
-    final statusArea = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox.square(
-          dimension: 16,
-          child: Center(
-            child: issue != null
-                ? Icon(
-                    Icons.error_outline,
-                    size: 15,
-                    color: context.colors.error,
-                  )
-                : thread.workspaceMode.isWorktree
-                ? Tooltip(
-                    message: context.l10n.sidebarSessionWorktree,
-                    child: Icon(
-                      Icons.account_tree_outlined,
-                      key: StudioDriverKeys.threadWorkspaceMode(thread.id),
-                      size: 14,
-                    ),
-                  )
-                : null,
+    // 三个会话操作共享同一槽位与图标尺寸：桌面收紧视觉间距，触控仍保留
+    // 44px 命中区；菜单触发器也复用同一尺寸，避免第三个图标显得偏大。
+    final actionTarget = touchMode ? 44.0 : 30.0;
+    // 状态标识与三个操作按钮共用同一网格：没有工作树或空闲状态时不保留
+    // 空槽；存在多个标识时按工作树、运行状态的顺序排列，视觉中心始终等距。
+    Widget statusSlot(Widget child) => SizedBox.square(
+      dimension: actionTarget,
+      child: Center(child: child),
+    );
+
+    final statusIndicators = <Widget>[
+      if (thread.workspaceMode.isWorktree)
+        statusSlot(
+          Tooltip(
+            message: context.l10n.sidebarSessionWorktree,
+            child: Icon(
+              Icons.account_tree_outlined,
+              key: StudioDriverKeys.threadWorkspaceMode(thread.id),
+              size: 16,
+            ),
           ),
         ),
-        SizedBox.square(
-          dimension: 16,
-          child: Center(child: _ThreadStatusBadge(status: thread.status)),
-        ),
-      ],
+      if (issue != null)
+        statusSlot(
+          Icon(Icons.error_outline, size: 18, color: context.colors.error),
+        )
+      else if (thread.status != ThreadStatusView.idle)
+        statusSlot(_ThreadStatusBadge(status: thread.status)),
+    ];
+    final statusArea = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: statusIndicators,
     );
     Widget tile({
       FocusNode? focusNode,
@@ -356,7 +358,8 @@ class _ThreadTile extends ConsumerWidget {
                 ? context.l10n.sidebarUnpin
                 : context.l10n.sidebarPin,
             icon: pinned ? Icons.push_pin : Icons.push_pin_outlined,
-            minTarget: touchMode ? 44 : 32,
+            iconSize: 18,
+            minTarget: actionTarget,
             onPressed: () async {
               await _saveSidebarPreferences(ref, threadId: thread.id);
             },
@@ -365,7 +368,8 @@ class _ThreadTile extends ConsumerWidget {
             key: StudioDriverKeys.archiveThread(thread.id),
             tooltip: context.l10n.sidebarArchiveSession,
             icon: Icons.archive_outlined,
-            minTarget: touchMode ? 44 : 32,
+            iconSize: 18,
+            minTarget: actionTarget,
             onPressed: !blocked
                 ? () => _archiveThreadFromSidebar(context, ref, thread.id)
                 : null,
@@ -379,7 +383,7 @@ class _ThreadTile extends ConsumerWidget {
             vsCodeAvailable: vsCodeAvailable,
             zedAvailable: zedAvailable,
             terminalAvailable: terminalAvailable,
-            minTarget: touchMode ? 44 : 32,
+            minTarget: actionTarget,
             onOpenChanged: onMenuOpenChanged,
             onBeforeOpen: onMenuBeforeOpen,
           ),

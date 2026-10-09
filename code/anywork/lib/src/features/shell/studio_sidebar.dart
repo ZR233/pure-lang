@@ -312,7 +312,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                 child: TextField(
                   key: const ValueKey('sidebar-search'),
                   controller: _search,
@@ -340,11 +340,12 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Wrap(
-                    spacing: 6,
+                    spacing: 8,
+                    runSpacing: 4,
                     children: [
                       for (final filter in DirectoryFilter.values)
                         ChoiceChip(
@@ -367,7 +368,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(18, 8, 12, 8),
+                padding: const EdgeInsets.fromLTRB(20, 8, 16, 8),
                 child: Row(
                   children: [
                     Expanded(
@@ -398,7 +399,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
               Expanded(
                 child: SingleChildScrollView(
                   key: const ValueKey('sidebar-project-tree'),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -437,7 +438,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                         ),
                         if (_filtered || _expanded.contains(project.id))
                           ..._projectThreads(project, general),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 8),
                       ],
                     ],
                   ),
@@ -531,13 +532,14 @@ class _SidebarState extends ConsumerState<_Sidebar> {
         ),
       if (_loading.contains(project.id))
         const Padding(
-          padding: EdgeInsets.all(8),
+          padding: EdgeInsets.fromLTRB(36, 6, 8, 6),
           child: LinearProgressIndicator(minHeight: 2),
         ),
       if (_errors[project.id] case final error?)
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(36, 8, 12, 8),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(error, style: TextStyle(color: context.colors.error)),
               TextButton(
@@ -560,11 +562,17 @@ class _SidebarState extends ConsumerState<_Sidebar> {
           ),
         ),
       if (page?.hasMore ?? false)
-        TextButton(
-          onPressed: _loading.contains(project.id)
-              ? null
-              : () => _load(project.id, more: true),
-          child: Text(context.l10n.sidebarEarlier),
+        Padding(
+          padding: const EdgeInsets.only(left: 36, right: 8),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: _loading.contains(project.id)
+                  ? null
+                  : () => _load(project.id, more: true),
+              child: Text(context.l10n.sidebarEarlier),
+            ),
+          ),
         ),
     ];
   }
