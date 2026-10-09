@@ -117,6 +117,11 @@ class StudioController extends _$StudioController {
   /// revision，避免并发 CAS 互冲；链本身永不失败，单次失败由 [_modeRouteSaveError] 记录。
   Future<void> _modeRouteSaveChain = Future<void>.value();
 
+  /// All settings mutations share one write barrier.  This keeps the in-memory
+  /// snapshot and the backend CAS revision ordered across independent Settings
+  /// tabs, instead of letting a late save overwrite a newer one.
+  Future<void> _settingsWriteBarrier = Future<void>.value();
+
   /// 最近一次新会话 model route 保存失败；成功后清空。submit 前若仍存在则拒绝用旧模型启动。
   Object? _modeRouteSaveError;
 
@@ -2214,15 +2219,15 @@ class StudioController extends _$StudioController {
         (effort == null || role.effort == effort)) {
       return;
     }
-    final next = await _api.setModelRole(
-      expectedSettingsRevision: current.settingsRevision,
-      roleKey: roleKey,
-      providerId: providerId,
-      model: model,
-      effort: effort ?? target?.reasoningEfforts.firstOrNull,
+    await _saveConfigSettings(
+      (revision) => _api.setModelRole(
+        expectedSettingsRevision: revision,
+        roleKey: roleKey,
+        providerId: providerId,
+        model: model,
+        effort: effort ?? target?.reasoningEfforts.firstOrNull,
+      ),
     );
-    final latest = state.value;
-    if (latest != null) state = AsyncData(applySettingsState(latest, next));
   }
 
   /// 排队保存新会话 mode 的路由（provider/model/effort）。
@@ -2260,6 +2265,8 @@ class StudioController extends _$StudioController {
     required String model,
     String? effort,
   }) async {
+    if (!ref.mounted) return;
+    await _awaitSettingsWrites();
     if (!ref.mounted) return;
     final current = state.value;
     if (current == null || current.newThreadMode != mode) return;
@@ -2327,6 +2334,11 @@ class StudioController extends _$StudioController {
     required String model,
     String? effort,
   }) async {
+    // Thread route updates validate against the same settings revision as
+    // configuration writes. Serialize them with the settings repository so a
+    // provider/model edit cannot race this CAS operation.
+    await _awaitSettingsWrites();
+    if (!ref.mounted) return;
     final current = state.value;
     final thread = current?.selectedThread;
     final workspace = current?.selectedWorkspace;
@@ -2482,11 +2494,14 @@ class StudioController extends _$StudioController {
   /// read gives the next start-page projection one coherent provider/model
   /// catalog after navigation.
   Future<void> refreshSettingsState() async {
+    await _awaitSettingsWrites();
     final snapshot = await _api.readSettingsState();
     if (!ref.mounted) return;
     final current = state.value;
     if (current != null) {
-      state = AsyncData(applySettingsState(current, snapshot));
+      // This explicit synchronization point is authoritative even when a
+      // topic frame with the same revision was already observed locally.
+      state = AsyncData(current.copyWith(settingsState: snapshot));
     }
   }
 
@@ -2590,17 +2605,23 @@ class StudioController extends _$StudioController {
   Future<SettingsStateSnapshot> _saveConfigSettings(
     Future<SettingsStateSnapshot> Function(int revision) request,
   ) async {
-    final current = state.value;
-    if (current == null) throw _settingsNotReady();
-    final next = await _requestSettings(request, current.settingsRevision);
-    final latest = state.value;
-    if (latest != null) {
-      final updated = applySettingsState(latest, next);
-      state = AsyncData(updated);
-      return updated.settingsState;
-    }
-    return next;
+    final operation = _settingsWriteBarrier.then((_) async {
+      final current = state.value;
+      if (current == null) throw _settingsNotReady();
+      final next = await _requestSettings(request, current.settingsRevision);
+      final latest = state.value;
+      if (latest != null) {
+        final updated = applySettingsState(latest, next);
+        state = AsyncData(updated);
+        return updated.settingsState;
+      }
+      return next;
+    });
+    _settingsWriteBarrier = operation.then<void>((_) {}, onError: (_) {});
+    return operation;
   }
+
+  Future<void> _awaitSettingsWrites() => _settingsWriteBarrier;
 
   /// 执行保存请求；revision/CAS 冲突时先刷新 canonical 再抛出原错误。
   Future<SettingsStateSnapshot> _requestSettings(
