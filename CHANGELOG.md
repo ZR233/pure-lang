@@ -5,6 +5,33 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.8.0](https://github.com/ZR233/pure-lang/compare/v6.7.0...v6.8.0) (2026-10-09)
+
+
+### Features
+
+* **pl-model:** expose canonical attempt billing projection ([#79](https://github.com/ZR233/pure-lang/issues/79)) ([69a56ec](https://github.com/ZR233/pure-lang/commit/69a56ecc33f07ad62275b22f4ff1ced640a2bee6))
+
+
+### Bug Fixes
+
+* **build:** 修复 Flutter 依赖并发锁竞争 ([5341dcc](https://github.com/ZR233/pure-lang/commit/5341dccab71bcf513f936998acb5472ff40c14b5))
+* **build:** 修复严格依赖校验与错误透传 ([6137692](https://github.com/ZR233/pure-lang/commit/6137692a028ce6e8ee2ff59987b08e1b7704f799))
+* **studio:** enforce lockfiles during GUI builds ([b9e7e24](https://github.com/ZR233/pure-lang/commit/b9e7e2466d1ee4cb7c02297be49bc54b73996706))
+* **studio:** 不阻塞设置返回并等待路由同步 ([15390e1](https://github.com/ZR233/pure-lang/commit/15390e12ff8629fa670dd78a66b60d3dcaa1ed1c))
+* **studio:** 串行化设置写入并同步会话路由 ([c858325](https://github.com/ZR233/pure-lang/commit/c858325e0bdc7ff7b2d9dd90c66410a0983688e4))
+* **studio:** 优化会话列表与悬浮详情布局 ([3dfaf9b](https://github.com/ZR233/pure-lang/commit/3dfaf9b1ce1ed51fc2b1a09ec30071364f9e51af))
+* **studio:** 修复 Windows 启动黑框闪现 ([eb6dd72](https://github.com/ZR233/pure-lang/commit/eb6dd728a4f3cee50e146d1a1b8912a61b50300a))
+* **studio:** 修复设置返回后的新会话路由同步 ([d016210](https://github.com/ZR233/pure-lang/commit/d016210d279eebe292e9bad0ba696b067ea495ec))
+* **studio:** 构建 GUI 时复用锁定 Flutter 依赖 ([5d1d5cc](https://github.com/ZR233/pure-lang/commit/5d1d5ccf1426393cc7424350b692784614ee2792))
+* **studio:** 稳定设置页模型选择导航 ([e207e39](https://github.com/ZR233/pure-lang/commit/e207e399381d611a18c6262ecede8ddf2631889a))
+
+
+### Performance
+
+* **studio:** 优化长会话滚动布局 ([035c291](https://github.com/ZR233/pure-lang/commit/035c2912df0477cf14a16b54149893f81ebf44ab))
+* **studio:** 增量校验长正文缓存 ([a846bd8](https://github.com/ZR233/pure-lang/commit/a846bd8a126eebc0acf0fb8d0afed20325e75ca0))
+
 ## [6.7.0](https://github.com/ZR233/pure-lang/compare/v6.6.0...v6.7.0) (2026-10-09)
 
 
