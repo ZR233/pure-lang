@@ -20,18 +20,38 @@ import 'settings_skills_tab.dart';
 import 'settings_ssh_tab.dart';
 import 'settings_statistics_tab.dart';
 
-class SettingsPage extends ConsumerStatefulWidget {
+class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
   @override
-  ConsumerState<SettingsPage> createState() => _SettingsPageState();
+  Widget build(BuildContext context) {
+    return const _SettingsPageShell();
+  }
 }
 
-class _SettingsPageState extends ConsumerState<SettingsPage> {
-  /// 最近一次可用的 canonical 设置视图。
-  ///
-  /// 后续刷新/重连/失败只保留 last-known 内容，不用整页 loading/error 替换已经可见的
-  /// 导航与各页 UI（含编辑器草稿、筛选与滚动位置）。
+/// Owns the tab controller independently from the reactive settings projection.
+/// A model/provider save refreshes canonical content without recreating the
+/// navigation controller or restarting the whole settings page animation.
+class _SettingsPageShell extends StatelessWidget {
+  const _SettingsPageShell();
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: _settingsTabs.length,
+      child: const _SettingsPageBody(),
+    );
+  }
+}
+
+class _SettingsPageBody extends ConsumerStatefulWidget {
+  const _SettingsPageBody();
+
+  @override
+  ConsumerState<_SettingsPageBody> createState() => _SettingsPageBodyState();
+}
+
+class _SettingsPageBodyState extends ConsumerState<_SettingsPageBody> {
   SettingsPageView? _lastView;
 
   @override
@@ -50,15 +70,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             Scaffold(body: Center(child: Text(error.toString()))),
       );
     }
-    return DefaultTabController(
-      length: _settingsTabs.length,
-      child: Scaffold(
-        backgroundColor: context.colors.surface,
-        body: KeyedSubtree(
-          key: StudioDriverKeys.settingsPage,
-          child: _SettingsTabVisibilitySync(
-            child: _SettingsScaffold(state: resolved),
-          ),
+    return Scaffold(
+      backgroundColor: context.colors.surface,
+      body: KeyedSubtree(
+        key: StudioDriverKeys.settingsPage,
+        child: _SettingsTabVisibilitySync(
+          child: _SettingsScaffold(state: resolved),
         ),
       ),
     );
