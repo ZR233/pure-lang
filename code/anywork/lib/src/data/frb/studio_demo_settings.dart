@@ -39,8 +39,67 @@ const demoProviderCatalogFixture = ProviderCatalogView(
         displayName: 'Future Model',
         reasoningEfforts: ['eco', 'balanced', 'max'],
         defaultReasoningEffort: 'balanced',
+        inputCapabilities: [
+          ModelInputCapabilityView(
+            modality: ModelModalityView.text,
+            sources: [
+              ModelInputSourceView.local,
+              ModelInputSourceView.remoteUrl,
+            ],
+          ),
+          ModelInputCapabilityView(
+            modality: ModelModalityView.image,
+            sources: [
+              ModelInputSourceView.local,
+              ModelInputSourceView.remoteUrl,
+            ],
+          ),
+        ],
         contextWindow: 500000,
         maxOutputTokens: 64000,
+        wireProtocol: 'chat_completions',
+        supportedConnectionModes: ['http'],
+        defaultConnectionMode: 'http',
+        connectionMode: 'http',
+      ),
+      ProviderModelView(
+        slug: 'future-text',
+        displayName: 'Future Text',
+        reasoningEfforts: ['eco', 'balanced'],
+        defaultReasoningEffort: 'balanced',
+        inputCapabilities: [
+          ModelInputCapabilityView(
+            modality: ModelModalityView.text,
+            sources: [ModelInputSourceView.local],
+          ),
+        ],
+        contextWindow: 256000,
+        maxOutputTokens: 32000,
+        wireProtocol: 'chat_completions',
+        supportedConnectionModes: ['http'],
+        defaultConnectionMode: 'http',
+        connectionMode: 'http',
+      ),
+      ProviderModelView(
+        slug: 'future-vision',
+        displayName: 'Future Vision',
+        reasoningEfforts: ['balanced', 'max'],
+        defaultReasoningEffort: 'max',
+        inputCapabilities: [
+          ModelInputCapabilityView(
+            modality: ModelModalityView.text,
+            sources: [
+              ModelInputSourceView.local,
+              ModelInputSourceView.remoteUrl,
+            ],
+          ),
+          ModelInputCapabilityView(
+            modality: ModelModalityView.image,
+            sources: [ModelInputSourceView.local],
+          ),
+        ],
+        contextWindow: 1000000,
+        maxOutputTokens: 128000,
         wireProtocol: 'chat_completions',
         supportedConnectionModes: ['http'],
         defaultConnectionMode: 'http',
