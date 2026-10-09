@@ -375,6 +375,11 @@ class _PlainBodyTextState extends State<_PlainBodyText> {
   int _riskStart = 0;
   bool _riskVerdict = false;
 
+  /// 上一次已验证的 canonical 正文。流式响应通常只追加尾部，可据此跳过已封存
+  /// 前缀的重复逐字比较；发生中间替换时仍回退到完整校验。
+  String? _validatedText;
+  String? _validatedId;
+
   /// 内容子树的稳定身份。
   ///
   /// 流式结束只是外层「禁用选择」的包装被去掉；用同一个 [GlobalKey] 让内容子树原样
@@ -384,6 +389,7 @@ class _PlainBodyTextState extends State<_PlainBodyText> {
   void _resetSealed() {
     _sealed.clear();
     _sealedEnd = 0;
+    _validatedText = null;
   }
 
   /// 精确校验已封存前缀：逐块与当前正文对应位置比较，全部一致才允许复用。
@@ -393,12 +399,20 @@ class _PlainBodyTextState extends State<_PlainBodyText> {
   /// 每帧一次 O(已封存长度) 的字符串比较，用来换取"显示的正文一定是最新正文"。
   bool _sealedPrefixMatches(String text) {
     if (_sealedEnd > text.length) return false;
+    final validatedText = _validatedText;
+    if (validatedText != null &&
+        (identical(validatedText, text) || text.startsWith(validatedText))) {
+      _validatedText = text;
+      return true;
+    }
     var offset = 0;
     for (final chunk in _sealed) {
       if (!text.startsWith(chunk.text, offset)) return false;
       offset += chunk.text.length;
     }
-    return offset == _sealedEnd;
+    final matches = offset == _sealedEnd;
+    if (matches) _validatedText = text;
+    return matches;
   }
 
   @override
@@ -407,6 +421,11 @@ class _PlainBodyTextState extends State<_PlainBodyText> {
     final effectiveStyle = DefaultTextStyle.of(context).style.merge(bodyStyle);
     return LayoutBuilder(
       builder: (context, constraints) {
+        if (_validatedId != widget.id) {
+          _resetSealed();
+          _riskText = null;
+          _validatedId = widget.id;
+        }
         final textScaler = MediaQuery.textScalerOf(context);
         final textDirection = Directionality.of(context);
         final locale = Localizations.maybeLocaleOf(context);
@@ -428,6 +447,7 @@ class _PlainBodyTextState extends State<_PlainBodyText> {
         if (!_sealedPrefixMatches(widget.text)) {
           _resetSealed();
         }
+        _validatedText ??= widget.text;
         // 复用前对**本次 canonical 正文**做风险判定，而不是只看测量窗：已封存前缀由上面的
         // 逐字校验证明未变（且它是在"当时无风险"的判定下才封存的），未封存后缀在这里整段
         // 扫描——因此不会漏掉短于阈值的尾巴，也不会漏掉 Replace 到尾巴里的风险字符。
@@ -589,7 +609,14 @@ class _PlainBodyTextState extends State<_PlainBodyText> {
     if (identical(_riskText, text) && _riskStart == start) {
       return _riskVerdict;
     }
-    final verdict = _hasBidiRisk(text, start, text.length);
+    final previousText = _riskText;
+    final appendOnly =
+        previousText != null &&
+        _riskStart == start &&
+        text.startsWith(previousText);
+    final verdict = appendOnly
+        ? _riskVerdict || _hasBidiRisk(text, previousText.length, text.length)
+        : _hasBidiRisk(text, start, text.length);
     _riskText = text;
     _riskStart = start;
     _riskVerdict = verdict;
