@@ -268,7 +268,12 @@ fn ensure_success(status: ExitStatus, display: &str) -> Result<()> {
 pub fn path_command(program: &'static str, args: &[OsString]) -> Command {
     if cfg!(windows) && matches!(program, "flutter" | "dart") {
         let mut command = Command::new("cmd");
-        command.arg("/c").arg(program);
+        // Flutter's batch launcher uses nested `FOR /F` commands.  An
+        // interactive `cmd` AutoRun entry can run again in those nested
+        // shells, change the working directory, and leave Flutter retrying
+        // its SDK lock forever.  Disable AutoRun for every SDK launcher so
+        // the working directory and lock ownership stay deterministic.
+        command.arg("/d").arg("/c").arg(program);
         command.args(args);
         command
     } else {

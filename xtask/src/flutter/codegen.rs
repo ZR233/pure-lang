@@ -1,5 +1,6 @@
 use super::{
-    DemoMode, ensure_flutter_dependencies, print_context, run_flutter, run_os_tool, run_tool,
+    DemoMode, acquire_flutter_dependency_lock, ensure_flutter_dependencies_locked, print_context,
+    run_flutter, run_os_tool, run_tool,
 };
 use crate::pubspec_lock;
 use anyhow::{Context, Result, bail};
@@ -84,14 +85,20 @@ pub(super) fn check_gui_generated() -> Result<()> {
 }
 
 pub(super) fn check_gui_generated_sources(workspace_root: &Path, app_dir: &Path) -> Result<()> {
+    let _lock = acquire_flutter_dependency_lock(workspace_root)?;
     let before = generated_sources_snapshot(workspace_root, app_dir)?;
-    generate_gui_sources(workspace_root, app_dir)?;
+    generate_gui_sources_locked(workspace_root, app_dir)?;
     let after = generated_sources_snapshot(workspace_root, app_dir)?;
     ensure_generated_sources_are_stable(&before, &after)
 }
 
 fn generate_gui_sources(workspace_root: &Path, app_dir: &Path) -> Result<()> {
-    ensure_flutter_dependencies(workspace_root, app_dir)?;
+    let _lock = acquire_flutter_dependency_lock(workspace_root)?;
+    generate_gui_sources_locked(workspace_root, app_dir)
+}
+
+fn generate_gui_sources_locked(workspace_root: &Path, app_dir: &Path) -> Result<()> {
+    ensure_flutter_dependencies_locked(workspace_root, app_dir)?;
     run_flutter(workspace_root, app_dir, &["gen-l10n"], DemoMode::Native)?;
     ensure_frb_codegen_version()?;
     run_frb_codegen(workspace_root, app_dir)?;

@@ -13,12 +13,75 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 
 mod codegen;
 #[cfg(target_os = "linux")]
 mod linux;
 
 const PUB_FINGERPRINT_FILE: &str = "pure-xtask-pub.sha256";
+const PUB_LOCK_FILE: &str = "flutter-dependency.lock";
+
+/// Serializes xtask processes that may start Flutter or mutate pubspec.lock.
+///
+/// Flutter has its own SDK-wide startup locks, but those locks cannot protect
+/// the repository-local fingerprint and lockfile restoration performed here.
+/// Keeping this file under the workspace's ignored `target/xtask` directory
+/// makes it local and disposable while preventing `flutter clean` from
+/// deleting the lock path during a critical section.
+pub(super) struct FlutterDependencyLock {
+    _file: fs::File,
+}
+
+pub(super) fn acquire_flutter_dependency_lock(
+    workspace_root: &Path,
+) -> Result<FlutterDependencyLock> {
+    let lock_path = workspace_root
+        .join("target")
+        .join("xtask")
+        .join(PUB_LOCK_FILE);
+    let parent = lock_path
+        .parent()
+        .context("Flutter dependency lock has no parent directory")?;
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open {}", lock_path.display()))?;
+
+    let mut waiting = false;
+    loop {
+        match fs4::FileExt::try_lock(&file) {
+            Ok(()) => break,
+            Err(fs4::TryLockError::WouldBlock) => {
+                if !waiting {
+                    println!(
+                        "等待 Flutter 依赖锁：{}（另一个 xtask 正在运行 Flutter 或更新 pubspec.lock）",
+                        lock_path.display()
+                    );
+                    waiting = true;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(fs4::TryLockError::Error(error)) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to lock Flutter dependency file {}",
+                        lock_path.display()
+                    )
+                });
+            }
+        }
+    }
+    if waiting {
+        println!("已获取 Flutter 依赖锁：{}", lock_path.display());
+    }
+    Ok(FlutterDependencyLock { _file: file })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesktopTarget {
@@ -610,6 +673,14 @@ fn build_gui_args(target: DesktopTarget, version_define: &str) -> Vec<&str> {
 }
 
 fn ensure_flutter_dependencies(workspace_root: &Path, app_dir: &Path) -> Result<()> {
+    let _lock = acquire_flutter_dependency_lock(workspace_root)?;
+    ensure_flutter_dependencies_locked(workspace_root, app_dir)
+}
+
+pub(super) fn ensure_flutter_dependencies_locked(
+    workspace_root: &Path,
+    app_dir: &Path,
+) -> Result<()> {
     let hosted_url = match std::env::var("PUB_HOSTED_URL") {
         Ok(hosted_url) => Some(hosted_url),
         Err(std::env::VarError::NotPresent) => None,
@@ -762,12 +833,17 @@ fn run_flutter_with_process_mode(
     args: &[&str],
     invocation: FlutterInvocation<'_>,
 ) -> Result<()> {
+    let retry_sdk_lock =
+        matches!(invocation.process_mode, FlutterProcessMode::Batch) && args == ["pub", "get"];
     let args = flutter_args(args, invocation.demo_mode);
     let display = process::display_command("flutter", &args);
     let mut command = process::path_command("flutter", &args);
     command.current_dir(app_dir);
     configure_flutter_environment(&mut command, invocation);
     let result = match invocation.process_mode {
+        FlutterProcessMode::Batch if retry_sdk_lock => {
+            run_flutter_pub_get_with_lock_retry(&mut command, &display)
+        }
         FlutterProcessMode::Batch => process::run_checked(&mut command, &display),
         FlutterProcessMode::ResidentDriver => process::run_resident_checked(&mut command, &display),
     };
@@ -778,6 +854,44 @@ fn run_flutter_with_process_mode(
             app_dir.display()
         )
     })
+}
+
+fn run_flutter_pub_get_with_lock_retry(command: &mut Command, display: &str) -> Result<()> {
+    const MAX_ATTEMPTS: usize = 4;
+    const RETRY_DELAY: Duration = Duration::from_millis(500);
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        let output = command
+            .output()
+            .with_context(|| format!("failed to start command from PATH: {display}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        print!("{stdout}");
+        eprint!("{stderr}");
+        if output.status.success() {
+            return Ok(());
+        }
+        let sdk_lock_error = stdout.contains("lockfile") || stderr.contains("lockfile");
+        if sdk_lock_error && attempt < MAX_ATTEMPTS {
+            println!("Flutter SDK 全局锁仍被占用，等待后重试 ({attempt}/{MAX_ATTEMPTS})。");
+            thread::sleep(RETRY_DELAY);
+            continue;
+        }
+        let code = output
+            .status
+            .code()
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "terminated by signal".to_owned());
+        if sdk_lock_error {
+            bail!("Flutter pub get exceeded the SDK lock retry limit ({MAX_ATTEMPTS}): {display}");
+        } else {
+            bail!(
+                "command failed with exit code {code}: {display}; original stdout/stderr was streamed above"
+            );
+        }
+    }
+
+    unreachable!("Flutter pub get retry loop must return from every attempt")
 }
 
 fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvocation<'_>) {
