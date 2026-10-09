@@ -37,13 +37,15 @@ extension on _TimelineViewState {
       key: ValueKey(row.id),
       child: KeyedSubtree(
         key: StudioDriverKeys.timelineBlock(row.id),
-        child: RepaintBoundary(
-          child: SizedBox(
-            key: _rowKeys.putIfAbsent(row.id, GlobalKey.new),
-            child: _layoutItem(
-              _anchorItemId(row.id, widget.rows),
-              _rowWidgets[row.id]!.child,
-            ),
+        // SliverChildBuilderDelegate already inserts one RepaintBoundary per
+        // child (its default). Avoid nesting another boundary around every
+        // timeline row; the extra layer increases layer-tree and raster work
+        // while providing no additional isolation.
+        child: SizedBox(
+          key: _rowKeys.putIfAbsent(row.id, GlobalKey.new),
+          child: _layoutItem(
+            _anchorItemIdForRow(row),
+            _rowWidgets[row.id]!.child,
           ),
         ),
       ),
@@ -52,10 +54,14 @@ extension on _TimelineViewState {
 
   String _anchorItemId(String rowId, List<TimelineRow> rows) {
     final row = rows.where((row) => row.id == rowId).firstOrNull;
-    return row?.part?.id ??
-        row?.toolGroup?.items.firstOrNull?.id ??
-        row?.reasoningGroup?.parts.firstOrNull?.id ??
-        rowId;
+    return row == null ? rowId : _anchorItemIdForRow(row);
+  }
+
+  String _anchorItemIdForRow(TimelineRow row) {
+    return row.part?.id ??
+        row.toolGroup?.items.firstOrNull?.id ??
+        row.reasoningGroup?.parts.firstOrNull?.id ??
+        row.id;
   }
 
   /// 行缓存键里的完整正文状态：载荷/加载/错误变化时重建该行，阅读位置不变。

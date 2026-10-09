@@ -470,6 +470,14 @@ class _TimelineViewState extends State<TimelineView> {
           if (anchor != null) _prepareAnchorRestore(anchor);
         }
         _viewportWidth = constraints.maxWidth;
+        // SliverChildBuilderDelegate may ask for the index of a mounted child
+        // while a window is being patched. Keep this lookup constant-time so
+        // a long history does not turn key reconciliation into repeated
+        // linear scans of the whole window.
+        final rowIndexById = <String, int>{};
+        for (var index = 0; index < rows.length; index += 1) {
+          rowIndexById.putIfAbsent(rows[index].id, () => index);
+        }
         return SizedBox(
           key: _viewportKey,
           child: NotificationListener<ScrollMetricsNotification>(
@@ -508,10 +516,7 @@ class _TimelineViewState extends State<TimelineView> {
                           addAutomaticKeepAlives: false,
                           findChildIndexCallback: (key) {
                             if (key is! ValueKey<String>) return null;
-                            final index = rows.indexWhere(
-                              (row) => row.id == key.value,
-                            );
-                            return index < 0 ? null : index;
+                            return rowIndexById[key.value];
                           },
                           itemBuilder: (context, index) => index == rows.length
                               ? _TimelineTail(planSummary: planSummary)

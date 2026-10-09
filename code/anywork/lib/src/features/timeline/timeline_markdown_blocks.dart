@@ -350,14 +350,16 @@ class _PlainBodyTextState extends State<_PlainBodyText> {
   static const _sealMinimumCharacters = 4096;
 
   /// 单个块的期望上限（字符）：断点在不超过它的前提下尽可能靠近。
-  static const _sealTargetCharacters = 8192;
+  static const _sealTargetCharacters = 4096;
 
   /// 测量窗上限（目标块长 + 尾部上下文）：保证每次 [TextPainter] 测量有界，且断点所在
   /// 行的换行不会因为人为截断而改变。
-  static const _sealMeasureCharacters = 12288;
+  static const _sealMeasureCharacters = 6144;
 
   /// 单次 build 最多新封存的块数，把一次 build 的封存工作量收成有界。
-  static const _sealBatchLimit = 8;
+  // Keep each build bounded while allowing the sealed prefix to catch up with
+  // a streaming response.  Each pass lays out only a 6 KiB window.
+  static const _sealBatchLimit = 2;
 
   final List<_PlainBodyChunk> _sealed = <_PlainBodyChunk>[];
   int _sealedEnd = 0;
