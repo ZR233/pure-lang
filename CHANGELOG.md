@@ -5,6 +5,32 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.7.0](https://github.com/ZR233/pure-lang/compare/v6.6.0...v6.7.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **studio:** 重构会话时间线滚动与事件会话
+* **studio:** StudioRuntime::check_studio_update 现在要求取消句柄，更新状态联合新增 Ready。运行时、桥接与前端消费者须使用新的类型化契约。
+* **studio:** Unscoped product subscriptions and startup polling APIs are removed. Consumers must use typed topic/scoped subscriptions and token-based startup progress streams.
+
+### Features
+
+* **studio:** scope live subscriptions and compact the session sidebar ([6f6f71d](https://github.com/ZR233/pure-lang/commit/6f6f71d4e60ba34a30b15a78feeb3366d15f4abc))
+* **studio:** 启动自动下载更新并在关闭后安装 ([5e75f75](https://github.com/ZR233/pure-lang/commit/5e75f758e9f5091f7650dc04a21e971eb9dfb711))
+
+
+### Bug Fixes
+
+* **build:** 修复 Visual Studio 18 下构建 xtask 的调试记录错误 ([2bd4eee](https://github.com/ZR233/pure-lang/commit/2bd4eee1adebf516ca8272ec45b06193846ecace))
+* **studio:** 修复滚动期间的锚点抢占 ([98383d0](https://github.com/ZR233/pure-lang/commit/98383d0bc0e220c7e8ba661832140d04123d1090))
+* **studio:** 清除回到最新后的历史锚点 ([0b76cb0](https://github.com/ZR233/pure-lang/commit/0b76cb024eafaaa15bb49fb60eb02d8b5aff2eb1))
+
+
+### Refactoring
+
+* **studio:** 重构会话时间线滚动与事件会话 ([6a10578](https://github.com/ZR233/pure-lang/commit/6a10578b6b151246bf4009dc9710ea7ab0c47931))
+
 ## [6.6.0](https://github.com/ZR233/pure-lang/compare/v6.5.0...v6.6.0) (2026-10-08)
 
 
