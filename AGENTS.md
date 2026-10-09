@@ -76,6 +76,8 @@
   cargo xtask build-gui [--demo] [--no-clean] [--check-generated]
   ```
 
+- `build-gui` 使用现有 `.dart_tool/package_config.json` 与 `code/anywork/pubspec.lock`，不会隐式运行 `flutter pub get`。依赖变更时先手动运行 `cargo flutter pub get` 并审查 lockfile；只按已提交 lockfile 恢复 package configuration 时使用 `cargo flutter pub get --enforce-lockfile`，再重新构建。
+
 - 不支持直接执行 `flutter build windows|linux` 或 `flutter run -d windows|linux`，也不新增 PowerShell GUI wrapper。
 - `run-gui --release` 直接启动已有 `dist/anywork-release` 原生程序，不执行构建或依赖解析；缺失时提示先执行 `build-gui`。它与 `--demo`、`--driver`、`--profile` 互斥，并沿用平台进程树管理。
 - Linux 原生 GUI 需要 Clang/C++ 标准库、CMake、Ninja、pkg-config 与 GTK 3 开发文件；Debian/Ubuntu 示例为 `sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev`。xtask 必须用当前 PATH 和真实最小 GTK/C++ 工程预检，缺失时透传实际命令与原始错误；不得写死编译器版本、系统库路径或注入机器专用 include/library 环境。Rust 桥以 `libpl_studio_bridge.so` 预构建并经 `ANYWORK_BRIDGE_LIBRARY` 环境变量注入 CMake，与 Windows 的 DLL 契约一致。

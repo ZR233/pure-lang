@@ -408,6 +408,12 @@ cargo xtask build-gui
 cargo xtask run-gui --release
 ```
 
+`cargo xtask build-gui` 不会隐式执行 `flutter pub get`，只使用现有的 Flutter package
+configuration 和 Git 中的 `code/anywork/pubspec.lock`。修改依赖或需要重新解析时，先显式运行
+`cargo flutter pub get`，审查更新后的 lockfile 后再构建；只想按已提交 lockfile 重新生成
+package configuration 时使用 `cargo flutter pub get --enforce-lockfile`。缺少或过期的
+package configuration 会在构建开始时直接提示先执行依赖准备。
+
 Markdown/timeline 视觉检查可以使用本地 demo 数据启动，不连接 runtime：
 
 ```powershell

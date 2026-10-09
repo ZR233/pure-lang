@@ -44,6 +44,14 @@ cargo xtask manual-gui # isolated native app with local scripted provider and ev
 # Use cargo xtask run-gui --driver for live manual observations using installed config.
 ```
 
+`cargo xtask build-gui` is a reproducible build step: it never runs `flutter pub get` and
+uses the existing `.dart_tool/package_config.json` together with the checked-in
+`pubspec.lock`. After changing `pubspec.yaml` or intentionally updating dependencies, run
+`cargo flutter pub get` manually, review the lockfile, then build again. To recreate only the
+package configuration from the committed lockfile, use `cargo flutter pub get --enforce-lockfile`.
+The build fails early with a dependency preparation message when the package configuration is
+missing or stale.
+
 Riverpod、Freezed、l10n 和 FRB 生成必须从仓库根目录使用
 `cargo xtask generate-gui`，不得手工修改生成文件。普通 `run-gui` 和 `build-gui` 只消费当前
 源码，不执行生成器或可写格式化；修改生成输入后必须先显式生成。`cargo xtask check-gui-generated`
