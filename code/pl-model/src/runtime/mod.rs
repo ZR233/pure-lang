@@ -9,6 +9,7 @@ mod host_call;
 mod hosted;
 pub use hosted::{HostedTool, HostedWebSearchOptions};
 mod attachments;
+mod billing;
 mod invocation;
 pub(crate) mod openai;
 mod provider_error;
@@ -20,6 +21,7 @@ pub use summary::{TextSummary, TextSummaryRequest};
 pub(crate) mod transport_policy;
 pub(crate) mod wire_capture;
 
+pub use billing::model_attempt_billing;
 pub use client::{ModelRuntime, NativeCompactionCheckpoint, RemoteCompaction};
 pub use clock::InferenceClock;
 pub(crate) use invocation::InvocationRunner;
