@@ -299,13 +299,13 @@ class _SettingsNav extends StatelessWidget {
   }
 }
 
-class _SettingsBackTile extends StatelessWidget {
+class _SettingsBackTile extends ConsumerWidget {
   const _SettingsBackTile({required this.compact});
 
   final bool compact;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final content = Row(
       mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
       children: [
@@ -338,7 +338,15 @@ class _SettingsBackTile extends StatelessWidget {
         child: InkWell(
           key: StudioDriverKeys.settingsBack,
           borderRadius: BorderRadius.circular(StudioRadii.sm),
-          onTap: () => context.go('/'),
+          onTap: () async {
+            // Re-read canonical settings before rebuilding the shell so a
+            // provider/model change saved in this route is immediately visible
+            // to the new-session selectors.
+            await ref
+                .read(studioControllerProvider.notifier)
+                .refreshSettingsState();
+            if (context.mounted) context.go('/');
+          },
           child: Padding(
             padding: EdgeInsets.symmetric(
               horizontal: compact ? 10 : 10,

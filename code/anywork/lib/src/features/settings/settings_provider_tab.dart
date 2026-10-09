@@ -417,13 +417,14 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       final provider = ProviderSettingsCommandBuilder.normalizeProvider(
         current.provider,
       );
+      final canonicalProviders = _canonicalProviders;
       final providers = current.mode == ProviderDraftMode.create
-          ? [...widget.providers, provider]
+          ? [...canonicalProviders, provider]
           : [
-              for (final item in widget.providers)
+              for (final item in canonicalProviders)
                 item.id == current.originalId ? provider : item,
             ];
-      await _saveProviders(
+      final saved = await _saveProviders(
         providers,
         selectedProviderId: _defaultProviderIdAfterDraftSave(current, provider),
         setSimpleModeDefault: current.mode == ProviderDraftMode.create,
@@ -432,6 +433,12 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
             : current.originalId,
         renamedTo: current.originalId == provider.id ? null : provider.id,
       );
+      if (!saved.providers.any((candidate) => candidate.id == provider.id)) {
+        throw StateError(
+          'Provider save returned a canonical snapshot without ${provider.id}.',
+        );
+      }
+      await _waitForProviderList(provider.id);
       if (mounted) {
         setState(() {
           _selectedProviderId = provider.id;
@@ -455,7 +462,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
     if (widget.providers.length <= 1) {
       return;
     }
-    final providers = widget.providers
+    final providers = _canonicalProviders
         .where((candidate) => candidate.id != provider.id)
         .toList();
     final currentDefaultId = ref
@@ -466,11 +473,18 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
     final selectedProviderId = currentDefaultId == provider.id
         ? providers.firstOrNull?.id
         : currentDefaultId;
-    await _saveProviders(
+    final saved = await _saveProviders(
       providers,
       selectedProviderId: selectedProviderId,
       removedProviderId: provider.id,
     );
+    if (saved.providers.any((candidate) => candidate.id == provider.id)) {
+      throw StateError(
+        'Provider removal returned a canonical snapshot that still contains '
+        '${provider.id}.',
+      );
+    }
+    await _waitForProviderList(provider.id, shouldExist: false);
     if (mounted) {
       setState(() {
         _selectedProviderId = selectedProviderId;
@@ -485,11 +499,18 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
 
   Future<void> _setDefaultProvider(ProviderSettingsView provider) async {
     setState(() => _selectedProviderId = provider.id);
-    await _saveProviders(
-      widget.providers,
+    final saved = await _saveProviders(
+      _canonicalProviders,
       selectedProviderId: provider.id,
       setSimpleModeDefault: true,
     );
+    if (saved.defaultProviderId != provider.id) {
+      throw StateError(
+        'Provider default save returned ${saved.defaultProviderId}, '
+        'expected ${provider.id}.',
+      );
+    }
+    await _waitForProviderList(provider.id);
     await _refreshUsages(providerId: provider.id);
   }
 
@@ -508,7 +529,9 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
     if (currentDefaultId == draft.originalId) {
       return provider.id;
     }
-    return currentDefaultId ?? widget.providers.firstOrNull?.id ?? provider.id;
+    return currentDefaultId ??
+        _canonicalProviders.firstOrNull?.id ??
+        provider.id;
   }
 
   Future<void> _refreshUsages({String? providerId}) async {
@@ -517,7 +540,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         .refresh(providerId: providerId);
   }
 
-  Future<void> _saveProviders(
+  Future<SettingsStateSnapshot> _saveProviders(
     List<ProviderSettingsView> providers, {
     required String? selectedProviderId,
     String? renamedFrom,
@@ -525,13 +548,13 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
     String? removedProviderId,
     bool setSimpleModeDefault = false,
   }) async {
-    await ref
+    return ref
         .read(studioControllerProvider.notifier)
         .saveProviderSettings(
           ProviderSettingsCommandBuilder.build(
             providers: providers,
-            modeRoutes: widget.modeRoutes,
-            roles: widget.roles,
+            modeRoutes: _canonicalModeRoutes,
+            roles: _canonicalRoles,
             selectedProviderId: selectedProviderId,
             renamedFrom: renamedFrom,
             renamedTo: renamedTo,
@@ -541,8 +564,41 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         );
   }
 
+  List<ProviderSettingsView> get _canonicalProviders =>
+      ref.read(studioControllerProvider).asData?.value.providers ??
+      widget.providers;
+
+  List<ModeModelRouteView> get _canonicalModeRoutes =>
+      ref.read(studioControllerProvider).asData?.value.modeModelRoutes ??
+      widget.modeRoutes;
+
+  List<RoleSettingsView> get _canonicalRoles =>
+      ref.read(studioControllerProvider).asData?.value.roles ?? widget.roles;
+
+  /// Keep the editor open until the parent Settings projection has observed the
+  /// canonical save. This prevents a successful backend response from briefly
+  /// revealing a stale provider list while the page rebuild is still queued.
+  Future<void> _waitForProviderList(
+    String providerId, {
+    bool shouldExist = true,
+  }) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (DateTime.now().isBefore(deadline)) {
+      final exists = widget.providers.any(
+        (provider) => provider.id == providerId,
+      );
+      if (exists == shouldExist) return;
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    throw StateError(
+      shouldExist
+          ? 'Saved provider $providerId is not visible in the provider list.'
+          : 'Removed provider $providerId is still visible in the provider list.',
+    );
+  }
+
   String _suggestProviderId(String base) {
-    final existing = widget.providers.map((provider) => provider.id).toSet();
+    final existing = _canonicalProviders.map((provider) => provider.id).toSet();
     if (!existing.contains(base)) {
       return base;
     }

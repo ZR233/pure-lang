@@ -2469,10 +2469,25 @@ class StudioController extends _$StudioController {
     return false;
   }
 
-  Future<void> saveProviderSettings(ProviderSettingsCommand command) async {
-    await _saveConfigSettings(
+  Future<SettingsStateSnapshot> saveProviderSettings(
+    ProviderSettingsCommand command,
+  ) {
+    return _saveConfigSettings(
       (revision) => _api.saveProviderSettings(revision, command),
     );
+  }
+
+  /// Re-adopt the backend's canonical settings before leaving the settings
+  /// route. Settings writes and topic deliveries are asynchronous; an explicit
+  /// read gives the next start-page projection one coherent provider/model
+  /// catalog after navigation.
+  Future<void> refreshSettingsState() async {
+    final snapshot = await _api.readSettingsState();
+    if (!ref.mounted) return;
+    final current = state.value;
+    if (current != null) {
+      state = AsyncData(applySettingsState(current, snapshot));
+    }
   }
 
   Future<void> saveInstructionsSettings(
