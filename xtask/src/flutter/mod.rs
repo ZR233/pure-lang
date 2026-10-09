@@ -102,10 +102,17 @@ enum FlutterProcessMode {
     ResidentDriver,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlutterHostedUrl {
+    Inherit,
+    PubDev,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct FlutterInvocation<'a> {
     demo_mode: DemoMode,
     process_mode: FlutterProcessMode,
+    hosted_url: FlutterHostedUrl,
     bridge_artifacts: Option<&'a RustBridgeArtifacts>,
     remote_helper_bundle_dir: Option<&'a Path>,
     log_level: Option<LogLevel>,
@@ -279,6 +286,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
             FlutterInvocation {
                 demo_mode: DemoMode::Native,
                 process_mode: FlutterProcessMode::ResidentDriver,
+                hosted_url: FlutterHostedUrl::Inherit,
                 bridge_artifacts: None,
                 remote_helper_bundle_dir: None,
                 log_level: options.log_level,
@@ -351,6 +359,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
         FlutterInvocation {
             demo_mode,
             process_mode,
+            hosted_url: FlutterHostedUrl::Inherit,
             bridge_artifacts: bridge_artifacts.as_ref(),
             remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
             log_level: options.log_level,
@@ -449,6 +458,7 @@ fn run_gui_native_launch(
         FlutterInvocation {
             demo_mode,
             process_mode: FlutterProcessMode::Batch,
+            hosted_url: FlutterHostedUrl::Inherit,
             bridge_artifacts: bridge_artifacts.as_ref(),
             remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
             log_level: options.log_level,
@@ -469,6 +479,7 @@ fn run_gui_native_launch(
         FlutterInvocation {
             demo_mode,
             process_mode: FlutterProcessMode::ResidentDriver,
+            hosted_url: FlutterHostedUrl::Inherit,
             bridge_artifacts: bridge_artifacts.as_ref(),
             remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
             log_level: options.log_level,
@@ -646,6 +657,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
         FlutterInvocation {
             demo_mode,
             process_mode: FlutterProcessMode::Batch,
+            hosted_url: FlutterHostedUrl::Inherit,
             bridge_artifacts: bridge_artifacts.as_ref(),
             remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
             log_level: None,
@@ -719,7 +731,7 @@ fn ensure_flutter_dependencies_with_mode(
     let lock_path = app_dir.join("pubspec.lock");
     let original_lock = pubspec_lock::read_optional(&lock_path)?;
     let resolution_result = (|| {
-        if let Some(hosted_url) = hosted_url.as_deref() {
+        if !enforce_lockfile && let Some(hosted_url) = hosted_url.as_deref() {
             // Pub treats the hosted URL as part of a package's source identity.
             pubspec_lock::rewrite_hosted_urls(&lock_path, hosted_url)?;
         }
@@ -728,7 +740,19 @@ fn ensure_flutter_dependencies_with_mode(
         } else {
             &["pub", "get"][..]
         };
-        run_flutter(workspace_root, app_dir, pub_get_args, DemoMode::Native)?;
+        run_flutter_with_hosted_url(
+            workspace_root,
+            app_dir,
+            pub_get_args,
+            DemoMode::Native,
+            if enforce_lockfile {
+                // The committed hashes are canonical for pub.dev; mirrors may
+                // publish different archive metadata for the same versions.
+                FlutterHostedUrl::PubDev
+            } else {
+                FlutterHostedUrl::Inherit
+            },
+        )?;
         match pubspec_lock::classify_change(&lock_path, original_lock.as_deref())? {
             LockfileChange::Unchanged => {}
             LockfileChange::HostedUrlsOnly => {
@@ -840,6 +864,22 @@ fn run_flutter(
     args: &[&str],
     demo_mode: DemoMode,
 ) -> Result<()> {
+    run_flutter_with_hosted_url(
+        workspace_root,
+        app_dir,
+        args,
+        demo_mode,
+        FlutterHostedUrl::Inherit,
+    )
+}
+
+fn run_flutter_with_hosted_url(
+    workspace_root: &Path,
+    app_dir: &Path,
+    args: &[&str],
+    demo_mode: DemoMode,
+    hosted_url: FlutterHostedUrl,
+) -> Result<()> {
     run_flutter_with_process_mode(
         workspace_root,
         app_dir,
@@ -847,6 +887,7 @@ fn run_flutter(
         FlutterInvocation {
             demo_mode,
             process_mode: FlutterProcessMode::Batch,
+            hosted_url,
             bridge_artifacts: None,
             remote_helper_bundle_dir: None,
             log_level: None,
@@ -860,17 +901,12 @@ fn run_flutter_with_process_mode(
     args: &[&str],
     invocation: FlutterInvocation<'_>,
 ) -> Result<()> {
-    let retry_sdk_lock = matches!(invocation.process_mode, FlutterProcessMode::Batch)
-        && args.starts_with(&["pub", "get"]);
     let args = flutter_args(args, invocation.demo_mode);
     let display = process::display_command("flutter", &args);
     let mut command = process::path_command("flutter", &args);
     command.current_dir(app_dir);
     configure_flutter_environment(&mut command, invocation);
     let result = match invocation.process_mode {
-        FlutterProcessMode::Batch if retry_sdk_lock => {
-            run_flutter_pub_get_with_lock_retry(&mut command, &display)
-        }
         FlutterProcessMode::Batch => process::run_checked(&mut command, &display),
         FlutterProcessMode::ResidentDriver => process::run_resident_checked(&mut command, &display),
     };
@@ -883,45 +919,10 @@ fn run_flutter_with_process_mode(
     })
 }
 
-fn run_flutter_pub_get_with_lock_retry(command: &mut Command, display: &str) -> Result<()> {
-    const MAX_ATTEMPTS: usize = 4;
-    const RETRY_DELAY: Duration = Duration::from_millis(500);
-
-    for attempt in 1..=MAX_ATTEMPTS {
-        let output = command
-            .output()
-            .with_context(|| format!("failed to start command from PATH: {display}"))?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        print!("{stdout}");
-        eprint!("{stderr}");
-        if output.status.success() {
-            return Ok(());
-        }
-        let sdk_lock_error = stdout.contains("lockfile") || stderr.contains("lockfile");
-        if sdk_lock_error && attempt < MAX_ATTEMPTS {
-            println!("Flutter SDK 全局锁仍被占用，等待后重试 ({attempt}/{MAX_ATTEMPTS})。");
-            thread::sleep(RETRY_DELAY);
-            continue;
-        }
-        let code = output
-            .status
-            .code()
-            .map(|code| code.to_string())
-            .unwrap_or_else(|| "terminated by signal".to_owned());
-        if sdk_lock_error {
-            bail!("Flutter pub get exceeded the SDK lock retry limit ({MAX_ATTEMPTS}): {display}");
-        } else {
-            bail!(
-                "command failed with exit code {code}: {display}; original stdout/stderr was streamed above"
-            );
-        }
-    }
-
-    unreachable!("Flutter pub get retry loop must return from every attempt")
-}
-
 fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvocation<'_>) {
+    if matches!(invocation.hosted_url, FlutterHostedUrl::PubDev) {
+        command.env("PUB_HOSTED_URL", crate::pubspec_lock::CANONICAL_HOSTED_URL);
+    }
     command.env_remove(BRIDGE_LIBRARY_ENV);
     command.env_remove(BRIDGE_DEBUG_SYMBOLS_ENV);
     command.env_remove(BUNDLE_DIR_ENV);
