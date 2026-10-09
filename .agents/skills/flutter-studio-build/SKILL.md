@@ -35,9 +35,9 @@ cargo xtask build-gui --check-generated
 
 `run-gui --release` 仅运行 `dist/anywork-release` 中已有的当前平台原生程序，不执行构建、生成或依赖解析。缺少程序时先执行 `build-gui`；不要将 demo 构建当作真实发布程序。关闭和取消沿用平台进程树所有权。
 
-`run-gui` 和 `build-gui` 在 `.dart_tool/pure-xtask-pub.sha256` 记录 `pubspec.yaml`、
-`pubspec.lock`、`pubspec_overrides.yaml` 与 `PUB_HOSTED_URL` 的依赖指纹；指纹未变时使用
-Flutter `--no-pub` 热路径。
+`run-gui` 和 `build-gui` 直接调用 Flutter 的依赖命令，由 Flutter 自身负责缓存、锁和错误返回。
+`xtask` 不维护工作区锁、不写入依赖指纹，也不改写 `pubspec.lock`；构建使用
+`flutter pub get --enforce-lockfile`，其他生成或运行入口透传 Flutter/Dart 的依赖错误。
 
 普通运行和构建不执行生成器或可写格式化。Riverpod、Freezed、本地化或 FRB 输入变化后先运行：
 

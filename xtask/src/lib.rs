@@ -3,7 +3,6 @@ use std::ffi::OsString;
 
 mod cli;
 mod flutter;
-mod pubspec_lock;
 mod release;
 mod remote_helper;
 mod rust_bridge;

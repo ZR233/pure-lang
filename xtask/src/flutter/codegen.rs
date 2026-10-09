@@ -1,8 +1,6 @@
 use super::{
-    DemoMode, acquire_flutter_dependency_lock, ensure_flutter_dependencies_locked, print_context,
-    run_flutter, run_os_tool, run_tool,
+    DemoMode, ensure_flutter_dependencies, print_context, run_flutter, run_os_tool, run_tool,
 };
-use crate::pubspec_lock;
 use anyhow::{Context, Result, bail};
 use pl_dev_support::paths;
 use std::collections::BTreeMap;
@@ -85,21 +83,18 @@ pub(super) fn check_gui_generated() -> Result<()> {
 }
 
 pub(super) fn check_gui_generated_sources(workspace_root: &Path, app_dir: &Path) -> Result<()> {
-    let _lock = acquire_flutter_dependency_lock(workspace_root)?;
     let before = generated_sources_snapshot(workspace_root, app_dir)?;
-    generate_gui_sources_locked(workspace_root, app_dir)?;
+    generate_gui_sources(workspace_root, app_dir)?;
     let after = generated_sources_snapshot(workspace_root, app_dir)?;
     ensure_generated_sources_are_stable(&before, &after)
 }
 
-/// Checks generated sources using the package configuration materialized from
-/// the committed lockfile. Dependency resolution is performed by the build
-/// preflight with `--enforce-lockfile`; this path must not update dependencies.
+/// Checks generated sources using the package configuration materialized by
+/// the Flutter dependency command run by the caller.
 pub(super) fn check_gui_generated_sources_for_build(
     workspace_root: &Path,
     app_dir: &Path,
 ) -> Result<()> {
-    let _lock = acquire_flutter_dependency_lock(workspace_root)?;
     let before = generated_sources_snapshot(workspace_root, app_dir)?;
     generate_gui_sources_from_existing_dependencies(workspace_root, app_dir)?;
     let after = generated_sources_snapshot(workspace_root, app_dir)?;
@@ -107,12 +102,7 @@ pub(super) fn check_gui_generated_sources_for_build(
 }
 
 fn generate_gui_sources(workspace_root: &Path, app_dir: &Path) -> Result<()> {
-    let _lock = acquire_flutter_dependency_lock(workspace_root)?;
-    generate_gui_sources_locked(workspace_root, app_dir)
-}
-
-fn generate_gui_sources_locked(workspace_root: &Path, app_dir: &Path) -> Result<()> {
-    ensure_flutter_dependencies_locked(workspace_root, app_dir)?;
+    ensure_flutter_dependencies(workspace_root, app_dir)?;
     generate_gui_sources_from_existing_dependencies(workspace_root, app_dir)
 }
 
@@ -130,40 +120,7 @@ fn generate_gui_sources_from_existing_dependencies(
 }
 
 fn run_build_runner(app_dir: &Path) -> Result<()> {
-    let lock_path = app_dir.join("pubspec.lock");
-    preserve_canonical_lockfile(&lock_path, || {
-        match std::env::var("PUB_HOSTED_URL") {
-            Ok(hosted_url) => {
-                pubspec_lock::rewrite_hosted_urls(&lock_path, &hosted_url)?;
-            }
-            Err(std::env::VarError::NotPresent) => {}
-            Err(std::env::VarError::NotUnicode(_)) => {
-                anyhow::bail!("PUB_HOSTED_URL must contain valid Unicode")
-            }
-        }
-        run_tool("dart", BUILD_RUNNER_ARGS, app_dir)
-    })
-}
-
-fn preserve_canonical_lockfile(
-    lock_path: &Path,
-    operation: impl FnOnce() -> Result<()>,
-) -> Result<()> {
-    let original_lock = pubspec_lock::read_optional(lock_path)?;
-    let operation_result = operation();
-    let validation_result = operation_result.as_ref().map_or(Ok(()), |_| {
-        pubspec_lock::classify_change(lock_path, original_lock.as_deref()).map(|change| {
-            if change == pubspec_lock::LockfileChange::HostedUrlsOnly {
-                println!("Restoring canonical pubspec.lock hosted URLs after build_runner.");
-            }
-        })
-    });
-    let restore_result =
-        pubspec_lock::restore_canonical_optional(lock_path, original_lock.as_deref());
-
-    operation_result?;
-    validation_result?;
-    restore_result
+    run_tool("dart", BUILD_RUNNER_ARGS, app_dir)
 }
 
 fn normalize_generated_dart_files(root: &Path) -> Result<Vec<PathBuf>> {

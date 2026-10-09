@@ -1,5 +1,4 @@
 use crate::cli::{BuildGuiOptions, LogLevel, RunGuiOptions};
-use crate::pubspec_lock::{self, LockfileChange};
 use crate::remote_helper::{self, BUNDLE_DIR_ENV};
 use crate::rust_bridge::{
     self, BRIDGE_DEBUG_SYMBOLS_ENV, BRIDGE_LIBRARY_ENV, BridgeConfiguration, RustBridgeArtifacts,
@@ -8,80 +7,14 @@ use crate::studio_version;
 use anyhow::{Context, Result, bail, ensure};
 use pl_dev_support::paths;
 use pl_dev_support::process;
-use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::thread;
-use std::time::Duration;
 
 mod codegen;
 #[cfg(target_os = "linux")]
 mod linux;
-
-const PUB_FINGERPRINT_FILE: &str = "pure-xtask-pub.sha256";
-const PUB_LOCK_FILE: &str = "flutter-dependency.lock";
-
-/// Serializes xtask processes that may start Flutter or mutate pubspec.lock.
-///
-/// Flutter has its own SDK-wide startup locks, but those locks cannot protect
-/// the repository-local fingerprint and lockfile restoration performed here.
-/// Keeping this file under the workspace's ignored `target/xtask` directory
-/// makes it local and disposable while preventing `flutter clean` from
-/// deleting the lock path during a critical section.
-pub(super) struct FlutterDependencyLock {
-    _file: fs::File,
-}
-
-pub(super) fn acquire_flutter_dependency_lock(
-    workspace_root: &Path,
-) -> Result<FlutterDependencyLock> {
-    let lock_path = workspace_root
-        .join("target")
-        .join("xtask")
-        .join(PUB_LOCK_FILE);
-    let parent = lock_path
-        .parent()
-        .context("Flutter dependency lock has no parent directory")?;
-    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open {}", lock_path.display()))?;
-
-    let mut waiting = false;
-    loop {
-        match fs4::FileExt::try_lock(&file) {
-            Ok(()) => break,
-            Err(fs4::TryLockError::WouldBlock) => {
-                if !waiting {
-                    println!(
-                        "等待 Flutter 依赖锁：{}（另一个 xtask 正在运行 Flutter 或更新 pubspec.lock）",
-                        lock_path.display()
-                    );
-                    waiting = true;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-            Err(fs4::TryLockError::Error(error)) => {
-                return Err(error).with_context(|| {
-                    format!(
-                        "failed to lock Flutter dependency file {}",
-                        lock_path.display()
-                    )
-                });
-            }
-        }
-    }
-    if waiting {
-        println!("已获取 Flutter 依赖锁：{}", lock_path.display());
-    }
-    Ok(FlutterDependencyLock { _file: file })
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesktopTarget {
@@ -102,17 +35,10 @@ enum FlutterProcessMode {
     ResidentDriver,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FlutterHostedUrl {
-    Inherit,
-    PubDev,
-}
-
 #[derive(Debug, Clone, Copy)]
 struct FlutterInvocation<'a> {
     demo_mode: DemoMode,
     process_mode: FlutterProcessMode,
-    hosted_url: FlutterHostedUrl,
     bridge_artifacts: Option<&'a RustBridgeArtifacts>,
     remote_helper_bundle_dir: Option<&'a Path>,
     log_level: Option<LogLevel>,
@@ -286,7 +212,6 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
             FlutterInvocation {
                 demo_mode: DemoMode::Native,
                 process_mode: FlutterProcessMode::ResidentDriver,
-                hosted_url: FlutterHostedUrl::Inherit,
                 bridge_artifacts: None,
                 remote_helper_bundle_dir: None,
                 log_level: options.log_level,
@@ -359,7 +284,6 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
         FlutterInvocation {
             demo_mode,
             process_mode,
-            hosted_url: FlutterHostedUrl::Inherit,
             bridge_artifacts: bridge_artifacts.as_ref(),
             remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
             log_level: options.log_level,
@@ -458,7 +382,6 @@ fn run_gui_native_launch(
         FlutterInvocation {
             demo_mode,
             process_mode: FlutterProcessMode::Batch,
-            hosted_url: FlutterHostedUrl::Inherit,
             bridge_artifacts: bridge_artifacts.as_ref(),
             remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
             log_level: options.log_level,
@@ -479,7 +402,6 @@ fn run_gui_native_launch(
         FlutterInvocation {
             demo_mode,
             process_mode: FlutterProcessMode::ResidentDriver,
-            hosted_url: FlutterHostedUrl::Inherit,
             bridge_artifacts: bridge_artifacts.as_ref(),
             remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
             log_level: options.log_level,
@@ -657,7 +579,6 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
         FlutterInvocation {
             demo_mode,
             process_mode: FlutterProcessMode::Batch,
-            hosted_url: FlutterHostedUrl::Inherit,
             bridge_artifacts: bridge_artifacts.as_ref(),
             remote_helper_bundle_dir: remote_helper_bundle_dir.as_deref(),
             log_level: None,
@@ -684,142 +605,17 @@ fn build_gui_args(target: DesktopTarget, version_define: &str) -> Vec<&str> {
     ]
 }
 
-fn ensure_flutter_dependencies(workspace_root: &Path, app_dir: &Path) -> Result<()> {
-    let _lock = acquire_flutter_dependency_lock(workspace_root)?;
-    ensure_flutter_dependencies_locked(workspace_root, app_dir)
-}
-
-/// Materializes Flutter packages for a release build using only the committed
-/// lockfile. Pub may download missing packages, but `--enforce-lockfile` rejects
-/// any resolution that would update versions or content hashes.
 fn ensure_flutter_dependencies_for_build(workspace_root: &Path, app_dir: &Path) -> Result<()> {
-    let lock_path = app_dir.join("pubspec.lock");
-    ensure!(
-        lock_path.is_file(),
-        "Flutter lockfile is missing: {}; update and commit it before building",
-        lock_path.display()
-    );
-    ensure_flutter_dependencies_with_mode(workspace_root, app_dir, true, false)
+    run_flutter(
+        workspace_root,
+        app_dir,
+        &["pub", "get", "--enforce-lockfile"],
+        DemoMode::Native,
+    )
 }
 
-pub(super) fn ensure_flutter_dependencies_locked(
-    workspace_root: &Path,
-    app_dir: &Path,
-) -> Result<()> {
-    ensure_flutter_dependencies_with_mode(workspace_root, app_dir, false, true)
-}
-
-fn ensure_flutter_dependencies_with_mode(
-    workspace_root: &Path,
-    app_dir: &Path,
-    enforce_lockfile: bool,
-    reuse_cached_configuration: bool,
-) -> Result<()> {
-    let hosted_url = match std::env::var("PUB_HOSTED_URL") {
-        Ok(hosted_url) => Some(hosted_url),
-        Err(std::env::VarError::NotPresent) => None,
-        Err(std::env::VarError::NotUnicode(_)) => {
-            bail!("PUB_HOSTED_URL must contain valid Unicode")
-        }
-    };
-    let fingerprint = flutter_dependency_fingerprint(app_dir, hosted_url.as_deref())?;
-    if reuse_cached_configuration && has_cached_flutter_dependencies(app_dir, &fingerprint)? {
-        println!("Flutter dependencies unchanged; reusing .dart_tool package configuration.");
-        return Ok(());
-    }
-
-    let lock_path = app_dir.join("pubspec.lock");
-    let original_lock = pubspec_lock::read_optional(&lock_path)?;
-    let resolution_result = (|| {
-        if !enforce_lockfile && let Some(hosted_url) = hosted_url.as_deref() {
-            // Pub treats the hosted URL as part of a package's source identity.
-            pubspec_lock::rewrite_hosted_urls(&lock_path, hosted_url)?;
-        }
-        let pub_get_args = if enforce_lockfile {
-            &["pub", "get", "--enforce-lockfile"][..]
-        } else {
-            &["pub", "get"][..]
-        };
-        run_flutter_with_hosted_url(
-            workspace_root,
-            app_dir,
-            pub_get_args,
-            DemoMode::Native,
-            if enforce_lockfile {
-                // The committed hashes are canonical for pub.dev; mirrors may
-                // publish different archive metadata for the same versions.
-                FlutterHostedUrl::PubDev
-            } else {
-                FlutterHostedUrl::Inherit
-            },
-        )?;
-        match pubspec_lock::classify_change(&lock_path, original_lock.as_deref())? {
-            LockfileChange::Unchanged => {}
-            LockfileChange::HostedUrlsOnly => {
-                println!(
-                    "Restoring canonical pubspec.lock hosted URLs after dependency resolution."
-                );
-            }
-        }
-        Ok(())
-    })();
-    let restore_result =
-        pubspec_lock::restore_canonical_optional(&lock_path, original_lock.as_deref());
-    match (resolution_result, restore_result) {
-        (Err(error), _) => return Err(error),
-        (Ok(()), Err(error)) => return Err(error),
-        (Ok(()), Ok(())) => {}
-    }
-
-    let stamp_path = flutter_dependency_stamp_path(app_dir);
-    let stamp_dir = stamp_path
-        .parent()
-        .context("Flutter dependency stamp has no parent directory")?;
-    fs::create_dir_all(stamp_dir)
-        .with_context(|| format!("failed to create {}", stamp_dir.display()))?;
-    fs::write(&stamp_path, format!("{fingerprint}\n"))
-        .with_context(|| format!("failed to write {}", stamp_path.display()))
-}
-
-fn flutter_dependency_fingerprint(app_dir: &Path, hosted_url: Option<&str>) -> Result<String> {
-    let mut hasher = Sha256::new();
-    for file_name in ["pubspec.yaml", "pubspec.lock", "pubspec_overrides.yaml"] {
-        hasher.update(file_name.as_bytes());
-        hasher.update([0]);
-        match fs::read(app_dir.join(file_name)) {
-            Ok(content) => hasher.update(content),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                hasher.update(b"<missing>")
-            }
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!("failed to read {}", app_dir.join(file_name).display())
-                });
-            }
-        }
-        hasher.update([0]);
-    }
-    hasher.update(hosted_url.unwrap_or("<default-hosted-url>").as_bytes());
-    Ok(hex::encode(hasher.finalize()))
-}
-
-fn has_cached_flutter_dependencies(app_dir: &Path, fingerprint: &str) -> Result<bool> {
-    if !app_dir
-        .join(".dart_tool")
-        .join("package_config.json")
-        .is_file()
-    {
-        return Ok(false);
-    }
-    match fs::read_to_string(flutter_dependency_stamp_path(app_dir)) {
-        Ok(cached) => Ok(cached.trim() == fingerprint),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).context("failed to read Flutter dependency fingerprint"),
-    }
-}
-
-fn flutter_dependency_stamp_path(app_dir: &Path) -> PathBuf {
-    app_dir.join(".dart_tool").join(PUB_FINGERPRINT_FILE)
+pub(super) fn ensure_flutter_dependencies(workspace_root: &Path, app_dir: &Path) -> Result<()> {
+    run_flutter(workspace_root, app_dir, &["pub", "get"], DemoMode::Native)
 }
 
 fn print_context(workspace_root: &Path, app_dir: &Path) {
@@ -864,22 +660,6 @@ fn run_flutter(
     args: &[&str],
     demo_mode: DemoMode,
 ) -> Result<()> {
-    run_flutter_with_hosted_url(
-        workspace_root,
-        app_dir,
-        args,
-        demo_mode,
-        FlutterHostedUrl::Inherit,
-    )
-}
-
-fn run_flutter_with_hosted_url(
-    workspace_root: &Path,
-    app_dir: &Path,
-    args: &[&str],
-    demo_mode: DemoMode,
-    hosted_url: FlutterHostedUrl,
-) -> Result<()> {
     run_flutter_with_process_mode(
         workspace_root,
         app_dir,
@@ -887,7 +667,6 @@ fn run_flutter_with_hosted_url(
         FlutterInvocation {
             demo_mode,
             process_mode: FlutterProcessMode::Batch,
-            hosted_url,
             bridge_artifacts: None,
             remote_helper_bundle_dir: None,
             log_level: None,
@@ -896,7 +675,7 @@ fn run_flutter_with_hosted_url(
 }
 
 fn run_flutter_with_process_mode(
-    workspace_root: &Path,
+    _workspace_root: &Path,
     app_dir: &Path,
     args: &[&str],
     invocation: FlutterInvocation<'_>,
@@ -906,23 +685,13 @@ fn run_flutter_with_process_mode(
     let mut command = process::path_command("flutter", &args);
     command.current_dir(app_dir);
     configure_flutter_environment(&mut command, invocation);
-    let result = match invocation.process_mode {
+    match invocation.process_mode {
         FlutterProcessMode::Batch => process::run_checked(&mut command, &display),
         FlutterProcessMode::ResidentDriver => process::run_resident_checked(&mut command, &display),
-    };
-    result.with_context(|| {
-        format!(
-            "workspace root: {}, Studio app dir: {}",
-            workspace_root.display(),
-            app_dir.display()
-        )
-    })
+    }
 }
 
 fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvocation<'_>) {
-    if matches!(invocation.hosted_url, FlutterHostedUrl::PubDev) {
-        command.env("PUB_HOSTED_URL", crate::pubspec_lock::CANONICAL_HOSTED_URL);
-    }
     command.env_remove(BRIDGE_LIBRARY_ENV);
     command.env_remove(BRIDGE_DEBUG_SYMBOLS_ENV);
     command.env_remove(BUNDLE_DIR_ENV);

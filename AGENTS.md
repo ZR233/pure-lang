@@ -158,8 +158,8 @@ crate 职责、依赖方向与禁止依赖的唯一权威源是 [Crate 边界](d
 - `code/anywork/pubspec.lock` 是必须纳入 Git 的 canonical 应用依赖快照，不得加入 ignore；
   Flutter 直接依赖升级后必须同步提交重新解析的 lockfile。
 - 代码、构建、依赖或生成输入变更提交前，在本地执行与 CI 一致的检查清单（纯说明性变更按本节首条豁免；只需保证当前环境通过；
-  `PUB_HOSTED_URL` 镜像导致的已跟踪 pubspec.lock hosted URL 差异由 xtask 自动
-  规范化为 pub.dev canonical，无需手工处理）：
+  `PUB_HOSTED_URL` 及其镜像行为由 Flutter/Dart 自身处理，xtask 不改写已跟踪的
+  `pubspec.lock`）：
 
   ```powershell
   cargo fmt --all --check
