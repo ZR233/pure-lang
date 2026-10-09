@@ -5,6 +5,14 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.9.0](https://github.com/ZR233/pure-lang/compare/v6.8.0...v6.9.0) (2026-10-09)
+
+
+### Bug Fixes
+
+* **build:** 由 Flutter 直接处理依赖锁错误 ([afe4df6](https://github.com/ZR233/pure-lang/commit/afe4df65b421580ff19be7a8f724d748468778ee))
+* **studio:** 约束模型菜单布局 ([0898105](https://github.com/ZR233/pure-lang/commit/08981057342448b22545369f19904e3f1ffc315e))
+
 ## [6.8.0](https://github.com/ZR233/pure-lang/compare/v6.7.0...v6.8.0) (2026-10-09)
 
 
