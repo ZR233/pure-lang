@@ -12,6 +12,6 @@ RUST_TEST_THREADS = { value = "4", force = false }
 debug = 0
 
 [alias]
-xtask = "run --target-dir target/xtask -p pl-xtask --"
-flutter = "run --target-dir target/xtask -p pl-xtask -- flutter"
-dart = "run --target-dir target/xtask -p pl-xtask -- dart"
+xtask = "run --locked --target-dir target/xtask -p pl-xtask --"
+flutter = "run --locked --target-dir target/xtask -p pl-xtask -- flutter"
+dart = "run --locked --target-dir target/xtask -p pl-xtask -- dart"

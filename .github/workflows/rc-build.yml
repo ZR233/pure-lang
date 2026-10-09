@@ -69,8 +69,6 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Install FRB code generator
         run: cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
-      - name: Resolve Flutter dependencies from the lockfile
-        run: cargo flutter pub get --enforce-lockfile
       - name: Build GUI artifact
         run: cargo xtask build-gui --check-generated
       - name: upload artifact

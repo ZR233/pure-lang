@@ -133,6 +133,7 @@ fn build_target(workspace_root: &Path, target: &str, builder: CargoBuilder) -> R
         .current_dir(workspace_root)
         .args([
             "--release",
+            "--locked",
             "--package",
             "pl-remote-helper",
             "--target",
@@ -144,10 +145,10 @@ fn build_target(workspace_root: &Path, target: &str, builder: CargoBuilder) -> R
         .env("CARGO_PROFILE_RELEASE_PANIC", "abort");
     let display = match builder {
         CargoBuilder::Cargo => {
-            format!("cargo build --release -p pl-remote-helper --target {target}")
+            format!("cargo build --release --locked -p pl-remote-helper --target {target}")
         }
         CargoBuilder::Zigbuild => {
-            format!("cargo zigbuild --release -p pl-remote-helper --target {target}")
+            format!("cargo zigbuild --release --locked -p pl-remote-helper --target {target}")
         }
     };
     run_checked(&mut command, &display)?;

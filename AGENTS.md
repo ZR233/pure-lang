@@ -76,7 +76,7 @@
   cargo xtask build-gui [--demo] [--no-clean] [--check-generated]
   ```
 
-- `build-gui` 使用现有 `.dart_tool/package_config.json` 与 `code/anywork/pubspec.lock`，不会隐式运行 `flutter pub get`。依赖变更时先手动运行 `cargo flutter pub get` 并审查 lockfile；只按已提交 lockfile 恢复 package configuration 时使用 `cargo flutter pub get --enforce-lockfile`，再重新构建。
+- `build-gui` 基于已提交的 `Cargo.lock` 与 `code/anywork/pubspec.lock` 确定性构建。它允许同步缺失的远程包，但 Flutter 使用 `pub get --enforce-lockfile`，Cargo 使用 `--locked`，不会更新 lockfile 或重新解析版本；`cargo xtask`、`cargo flutter` 和 `cargo dart` 包装命令本身也使用 `--locked`。依赖升级必须手动运行对应的依赖更新命令并审查提交新的 lockfile。
 
 - 不支持直接执行 `flutter build windows|linux` 或 `flutter run -d windows|linux`，也不新增 PowerShell GUI wrapper。
 - `run-gui --release` 直接启动已有 `dist/anywork-release` 原生程序，不执行构建或依赖解析；缺失时提示先执行 `build-gui`。它与 `--demo`、`--driver`、`--profile` 互斥，并沿用平台进程树管理。

@@ -72,6 +72,7 @@ fn resolve_workspace_root(workspace_root: &Path) -> Result<PathBuf> {
 fn cargo_build_args(configuration: BridgeConfiguration) -> Vec<OsString> {
     let mut args = vec![
         OsString::from("build"),
+        OsString::from("--locked"),
         OsString::from("-p"),
         OsString::from(BRIDGE_PACKAGE_NAME),
     ];

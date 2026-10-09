@@ -625,7 +625,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     }
     print_context(&workspace_root, &app_dir);
     ensure_desktop_build_environment(target)?;
-    ensure_flutter_dependencies_for_build(&app_dir)?;
+    ensure_flutter_dependencies_for_build(&workspace_root, &app_dir)?;
     if options.check_generated {
         codegen::check_gui_generated_sources_for_build(&workspace_root, &app_dir)?;
     }
@@ -677,62 +677,31 @@ fn ensure_flutter_dependencies(workspace_root: &Path, app_dir: &Path) -> Result<
     ensure_flutter_dependencies_locked(workspace_root, app_dir)
 }
 
-/// Verifies the dependency materialization used by a release build without
-/// resolving packages. `flutter build --no-pub` consumes the package
-/// configuration produced by the last explicit `flutter pub get`; resolving
-/// here would make a build mutate or reinterpret the checked-in lockfile.
-fn ensure_flutter_dependencies_for_build(app_dir: &Path) -> Result<()> {
+/// Materializes Flutter packages for a release build using only the committed
+/// lockfile. Pub may download missing packages, but `--enforce-lockfile` rejects
+/// any resolution that would update versions or content hashes.
+fn ensure_flutter_dependencies_for_build(workspace_root: &Path, app_dir: &Path) -> Result<()> {
     let lock_path = app_dir.join("pubspec.lock");
     ensure!(
         lock_path.is_file(),
-        "Flutter lockfile is missing: {}; run `cargo flutter pub get` first",
+        "Flutter lockfile is missing: {}; update and commit it before building",
         lock_path.display()
     );
-    let package_config = app_dir.join(".dart_tool").join("package_config.json");
-    ensure!(
-        package_config.is_file(),
-        "Flutter package configuration is missing: {}; run `cargo flutter pub get` first",
-        package_config.display()
-    );
-
-    let package_config_modified = fs::metadata(&package_config)
-        .with_context(|| format!("failed to inspect {}", package_config.display()))?
-        .modified()
-        .with_context(|| {
-            format!(
-                "failed to read modification time of {}",
-                package_config.display()
-            )
-        })?;
-    // Code generators may rewrite the canonical lockfile without changing its
-    // resolved contents, so its mtime is not a reliable freshness signal.
-    // The package configuration is invalidated by manifest changes instead.
-    for source in ["pubspec.yaml", "pubspec_overrides.yaml"] {
-        let path = app_dir.join(source);
-        let modified = match fs::metadata(&path) {
-            Ok(metadata) => metadata.modified().with_context(|| {
-                format!("failed to read modification time of {}", path.display())
-            })?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
-            }
-        };
-        ensure!(
-            package_config_modified >= modified,
-            "Flutter package configuration is older than {}; run `cargo flutter pub get` before building",
-            path.display()
-        );
-    }
-    println!(
-        "Using checked-in pubspec.lock and existing Flutter package configuration; skipping Flutter pub get."
-    );
-    Ok(())
+    ensure_flutter_dependencies_with_mode(workspace_root, app_dir, true, false)
 }
 
 pub(super) fn ensure_flutter_dependencies_locked(
     workspace_root: &Path,
     app_dir: &Path,
+) -> Result<()> {
+    ensure_flutter_dependencies_with_mode(workspace_root, app_dir, false, true)
+}
+
+fn ensure_flutter_dependencies_with_mode(
+    workspace_root: &Path,
+    app_dir: &Path,
+    enforce_lockfile: bool,
+    reuse_cached_configuration: bool,
 ) -> Result<()> {
     let hosted_url = match std::env::var("PUB_HOSTED_URL") {
         Ok(hosted_url) => Some(hosted_url),
@@ -742,7 +711,7 @@ pub(super) fn ensure_flutter_dependencies_locked(
         }
     };
     let fingerprint = flutter_dependency_fingerprint(app_dir, hosted_url.as_deref())?;
-    if has_cached_flutter_dependencies(app_dir, &fingerprint)? {
+    if reuse_cached_configuration && has_cached_flutter_dependencies(app_dir, &fingerprint)? {
         println!("Flutter dependencies unchanged; reusing .dart_tool package configuration.");
         return Ok(());
     }
@@ -754,7 +723,12 @@ pub(super) fn ensure_flutter_dependencies_locked(
             // Pub treats the hosted URL as part of a package's source identity.
             pubspec_lock::rewrite_hosted_urls(&lock_path, hosted_url)?;
         }
-        run_flutter(workspace_root, app_dir, &["pub", "get"], DemoMode::Native)?;
+        let pub_get_args = if enforce_lockfile {
+            &["pub", "get", "--enforce-lockfile"][..]
+        } else {
+            &["pub", "get"][..]
+        };
+        run_flutter(workspace_root, app_dir, pub_get_args, DemoMode::Native)?;
         match pubspec_lock::classify_change(&lock_path, original_lock.as_deref())? {
             LockfileChange::Unchanged => {}
             LockfileChange::HostedUrlsOnly => {
@@ -886,8 +860,8 @@ fn run_flutter_with_process_mode(
     args: &[&str],
     invocation: FlutterInvocation<'_>,
 ) -> Result<()> {
-    let retry_sdk_lock =
-        matches!(invocation.process_mode, FlutterProcessMode::Batch) && args == ["pub", "get"];
+    let retry_sdk_lock = matches!(invocation.process_mode, FlutterProcessMode::Batch)
+        && args.starts_with(&["pub", "get"]);
     let args = flutter_args(args, invocation.demo_mode);
     let display = process::display_command("flutter", &args);
     let mut command = process::path_command("flutter", &args);

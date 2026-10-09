@@ -92,10 +92,9 @@ pub(super) fn check_gui_generated_sources(workspace_root: &Path, app_dir: &Path)
     ensure_generated_sources_are_stable(&before, &after)
 }
 
-/// Checks generated sources using the already materialized Flutter package
-/// configuration. Release builds must not resolve dependencies as a side
-/// effect; CI prepares the package configuration explicitly before invoking
-/// `build-gui --check-generated`.
+/// Checks generated sources using the package configuration materialized from
+/// the committed lockfile. Dependency resolution is performed by the build
+/// preflight with `--enforce-lockfile`; this path must not update dependencies.
 pub(super) fn check_gui_generated_sources_for_build(
     workspace_root: &Path,
     app_dir: &Path,
