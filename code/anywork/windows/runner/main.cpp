@@ -101,11 +101,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   ConfigureWindowsErrorReporting();
   ::SetUnhandledExceptionFilter(WriteUnhandledMinidump);
 
-  // Attach to console when present (e.g., 'flutter run') or create a
-  // new console when running with a debugger.
-  if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
-    CreateAndAttachConsole();
-  }
+  // Reuse an existing terminal when one is available (for example, when the
+  // app is started by `flutter run`), but never create a console for a GUI
+  // process. Creating a console makes a black window flash during debugger
+  // launches and shortcut startup; diagnostics use the log files and debugger
+  // output.
+  ::AttachConsole(ATTACH_PARENT_PROCESS);
 
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.

@@ -17,6 +17,12 @@ use pl_tool::workspace::resolve_workspace_root;
 
 use super::super::StudioRuntime;
 
+fn background_git_command() -> tokio::process::Command {
+    let mut command = tokio::process::Command::new("git");
+    pl_remote_helper::process::configure_background_command(&mut command);
+    command
+}
+
 impl StudioRuntime {
     pub(in crate::studio::runtime) async fn append_worktree_recovery_issues(
         &self,
@@ -53,8 +59,7 @@ impl StudioRuntime {
                 continue;
             }
             let project_path = PathBuf::from(&project.path);
-            let root = tokio::process::Command::new("git")
-                .kill_on_drop(true)
+            let root = background_git_command()
                 .args(["rev-parse", "--show-toplevel"])
                 .current_dir(&project_path)
                 .output()
@@ -79,8 +84,7 @@ impl StudioRuntime {
                     }
                 }
             }
-            let registered = tokio::process::Command::new("git")
-                .kill_on_drop(true)
+            let registered = background_git_command()
                 .args(["worktree", "list", "--porcelain", "-z"])
                 .current_dir(&root)
                 .output()
