@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -355,14 +357,17 @@ class _SettingsBackTile extends ConsumerWidget {
         child: InkWell(
           key: StudioDriverKeys.settingsBack,
           borderRadius: BorderRadius.circular(StudioRadii.sm),
-          onTap: () async {
-            // Re-read canonical settings before rebuilding the shell so a
-            // provider/model change saved in this route is immediately visible
-            // to the new-session selectors.
-            await ref
-                .read(studioControllerProvider.notifier)
-                .refreshSettingsState();
-            if (context.mounted) context.go('/');
+          onTap: () {
+            // Navigate first. Saving already applies the canonical snapshot to
+            // the controller; a defensive refresh must never hold the route
+            // transition hostage when the bridge is slow or reconnecting.
+            if (!context.mounted) return;
+            context.go('/');
+            unawaited(
+              ref
+                  .read(studioControllerProvider.notifier)
+                  .refreshSettingsState(),
+            );
           },
           child: Padding(
             padding: EdgeInsets.symmetric(

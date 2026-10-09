@@ -2495,7 +2495,13 @@ class StudioController extends _$StudioController {
   /// catalog after navigation.
   Future<void> refreshSettingsState() async {
     await _awaitSettingsWrites();
-    final snapshot = await _api.readSettingsState();
+    await _awaitModeRouteSaves();
+    SettingsStateSnapshot snapshot;
+    try {
+      snapshot = await _api.readSettingsState();
+    } catch (_) {
+      return;
+    }
     if (!ref.mounted) return;
     final current = state.value;
     if (current != null) {
