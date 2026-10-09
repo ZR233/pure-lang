@@ -92,10 +92,7 @@ extension on _TimelineViewState {
   ) {
     final explicit = kind != _TimelineLayoutChangeKind.content;
     if (!explicit &&
-        (_followingBottom ||
-            _pointerHeld ||
-            _userScrollActive ||
-            _keyboardScrolling)) {
+        (_followingBottom || _userScrollActive || _keyboardScrolling)) {
       _scheduleGeometrySync();
       return;
     }
@@ -133,10 +130,7 @@ extension on _TimelineViewState {
   }
 
   bool _handleItemSizeChanged(SizeChangedLayoutNotification notification) {
-    if (_detachedByUser &&
-        !_pointerHeld &&
-        !_userScrollActive &&
-        !_keyboardScrolling) {
+    if (_detachedByUser && !_userScrollActive && !_keyboardScrolling) {
       final anchor = _pendingRestore.anchor ?? _settledAnchor;
       if (anchor != null || _validLayoutTarget != null) {
         _pendingRestore = _TimelineRestore.anchor(

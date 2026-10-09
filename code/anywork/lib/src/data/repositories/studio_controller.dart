@@ -1412,8 +1412,8 @@ class StudioController extends _$StudioController {
     final direction = request == _ChatWindowLoad.newer
         ? TimelineDirection.newer
         : TimelineDirection.older;
-    _timelineEvents.add(TimelinePagingStarted(threadId, direction));
     if (!_historyRequests.add(threadId)) return;
+    _timelineEvents.add(TimelinePagingStarted(threadId, direction));
     final operation = ++_chatWindowOperation;
     final current = state.value;
     if (current != null) {

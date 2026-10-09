@@ -125,7 +125,6 @@ class _TimelineViewState extends State<TimelineView> {
   int _readingGeneration = 0;
   TimelineAnchor? _settledAnchor;
   bool _programmaticScroll = false;
-  bool _pointerHeld = false;
   bool _keyboardScrolling = false;
   bool _userScrollActive = false;
   double _textScale = 1;
@@ -604,7 +603,7 @@ class _TimelineViewState extends State<TimelineView> {
     }
     final delta = notification.scrollDelta;
     if (!_programmaticScroll &&
-        (_pointerHeld || _keyboardScrolling) &&
+        (_userScrollActive || _keyboardScrolling) &&
         delta != null &&
         delta != 0 &&
         _controller.hasClients &&
@@ -647,7 +646,7 @@ class _TimelineViewState extends State<TimelineView> {
     final nearBottom = _isNearBottom() && !widget.hasNewer && !_restoreClamped;
     if (nearBottom && direction == ScrollDirection.reverse && !pullingAway) {
       if (!_followingBottom || _detachedByUser || _pendingNewEvents != 0) {
-        if (_pointerHeld) {
+        if (_userScrollActive) {
           _resumeAfterNewerPage = true;
           _saveThreadState(widget.threadId);
           return;
@@ -677,14 +676,17 @@ class _TimelineViewState extends State<TimelineView> {
 
   void _scheduleBottomScroll() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_pointerHeld && _followingBottom && !_detachedByUser) {
+      if (mounted &&
+          !_userScrollActive &&
+          _followingBottom &&
+          !_detachedByUser) {
         _scrollToBottom();
       }
     });
   }
 
   void _scrollToBottom() {
-    if (!_controller.hasClients || _pointerHeld) return;
+    if (!_controller.hasClients || _userScrollActive) return;
     final position = _controller.position;
     if ((position.pixels - position.maxScrollExtent).abs() > 0.5) {
       _programmaticScroll = true;
@@ -791,7 +793,7 @@ class _TimelineViewState extends State<TimelineView> {
     // SliverList may refine the extent of a very tall lazily built row over
     // several layouts. Keep followLatest attached to the real max extent;
     // this is a layout event response, never a timer or polling loop.
-    if (_followingBottom && !_detachedByUser && !_pointerHeld) {
+    if (_followingBottom && !_detachedByUser && !_userScrollActive) {
       _scheduleBottomScroll();
     }
     // 索引定位和真实几何校正后确认恢复完成，再发布位置。
@@ -799,7 +801,7 @@ class _TimelineViewState extends State<TimelineView> {
     if (_resumeAfterNewerPage &&
         !_programmaticScroll &&
         !_restoreClamped &&
-        !_pointerHeld &&
+        !_userScrollActive &&
         _controller.hasClients) {
       _resumeAfterNewerPage = false;
       // 用户向新翻页后真正抵达最新端，分页响应代替最后一次滚动事件完成跟随。
@@ -892,7 +894,7 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _prepareAnchorRestore(TimelineAnchor anchor) {
-    if (_pointerHeld || _keyboardScrolling || _userScrollActive) return;
+    if (_userScrollActive || _keyboardScrolling) return;
     _pendingRestore = _TimelineRestore.anchor(
       anchor,
       target: _validLayoutTarget,
@@ -903,7 +905,6 @@ class _TimelineViewState extends State<TimelineView> {
 
   void _restoreThreadState() {
     _programmaticScroll = false;
-    _pointerHeld = false;
     _keyboardScrolling = false;
     _userScrollActive = false;
     _resumeAfterNewerPage = false;
@@ -932,7 +933,6 @@ class _TimelineViewState extends State<TimelineView> {
   /// the intent until its canonical body arrives; it never spins a frame loop.
   void _restoreVisibleAnchor() {
     if (!_restoreClamped ||
-        _pointerHeld ||
         _userScrollActive ||
         _keyboardScrolling ||
         !_controller.hasClients) {
@@ -943,7 +943,16 @@ class _TimelineViewState extends State<TimelineView> {
     if (anchor == null && layoutTarget == null) return;
     final rowId = anchor == null ? null : _anchorRowId(anchor.itemId);
     final index = widget.rows.indexWhere((row) => row.id == rowId);
-    if (index < 0 && layoutTarget == null) return;
+    if (index < 0 && layoutTarget == null) {
+      // The canonical window has evicted the requested identity. Keeping the
+      // restore flag set forever would suppress new anchors and make every
+      // later layout look like a pending recovery. Preserve the current
+      // visible geometry and let the next real anchor establish a new intent.
+      _restoreClamped = false;
+      _pendingRestore = const _TimelineRestore.bottom();
+      _settledAnchor = _captureAnchor();
+      return;
+    }
     var moved = false;
     _programmaticScroll = true;
     try {
@@ -982,7 +991,7 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   bool _refreshRestorePending() {
-    if (!_restoreClamped || _pointerHeld) return false;
+    if (!_restoreClamped || _userScrollActive) return false;
     final anchor = _pendingRestore.anchor;
     if (!_controller.hasClients) return false;
     final layoutTarget = _validLayoutTarget;

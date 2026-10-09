@@ -218,10 +218,7 @@ extension on _TimelineViewState {
     _prefetchScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prefetchScheduled = false;
-      if (!mounted ||
-          _pointerHeld ||
-          widget.isLoadingOlder ||
-          widget.isLoadingNewer) {
+      if (!mounted || widget.isLoadingOlder || widget.isLoadingNewer) {
         return;
       }
       final position = _controller.hasClients ? _controller.position : null;
