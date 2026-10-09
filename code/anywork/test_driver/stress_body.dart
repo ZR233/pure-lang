@@ -374,6 +374,24 @@ Future<void> main(List<String> args) async {
       await Future<void>.delayed(const Duration(milliseconds: 100));
       reopened = await driver.readSnapshot();
     }
+    // The body and scroll geometry can settle one frame before the controller
+    // publishes the restored anchor. Give that final publication a short,
+    // bounded window so a transient snapshot cannot be mistaken for a failed
+    // restore; a persistent mismatch still fails below.
+    final expectedAnchorId = reading['anchorItemId'];
+    if (bodyReady && expectedAnchorId is String) {
+      final anchorDeadline = DateTime.now().add(const Duration(seconds: 3));
+      while (DateTime.now().isBefore(anchorDeadline)) {
+        final scroll = _timelineScroll(reopened);
+        if (_anchorId(scroll) == expectedAnchorId &&
+            scroll?['restorePending'] != true &&
+            scroll?['programmaticScroll'] != true) {
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        reopened = await driver.readSnapshot();
+      }
+    }
     final bodyWaitMillis =
         DateTime.now().millisecondsSinceEpoch - reopenStartedAt;
     if (!bodyReady) {
