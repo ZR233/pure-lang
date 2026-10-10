@@ -350,6 +350,53 @@ class CacheUsageView {
       Object.hash(inputTokens, cacheReadTokens, hitRate, hasIncompleteUsage);
 }
 
+enum ThreadRuntimeUsageState { live, authoritative }
+
+class ThreadRuntimeLiveUsageView {
+  const ThreadRuntimeLiveUsageView({
+    required this.turnId,
+    required this.attemptId,
+    this.completionTokens,
+    this.decodeMillis,
+    this.latestContextTokens,
+    required this.state,
+    required this.observationSequence,
+  });
+
+  final String turnId;
+  final String attemptId;
+  final int? completionTokens;
+  final int? decodeMillis;
+  final int? latestContextTokens;
+  final ThreadRuntimeUsageState state;
+  final int observationSequence;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ThreadRuntimeLiveUsageView &&
+          turnId == other.turnId &&
+          attemptId == other.attemptId &&
+          completionTokens == other.completionTokens &&
+          decodeMillis == other.decodeMillis &&
+          latestContextTokens == other.latestContextTokens &&
+          state == other.state &&
+          observationSequence == other.observationSequence;
+
+  @override
+  int get hashCode => Object.hash(
+    turnId,
+    attemptId,
+    completionTokens,
+    decodeMillis,
+    latestContextTokens,
+    state,
+    observationSequence,
+  );
+}
+
+const _threadRuntimeUnset = Object();
+
 class ThreadRuntimeView {
   const ThreadRuntimeView({
     required this.model,
@@ -376,6 +423,7 @@ class ThreadRuntimeView {
     this.prefixChangedReason,
     this.turnCompletionTokens = 0,
     this.turnDecodeMillis = 0,
+    this.liveUsage,
     this.workflow,
     this.modelRoute,
   });
@@ -404,6 +452,7 @@ class ThreadRuntimeView {
   final String? prefixChangedReason;
   final int turnCompletionTokens;
   final int turnDecodeMillis;
+  final ThreadRuntimeLiveUsageView? liveUsage;
   final WorkflowRuntimeView? workflow;
   final ThreadModelRouteView? modelRoute;
 
@@ -442,6 +491,7 @@ class ThreadRuntimeView {
             prefixChangedReason == other.prefixChangedReason &&
             turnCompletionTokens == other.turnCompletionTokens &&
             turnDecodeMillis == other.turnDecodeMillis &&
+            liveUsage == other.liveUsage &&
             workflow == other.workflow &&
             modelRoute == other.modelRoute;
   }
@@ -472,6 +522,7 @@ class ThreadRuntimeView {
     prefixChangedReason,
     turnCompletionTokens,
     turnDecodeMillis,
+    liveUsage,
     workflow,
     modelRoute,
   ]);
@@ -501,6 +552,7 @@ class ThreadRuntimeView {
     String? prefixChangedReason,
     int? turnCompletionTokens,
     int? turnDecodeMillis,
+    Object? liveUsage = _threadRuntimeUnset,
     WorkflowRuntimeView? workflow,
     ThreadModelRouteView? modelRoute,
   }) {
@@ -530,6 +582,9 @@ class ThreadRuntimeView {
       prefixChangedReason: prefixChangedReason ?? this.prefixChangedReason,
       turnCompletionTokens: turnCompletionTokens ?? this.turnCompletionTokens,
       turnDecodeMillis: turnDecodeMillis ?? this.turnDecodeMillis,
+      liveUsage: identical(liveUsage, _threadRuntimeUnset)
+          ? this.liveUsage
+          : liveUsage as ThreadRuntimeLiveUsageView?,
       workflow: workflow ?? this.workflow,
       modelRoute: modelRoute ?? this.modelRoute,
     );

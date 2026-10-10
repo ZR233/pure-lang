@@ -479,18 +479,11 @@ impl LiveSubscription {
                 )
             }
             ThreadNotification::ThreadRuntimeUpdated { runtime } => {
-                let incoming_is_live = runtime
-                    .live_usage
-                    .as_ref()
-                    .is_some_and(|usage| usage.state == pl_protocol::ThreadRuntimeUsageState::Live);
-                incoming_is_live
-                    && matches!(
-                        &last.notification,
-                        ThreadNotification::ThreadRuntimeUpdated { runtime: old }
-                        if old.live_usage.as_ref().is_some_and(|usage| {
-                            usage.state == pl_protocol::ThreadRuntimeUsageState::Live
-                        })
-                    )
+                matches!(
+                    &last.notification,
+                    ThreadNotification::ThreadRuntimeUpdated { runtime: old }
+                    if same_live_runtime_identity(runtime, old)
+                )
             }
             _ => false,
         };
@@ -536,6 +529,27 @@ impl LiveSubscription {
             ))
         })
     }
+}
+
+/// Live runtime observations may replace only an observation for the same model attempt.
+///
+/// A live frame from a new turn or retry is a distinct generation even when it is adjacent to the
+/// previous frame in the pending queue. Keeping the identity check here prevents coalescing from
+/// reusing the previous frame's envelope revision for a newer generation.
+fn same_live_runtime_identity(
+    incoming: &pl_protocol::ThreadRuntimeSnapshot,
+    previous: &pl_protocol::ThreadRuntimeSnapshot,
+) -> bool {
+    let Some(incoming_usage) = incoming.live_usage.as_ref() else {
+        return false;
+    };
+    let Some(previous_usage) = previous.live_usage.as_ref() else {
+        return false;
+    };
+    incoming_usage.state == pl_protocol::ThreadRuntimeUsageState::Live
+        && previous_usage.state == pl_protocol::ThreadRuntimeUsageState::Live
+        && incoming_usage.turn_id == previous_usage.turn_id
+        && incoming_usage.attempt_id == previous_usage.attempt_id
 }
 
 impl StudioThreadSubscription {
