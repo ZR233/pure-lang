@@ -186,23 +186,28 @@ class _McpTabState extends ConsumerState<McpTab> {
     try {
       setState(() => _error = null);
       final configServers = _configServers();
-      await ref
-          .read(studioControllerProvider.notifier)
-          .saveMcpSettings(
-            McpSettingsCommand(
-              servers: [
-                for (final server in configServers)
-                  McpServerCommand(
-                    id: server.id,
-                    enabled: _enabledByServer[server.id] ?? server.enabled,
-                    transport: server.transport,
-                    endpoint: server.hasLockedIdentity
-                        ? server.endpoint
-                        : _endpointByServer[server.id] ?? server.endpoint,
-                  ),
-              ],
-            ),
+      final controller = ref.read(studioControllerProvider.notifier);
+      for (final server in configServers) {
+        final enabled = _enabledByServer[server.id] ?? server.enabled;
+        final endpoint = server.hasLockedIdentity
+            ? server.endpoint
+            : _endpointByServer[server.id] ?? server.endpoint;
+        if (enabled == server.enabled && endpoint == server.endpoint) {
+          continue;
+        }
+        if (enabled != server.enabled) {
+          await controller.applySettingsField(
+            McpServerEnabledCommand(id: server.id, value: enabled),
+            mutationKey: 'mcp:${server.id}:enabled',
           );
+        }
+        if (endpoint != server.endpoint) {
+          await controller.applySettingsField(
+            McpServerEndpointCommand(id: server.id, value: endpoint),
+            mutationKey: 'mcp:${server.id}:endpoint',
+          );
+        }
+      }
     } catch (error) {
       if (mounted) {
         setState(() => _error = error.toString());

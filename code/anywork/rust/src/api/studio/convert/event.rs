@@ -6,10 +6,10 @@ use pl_studio_runtime::{
 
 use super::runtime::{
     bridge_agent_directory, bridge_agent_profiles, bridge_lsp_state, bridge_mcp_state,
-    bridge_model_performance, bridge_persistence_queue_state, bridge_persistence_state,
-    bridge_project_directory, bridge_provider_usage_state, bridge_recovery_state,
-    bridge_session_costs_state, bridge_settings_state, bridge_skills_state,
-    bridge_thread_mode_catalog, bridge_update_state,
+    bridge_model_catalog_state, bridge_model_performance, bridge_persistence_queue_state,
+    bridge_persistence_state, bridge_project_directory, bridge_provider_usage_state,
+    bridge_recovery_state, bridge_session_costs_state, bridge_settings_config_state,
+    bridge_skills_state, bridge_thread_mode_catalog, bridge_update_state,
 };
 use super::thread_stream::bridge_thread;
 use crate::api::studio::types::*;
@@ -40,10 +40,15 @@ pub(crate) fn bridge_product_event(
                     state.state,
                 ))
             }
-            StudioProductEventKind::SettingsStateChanged(state) => {
-                BridgeProductEventPayload::SettingsStateChanged(Box::new(bridge_settings_state(
-                    state.state,
-                )))
+            StudioProductEventKind::SettingsConfigStateChanged(state) => {
+                BridgeProductEventPayload::SettingsConfigStateChanged(Box::new(
+                    bridge_settings_config_state(state.state),
+                ))
+            }
+            StudioProductEventKind::ModelCatalogStateChanged(state) => {
+                BridgeProductEventPayload::ModelCatalogStateChanged(Box::new(
+                    bridge_model_catalog_state(state.state),
+                ))
             }
             StudioProductEventKind::RecoveryStateChanged(state) => {
                 BridgeProductEventPayload::RecoveryStateChanged(bridge_recovery_state(state.state))
@@ -116,8 +121,11 @@ pub(crate) fn bridge_product_baseline(
         StudioProductBaselineState::AgentDirectory(state) => {
             BridgeProductBaseline::AgentDirectory(bridge_agent_directory(state.state))
         }
-        StudioProductBaselineState::Settings(state) => {
-            BridgeProductBaseline::Settings(Box::new(bridge_settings_state(state.state)))
+        StudioProductBaselineState::SettingsConfig(state) => BridgeProductBaseline::SettingsConfig(
+            Box::new(bridge_settings_config_state(state.state)),
+        ),
+        StudioProductBaselineState::ModelCatalog(state) => {
+            BridgeProductBaseline::ModelCatalog(Box::new(bridge_model_catalog_state(state.state)))
         }
         StudioProductBaselineState::Recovery(state) => {
             BridgeProductBaseline::Recovery(bridge_recovery_state(state.state))

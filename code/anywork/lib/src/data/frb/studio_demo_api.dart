@@ -63,6 +63,7 @@ class DemoStudioApi
   int get directoryPageFillCount => 0;
 
   List<ProviderSettingsView>? _providers;
+  String? _defaultProviderId;
   List<ModeModelRouteView>? _modeRoutes;
   List<RoleSettingsView>? _roles;
   InstructionsSettingsView _instructions = const InstructionsSettingsView();
@@ -383,7 +384,7 @@ class DemoStudioApi
         _settingsRevision,
         SettingsStateData(
           providers: providers,
-          defaultProviderId: providers.firstOrNull?.id,
+          defaultProviderId: _defaultProviderId ?? providers.firstOrNull?.id,
           modeModelRoutes: modeRoutes,
           roles: roles,
           instructions: _instructions,
@@ -1380,65 +1381,241 @@ class DemoStudioApi
   Future<PersistenceQueueSnapshot> readPersistenceQueue() async =>
       const PersistenceQueueSnapshot.empty();
 
+  /// Demo counterpart of the production field mutation endpoint.
+  ///
+  /// The demo must obey the same contract as the Bridge: one command changes
+  /// one canonical field/resource and never reconstructs a sibling settings
+  /// object from a stale page snapshot.
   @override
-  Future<SettingsStateSnapshot> setModelRole({
-    required int expectedSettingsRevision,
-    required String roleKey,
-    required String providerId,
-    required String model,
-    String? effort,
-  }) async {
+  Future<SettingsStateSnapshot> applySettingsField(
+    int expectedSettingsRevision,
+    SettingsFieldCommand command,
+  ) async {
     _checkSettingsRevision(expectedSettingsRevision);
     final current = await readStudioState();
-    final selected = current.providers
-        .firstWhere((provider) => provider.id == providerId)
-        .allModels
-        .firstWhere((candidate) => candidate.slug == model);
-    final selectedEffort = selected.reasoningEfforts.contains(effort)
-        ? effort
-        : selected.reasoningEfforts.firstOrNull;
-    _roles = [
-      for (final role in current.roles)
-        role.key == roleKey
-            ? RoleSettingsView(
-                key: role.key,
-                providerId: providerId,
-                model: model,
-                effort: selectedEffort ?? '',
-              )
-            : role,
-    ];
-    _settingsRevision += 1;
-    return (await readStudioState()).settingsState;
-  }
-
-  @override
-  Future<SettingsStateSnapshot> setModeModelRoute({
-    required int expectedSettingsRevision,
-    required ThreadModeId mode,
-    required String providerId,
-    required String model,
-    String? effort,
-  }) async {
-    _checkSettingsRevision(expectedSettingsRevision);
-    final current = await readStudioState();
-    final selected = current.providers
-        .firstWhere((provider) => provider.id == providerId)
-        .allModels
-        .firstWhere((candidate) => candidate.slug == model);
-    final selectedEffort = selected.reasoningEfforts.contains(effort)
-        ? effort
-        : selected.reasoningEfforts.firstOrNull ?? '';
-    _modeRoutes = [
-      for (final route in current.modeModelRoutes)
-        if (route.modeId != mode) route,
-      ModeModelRouteView(
-        modeId: mode,
-        providerId: providerId,
-        model: model,
-        effort: selectedEffort ?? '',
-      ),
-    ];
+    final settings = current.settingsState;
+    switch (command) {
+      case InstructionBaseOverrideCommand(:final value):
+        _instructions = _instructions.copyWith(baseOverride: value);
+      case InstructionDeveloperCommand(:final value):
+        _instructions = _instructions.copyWith(developer: value);
+      case InstructionUserCommand(:final value):
+        _instructions = _instructions.copyWith(user: value);
+      case ProjectDocMaxBytesCommand(:final value):
+        _instructions = _instructions.copyWith(projectDocMaxBytes: value);
+      case ProjectDocFallbackFilenamesCommand(:final value):
+        _instructions = _instructions.copyWith(
+          projectDocFallbackFilenames: value,
+        );
+      case SkillsEnabledCommand(:final value):
+        _skills = _skills.copyWith(enabled: value);
+      case SkillsAutoLearnCommand(:final value):
+        _skills = _skills.copyWith(autoLearn: value);
+      case SkillsSystemEnabledCommand(:final value):
+        _skills = _skills.copyWith(systemEnabled: value);
+      case SkillsProjectDirCommand(:final value):
+        _skills = _skills.copyWith(projectDir: value);
+      case SkillsUserDirCommand(:final value):
+        _skills = _skills.copyWith(userDir: value);
+      case SkillsExternalDirsCommand(:final value):
+        _skills = _skills.copyWith(externalDirs: value);
+      case SkillsDisabledCommand(:final value):
+        _skills = _skills.copyWith(disabled: value);
+      case SkillsAutoLearnMinToolCallsCommand(:final value):
+        _skills = _skills.copyWith(autoLearnMinToolCalls: value);
+      case McpServerEnabledCommand():
+      case McpServerTransportCommand():
+      case McpServerEndpointCommand():
+        // The demo fixture has no configurable MCP entries. Keep the command
+        // observable through the same revision/resource boundary as Bridge.
+        _mcpRevision += 1;
+      case GeneralFollowActiveTurnCommand(:final value):
+        _general = _general.copyWith(followActiveTurn: value);
+      case GeneralCompactTimelineCommand(:final value):
+        _general = _general.copyWith(compactTimeline: value);
+      case GeneralSidebarWidthCommand(:final value):
+        _general = _general.copyWith(sidebarWidth: value ?? 336);
+      case GeneralPinnedThreadIdsCommand(:final value):
+        _general = _general.copyWith(pinnedThreadIds: value);
+      case GeneralPinnedProjectIdsCommand(:final value):
+        _general = _general.copyWith(pinnedProjectIds: value);
+      case WebSearchModeCommand(:final value):
+        _webSearch = _webSearch.withConfiguredValues(
+          configuredMode: value,
+          contextSize: _webSearch.contextSize,
+          allowedDomains: _webSearch.allowedDomains,
+          country: _webSearch.country,
+          region: _webSearch.region,
+          city: _webSearch.city,
+          timezone: _webSearch.timezone,
+        );
+      case WebSearchContextSizeCommand(:final value):
+        _webSearch = _webSearch.withConfiguredValues(
+          configuredMode: _webSearch.configuredMode,
+          contextSize: value,
+          allowedDomains: _webSearch.allowedDomains,
+          country: _webSearch.country,
+          region: _webSearch.region,
+          city: _webSearch.city,
+          timezone: _webSearch.timezone,
+        );
+      case WebSearchAllowedDomainsCommand(:final value):
+        _webSearch = _webSearch.withConfiguredValues(
+          configuredMode: _webSearch.configuredMode,
+          contextSize: _webSearch.contextSize,
+          allowedDomains: value,
+          country: _webSearch.country,
+          region: _webSearch.region,
+          city: _webSearch.city,
+          timezone: _webSearch.timezone,
+        );
+      case WebSearchCountryCommand(:final value):
+        _webSearch = _webSearch.withConfiguredValues(
+          configuredMode: _webSearch.configuredMode,
+          contextSize: _webSearch.contextSize,
+          allowedDomains: _webSearch.allowedDomains,
+          country: value,
+          region: _webSearch.region,
+          city: _webSearch.city,
+          timezone: _webSearch.timezone,
+        );
+      case WebSearchRegionCommand(:final value):
+        _webSearch = _webSearch.withConfiguredValues(
+          configuredMode: _webSearch.configuredMode,
+          contextSize: _webSearch.contextSize,
+          allowedDomains: _webSearch.allowedDomains,
+          country: _webSearch.country,
+          region: value,
+          city: _webSearch.city,
+          timezone: _webSearch.timezone,
+        );
+      case WebSearchCityCommand(:final value):
+        _webSearch = _webSearch.withConfiguredValues(
+          configuredMode: _webSearch.configuredMode,
+          contextSize: _webSearch.contextSize,
+          allowedDomains: _webSearch.allowedDomains,
+          country: _webSearch.country,
+          region: _webSearch.region,
+          city: value,
+          timezone: _webSearch.timezone,
+        );
+      case WebSearchTimezoneCommand(:final value):
+        _webSearch = _webSearch.withConfiguredValues(
+          configuredMode: _webSearch.configuredMode,
+          contextSize: _webSearch.contextSize,
+          allowedDomains: _webSearch.allowedDomains,
+          country: _webSearch.country,
+          region: _webSearch.region,
+          city: _webSearch.city,
+          timezone: value,
+        );
+      case DeepSeekWebSearchEnabledCommand(:final value):
+        _deepSeekWebSearch = _deepSeekWebSearch.withConfiguredEnabled(value);
+      case ModeModelCommand(:final modeId, :final providerId, :final model):
+        final mode = ThreadModeId.fromId(modeId);
+        final selected = _findDemoModel(settings.providers, providerId, model);
+        final previous = settings.modeModelRoutes
+            .where((route) => route.modeId == mode)
+            .firstOrNull;
+        final effort =
+            previous != null &&
+                previous.providerId == providerId &&
+                previous.model == model
+            ? previous.effort
+            : selected.defaultReasoningEffort.isNotEmpty
+            ? selected.defaultReasoningEffort
+            : selected.reasoningEfforts.firstOrNull ?? '';
+        _modeRoutes = [
+          for (final route in settings.modeModelRoutes)
+            if (route.modeId != mode) route,
+          ModeModelRouteView(
+            modeId: mode,
+            providerId: providerId,
+            model: model,
+            effort: effort,
+          ),
+        ];
+      case ModeReasoningEffortCommand(:final modeId, :final effort):
+        final mode = ThreadModeId.fromId(modeId);
+        final previous = settings.modeModelRoutes
+            .where((route) => route.modeId == mode)
+            .firstOrNull;
+        final route = previous ?? _demoModeRoute(mode);
+        final selected = _findDemoModel(
+          settings.providers,
+          route.providerId,
+          route.model,
+        );
+        final resolvedEffort =
+            effort != null && selected.reasoningEfforts.contains(effort)
+            ? effort
+            : selected.defaultReasoningEffort.isNotEmpty
+            ? selected.defaultReasoningEffort
+            : selected.reasoningEfforts.firstOrNull ?? '';
+        _modeRoutes = [
+          for (final candidate in settings.modeModelRoutes)
+            if (candidate.modeId != mode) candidate,
+          ModeModelRouteView(
+            modeId: mode,
+            providerId: route.providerId,
+            model: route.model,
+            effort: resolvedEffort,
+          ),
+        ];
+      case RoleModelCommand(:final role, :final providerId, :final model):
+        final selected = _findDemoModel(settings.providers, providerId, model);
+        final previous = settings.roles
+            .where((candidate) => candidate.key == role)
+            .firstOrNull;
+        final effort =
+            previous != null &&
+                previous.providerId == providerId &&
+                previous.model == model
+            ? previous.effort
+            : selected.defaultReasoningEffort.isNotEmpty
+            ? selected.defaultReasoningEffort
+            : selected.reasoningEfforts.firstOrNull ?? '';
+        final next = RoleSettingsView(
+          key: role,
+          providerId: providerId,
+          model: model,
+          effort: effort,
+        );
+        _roles = [
+          for (final candidate in settings.roles)
+            if (candidate.key != role) candidate,
+          next,
+        ];
+      case RoleReasoningEffortCommand(:final role, :final effort):
+        final previous = settings.roles
+            .where((candidate) => candidate.key == role)
+            .firstOrNull;
+        if (previous == null) {
+          throw StateError('unknown demo Agent role: $role');
+        }
+        final selected = _findDemoModel(
+          settings.providers,
+          previous.providerId,
+          previous.model,
+        );
+        final resolvedEffort =
+            effort != null && selected.reasoningEfforts.contains(effort)
+            ? effort
+            : selected.defaultReasoningEffort.isNotEmpty
+            ? selected.defaultReasoningEffort
+            : selected.reasoningEfforts.firstOrNull ?? '';
+        _roles = [
+          for (final candidate in settings.roles)
+            candidate.key == role
+                ? RoleSettingsView(
+                    key: candidate.key,
+                    providerId: candidate.providerId,
+                    model: candidate.model,
+                    effort: resolvedEffort,
+                  )
+                : candidate,
+        ];
+    }
     _settingsRevision += 1;
     return (await readStudioState()).settingsState;
   }
@@ -1671,7 +1848,8 @@ class DemoStudioApi
         ),
       ),
       AgentDirectoryTopic() => AgentDirectoryBaseline(state.agentDirectory),
-      SettingsTopic() => SettingsBaseline(state.settingsState),
+      SettingsConfigTopic() => SettingsConfigBaseline(state.settingsState),
+      ModelCatalogTopic() => ModelCatalogBaseline(state.settingsState),
       RecoveryTopic() => RecoveryBaseline(state.recoveryState),
       McpTopic() => McpBaseline(state.mcpState),
       LspTopic() => LspBaseline(state.lspState),
@@ -1712,7 +1890,8 @@ class DemoStudioApi
       ProjectDirectoryBaseline(:final state) => state.revision,
       ThreadDirectoryBaseline(:final page) => page.revision,
       AgentDirectoryBaseline(:final state) => state.revision,
-      SettingsBaseline(:final state) => state.revision,
+      SettingsConfigBaseline(:final state) => state.revision,
+      ModelCatalogBaseline(:final state) => state.modelCatalogRevision,
       RecoveryBaseline(:final state) => state.revision,
       McpBaseline(:final state) => state.revision,
       LspBaseline(:final state) => state.revision,
@@ -2415,104 +2594,69 @@ class DemoStudioApi
   }
 
   @override
-  Future<SettingsStateSnapshot> saveProviderSettings(
+  Future<SettingsStateSnapshot> saveProvider(
     int expectedSettingsRevision,
-    ProviderSettingsCommand command,
+    ProviderCommand command,
   ) async {
     _checkSettingsRevision(expectedSettingsRevision);
     final current = await readStudioState();
-    _providers = _providersFromSettingsCommand(
-      command,
+    final converted = _providersFromCommands(
+      [command],
       previous: current.providers,
       catalog: _providerCatalog,
     );
-    _roles = _rolesFromSettingsCommand(command);
-    _modeRoutes = command.modeRoutes;
+    final originalId = command.originalId ?? command.id;
+    _providers = [
+      for (final provider in current.providers)
+        if (provider.id != originalId && provider.id != command.id) provider,
+      ...converted,
+    ];
     _settingsRevision += 1;
     return (await readStudioState()).settingsState;
   }
 
   @override
-  Future<SettingsStateSnapshot> saveInstructionsSettings(
+  Future<SettingsStateSnapshot> setDefaultProvider(
     int expectedSettingsRevision,
-    InstructionsSettingsCommand command,
+    String providerId,
   ) async {
     _checkSettingsRevision(expectedSettingsRevision);
-    _instructions = _instructionsFromSettingsCommand(command);
+    if (!(_providers ?? const []).any(
+      (provider) => provider.id == providerId,
+    )) {
+      throw StateError('Provider is unavailable: $providerId');
+    }
+    _defaultProviderId = providerId;
     _settingsRevision += 1;
     return (await readStudioState()).settingsState;
   }
 
   @override
-  Future<SettingsStateSnapshot> saveSkillsSettings(
+  Future<SettingsStateSnapshot> removeProvider(
     int expectedSettingsRevision,
-    SkillsSettingsCommand command,
-  ) async {
+    String providerId, {
+    String? replacementProviderId,
+  }) async {
     _checkSettingsRevision(expectedSettingsRevision);
-    _skills = _skillsFromSettingsCommand(command);
-    _settingsRevision += 1;
-    return (await readStudioState()).settingsState;
-  }
-
-  @override
-  Future<SettingsStateSnapshot> saveMcpSettings(
-    int expectedSettingsRevision,
-    McpSettingsCommand command,
-  ) async {
-    _checkSettingsRevision(expectedSettingsRevision);
-    _settingsRevision += 1;
-    return (await readStudioState()).settingsState;
-  }
-
-  @override
-  Future<SettingsStateSnapshot> saveGeneralSettings(
-    int expectedSettingsRevision,
-    GeneralSettingsCommand command,
-  ) async {
-    _checkSettingsRevision(expectedSettingsRevision);
-    _general = GeneralSettingsView(
-      followActiveTurn: command.followActiveTurn,
-      compactTimeline: command.compactTimeline,
-      sidebarWidth: command.sidebarWidth ?? _general.sidebarWidth,
-      pinnedThreadIds: command.pinnedThreadIds ?? _general.pinnedThreadIds,
-      pinnedProjectIds: command.pinnedProjectIds ?? _general.pinnedProjectIds,
-    );
-    _settingsRevision += 1;
-    return (await readStudioState()).settingsState;
-  }
-
-  @override
-  Future<SettingsStateSnapshot> saveWebSearchSettings(
-    int expectedSettingsRevision,
-    WebSearchSettingsCommand command,
-  ) async {
-    _checkSettingsRevision(expectedSettingsRevision);
-    _webSearch = WebSearchSettingsView(
-      configuredMode: command.mode,
-      effectiveMode: command.mode,
-      availability: command.mode == 'disabled' ? 'disabled' : 'available',
-      contextSize: command.contextSize,
-      allowedDomains: command.allowedDomains,
-      country: command.country,
-      region: command.region,
-      city: command.city,
-      timezone: command.timezone,
-      providerId: 'openai',
-      model: 'gpt-5',
-    );
-    _settingsRevision += 1;
-    return (await readStudioState()).settingsState;
-  }
-
-  @override
-  Future<SettingsStateSnapshot> saveDeepSeekWebSearchSettings(
-    int expectedSettingsRevision,
-    DeepSeekWebSearchSettingsCommand command,
-  ) async {
-    _checkSettingsRevision(expectedSettingsRevision);
-    _deepSeekWebSearch = _deepSeekWebSearch.withConfiguredEnabled(
-      command.enabled,
-    );
+    final current = await readStudioState();
+    if (current.providers.length <= 1) {
+      throw StateError('At least one provider is required');
+    }
+    final replacement =
+        replacementProviderId ??
+        current.providers
+            .firstWhere((provider) => provider.id != providerId)
+            .id;
+    if (!current.providers.any((provider) => provider.id == replacement)) {
+      throw StateError('Replacement provider is unavailable: $replacement');
+    }
+    _providers = [
+      for (final provider in current.providers)
+        if (provider.id != providerId) provider,
+    ];
+    _defaultProviderId = _defaultProviderId == providerId
+        ? replacement
+        : _defaultProviderId;
     _settingsRevision += 1;
     return (await readStudioState()).settingsState;
   }
@@ -2649,6 +2793,26 @@ class DemoStudioApi
         'settings revision conflict: expected $expected, actual $_settingsRevision',
       );
     }
+  }
+
+  ProviderModelView _findDemoModel(
+    List<ProviderSettingsView> providers,
+    String providerId,
+    String model,
+  ) {
+    final provider = providers
+        .where((item) => item.id == providerId)
+        .firstOrNull;
+    if (provider == null) {
+      throw StateError('unknown demo provider: $providerId');
+    }
+    final selected = provider.allModels
+        .where((candidate) => candidate.slug == model)
+        .firstOrNull;
+    if (selected == null) {
+      throw StateError('unknown demo model: $providerId / $model');
+    }
+    return selected;
   }
 
   /// 通知某 Thread 的内容窗口：条目发生真实变化（正文只由窗口交给 UI）。

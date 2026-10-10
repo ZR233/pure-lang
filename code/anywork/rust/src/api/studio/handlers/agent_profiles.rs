@@ -3,7 +3,7 @@ use crate::api::studio::convert::runtime::bridge_agent_profiles;
 use crate::api::studio::convert::settings::bridge_settings_snapshot;
 use crate::api::studio::types::{
     BridgeAgentProfilesStateSnapshot, BridgeAgentWorkspaceMode, BridgeError,
-    BridgeSettingsStateSnapshot,
+    BridgeSettingsStateResponse,
 };
 
 /// 读取配置 owner 已发布的 Agent Profiles 资源快照（完整配置与逐文件诊断）。
@@ -22,7 +22,7 @@ pub async fn set_system_agent_enabled(
     expected_settings_revision: u64,
     profile_id: String,
     enabled: bool,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+) -> Result<BridgeSettingsStateResponse, BridgeError> {
     let bridge = active_bridge().await?;
     Ok(bridge_settings_snapshot(
         bridge
@@ -45,7 +45,7 @@ pub async fn save_user_agent_profile(
     model: String,
     effort: Option<String>,
     workspace_mode: BridgeAgentWorkspaceMode,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+) -> Result<BridgeSettingsStateResponse, BridgeError> {
     let bridge = active_bridge().await?;
     let profile = pl_studio_runtime::UserAgentProfile {
         enabled,

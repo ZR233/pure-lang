@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart'
     show visibleForTesting, ValueNotifier, debugPrint;
 
 import '../../domain/models/studio_models.dart';
+import '../repositories/studio_settings_repository.dart';
 import '../../platform/error_log.dart';
 import '../../rust/api/studio.dart' as frb;
 import '../../rust/api/studio/subscription/product_topic.dart' as frb_topic_sub;

@@ -4,19 +4,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderSettingsInput {
-    pub default_provider_id: String,
-    pub providers: Vec<ProviderInput>,
-    pub mode_routes: Vec<ModeRouteInput>,
-    pub roles: Vec<RoleInput>,
+    /// A single provider edit.  Default provider, mode routes and role routes
+    /// have their own commands and are intentionally absent from this input.
+    pub provider: ProviderInput,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModeRouteInput {
-    pub mode_id: String,
-    pub provider: String,
-    pub model: String,
-    pub effort: String,
+pub struct RemoveProviderInput {
+    #[serde(default)]
+    pub replacement_provider_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -62,53 +59,6 @@ pub struct ProviderModelAutoCompactInput {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoleInput {
-    pub key: String,
-    pub provider: String,
-    pub model: String,
-    pub effort: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InstructionsSettingsInput {
-    pub base_override: String,
-    pub developer: String,
-    pub user: String,
-    pub project_doc_max_bytes: usize,
-    pub project_doc_fallback_filenames: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SkillsSettingsInput {
-    pub enabled: bool,
-    pub auto_learn: bool,
-    pub system_enabled: bool,
-    pub project_dir: String,
-    pub user_dir: String,
-    pub external_dirs: Vec<String>,
-    pub disabled: Vec<String>,
-    pub auto_learn_min_tool_calls: u32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpSettingsInput {
-    pub servers: Vec<McpServerInput>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpServerInput {
-    pub id: String,
-    pub enabled: bool,
-    pub transport: String,
-    pub endpoint: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "scope")]
 pub enum McpResetInput {
     Server { server_id: String },
@@ -136,38 +86,217 @@ pub enum ProviderSecretInput {
     Clear,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GeneralSettingsInput {
-    pub follow_active_turn: bool,
-    pub compact_timeline: bool,
-    #[serde(default)]
-    pub sidebar_width: Option<u16>,
-    #[serde(default)]
-    pub pinned_thread_ids: Vec<String>,
-    #[serde(default)]
-    pub pinned_project_ids: Vec<String>,
+/// One settings field/resource mutation.  The bridge accepts exactly one
+/// typed intent per call; the runtime fills all sibling values from its
+/// canonical configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum SettingsFieldInput {
+    InstructionBaseOverride {
+        value: String,
+    },
+    InstructionDeveloper {
+        value: String,
+    },
+    InstructionUser {
+        value: String,
+    },
+    ProjectDocMaxBytes {
+        value: u64,
+    },
+    ProjectDocFallbackFilenames {
+        value: Vec<String>,
+    },
+    SkillsEnabled {
+        value: bool,
+    },
+    SkillsAutoLearn {
+        value: bool,
+    },
+    SkillsSystemEnabled {
+        value: bool,
+    },
+    SkillsProjectDir {
+        value: String,
+    },
+    SkillsUserDir {
+        value: String,
+    },
+    SkillsExternalDirs {
+        value: Vec<String>,
+    },
+    SkillsDisabled {
+        value: Vec<String>,
+    },
+    SkillsAutoLearnMinToolCalls {
+        value: u32,
+    },
+    McpServerEnabled {
+        id: String,
+        value: bool,
+    },
+    McpServerTransport {
+        id: String,
+        transport: String,
+    },
+    McpServerEndpoint {
+        id: String,
+        endpoint: String,
+    },
+    GeneralFollowActiveTurn {
+        value: bool,
+    },
+    GeneralCompactTimeline {
+        value: bool,
+    },
+    GeneralSidebarWidth {
+        value: Option<u16>,
+    },
+    GeneralPinnedThreadIds {
+        value: Vec<String>,
+    },
+    GeneralPinnedProjectIds {
+        value: Vec<String>,
+    },
+    WebSearchMode {
+        value: String,
+    },
+    WebSearchContextSize {
+        value: Option<String>,
+    },
+    WebSearchAllowedDomains {
+        value: Vec<String>,
+    },
+    WebSearchCountry {
+        value: Option<String>,
+    },
+    WebSearchRegion {
+        value: Option<String>,
+    },
+    WebSearchCity {
+        value: Option<String>,
+    },
+    WebSearchTimezone {
+        value: Option<String>,
+    },
+    DeepSeekWebSearchEnabled {
+        value: bool,
+    },
+    ModeModel {
+        mode_id: String,
+        provider_id: String,
+        model: String,
+    },
+    ModeReasoningEffort {
+        mode_id: String,
+        effort: Option<String>,
+    },
+    RoleModel {
+        role: String,
+        provider_id: String,
+        model: String,
+    },
+    RoleReasoningEffort {
+        role: String,
+        effort: Option<String>,
+    },
 }
 
-/// Web 搜索设置的 typed bridge 输入。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebSearchSettingsInput {
-    pub mode: String,
-    pub context_size: Option<String>,
-    #[serde(default)]
-    pub allowed_domains: Vec<String>,
-    pub country: Option<String>,
-    pub region: Option<String>,
-    pub city: Option<String>,
-    pub timezone: Option<String>,
-}
-
-/// DeepSeek 原生 Web 搜索开关的 typed bridge 输入。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeepSeekWebSearchSettingsInput {
-    pub enabled: bool,
+impl From<SettingsFieldInput> for pl_protocol::studio::SettingsFieldUpdate {
+    fn from(value: SettingsFieldInput) -> Self {
+        use pl_protocol::studio::SettingsFieldUpdate as Update;
+        match value {
+            SettingsFieldInput::InstructionBaseOverride { value } => {
+                Update::InstructionBaseOverride { value }
+            }
+            SettingsFieldInput::InstructionDeveloper { value } => {
+                Update::InstructionDeveloper { value }
+            }
+            SettingsFieldInput::InstructionUser { value } => Update::InstructionUser { value },
+            SettingsFieldInput::ProjectDocMaxBytes { value } => {
+                Update::ProjectDocMaxBytes { value }
+            }
+            SettingsFieldInput::ProjectDocFallbackFilenames { value } => {
+                Update::ProjectDocFallbackFilenames { value }
+            }
+            SettingsFieldInput::SkillsEnabled { value } => Update::SkillsEnabled { value },
+            SettingsFieldInput::SkillsAutoLearn { value } => Update::SkillsAutoLearn { value },
+            SettingsFieldInput::SkillsSystemEnabled { value } => {
+                Update::SkillsSystemEnabled { value }
+            }
+            SettingsFieldInput::SkillsProjectDir { value } => Update::SkillsProjectDir { value },
+            SettingsFieldInput::SkillsUserDir { value } => Update::SkillsUserDir { value },
+            SettingsFieldInput::SkillsExternalDirs { value } => {
+                Update::SkillsExternalDirs { value }
+            }
+            SettingsFieldInput::SkillsDisabled { value } => Update::SkillsDisabled { value },
+            SettingsFieldInput::SkillsAutoLearnMinToolCalls { value } => {
+                Update::SkillsAutoLearnMinToolCalls { value }
+            }
+            SettingsFieldInput::McpServerEnabled { id, value } => {
+                Update::McpServerEnabled { id, value }
+            }
+            SettingsFieldInput::McpServerTransport { id, transport } => {
+                Update::McpServerTransport { id, transport }
+            }
+            SettingsFieldInput::McpServerEndpoint { id, endpoint } => {
+                Update::McpServerEndpoint { id, endpoint }
+            }
+            SettingsFieldInput::GeneralFollowActiveTurn { value } => {
+                Update::GeneralFollowActiveTurn { value }
+            }
+            SettingsFieldInput::GeneralCompactTimeline { value } => {
+                Update::GeneralCompactTimeline { value }
+            }
+            SettingsFieldInput::GeneralSidebarWidth { value } => {
+                Update::GeneralSidebarWidth { value }
+            }
+            SettingsFieldInput::GeneralPinnedThreadIds { value } => {
+                Update::GeneralPinnedThreadIds { value }
+            }
+            SettingsFieldInput::GeneralPinnedProjectIds { value } => {
+                Update::GeneralPinnedProjectIds { value }
+            }
+            SettingsFieldInput::WebSearchMode { value } => Update::WebSearchMode { value },
+            SettingsFieldInput::WebSearchContextSize { value } => {
+                Update::WebSearchContextSize { value }
+            }
+            SettingsFieldInput::WebSearchAllowedDomains { value } => {
+                Update::WebSearchAllowedDomains { value }
+            }
+            SettingsFieldInput::WebSearchCountry { value } => Update::WebSearchCountry { value },
+            SettingsFieldInput::WebSearchRegion { value } => Update::WebSearchRegion { value },
+            SettingsFieldInput::WebSearchCity { value } => Update::WebSearchCity { value },
+            SettingsFieldInput::WebSearchTimezone { value } => Update::WebSearchTimezone { value },
+            SettingsFieldInput::DeepSeekWebSearchEnabled { value } => {
+                Update::DeepSeekWebSearchEnabled { value }
+            }
+            SettingsFieldInput::ModeModel {
+                mode_id,
+                provider_id,
+                model,
+            } => Update::ModeModel {
+                mode_id,
+                provider_id,
+                model,
+            },
+            SettingsFieldInput::ModeReasoningEffort { mode_id, effort } => {
+                Update::ModeReasoningEffort { mode_id, effort }
+            }
+            SettingsFieldInput::RoleModel {
+                role,
+                provider_id,
+                model,
+            } => Update::RoleModel {
+                role,
+                provider_id,
+                model,
+            },
+            SettingsFieldInput::RoleReasoningEffort { role, effort } => {
+                Update::RoleReasoningEffort { role, effort }
+            }
+        }
+    }
 }
 
 /// Web 搜索配置、有效状态和自动 OpenAI backend 的 canonical bridge 快照。
@@ -229,8 +358,6 @@ pub struct BridgeModeModelSettingsDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeProviderSettingsDto {
-    pub effective_models: Vec<BridgeModelDescriptor>,
-    pub model_catalog: BridgeModelCatalogStatusDto,
     pub pricing_enabled: bool,
     pub id: String,
     pub template_kind: String,
@@ -249,6 +376,16 @@ pub struct BridgeProviderSettingsDto {
     pub model_connection_modes: Vec<BridgeModelConnectionSettingsDto>,
     pub model_auto_compact_limits: Vec<BridgeModelAutoCompactSettingsDto>,
     pub catalog_id: Option<String>,
+}
+
+/// A provider's observed model directory. This belongs to the catalog clock,
+/// not to the provider configuration snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeModelCatalogProviderDto {
+    pub id: String,
+    pub effective_models: Vec<BridgeModelDescriptor>,
+    pub model_catalog: BridgeModelCatalogStatusDto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

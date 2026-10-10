@@ -99,7 +99,7 @@ impl StudioRuntime {
     pub async fn refresh_model_catalog(
         &self,
         request: pl_protocol::studio::RefreshModelCatalogRequest,
-    ) -> Result<pl_protocol::studio::StudioSettingsSnapshot> {
+    ) -> Result<pl_protocol::studio::ModelCatalogSnapshot> {
         let id = ProviderId::new(request.provider_id)?;
         loop {
             let (generation, mut done) = {
@@ -119,7 +119,9 @@ impl StudioRuntime {
             // Address/credential changes cancel the old generation. A manual refresh must
             // observe the current instance rather than return that cancelled query as success.
             if self.config_runtime.model_catalog_generation(&id)? == generation {
-                return self.read_settings();
+                let settings = self.config_runtime.read()?;
+                let catalog = self.config_runtime.read_catalog()?;
+                return super::settings_api::model_catalog_snapshot(&settings, &catalog);
             }
         }
     }

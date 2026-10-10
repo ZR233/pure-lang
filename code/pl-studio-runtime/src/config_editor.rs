@@ -3,18 +3,13 @@ use std::collections::BTreeSet;
 
 use crate::{PureError, Result};
 
-use crate::config::{
-    ModelRouteConfig, ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig,
-    StudioRole,
-};
+use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort, StudioConfig};
 use crate::first_run::ProviderTemplateKind;
 use pl_model::config::{
-    AgentModelConfig, ProviderConfig, ProviderModelCatalogConfig, ProviderPresetId,
-    builtin_provider_catalog,
+    ProviderConfig, ProviderModelCatalogConfig, ProviderPresetId, builtin_provider_catalog,
 };
 use pl_model::model::{ModelInfo, ModelTransportProfile};
 use pl_model::provider::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProtocol};
-use pl_protocol::ThreadModeId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderModelEdit {
@@ -39,30 +34,6 @@ pub struct ProviderEdit {
     pub model_connection_modes: BTreeMap<String, ProviderConnectionMode>,
     /// 该 provider 实例完整的上下文压缩阈值用户覆盖集合；未列出模型使用默认值。
     pub model_auto_compact_limits: BTreeMap<String, u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderSettingsEdit {
-    pub default_provider: Option<String>,
-    pub providers: Vec<ProviderEdit>,
-    pub mode_routes: Vec<ModeRouteEdit>,
-    pub roles: Vec<RoleEdit>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModeRouteEdit {
-    pub mode_id: String,
-    pub provider: String,
-    pub model: String,
-    pub effort: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RoleEdit {
-    pub key: String,
-    pub provider: String,
-    pub model: String,
-    pub effort: String,
 }
 
 /// # Errors
@@ -241,278 +212,135 @@ impl ProviderEdit {
 
         Ok(EditedProvider {
             id: ProviderId::new(provider_key)?,
-            default_model,
             config,
         })
     }
+
+    /// Applies one provider edit while preserving every other settings domain.
+    ///
+    /// The old aggregate editor rebuilt providers, mode routes and role routes
+    /// from one page snapshot.  That made a stale settings page capable of
+    /// reverting an unrelated route.  Single provider commands are deliberately
+    /// constrained to an existing id or a new id; identity changes have their
+    /// own explicit removal/rename workflow and cannot silently rewrite routes.
+    pub fn to_single_config(&self, current: &StudioConfig) -> Result<StudioConfig> {
+        let provider_key = self.provider_key()?;
+        let provider_id = ProviderId::new(provider_key.clone())?;
+        let original_id = self
+            .original_key
+            .as_deref()
+            .map(ProviderId::new)
+            .transpose()?
+            .unwrap_or_else(|| provider_id.clone());
+        if self.original_key.is_some() && original_id != provider_id {
+            return Err(PureError::ConfigError(
+                "provider identity changes require an explicit rename operation".into(),
+            ));
+        }
+        if self.original_key.is_none() && current.models.providers.contains_key(&provider_id) {
+            return Err(PureError::ConfigError(format!(
+                "provider already exists: {provider_id}"
+            )));
+        }
+        let edited = self.to_provider_config(current.models.providers.get(&original_id))?;
+        let mut next = current.clone();
+        next.models.providers.insert(edited.id, edited.config);
+        next.validate_declarations()?;
+        Ok(next)
+    }
+}
+
+/// Removes one provider.  Route migration is only performed when the caller
+/// explicitly supplies a replacement provider; an old page snapshot can never
+/// cause an implicit route rewrite.
+pub fn remove_provider(
+    current: &StudioConfig,
+    provider_key: &str,
+    replacement_key: Option<&str>,
+) -> Result<StudioConfig> {
+    if current.models.providers.len() <= 1 {
+        return Err(PureError::ConfigError(
+            "at least one provider is required".into(),
+        ));
+    }
+    let provider_id = ProviderId::new(provider_key.trim())?;
+    if !current.models.providers.contains_key(&provider_id) {
+        return Err(PureError::ConfigError(format!(
+            "provider does not exist: {provider_id}"
+        )));
+    }
+    let replacement_id = replacement_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ProviderId::new)
+        .transpose()?;
+    if replacement_id.as_ref() == Some(&provider_id) {
+        return Err(PureError::ConfigError(
+            "provider replacement must differ from the removed provider".into(),
+        ));
+    }
+    let replacement = replacement_id
+        .as_ref()
+        .map(|id| {
+            current
+                .models
+                .providers
+                .get(id)
+                .ok_or_else(|| PureError::ConfigError(format!("provider does not exist: {id}")))
+        })
+        .transpose()?;
+    let mut next = current.clone();
+    next.models.providers.remove(&provider_id);
+
+    let migrate_route = |route: &mut ModelRouteConfig| -> Result<()> {
+        if route.provider != provider_id {
+            return Ok(());
+        }
+        let replacement_id = replacement_id.as_ref().ok_or_else(|| {
+            PureError::ConfigError(format!(
+                "provider {provider_id} is still referenced by a route; specify replacement_provider_id"
+            ))
+        })?;
+        let replacement = replacement.expect("validated replacement provider");
+        let models = replacement.effective_models()?;
+        let model = models
+            .iter()
+            .find(|model| model.slug == route.model)
+            .or_else(|| models.first())
+            .ok_or_else(|| {
+                PureError::ConfigError(format!(
+                    "replacement provider has no usable models: {replacement_id}"
+                ))
+            })?;
+        let effort = route
+            .effort
+            .as_ref()
+            .filter(|effort| {
+                model
+                    .supported_efforts()
+                    .iter()
+                    .any(|value| value == effort.as_str())
+            })
+            .cloned()
+            .or_else(|| model.default_effort().map(ReasoningEffort::new));
+        route.provider = replacement_id.clone();
+        route.model = model.slug.clone();
+        route.effort = effort;
+        Ok(())
+    };
+    for route in next.models.routes.values_mut() {
+        migrate_route(route)?;
+    }
+    for route in next.mode_model_routes.values_mut() {
+        migrate_route(route)?;
+    }
+    next.validate_declarations()?;
+    Ok(next)
 }
 
 struct EditedProvider {
     id: ProviderId,
     config: ProviderConfig,
-    default_model: String,
-}
-
-impl ProviderSettingsEdit {
-    pub fn to_config(&self, current: &StudioConfig) -> Result<StudioConfig> {
-        if self.providers.is_empty() {
-            return Err(PureError::ConfigError(
-                "at least one provider is required".to_string(),
-            ));
-        }
-
-        let mut provider_keys = BTreeSet::new();
-        let mut providers = BTreeMap::new();
-        let mut default_models = BTreeMap::new();
-        for provider in &self.providers {
-            let provider_key = provider.provider_key()?;
-            if !provider_keys.insert(provider_key.clone()) {
-                return Err(PureError::ConfigError(format!(
-                    "duplicate provider key: {provider_key}"
-                )));
-            }
-            let provider_id = ProviderId::new(provider_key)?;
-            let current_provider_id = provider
-                .original_key
-                .as_deref()
-                .map(ProviderId::new)
-                .transpose()?
-                .unwrap_or_else(|| provider_id.clone());
-            let edited =
-                provider.to_provider_config(current.models.providers.get(&current_provider_id))?;
-            default_models.insert(edited.id.clone(), edited.default_model);
-            providers.insert(edited.id, edited.config);
-        }
-
-        let fallback_provider = self
-            .default_provider
-            .as_deref()
-            .map(str::trim)
-            .and_then(|key| ProviderId::new(key).ok())
-            .filter(|key| providers.contains_key(key))
-            .or_else(|| {
-                current
-                    .mode_model_routes
-                    .get(&ThreadModeId::simple())
-                    .map(|route| route.provider.clone())
-                    .filter(|provider| providers.contains_key(provider))
-            })
-            .or_else(|| providers.keys().next().cloned())
-            .ok_or_else(|| {
-                PureError::ConfigError("at least one provider is required".to_string())
-            })?;
-
-        let routes = if self.roles.is_empty() {
-            StudioRole::child_roles()
-                .into_iter()
-                .map(|role| {
-                    let route = current.models.routes.get(&role.id());
-                    Ok((
-                        role.id(),
-                        reconciled_route(route, &providers, &default_models, &fallback_provider)?,
-                    ))
-                })
-                .collect::<Result<BTreeMap<_, _>>>()?
-        } else {
-            role_edits_to_routes(&self.roles, &providers, &default_models, &fallback_provider)?
-        };
-        let mode_model_routes = if self.mode_routes.is_empty() {
-            current
-                .mode_model_routes
-                .iter()
-                .map(|(mode, route)| {
-                    Ok((
-                        mode.clone(),
-                        reconciled_route(
-                            Some(route),
-                            &providers,
-                            &default_models,
-                            &fallback_provider,
-                        )?,
-                    ))
-                })
-                .collect::<Result<BTreeMap<_, _>>>()?
-        } else {
-            mode_route_edits_to_routes(&self.mode_routes, &providers)?
-        };
-        let mut config = StudioConfig {
-            schema_version: STUDIO_CONFIG_SCHEMA_VERSION,
-            models: AgentModelConfig { providers, routes },
-            mode_model_routes,
-            disabled_system_agents: current.disabled_system_agents.clone(),
-            web_search: current.web_search.clone(),
-            deepseek_web_search: current.deepseek_web_search.clone(),
-            runtime: current.runtime.clone(),
-            instructions: current.instructions.clone(),
-            skills: current.skills.clone(),
-            mcp: current.mcp.clone(),
-            lsp: current.lsp.clone(),
-            ui: current.ui.clone(),
-        };
-        crate::config::normalize_builtin_mcp_server_states(&mut config);
-        config.validate_declarations()?;
-        Ok(config)
-    }
-}
-
-fn role_edits_to_routes(
-    edits: &[RoleEdit],
-    providers: &BTreeMap<ProviderId, ProviderConfig>,
-    default_models: &BTreeMap<ProviderId, String>,
-    fallback_provider: &ProviderId,
-) -> Result<BTreeMap<pl_model::config::AgentRoleId, ModelRouteConfig>> {
-    let mut routes = BTreeMap::new();
-    let mut seen = BTreeSet::new();
-
-    for edit in edits {
-        let role = StudioRole::from_key(edit.key.trim()).ok_or_else(|| {
-            let key = &edit.key;
-            PureError::ConfigError(format!("unsupported model role: {key}"))
-        })?;
-        if role == StudioRole::Planner {
-            return Err(PureError::ConfigError(
-                "planner is a root identity, not a child model route".to_string(),
-            ));
-        }
-        if !seen.insert(role) {
-            return Err(PureError::ConfigError(format!(
-                "duplicate model role: {}",
-                role.key()
-            )));
-        }
-        routes.insert(role.id(), role_edit_to_route(edit, providers, role)?);
-    }
-
-    // Complete requests never need a default from an unrelated provider, whose
-    // online inventory may be empty or may have withdrawn its old selection.
-    let child_roles = StudioRole::child_roles();
-    if routes.len() < child_roles.len() {
-        let fallback_route =
-            route_for_provider_default(providers, default_models, fallback_provider)?;
-        for role in child_roles {
-            routes
-                .entry(role.id())
-                .or_insert_with(|| fallback_route.clone());
-        }
-    }
-
-    Ok(routes)
-}
-
-fn mode_route_edits_to_routes(
-    edits: &[ModeRouteEdit],
-    providers: &BTreeMap<ProviderId, ProviderConfig>,
-) -> Result<BTreeMap<ThreadModeId, ModelRouteConfig>> {
-    let mut routes = BTreeMap::new();
-    for edit in edits {
-        let mode = ThreadModeId::new(edit.mode_id.trim().to_string())
-            .map_err(|error| PureError::ConfigError(error.to_string()))?;
-        if routes.contains_key(&mode) {
-            return Err(PureError::ConfigError(format!(
-                "duplicate Thread Mode model route: {mode}"
-            )));
-        }
-        let route = route_values_to_route(
-            &edit.provider,
-            &edit.model,
-            &edit.effort,
-            providers,
-            &format!("Thread Mode {mode}"),
-        )?;
-        routes.insert(mode, route);
-    }
-    Ok(routes)
-}
-
-fn role_edit_to_route(
-    edit: &RoleEdit,
-    providers: &BTreeMap<ProviderId, ProviderConfig>,
-    role: StudioRole,
-) -> Result<ModelRouteConfig> {
-    route_values_to_route(
-        &edit.provider,
-        &edit.model,
-        &edit.effort,
-        providers,
-        &format!("role {}", role.key()),
-    )
-}
-
-fn route_values_to_route(
-    provider_value: &str,
-    model_value: &str,
-    effort_value: &str,
-    providers: &BTreeMap<ProviderId, ProviderConfig>,
-    subject: &str,
-) -> Result<ModelRouteConfig> {
-    let provider_key = non_empty_trimmed(provider_value, "route provider")?;
-    let provider_id = ProviderId::new(provider_key.clone())?;
-    if !providers.contains_key(&provider_id) {
-        return Err(PureError::ConfigError(format!(
-            "{subject} references missing provider: {provider_key}"
-        )));
-    }
-    let model_slug = non_empty_trimmed(model_value, "route model")?;
-    let effort = trim_optional(Some(effort_value));
-
-    Ok(ModelRouteConfig {
-        provider: provider_id,
-        model: model_slug,
-        effort: effort.map(ReasoningEffort::new),
-    })
-}
-
-fn reconciled_route(
-    route: Option<&ModelRouteConfig>,
-    providers: &BTreeMap<ProviderId, ProviderConfig>,
-    default_models: &BTreeMap<ProviderId, String>,
-    fallback_provider: &ProviderId,
-) -> Result<ModelRouteConfig> {
-    if let Some(route) = route {
-        if !providers.contains_key(&route.provider) {
-            return Err(PureError::ConfigError(format!(
-                "model route references missing provider: {}",
-                route.provider
-            )));
-        }
-        return Ok(route.clone());
-    }
-
-    route_for_provider_default(providers, default_models, fallback_provider)
-}
-
-fn route_for_provider_default(
-    providers: &BTreeMap<ProviderId, ProviderConfig>,
-    default_models: &BTreeMap<ProviderId, String>,
-    provider_key: &ProviderId,
-) -> Result<ModelRouteConfig> {
-    let provider = providers.get(provider_key).ok_or_else(|| {
-        PureError::ConfigError(format!(
-            "default provider references missing provider: {provider_key}"
-        ))
-    })?;
-    let default_model = default_models.get(provider_key).ok_or_else(|| {
-        PureError::ConfigError(format!(
-            "default model is missing for provider: {provider_key}"
-        ))
-    })?;
-    let models = provider.effective_models()?;
-    let model = models
-        .iter()
-        .find(|model| model.slug == *default_model)
-        .ok_or_else(|| {
-            PureError::ConfigError(format!(
-                "default model is missing from provider: {}",
-                default_model
-            ))
-        })?;
-    let effort = model.default_effort();
-
-    Ok(ModelRouteConfig {
-        provider: provider_key.clone(),
-        model: default_model.clone(),
-        effort: effort.map(ReasoningEffort::new),
-    })
 }
 
 fn non_empty_trimmed(value: &str, name: &str) -> Result<String> {

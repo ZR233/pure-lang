@@ -44,14 +44,24 @@ final class AgentDirectoryTopic extends ProductTopic {
   int get hashCode => 0x0103;
 }
 
-final class SettingsTopic extends ProductTopic {
-  const SettingsTopic();
+final class SettingsConfigTopic extends ProductTopic {
+  const SettingsConfigTopic();
 
   @override
-  bool operator ==(Object other) => other is SettingsTopic;
+  bool operator ==(Object other) => other is SettingsConfigTopic;
 
   @override
   int get hashCode => 0x0104;
+}
+
+final class ModelCatalogTopic extends ProductTopic {
+  const ModelCatalogTopic();
+
+  @override
+  bool operator ==(Object other) => other is ModelCatalogTopic;
+
+  @override
+  int get hashCode => 0x0117;
 }
 
 final class RecoveryTopic extends ProductTopic {
@@ -205,8 +215,14 @@ final class AgentDirectoryBaseline extends ProductTopicBaselineState {
   final AgentDirectoryState state;
 }
 
-final class SettingsBaseline extends ProductTopicBaselineState {
-  const SettingsBaseline(this.state);
+final class SettingsConfigBaseline extends ProductTopicBaselineState {
+  const SettingsConfigBaseline(this.state);
+
+  final SettingsStateSnapshot state;
+}
+
+final class ModelCatalogBaseline extends ProductTopicBaselineState {
+  const ModelCatalogBaseline(this.state);
 
   final SettingsStateSnapshot state;
 }
@@ -390,7 +406,8 @@ sealed class ProductTopicEventPayload {
     ProjectDirectoryChangedPayload() => const ProjectDirectoryTopic(),
     ThreadDirectoryChangedPayload() => const ThreadDirectoryTopic(),
     AgentDirectoryChangedPayload() => const AgentDirectoryTopic(),
-    SettingsStateChangedPayload() => const SettingsTopic(),
+    SettingsConfigStateChangedPayload() => const SettingsConfigTopic(),
+    ModelCatalogStateChangedPayload() => const ModelCatalogTopic(),
     RecoveryStateChangedPayload() => const RecoveryTopic(),
     McpStateChangedPayload() => const McpTopic(),
     LspStateChangedPayload() => const LspTopic(),
@@ -436,8 +453,14 @@ final class AgentDirectoryChangedPayload extends ProductTopicEventPayload {
   final AgentDirectoryState state;
 }
 
-final class SettingsStateChangedPayload extends ProductTopicEventPayload {
-  const SettingsStateChangedPayload(this.state);
+final class SettingsConfigStateChangedPayload extends ProductTopicEventPayload {
+  const SettingsConfigStateChangedPayload(this.state);
+
+  final SettingsStateSnapshot state;
+}
+
+final class ModelCatalogStateChangedPayload extends ProductTopicEventPayload {
+  const ModelCatalogStateChangedPayload(this.state);
 
   final SettingsStateSnapshot state;
 }

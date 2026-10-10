@@ -16,7 +16,7 @@ import 'updater.dart';
 part 'response.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class ArchiveThreadResult {
   final String archivedRootId;
@@ -347,6 +347,82 @@ sealed class BridgeMcpStateSnapshot with _$BridgeMcpStateSnapshot {
       BridgeMcpStateSnapshot_Failed;
   const factory BridgeMcpStateSnapshot.stopped(BridgeStoppedResource field0) =
       BridgeMcpStateSnapshot_Stopped;
+}
+
+class BridgeModelCatalogSnapshotDto {
+  final BigInt revision;
+  final PlatformInt64 updatedAt;
+  final List<BridgeModelCatalogProviderDto> providers;
+
+  const BridgeModelCatalogSnapshotDto({
+    required this.revision,
+    required this.updatedAt,
+    required this.providers,
+  });
+
+  @override
+  int get hashCode =>
+      revision.hashCode ^ updatedAt.hashCode ^ providers.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelCatalogSnapshotDto &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt &&
+          providers == other.providers;
+}
+
+class BridgeModelCatalogStateData {
+  final List<BridgeModelCatalogProviderDto> providers;
+
+  const BridgeModelCatalogStateData({required this.providers});
+
+  @override
+  int get hashCode => providers.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelCatalogStateData &&
+          runtimeType == other.runtimeType &&
+          providers == other.providers;
+}
+
+@freezed
+sealed class BridgeModelCatalogStateSnapshot
+    with _$BridgeModelCatalogStateSnapshot {
+  const BridgeModelCatalogStateSnapshot._();
+
+  const factory BridgeModelCatalogStateSnapshot.uninitialized(
+    BridgeUninitializedResource field0,
+  ) = BridgeModelCatalogStateSnapshot_Uninitialized;
+  const factory BridgeModelCatalogStateSnapshot.loading(
+    BridgeLoadingResource field0,
+  ) = BridgeModelCatalogStateSnapshot_Loading;
+  const factory BridgeModelCatalogStateSnapshot.ready({
+    required BridgeReadyResource resource,
+    required BridgeModelCatalogStateData value,
+  }) = BridgeModelCatalogStateSnapshot_Ready;
+  const factory BridgeModelCatalogStateSnapshot.refreshing({
+    required BridgeRefreshingResource resource,
+    required BridgeModelCatalogStateData value,
+  }) = BridgeModelCatalogStateSnapshot_Refreshing;
+  const factory BridgeModelCatalogStateSnapshot.stale({
+    required BridgeStaleResource resource,
+    required BridgeModelCatalogStateData value,
+  }) = BridgeModelCatalogStateSnapshot_Stale;
+  const factory BridgeModelCatalogStateSnapshot.degraded({
+    required BridgeDegradedResource resource,
+    required BridgeModelCatalogStateData value,
+  }) = BridgeModelCatalogStateSnapshot_Degraded;
+  const factory BridgeModelCatalogStateSnapshot.failed(
+    BridgeFailedResource field0,
+  ) = BridgeModelCatalogStateSnapshot_Failed;
+  const factory BridgeModelCatalogStateSnapshot.stopped(
+    BridgeStoppedResource field0,
+  ) = BridgeModelCatalogStateSnapshot_Stopped;
 }
 
 enum BridgeModelMatchState { matched, mismatched, unreported, legacyUnknown }
@@ -944,59 +1020,103 @@ class BridgeSessionCostsState {
           cost == other.cost;
 }
 
-class BridgeSettingsStateData {
-  final BigInt modelCatalogRevision;
+class BridgeSettingsConfigSnapshotDto {
+  final BigInt revision;
+  final PlatformInt64 updatedAt;
   final BridgeStudioSettingsDto settings;
 
-  const BridgeSettingsStateData({
-    required this.modelCatalogRevision,
+  const BridgeSettingsConfigSnapshotDto({
+    required this.revision,
+    required this.updatedAt,
     required this.settings,
   });
 
   @override
-  int get hashCode => modelCatalogRevision.hashCode ^ settings.hashCode;
+  int get hashCode =>
+      revision.hashCode ^ updatedAt.hashCode ^ settings.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeSettingsStateData &&
+      other is BridgeSettingsConfigSnapshotDto &&
           runtimeType == other.runtimeType &&
-          modelCatalogRevision == other.modelCatalogRevision &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt &&
+          settings == other.settings;
+}
+
+class BridgeSettingsConfigStateData {
+  final BridgeStudioSettingsDto settings;
+
+  const BridgeSettingsConfigStateData({required this.settings});
+
+  @override
+  int get hashCode => settings.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSettingsConfigStateData &&
+          runtimeType == other.runtimeType &&
           settings == other.settings;
 }
 
 @freezed
-sealed class BridgeSettingsStateSnapshot with _$BridgeSettingsStateSnapshot {
-  const BridgeSettingsStateSnapshot._();
+sealed class BridgeSettingsConfigStateSnapshot
+    with _$BridgeSettingsConfigStateSnapshot {
+  const BridgeSettingsConfigStateSnapshot._();
 
-  const factory BridgeSettingsStateSnapshot.uninitialized(
+  const factory BridgeSettingsConfigStateSnapshot.uninitialized(
     BridgeUninitializedResource field0,
-  ) = BridgeSettingsStateSnapshot_Uninitialized;
-  const factory BridgeSettingsStateSnapshot.loading(
+  ) = BridgeSettingsConfigStateSnapshot_Uninitialized;
+  const factory BridgeSettingsConfigStateSnapshot.loading(
     BridgeLoadingResource field0,
-  ) = BridgeSettingsStateSnapshot_Loading;
-  const factory BridgeSettingsStateSnapshot.ready({
+  ) = BridgeSettingsConfigStateSnapshot_Loading;
+  const factory BridgeSettingsConfigStateSnapshot.ready({
     required BridgeReadyResource resource,
-    required BridgeSettingsStateData value,
-  }) = BridgeSettingsStateSnapshot_Ready;
-  const factory BridgeSettingsStateSnapshot.refreshing({
+    required BridgeSettingsConfigStateData value,
+  }) = BridgeSettingsConfigStateSnapshot_Ready;
+  const factory BridgeSettingsConfigStateSnapshot.refreshing({
     required BridgeRefreshingResource resource,
-    required BridgeSettingsStateData value,
-  }) = BridgeSettingsStateSnapshot_Refreshing;
-  const factory BridgeSettingsStateSnapshot.stale({
+    required BridgeSettingsConfigStateData value,
+  }) = BridgeSettingsConfigStateSnapshot_Refreshing;
+  const factory BridgeSettingsConfigStateSnapshot.stale({
     required BridgeStaleResource resource,
-    required BridgeSettingsStateData value,
-  }) = BridgeSettingsStateSnapshot_Stale;
-  const factory BridgeSettingsStateSnapshot.degraded({
+    required BridgeSettingsConfigStateData value,
+  }) = BridgeSettingsConfigStateSnapshot_Stale;
+  const factory BridgeSettingsConfigStateSnapshot.degraded({
     required BridgeDegradedResource resource,
-    required BridgeSettingsStateData value,
-  }) = BridgeSettingsStateSnapshot_Degraded;
-  const factory BridgeSettingsStateSnapshot.failed(
+    required BridgeSettingsConfigStateData value,
+  }) = BridgeSettingsConfigStateSnapshot_Degraded;
+  const factory BridgeSettingsConfigStateSnapshot.failed(
     BridgeFailedResource field0,
-  ) = BridgeSettingsStateSnapshot_Failed;
-  const factory BridgeSettingsStateSnapshot.stopped(
+  ) = BridgeSettingsConfigStateSnapshot_Failed;
+  const factory BridgeSettingsConfigStateSnapshot.stopped(
     BridgeStoppedResource field0,
-  ) = BridgeSettingsStateSnapshot_Stopped;
+  ) = BridgeSettingsConfigStateSnapshot_Stopped;
+}
+
+/// Direct command response. The two clocks stay independent even though a
+/// command returns both canonical resources for convenience.
+class BridgeSettingsStateResponse {
+  final BridgeSettingsConfigSnapshotDto config;
+  final BridgeModelCatalogSnapshotDto catalog;
+
+  const BridgeSettingsStateResponse({
+    required this.config,
+    required this.catalog,
+  });
+
+  @override
+  int get hashCode => config.hashCode ^ catalog.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSettingsStateResponse &&
+          runtimeType == other.runtimeType &&
+          config == other.config &&
+          catalog == other.catalog;
 }
 
 class BridgeSkillSearchResult {
@@ -1126,7 +1246,8 @@ class BridgeStudioStateSnapshot {
   /// 目录分页窗口的首页；后续页通过 `listThreadsPage` keyset cursor 加载。
   final BridgeThreadDirectoryPage threadDirectory;
   final BridgeAgentDirectoryState agentDirectory;
-  final BridgeSettingsStateSnapshot settings;
+  final BridgeSettingsConfigStateSnapshot settingsConfig;
+  final BridgeModelCatalogStateSnapshot modelCatalog;
   final BridgeRecoveryStateSnapshot recovery;
   final BridgeMcpStateSnapshot mcp;
   final BridgeLspStateSnapshot lsp;
@@ -1145,7 +1266,8 @@ class BridgeStudioStateSnapshot {
     required this.projectDirectory,
     required this.threadDirectory,
     required this.agentDirectory,
-    required this.settings,
+    required this.settingsConfig,
+    required this.modelCatalog,
     required this.recovery,
     required this.mcp,
     required this.lsp,
@@ -1166,7 +1288,8 @@ class BridgeStudioStateSnapshot {
       projectDirectory.hashCode ^
       threadDirectory.hashCode ^
       agentDirectory.hashCode ^
-      settings.hashCode ^
+      settingsConfig.hashCode ^
+      modelCatalog.hashCode ^
       recovery.hashCode ^
       mcp.hashCode ^
       lsp.hashCode ^
@@ -1189,7 +1312,8 @@ class BridgeStudioStateSnapshot {
           projectDirectory == other.projectDirectory &&
           threadDirectory == other.threadDirectory &&
           agentDirectory == other.agentDirectory &&
-          settings == other.settings &&
+          settingsConfig == other.settingsConfig &&
+          modelCatalog == other.modelCatalog &&
           recovery == other.recovery &&
           mcp == other.mcp &&
           lsp == other.lsp &&
@@ -1316,7 +1440,7 @@ class BridgeThreadModeDescriptor {
 
 class BridgeThreadModelRouteUpdateResponse {
   final BridgeThreadRuntimeSnapshot runtime;
-  final BridgeSettingsStateSnapshot settings;
+  final BridgeSettingsStateResponse settings;
   final bool modeDefaultSaved;
   final String? warning;
 

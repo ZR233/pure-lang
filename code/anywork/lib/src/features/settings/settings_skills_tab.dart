@@ -289,18 +289,7 @@ class _SkillsTabState extends ConsumerState<SkillsTab> {
       if (settings == null) return;
       await ref
           .read(studioControllerProvider.notifier)
-          .saveSkillsSettings(
-            SkillsSettingsCommand(
-              enabled: settings.enabled,
-              autoLearn: settings.autoLearn,
-              systemEnabled: settings.systemEnabled,
-              projectDir: settings.projectDir,
-              userDir: settings.userDir,
-              externalDirs: settings.externalDirs,
-              disabled: disabled.toList()..sort(),
-              autoLearnMinToolCalls: settings.autoLearnMinToolCalls,
-            ),
-          );
+          .applySettingsField(SkillsDisabledCommand(disabled.toList()..sort()));
     } catch (error) {
       if (mounted) {
         setState(() => _saveError = error.toString());

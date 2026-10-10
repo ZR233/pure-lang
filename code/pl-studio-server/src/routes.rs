@@ -12,15 +12,13 @@ use pl_protocol::ThreadActivityDetailQuery;
 use pl_protocol::ThreadModeId;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, CreateThreadRequest,
-    ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest, OpenProjectRequest,
-    RefreshModelCatalogRequest, RenameThreadRequest, ResolveInteractionRequest,
-    SearchSkillsRequest, SetModeModelRouteRequest, SetModelRoleRequest, SetThreadModeRequest,
-    SetThreadModelRouteRequest, StudioAttachmentAdmissionContext, StudioAttachmentDraftSource,
-    StudioError, StudioSettingsSnapshot, SubmitPromptRequest, ThreadModelRouteUpdateResponse,
-    ThreadPageQuery, TimelinePageQuery, UpdateDeepSeekWebSearchSettingsRequest,
-    UpdateGeneralSettingsRequest, UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest,
-    UpdatePermissionSettingsRequest, UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest,
-    UpdateWebSearchSettingsRequest,
+    ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest,
+    ModelCatalogSnapshot, OpenProjectRequest, RefreshModelCatalogRequest, RemoveProviderRequest,
+    RenameThreadRequest, ResolveInteractionRequest, SearchSkillsRequest, SetDefaultProviderRequest,
+    SetThreadModeRequest, SetThreadModelRouteRequest, SettingsStateResponse,
+    StudioAttachmentAdmissionContext, StudioAttachmentDraftSource, StudioError,
+    SubmitPromptRequest, ThreadModelRouteUpdateResponse, ThreadPageQuery, TimelinePageQuery,
+    UpdatePermissionSettingsRequest, UpdateProviderRequest, UpdateSettingsFieldRequest,
 };
 use tokio::io::AsyncWriteExt;
 use utoipa::{IntoResponses, OpenApi};
@@ -136,7 +134,8 @@ pub(crate) fn parse_product_topic(
         "projectDirectory" => StudioProductTopic::ProjectDirectory,
         "threadDirectory" => StudioProductTopic::ThreadDirectory,
         "agentDirectory" => StudioProductTopic::AgentDirectory,
-        "settings" => StudioProductTopic::Settings,
+        "settingsConfig" => StudioProductTopic::SettingsConfig,
+        "modelCatalog" => StudioProductTopic::ModelCatalog,
         "recovery" => StudioProductTopic::Recovery,
         "mcp" => StudioProductTopic::Mcp,
         "lsp" => StudioProductTopic::Lsp,
@@ -222,16 +221,11 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(read_settings))
         .routes(routes!(reload_settings))
         .routes(routes!(refresh_model_catalog))
-        .routes(routes!(save_web_search_settings))
-        .routes(routes!(save_deepseek_web_search_settings))
         .routes(routes!(save_permission_settings))
-        .routes(routes!(save_provider_settings))
-        .routes(routes!(save_instructions_settings))
-        .routes(routes!(save_skills_settings))
-        .routes(routes!(save_mcp_settings))
-        .routes(routes!(save_general_settings))
-        .routes(routes!(save_model_role))
-        .routes(routes!(save_mode_model_route))
+        .routes(routes!(save_provider))
+        .routes(routes!(set_default_provider))
+        .routes(routes!(remove_provider))
+        .routes(routes!(apply_settings_field))
         .routes(routes!(read_provider_usage))
         .routes(routes!(check_provider_usage))
         .routes(routes!(read_recovery, retry_recovery))
@@ -825,18 +819,18 @@ async fn provider_catalog(State(state): State<AppState>) -> Result<impl IntoResp
     Ok(Json(snapshot))
 }
 
-#[utoipa::path(get, path = "/api/v1/settings", operation_id = "settings.read", responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
+#[utoipa::path(get, path = "/api/v1/settings", operation_id = "settings.read", responses(StudioApiErrors, (status = 200, body = SettingsStateResponse)))]
 async fn read_settings(
     State(state): State<AppState>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
+) -> Result<Json<SettingsStateResponse>, ApiError> {
     Ok(Json(state.runtime.read_settings().map_err(ApiError::from)?))
 }
 
-#[utoipa::path(post, path = "/api/v1/settings/reload", operation_id = "settings.reload", request_body = ExpectedRevisionRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
+#[utoipa::path(post, path = "/api/v1/settings/reload", operation_id = "settings.reload", request_body = ExpectedRevisionRequest, responses(StudioApiErrors, (status = 200, body = SettingsStateResponse)))]
 async fn reload_settings(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<ExpectedRevisionRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
+) -> Result<Json<SettingsStateResponse>, ApiError> {
     Ok(Json(
         state
             .runtime
@@ -846,11 +840,11 @@ async fn reload_settings(
     ))
 }
 
-#[utoipa::path(post, path = "/api/v1/settings/model-catalog/refresh", operation_id = "settings.refreshModelCatalog", request_body = RefreshModelCatalogRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
+#[utoipa::path(post, path = "/api/v1/settings/model-catalog/refresh", operation_id = "settings.refreshModelCatalog", request_body = RefreshModelCatalogRequest, responses(StudioApiErrors, (status = 200, body = ModelCatalogSnapshot)))]
 async fn refresh_model_catalog(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<RefreshModelCatalogRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
+) -> Result<Json<ModelCatalogSnapshot>, ApiError> {
     Ok(Json(
         state
             .runtime
@@ -860,37 +854,11 @@ async fn refresh_model_catalog(
     ))
 }
 
-#[utoipa::path(put, path = "/api/v1/settings/web-search", operation_id = "settings.saveWebSearch", request_body = UpdateWebSearchSettingsRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
-async fn save_web_search_settings(
-    State(state): State<AppState>,
-    ApiJson(request): ApiJson<UpdateWebSearchSettingsRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .save_web_search_settings(request)
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(put, path = "/api/v1/settings/deepseek-web-search", operation_id = "settings.saveDeepSeekWebSearch", request_body = UpdateDeepSeekWebSearchSettingsRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
-async fn save_deepseek_web_search_settings(
-    State(state): State<AppState>,
-    ApiJson(request): ApiJson<UpdateDeepSeekWebSearchSettingsRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .save_deepseek_web_search_settings(request)
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(put, path = "/api/v1/settings/permission", operation_id = "settings.savePermission", request_body = UpdatePermissionSettingsRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
+#[utoipa::path(put, path = "/api/v1/settings/permission", operation_id = "settings.savePermission", request_body = UpdatePermissionSettingsRequest, responses(StudioApiErrors, (status = 200, body = SettingsStateResponse)))]
 async fn save_permission_settings(
     State(state): State<AppState>,
     ApiJson(request): ApiJson<UpdatePermissionSettingsRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
+) -> Result<Json<SettingsStateResponse>, ApiError> {
     Ok(Json(
         state
             .runtime
@@ -899,96 +867,56 @@ async fn save_permission_settings(
     ))
 }
 
-#[utoipa::path(put, path = "/api/v1/settings/providers", operation_id = "settings.saveProviders", request_body = UpdateProviderSettingsRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
-async fn save_provider_settings(
+#[utoipa::path(put, path = "/api/v1/settings/provider", operation_id = "settings.saveProvider", request_body = UpdateProviderRequest, responses(StudioApiErrors, (status = 200, body = SettingsStateResponse)))]
+async fn save_provider(
     State(state): State<AppState>,
-    ApiJson(request): ApiJson<UpdateProviderSettingsRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
+    ApiJson(request): ApiJson<UpdateProviderRequest>,
+) -> Result<Json<SettingsStateResponse>, ApiError> {
     Ok(Json(
         state
             .runtime
-            .save_provider_settings(request)
+            .save_provider(request)
             .await
             .map_err(ApiError::from)?,
     ))
 }
 
-#[utoipa::path(put, path = "/api/v1/settings/instructions", operation_id = "settings.saveInstructions", request_body = UpdateInstructionsSettingsRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
-async fn save_instructions_settings(
+#[utoipa::path(put, path = "/api/v1/settings/default-provider", operation_id = "settings.setDefaultProvider", request_body = SetDefaultProviderRequest, responses(StudioApiErrors, (status = 200, body = SettingsStateResponse)))]
+async fn set_default_provider(
     State(state): State<AppState>,
-    ApiJson(request): ApiJson<UpdateInstructionsSettingsRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
+    ApiJson(request): ApiJson<SetDefaultProviderRequest>,
+) -> Result<Json<SettingsStateResponse>, ApiError> {
     Ok(Json(
         state
             .runtime
-            .save_instructions_settings(request)
+            .set_default_provider(request)
             .map_err(ApiError::from)?,
     ))
 }
 
-#[utoipa::path(put, path = "/api/v1/settings/skills", operation_id = "settings.saveSkills", request_body = UpdateSkillsSettingsRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
-async fn save_skills_settings(
+#[utoipa::path(delete, path = "/api/v1/settings/providers", operation_id = "settings.removeProvider", request_body = RemoveProviderRequest, responses(StudioApiErrors, (status = 200, body = SettingsStateResponse)))]
+async fn remove_provider(
     State(state): State<AppState>,
-    ApiJson(request): ApiJson<UpdateSkillsSettingsRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
+    ApiJson(request): ApiJson<RemoveProviderRequest>,
+) -> Result<Json<SettingsStateResponse>, ApiError> {
     Ok(Json(
         state
             .runtime
-            .save_skills_settings(request)
+            .remove_provider(request)
+            .map_err(ApiError::from)?,
+    ))
+}
+
+#[utoipa::path(put, path = "/api/v1/settings/field", operation_id = "settings.applyField", request_body = UpdateSettingsFieldRequest, responses(StudioApiErrors, (status = 200, body = SettingsStateResponse)))]
+async fn apply_settings_field(
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<UpdateSettingsFieldRequest>,
+) -> Result<Json<SettingsStateResponse>, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .apply_settings_field(request)
             .await
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(put, path = "/api/v1/settings/mcp", operation_id = "settings.saveMcp", request_body = UpdateMcpSettingsRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
-async fn save_mcp_settings(
-    State(state): State<AppState>,
-    ApiJson(request): ApiJson<UpdateMcpSettingsRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .save_mcp_settings(request)
-            .await
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(put, path = "/api/v1/settings/general", operation_id = "settings.saveGeneral", request_body = UpdateGeneralSettingsRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
-async fn save_general_settings(
-    State(state): State<AppState>,
-    ApiJson(request): ApiJson<UpdateGeneralSettingsRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .save_general_settings(request)
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(put, path = "/api/v1/settings/role", operation_id = "settings.setModelRole", request_body = SetModelRoleRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
-async fn save_model_role(
-    State(state): State<AppState>,
-    ApiJson(request): ApiJson<SetModelRoleRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .save_model_role(request)
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(put, path = "/api/v1/settings/mode-route", operation_id = "settings.setModeModelRoute", request_body = SetModeModelRouteRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
-async fn save_mode_model_route(
-    State(state): State<AppState>,
-    ApiJson(request): ApiJson<SetModeModelRouteRequest>,
-) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .save_mode_model_route(request)
             .map_err(ApiError::from)?,
     ))
 }

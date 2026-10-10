@@ -7,7 +7,6 @@ import '../../../frb_generated.dart';
 import '../types/attachment.dart';
 import '../types/error.dart';
 import '../types/response.dart';
-import '../types/runtime.dart';
 import '../types/settings.dart';
 import '../types/thread_stream.dart';
 

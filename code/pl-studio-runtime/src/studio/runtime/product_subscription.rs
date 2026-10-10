@@ -98,15 +98,33 @@ impl StudioRuntime {
                         .await,
                 ))
             }
-            StudioProductTopic::Settings => {
-                let settings = self.read_settings()?;
-                StudioProductBaselineState::Settings(Box::new(crate::StudioSettingsStateSnapshot {
-                    state: pl_protocol::ObservedResource::ready(
-                        settings.revision,
-                        settings.updated_at,
-                        settings,
-                    ),
-                }))
+            StudioProductTopic::SettingsConfig => {
+                let settings =
+                    super::settings_api::settings_config_snapshot(&self.config_runtime.read()?)?;
+                StudioProductBaselineState::SettingsConfig(Box::new(
+                    crate::StudioSettingsConfigStateSnapshot {
+                        state: pl_protocol::ObservedResource::ready(
+                            settings.revision,
+                            settings.updated_at,
+                            settings,
+                        ),
+                    },
+                ))
+            }
+            StudioProductTopic::ModelCatalog => {
+                let settings = self.config_runtime.read()?;
+                let catalog_state = self.config_runtime.read_catalog()?;
+                let catalog =
+                    super::settings_api::model_catalog_snapshot(&settings, &catalog_state)?;
+                StudioProductBaselineState::ModelCatalog(Box::new(
+                    crate::StudioModelCatalogStateSnapshot {
+                        state: pl_protocol::ObservedResource::ready(
+                            catalog.revision,
+                            catalog.updated_at,
+                            catalog,
+                        ),
+                    },
+                ))
             }
             StudioProductTopic::Recovery => {
                 StudioProductBaselineState::Recovery(Box::new(crate::StudioRecoveryStateSnapshot {

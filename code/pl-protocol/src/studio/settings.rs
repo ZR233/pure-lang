@@ -3,14 +3,42 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// Secret-free canonical Settings snapshot.
+/// Secret-free canonical configuration snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct StudioSettingsSnapshot {
+pub struct SettingsConfigSnapshot {
     pub revision: u64,
-    pub model_catalog_revision: u64,
     pub updated_at: i64,
     pub settings: StudioSettings,
+}
+
+/// Provider model directory observation. It is owned by the catalog clock and
+/// is deliberately absent from [`StudioProviderSettings`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudioModelCatalogProvider {
+    pub id: String,
+    pub effective_models: Vec<crate::ModelDescriptor>,
+    pub model_catalog: StudioModelCatalogStatus,
+}
+
+/// Canonical model directory snapshot. Catalog refreshes never rewrite the
+/// configuration snapshot or its revision.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelCatalogSnapshot {
+    pub revision: u64,
+    pub updated_at: i64,
+    pub providers: Vec<StudioModelCatalogProvider>,
+}
+
+/// Direct response for a configuration command. The two resources are
+/// returned together for convenience, while each retains its own clock.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SettingsStateResponse {
+    pub config: SettingsConfigSnapshot,
+    pub catalog: ModelCatalogSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
@@ -32,8 +60,6 @@ pub struct StudioSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudioProviderSettings {
-    pub effective_models: Vec<crate::ModelDescriptor>,
-    pub model_catalog: StudioModelCatalogStatus,
     pub pricing_enabled: bool,
     pub id: String,
     pub template_kind: String,

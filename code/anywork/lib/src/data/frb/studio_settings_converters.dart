@@ -1,5 +1,89 @@
 part of 'studio_api.dart';
 
+frb.SettingsFieldInput _settingsFieldInputFromDomain(
+  SettingsFieldCommand command,
+) => switch (command) {
+  InstructionBaseOverrideCommand(:final value) =>
+    frb.SettingsFieldInput.instructionBaseOverride(value: value),
+  InstructionDeveloperCommand(:final value) =>
+    frb.SettingsFieldInput.instructionDeveloper(value: value),
+  InstructionUserCommand(:final value) =>
+    frb.SettingsFieldInput.instructionUser(value: value),
+  ProjectDocMaxBytesCommand(:final value) =>
+    frb.SettingsFieldInput.projectDocMaxBytes(value: BigInt.from(value)),
+  ProjectDocFallbackFilenamesCommand(:final value) =>
+    frb.SettingsFieldInput.projectDocFallbackFilenames(value: value),
+  SkillsEnabledCommand(:final value) => frb.SettingsFieldInput.skillsEnabled(
+    value: value,
+  ),
+  SkillsAutoLearnCommand(:final value) =>
+    frb.SettingsFieldInput.skillsAutoLearn(value: value),
+  SkillsSystemEnabledCommand(:final value) =>
+    frb.SettingsFieldInput.skillsSystemEnabled(value: value),
+  SkillsProjectDirCommand(:final value) =>
+    frb.SettingsFieldInput.skillsProjectDir(value: value),
+  SkillsUserDirCommand(:final value) => frb.SettingsFieldInput.skillsUserDir(
+    value: value,
+  ),
+  SkillsExternalDirsCommand(:final value) =>
+    frb.SettingsFieldInput.skillsExternalDirs(value: value),
+  SkillsDisabledCommand(:final value) => frb.SettingsFieldInput.skillsDisabled(
+    value: value,
+  ),
+  SkillsAutoLearnMinToolCallsCommand(:final value) =>
+    frb.SettingsFieldInput.skillsAutoLearnMinToolCalls(value: value),
+  McpServerEnabledCommand(:final id, :final value) =>
+    frb.SettingsFieldInput.mcpServerEnabled(id: id, value: value),
+  McpServerTransportCommand(:final id, :final value) =>
+    frb.SettingsFieldInput.mcpServerTransport(id: id, transport: value),
+  McpServerEndpointCommand(:final id, :final value) =>
+    frb.SettingsFieldInput.mcpServerEndpoint(id: id, endpoint: value),
+  GeneralFollowActiveTurnCommand(:final value) =>
+    frb.SettingsFieldInput.generalFollowActiveTurn(value: value),
+  GeneralCompactTimelineCommand(:final value) =>
+    frb.SettingsFieldInput.generalCompactTimeline(value: value),
+  GeneralSidebarWidthCommand(:final value) =>
+    frb.SettingsFieldInput.generalSidebarWidth(value: value),
+  GeneralPinnedThreadIdsCommand(:final value) =>
+    frb.SettingsFieldInput.generalPinnedThreadIds(value: value),
+  GeneralPinnedProjectIdsCommand(:final value) =>
+    frb.SettingsFieldInput.generalPinnedProjectIds(value: value),
+  WebSearchModeCommand(:final value) => frb.SettingsFieldInput.webSearchMode(
+    value: value,
+  ),
+  WebSearchContextSizeCommand(:final value) =>
+    frb.SettingsFieldInput.webSearchContextSize(value: value),
+  WebSearchAllowedDomainsCommand(:final value) =>
+    frb.SettingsFieldInput.webSearchAllowedDomains(value: value),
+  WebSearchCountryCommand(:final value) =>
+    frb.SettingsFieldInput.webSearchCountry(value: value),
+  WebSearchRegionCommand(:final value) =>
+    frb.SettingsFieldInput.webSearchRegion(value: value),
+  WebSearchCityCommand(:final value) => frb.SettingsFieldInput.webSearchCity(
+    value: value,
+  ),
+  WebSearchTimezoneCommand(:final value) =>
+    frb.SettingsFieldInput.webSearchTimezone(value: value),
+  DeepSeekWebSearchEnabledCommand(:final value) =>
+    frb.SettingsFieldInput.deepSeekWebSearchEnabled(value: value),
+  ModeModelCommand(:final modeId, :final providerId, :final model) =>
+    frb.SettingsFieldInput.modeModel(
+      modeId: modeId,
+      providerId: providerId,
+      model: model,
+    ),
+  ModeReasoningEffortCommand(:final modeId, :final effort) =>
+    frb.SettingsFieldInput.modeReasoningEffort(modeId: modeId, effort: effort),
+  RoleModelCommand(:final role, :final providerId, :final model) =>
+    frb.SettingsFieldInput.roleModel(
+      role: role,
+      providerId: providerId,
+      model: model,
+    ),
+  RoleReasoningEffortCommand(:final role, :final effort) =>
+    frb.SettingsFieldInput.roleReasoningEffort(role: role, effort: effort),
+};
+
 ModelCatalogStatusView _modelCatalogStatusFromFrb(
   frb.BridgeModelCatalogStatusDto status,
 ) => ModelCatalogStatusView(
@@ -67,8 +151,9 @@ ModelCatalogStatusView _modelCatalogStatusFromFrb(
 );
 
 ProviderSettingsView _providerSettingsFromFrb(
-  frb.BridgeProviderSettingsDto value,
-) {
+  frb.BridgeProviderSettingsDto value, {
+  frb.BridgeModelCatalogProviderDto? catalog,
+}) {
   final customModels = value.customModels
       .map(_customModelSettingsFromFrb)
       .toList();
@@ -87,8 +172,14 @@ ProviderSettingsView _providerSettingsFromFrb(
       ),
   };
 
+  final catalogModels =
+      catalog?.effectiveModels.map(_providerModelFromCatalog).toList() ??
+      const <ProviderModelView>[];
+  final models = catalog == null ? const <ProviderModelView>[] : catalogModels;
   return ProviderSettingsView(
-    modelCatalog: _modelCatalogStatusFromFrb(value.modelCatalog),
+    modelCatalog: catalog == null
+        ? const ModelCatalogStatusView()
+        : _modelCatalogStatusFromFrb(catalog.modelCatalog),
     pricingEnabled: value.pricingEnabled,
     id: value.id,
     templateKind: value.templateKind,
@@ -99,7 +190,7 @@ ProviderSettingsView _providerSettingsFromFrb(
     hasBearerToken: value.hasBearerToken,
     credentialRequired: value.credentialRequired,
     defaultModel: value.defaultModel,
-    models: value.effectiveModels.map(_providerModelFromCatalog).toList(),
+    models: models,
     customModels: customModels,
     modelConnectionModes: connectionModes,
     autoCompactLimits: autoCompactLimits,
@@ -107,7 +198,7 @@ ProviderSettingsView _providerSettingsFromFrb(
         ? 'ready'
         : 'missingCredential',
     usageLabel: value.defaultModel,
-    modelCount: '${value.effectiveModels.length}',
+    modelCount: '${models.length}',
     updatedAt: 'Loaded',
     catalogId: value.catalogId ?? '',
     capabilitySource: value.capabilitySource,

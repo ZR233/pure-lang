@@ -67,9 +67,12 @@ sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
   const factory BridgeProductEventPayload.agentDirectoryChanged(
     BridgeAgentDirectoryState field0,
   ) = BridgeProductEventPayload_AgentDirectoryChanged;
-  const factory BridgeProductEventPayload.settingsStateChanged(
-    BridgeSettingsStateSnapshot field0,
-  ) = BridgeProductEventPayload_SettingsStateChanged;
+  const factory BridgeProductEventPayload.settingsConfigStateChanged(
+    BridgeSettingsConfigStateSnapshot field0,
+  ) = BridgeProductEventPayload_SettingsConfigStateChanged;
+  const factory BridgeProductEventPayload.modelCatalogStateChanged(
+    BridgeModelCatalogStateSnapshot field0,
+  ) = BridgeProductEventPayload_ModelCatalogStateChanged;
   const factory BridgeProductEventPayload.recoveryStateChanged(
     BridgeRecoveryStateSnapshot field0,
   ) = BridgeProductEventPayload_RecoveryStateChanged;

@@ -127,12 +127,12 @@ ProviderUsageView _demoProviderUsage(ProviderSettingsView provider) {
   );
 }
 
-List<ProviderSettingsView> _providersFromSettingsCommand(
-  ProviderSettingsCommand command, {
+List<ProviderSettingsView> _providersFromCommands(
+  List<ProviderCommand> commands, {
   List<ProviderSettingsView> previous = const [],
   required ProviderCatalogView catalog,
 }) {
-  return command.providers.map((provider) {
+  return commands.map((provider) {
     final customModels = provider.customModels
         .map(
           (model) => ProviderModelView(
@@ -243,42 +243,4 @@ ProviderModelAutoCompactView _demoAutoCompactLimit(
     return base;
   }
   return base.withOverride(override);
-}
-
-List<RoleSettingsView> _rolesFromSettingsCommand(
-  ProviderSettingsCommand command,
-) {
-  return command.roles.map((role) {
-    return RoleSettingsView(
-      key: role.key,
-      providerId: role.providerId,
-      model: role.model,
-      effort: role.effort,
-    );
-  }).toList();
-}
-
-InstructionsSettingsView _instructionsFromSettingsCommand(
-  InstructionsSettingsCommand command,
-) {
-  return InstructionsSettingsView(
-    baseOverride: command.baseOverride,
-    developer: command.developer,
-    user: command.user,
-    projectDocMaxBytes: command.projectDocMaxBytes,
-    projectDocFallbackFilenames: command.projectDocFallbackFilenames,
-  );
-}
-
-SkillsSettingsView _skillsFromSettingsCommand(SkillsSettingsCommand command) {
-  return SkillsSettingsView(
-    enabled: command.enabled,
-    autoLearn: command.autoLearn,
-    systemEnabled: command.systemEnabled,
-    projectDir: command.projectDir,
-    userDir: command.userDir,
-    externalDirs: command.externalDirs,
-    disabled: command.disabled,
-    autoLearnMinToolCalls: command.autoLearnMinToolCalls,
-  );
 }

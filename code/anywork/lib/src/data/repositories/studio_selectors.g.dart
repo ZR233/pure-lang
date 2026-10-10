@@ -200,53 +200,6 @@ final class StudioHeaderProvider
 
 String _$studioHeaderHash() => r'8b726c8fce95c93dbb23f265869ba39ea61f7d13';
 
-@ProviderFor(settingsPage)
-final settingsPageProvider = SettingsPageProvider._();
-
-final class SettingsPageProvider
-    extends
-        $FunctionalProvider<
-          AsyncValue<SettingsPageView>,
-          AsyncValue<SettingsPageView>,
-          AsyncValue<SettingsPageView>
-        >
-    with $Provider<AsyncValue<SettingsPageView>> {
-  SettingsPageProvider._()
-    : super(
-        from: null,
-        argument: null,
-        retry: null,
-        name: r'settingsPageProvider',
-        isAutoDispose: true,
-        dependencies: null,
-        $allTransitiveDependencies: null,
-      );
-
-  @override
-  String debugGetCreateSourceHash() => _$settingsPageHash();
-
-  @$internal
-  @override
-  $ProviderElement<AsyncValue<SettingsPageView>> $createElement(
-    $ProviderPointer pointer,
-  ) => $ProviderElement(pointer);
-
-  @override
-  AsyncValue<SettingsPageView> create(Ref ref) {
-    return settingsPage(ref);
-  }
-
-  /// {@macro riverpod.override_with_value}
-  Override overrideWithValue(AsyncValue<SettingsPageView> value) {
-    return $ProviderOverride(
-      origin: this,
-      providerOverride: $SyncValueProvider<AsyncValue<SettingsPageView>>(value),
-    );
-  }
-}
-
-String _$settingsPageHash() => r'7cbd7957b567897a1087746806f635cbd90edf5f';
-
 @ProviderFor(selectedWorkspaceLayout)
 final selectedWorkspaceLayoutProvider = SelectedWorkspaceLayoutProvider._();
 
@@ -392,7 +345,7 @@ final class StartPageProvider
   }
 }
 
-String _$startPageHash() => r'698da01f70ed21543c6f5b4021563f3d82f6aa6c';
+String _$startPageHash() => r'f8e11bccec1be23309dd83303d462e0e0ce0d8d8';
 
 @ProviderFor(statusBar)
 final statusBarProvider = StatusBarProvider._();

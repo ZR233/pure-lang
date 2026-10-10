@@ -7,3 +7,4 @@ export 'studio_product_topics.dart';
 export 'studio_topic_providers.dart';
 export 'studio_topic_reducer.dart';
 export 'studio_stream_coordinators.dart';
+export 'session_draft_store.dart';

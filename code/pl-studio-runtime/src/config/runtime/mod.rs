@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crate::studio::unix_seconds;
 use crate::{PureError, Result};
-use serde::{Deserialize, Serialize};
 
 use super::model_catalog::{self, Observation};
 use super::{AgentProfilesResource, AgentProfilesSnapshot, ConfigStore, StudioConfig};
@@ -28,25 +27,45 @@ pub struct ConfigRuntime {
 struct RuntimeState {
     desired: StudioConfig,
     snapshot: ConfigRuntimeSnapshot,
+    catalog: ModelCatalogRuntimeSnapshot,
     observations: BTreeMap<ProviderId, Observation>,
     closing: bool,
 }
 
 #[derive(Clone)]
 pub(crate) struct CatalogChange {
-    pub snapshot: ConfigRuntimeSnapshot,
+    pub snapshot: ModelCatalogRuntimeSnapshot,
     pub affected: Vec<ProviderId>,
 }
 
 /// 已校验 Studio 配置及其单调 revision。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+///
+/// `config` 是带当前目录 overlay 的运行时解析配置，供模型路由和执行路径使用。
+/// `canonical_config` 是持久化的配置事实源，目录刷新不会修改它，也不会提升这个
+/// snapshot 的 revision。
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConfigRuntimeSnapshot {
     pub revision: u64,
-    pub model_catalog_revision: u64,
-    pub model_catalogs: BTreeMap<ProviderId, StudioModelCatalogStatus>,
     pub updated_at: i64,
     pub config: StudioConfig,
+    canonical_config: StudioConfig,
+}
+
+impl ConfigRuntimeSnapshot {
+    pub(crate) fn canonical_config(&self) -> &StudioConfig {
+        &self.canonical_config
+    }
+}
+
+/// 独立的模型目录 canonical snapshot。
+///
+/// 目录刷新只推进这个 revision；配置写入可以同时更新目录内容，但不会把两个时钟
+/// 合并到同一个快照中。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelCatalogRuntimeSnapshot {
+    pub revision: u64,
+    pub updated_at: i64,
+    pub catalogs: BTreeMap<ProviderId, StudioModelCatalogStatus>,
 }
 
 /// Parameters resolved from one configuration revision for a newly created product Agent.
@@ -107,14 +126,18 @@ impl ConfigRuntime {
             command_lock: Arc::new(Mutex::new(())),
             catalog_updates,
             state: Arc::new(RwLock::new(RuntimeState {
-                desired,
+                desired: desired.clone(),
                 closing: false,
                 snapshot: ConfigRuntimeSnapshot {
                     revision: 1,
-                    model_catalog_revision: 1,
-                    model_catalogs: statuses(&observations),
                     updated_at: unix_seconds(),
-                    config,
+                    config: config.clone(),
+                    canonical_config: desired,
+                },
+                catalog: ModelCatalogRuntimeSnapshot {
+                    revision: 1,
+                    updated_at: unix_seconds(),
+                    catalogs: statuses(&observations),
                 },
                 observations,
             })),
@@ -127,6 +150,14 @@ impl ConfigRuntime {
         self.state
             .read()
             .map(|state| state.snapshot.clone())
+            .map_err(|_| config_runtime_poisoned())
+    }
+
+    /// 返回独立的模型目录 snapshot，不访问磁盘。
+    pub fn read_catalog(&self) -> ConfigRuntimeResult<ModelCatalogRuntimeSnapshot> {
+        self.state
+            .read()
+            .map(|state| state.catalog.clone())
             .map_err(|_| config_runtime_poisoned())
     }
 
@@ -196,7 +227,8 @@ impl ConfigRuntime {
         let next = ConfigRuntimeSnapshot {
             revision: current.revision.saturating_add(1),
             updated_at: unix_seconds(),
-            ..current
+            config: current.config,
+            canonical_config: current.canonical_config,
         };
         state.snapshot = next.clone();
         drop(state);
@@ -221,11 +253,23 @@ impl ConfigRuntime {
         expected_revision: u64,
         edit: impl FnOnce(&StudioConfig) -> Result<StudioConfig>,
     ) -> ConfigRuntimeResult<ConfigRuntimeSnapshot> {
+        self.update_with_effective(expected_revision, |desired, _effective| edit(desired))
+    }
+
+    /// 在编辑 canonical desired config 时同时暴露当前 effective runtime
+    /// config。模型目录观察是独立资源，路由选择必须能校验刚发现的模型，
+    /// 但提交到磁盘的配置仍只能来自 desired，不能把目录 overlay 写回配置。
+    pub fn update_with_effective(
+        &self,
+        expected_revision: u64,
+        edit: impl FnOnce(&StudioConfig, &StudioConfig) -> Result<StudioConfig>,
+    ) -> ConfigRuntimeResult<ConfigRuntimeSnapshot> {
         let _command = self
             .command_lock
             .lock()
             .map_err(|_| config_runtime_poisoned())?;
         let current = self.read()?;
+        let current_catalog = self.read_catalog()?;
         ensure_revision(expected_revision, current.revision)?;
         let (desired, observations) = {
             let state = self.state.read().map_err(|_| config_runtime_poisoned())?;
@@ -234,7 +278,7 @@ impl ConfigRuntime {
             }
             (state.desired.clone(), state.observations.clone())
         };
-        let mut next_config = edit(&desired)?;
+        let mut next_config = edit(&desired, &current.config)?;
         for provider in next_config.models.providers.values_mut() {
             provider.clear_model_catalog_overlay();
         }
@@ -249,19 +293,25 @@ impl ConfigRuntime {
 
         let next = ConfigRuntimeSnapshot {
             revision: current.revision.saturating_add(1),
-            model_catalog_revision: current.model_catalog_revision.saturating_add(u64::from(
-                statuses(&next_observations) != current.model_catalogs
-                    || effective.models.providers != current.config.models.providers,
-            )),
-            model_catalogs: statuses(&next_observations),
             updated_at: unix_seconds(),
-            config: effective,
+            config: effective.clone(),
+            canonical_config: next_config.clone(),
+        };
+        let catalog_changed = statuses(&next_observations) != current_catalog.catalogs
+            || effective.models.providers != current.config.models.providers;
+        let catalog = ModelCatalogRuntimeSnapshot {
+            revision: current_catalog
+                .revision
+                .saturating_add(u64::from(catalog_changed)),
+            updated_at: unix_seconds(),
+            catalogs: statuses(&next_observations),
         };
         invalidate_observations(&observations, &next_observations);
         let mut state = self.state.write().map_err(|_| config_runtime_poisoned())?;
         state.desired = next_config;
         state.observations = next_observations;
         state.snapshot = next.clone();
+        state.catalog = catalog;
         drop(state);
         // 配置命令采用一次新的目录扫描；资源未变化时不提升 revision、不通知观察者。
         self.profiles.adopt_scan(self.store.paths(), &next.config);
@@ -278,6 +328,7 @@ impl ConfigRuntime {
             .lock()
             .map_err(|_| config_runtime_poisoned())?;
         let current = self.read()?;
+        let current_catalog = self.read_catalog()?;
         ensure_revision(expected_revision, current.revision)?;
         let desired = self.store.load_or_default()?;
         let observations = self
@@ -293,16 +344,21 @@ impl ConfigRuntime {
         super::AgentProfileCatalog::validate_for_startup(self.store.paths(), &config)?;
         let next = ConfigRuntimeSnapshot {
             revision: current.revision.saturating_add(1),
-            model_catalog_revision: current.model_catalog_revision.saturating_add(1),
-            model_catalogs: statuses(&next_observations),
             updated_at: unix_seconds(),
-            config,
+            config: config.clone(),
+            canonical_config: desired.clone(),
+        };
+        let catalog = ModelCatalogRuntimeSnapshot {
+            revision: current_catalog.revision.saturating_add(1),
+            updated_at: unix_seconds(),
+            catalogs: statuses(&next_observations),
         };
         invalidate_observations(&observations, &next_observations);
         let mut state = self.state.write().map_err(|_| config_runtime_poisoned())?;
         state.desired = desired;
         state.observations = next_observations;
         state.snapshot = next.clone();
+        state.catalog = catalog;
         drop(state);
         // 显式重扫；目录未变化时不提升 revision。
         self.profiles.adopt_scan(self.store.paths(), &next.config);

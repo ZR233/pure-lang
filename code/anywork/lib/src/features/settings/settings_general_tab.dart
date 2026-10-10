@@ -87,14 +87,17 @@ class _GeneralTabState extends ConsumerState<GeneralTab> {
   Future<void> _save(GeneralSettingsView settings) async {
     try {
       setState(() => _error = null);
-      await ref
-          .read(studioControllerProvider.notifier)
-          .saveGeneralSettings(
-            GeneralSettingsCommand(
-              followActiveTurn: settings.followActiveTurn,
-              compactTimeline: settings.compactTimeline,
-            ),
-          );
+      final controller = ref.read(studioControllerProvider.notifier);
+      if (settings.followActiveTurn != widget.settings.followActiveTurn) {
+        await controller.applySettingsField(
+          GeneralFollowActiveTurnCommand(settings.followActiveTurn),
+        );
+      }
+      if (settings.compactTimeline != widget.settings.compactTimeline) {
+        await controller.applySettingsField(
+          GeneralCompactTimelineCommand(settings.compactTimeline),
+        );
+      }
     } catch (error) {
       if (mounted) {
         setState(() => _error = error.toString());

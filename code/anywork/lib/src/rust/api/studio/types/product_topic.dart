@@ -34,9 +34,12 @@ sealed class BridgeProductBaseline with _$BridgeProductBaseline {
   const factory BridgeProductBaseline.agentDirectory(
     BridgeAgentDirectoryState field0,
   ) = BridgeProductBaseline_AgentDirectory;
-  const factory BridgeProductBaseline.settings(
-    BridgeSettingsStateSnapshot field0,
-  ) = BridgeProductBaseline_Settings;
+  const factory BridgeProductBaseline.settingsConfig(
+    BridgeSettingsConfigStateSnapshot field0,
+  ) = BridgeProductBaseline_SettingsConfig;
+  const factory BridgeProductBaseline.modelCatalog(
+    BridgeModelCatalogStateSnapshot field0,
+  ) = BridgeProductBaseline_ModelCatalog;
   const factory BridgeProductBaseline.recovery(
     BridgeRecoveryStateSnapshot field0,
   ) = BridgeProductBaseline_Recovery;
@@ -82,7 +85,10 @@ sealed class BridgeProductTopic with _$BridgeProductTopic {
       BridgeProductTopic_ThreadDirectory;
   const factory BridgeProductTopic.agentDirectory() =
       BridgeProductTopic_AgentDirectory;
-  const factory BridgeProductTopic.settings() = BridgeProductTopic_Settings;
+  const factory BridgeProductTopic.settingsConfig() =
+      BridgeProductTopic_SettingsConfig;
+  const factory BridgeProductTopic.modelCatalog() =
+      BridgeProductTopic_ModelCatalog;
   const factory BridgeProductTopic.recovery() = BridgeProductTopic_Recovery;
   const factory BridgeProductTopic.mcp() = BridgeProductTopic_Mcp;
   const factory BridgeProductTopic.lsp() = BridgeProductTopic_Lsp;

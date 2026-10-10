@@ -3,40 +3,338 @@
 use anyhow::{Context, Result, bail};
 use pl_protocol::ThreadModeId;
 use pl_protocol::studio::{
-    SetModeModelRouteRequest, SetModelRoleRequest, SetThreadModelRouteRequest,
-    StudioSettingsSnapshot, ThreadModelRouteUpdateResponse, UpdateDeepSeekWebSearchSettingsRequest,
-    UpdateGeneralSettingsRequest, UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest,
-    UpdatePermissionSettingsRequest, UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest,
-    UpdateWebSearchSettingsRequest,
+    RemoveProviderRequest, SetDefaultProviderRequest, SetThreadModelRouteRequest,
+    SettingsFieldUpdate, SettingsStateResponse, ThreadModelRouteUpdateResponse,
+    UpdatePermissionSettingsRequest, UpdateProviderRequest, UpdateSettingsFieldRequest,
 };
 
 use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort};
-use crate::{ModeRouteEdit, PermissionMode, ProviderSettingsEdit, RoleEdit, StudioRole};
+use crate::{PermissionMode, StudioRole};
 
 use super::StudioRuntime;
 
 mod provider_edit;
 mod view;
 
-use provider_edit::{invalid_settings_argument, web_search_config};
-use view::normalized_string_list;
-pub(crate) use view::settings_snapshot;
+use provider_edit::invalid_settings_argument;
+pub(crate) use view::{model_catalog_snapshot, settings_config_snapshot, settings_state_response};
+use view::{normalized_optional, normalized_string_list};
 
 impl StudioRuntime {
+    fn settings_response(
+        &self,
+        state: &crate::ConfigRuntimeSnapshot,
+    ) -> Result<SettingsStateResponse> {
+        settings_state_response(state, &self.config_runtime.read_catalog()?)
+    }
+
     /// Reads the canonical built-in provider and model catalog.
     pub fn load_provider_catalog(&self) -> Result<pl_protocol::ProviderCatalogSnapshot> {
         Ok(pl_model::config::builtin_provider_catalog()?.snapshot()?)
     }
 
     /// Reads the secret-free canonical Settings snapshot from the in-memory owner.
-    pub fn read_settings(&self) -> Result<StudioSettingsSnapshot> {
-        settings_snapshot(self.config_runtime.read()?)
+    pub fn read_settings(&self) -> Result<SettingsStateResponse> {
+        self.settings_response(&self.config_runtime.read()?)
+    }
+
+    /// Applies one typed settings field/resource mutation.
+    ///
+    /// The closure starts from the runtime's canonical desired configuration,
+    /// so a command never carries an old sibling field back into the store.
+    /// Route model and effort updates deliberately have separate variants; the
+    /// unchanged half is resolved from the current canonical route.
+    pub async fn apply_settings_field(
+        &self,
+        request: UpdateSettingsFieldRequest,
+    ) -> Result<SettingsStateResponse> {
+        let mark_skills_stale = matches!(
+            &request.update,
+            SettingsFieldUpdate::SkillsEnabled { .. }
+                | SettingsFieldUpdate::SkillsAutoLearn { .. }
+                | SettingsFieldUpdate::SkillsSystemEnabled { .. }
+                | SettingsFieldUpdate::SkillsProjectDir { .. }
+                | SettingsFieldUpdate::SkillsUserDir { .. }
+                | SettingsFieldUpdate::SkillsExternalDirs { .. }
+                | SettingsFieldUpdate::SkillsDisabled { .. }
+                | SettingsFieldUpdate::SkillsAutoLearnMinToolCalls { .. }
+        );
+        let reconcile_mcp = matches!(
+            &request.update,
+            SettingsFieldUpdate::McpServerEnabled { .. }
+                | SettingsFieldUpdate::McpServerTransport { .. }
+                | SettingsFieldUpdate::McpServerEndpoint { .. }
+        );
+        let update = request.update;
+        let state = self.config_runtime.update_with_effective(
+            request.expected_revision,
+            |config, effective| {
+                let mut config = config.clone();
+                let route_validation_config = if matches!(
+                    &update,
+                    SettingsFieldUpdate::ModeModel { .. }
+                        | SettingsFieldUpdate::ModeReasoningEffort { .. }
+                        | SettingsFieldUpdate::RoleModel { .. }
+                        | SettingsFieldUpdate::RoleReasoningEffort { .. }
+                ) {
+                    effective
+                } else {
+                    &config
+                };
+                match update {
+                    SettingsFieldUpdate::InstructionBaseOverride { value } => {
+                        config.instructions.base_override = value;
+                    }
+                    SettingsFieldUpdate::InstructionDeveloper { value } => {
+                        config.instructions.developer = value;
+                    }
+                    SettingsFieldUpdate::InstructionUser { value } => {
+                        config.instructions.user = value;
+                    }
+                    SettingsFieldUpdate::ProjectDocMaxBytes { value } => {
+                        config.instructions.project_doc_max_bytes = usize::try_from(value)
+                            .map_err(|_| {
+                                pl_protocol::PureError::ConfigError(
+                                    "projectDocMaxBytes exceeds this platform".to_string(),
+                                )
+                            })?;
+                    }
+                    SettingsFieldUpdate::ProjectDocFallbackFilenames { value } => {
+                        config.instructions.project_doc_fallback_filenames =
+                            normalized_string_list(value);
+                    }
+                    SettingsFieldUpdate::SkillsEnabled { value } => config.skills.enabled = value,
+                    SettingsFieldUpdate::SkillsAutoLearn { value } => {
+                        config.skills.auto_learn = value;
+                    }
+                    SettingsFieldUpdate::SkillsSystemEnabled { value } => {
+                        config.skills.system.enabled = value;
+                    }
+                    SettingsFieldUpdate::SkillsProjectDir { value } => {
+                        config.skills.project_dir = value
+                    }
+                    SettingsFieldUpdate::SkillsUserDir { value } => config.skills.user_dir = value,
+                    SettingsFieldUpdate::SkillsExternalDirs { value } => {
+                        config.skills.external_dirs = normalized_string_list(value);
+                    }
+                    SettingsFieldUpdate::SkillsDisabled { value } => {
+                        config.skills.disabled = normalized_string_list(value);
+                    }
+                    SettingsFieldUpdate::SkillsAutoLearnMinToolCalls { value } => {
+                        config.skills.auto_learn_min_tool_calls = value;
+                    }
+                    SettingsFieldUpdate::McpServerEnabled { id, value } => {
+                        apply_mcp_server_enabled(&mut config, &id, value)?;
+                    }
+                    SettingsFieldUpdate::McpServerTransport { id, transport } => {
+                        apply_mcp_server_transport(&mut config, &id, &transport)?;
+                    }
+                    SettingsFieldUpdate::McpServerEndpoint { id, endpoint } => {
+                        apply_mcp_server_endpoint(&mut config, &id, &endpoint)?;
+                    }
+                    SettingsFieldUpdate::GeneralFollowActiveTurn { value } => {
+                        config.ui.follow_active_turn = value;
+                    }
+                    SettingsFieldUpdate::GeneralCompactTimeline { value } => {
+                        config.ui.compact_timeline = value;
+                    }
+                    SettingsFieldUpdate::GeneralSidebarWidth { value } => {
+                        if !value.is_none_or(|width| (300..=440).contains(&width)) {
+                            return Err(pl_protocol::PureError::ConfigError(
+                                "sidebar width must be between 300 and 440".to_string(),
+                            ));
+                        }
+                        config.ui.sidebar_width = value;
+                    }
+                    SettingsFieldUpdate::GeneralPinnedThreadIds { value } => {
+                        if value.len() > 64 {
+                            return Err(pl_protocol::PureError::ConfigError(
+                                "at most 64 pinned sessions are supported".to_string(),
+                            ));
+                        }
+                        config.ui.pinned_thread_ids = normalized_string_list(value);
+                    }
+                    SettingsFieldUpdate::GeneralPinnedProjectIds { value } => {
+                        if value.len() > 64 {
+                            return Err(pl_protocol::PureError::ConfigError(
+                                "at most 64 pinned projects are supported".to_string(),
+                            ));
+                        }
+                        config.ui.pinned_project_ids = normalized_string_list(value);
+                    }
+                    SettingsFieldUpdate::WebSearchMode { value } => {
+                        config.web_search.mode = parse_web_search_mode(&value)?;
+                    }
+                    SettingsFieldUpdate::WebSearchContextSize { value } => {
+                        config.web_search.context_size =
+                            parse_web_search_context_size(value.as_deref())?;
+                    }
+                    SettingsFieldUpdate::WebSearchAllowedDomains { value } => {
+                        config.web_search.allowed_domains = normalized_string_list(value);
+                    }
+                    SettingsFieldUpdate::WebSearchCountry { value } => {
+                        update_web_search_location(&mut config, |location| {
+                            location.country = normalized_optional(value);
+                        });
+                    }
+                    SettingsFieldUpdate::WebSearchRegion { value } => {
+                        update_web_search_location(&mut config, |location| {
+                            location.region = normalized_optional(value);
+                        });
+                    }
+                    SettingsFieldUpdate::WebSearchCity { value } => {
+                        update_web_search_location(&mut config, |location| {
+                            location.city = normalized_optional(value);
+                        });
+                    }
+                    SettingsFieldUpdate::WebSearchTimezone { value } => {
+                        update_web_search_location(&mut config, |location| {
+                            location.timezone = normalized_optional(value);
+                        });
+                    }
+                    SettingsFieldUpdate::DeepSeekWebSearchEnabled { value } => {
+                        config.deepseek_web_search.enabled = value;
+                    }
+                    SettingsFieldUpdate::ModeModel {
+                        mode_id,
+                        provider_id,
+                        model,
+                    } => {
+                        let mode =
+                            ThreadModeId::new(mode_id.trim().to_string()).map_err(|error| {
+                                pl_protocol::PureError::ConfigError(error.to_string())
+                            })?;
+                        let effort = config
+                            .mode_model_routes
+                            .get(&mode)
+                            .filter(|route| {
+                                route.provider.as_str() == provider_id.trim()
+                                    && route.model == model.trim()
+                            })
+                            .and_then(|route| route.effort.as_ref().map(|value| value.as_str()));
+                        let route = validated_route(
+                            route_validation_config,
+                            &format!("Thread Mode {mode}"),
+                            &provider_id,
+                            &model,
+                            effort,
+                        )
+                        .map_err(|error| pl_protocol::PureError::ConfigError(error.to_string()))?;
+                        config.mode_model_routes.insert(mode, route);
+                    }
+                    SettingsFieldUpdate::ModeReasoningEffort { mode_id, effort } => {
+                        let mode =
+                            ThreadModeId::new(mode_id.trim().to_string()).map_err(|error| {
+                                pl_protocol::PureError::ConfigError(error.to_string())
+                            })?;
+                        let current =
+                            config
+                                .mode_model_routes
+                                .get(&mode)
+                                .cloned()
+                                .ok_or_else(|| {
+                                    pl_protocol::PureError::ConfigError(format!(
+                                        "Thread Mode {mode} has no model route"
+                                    ))
+                                })?;
+                        let route = validated_route(
+                            route_validation_config,
+                            &format!("Thread Mode {mode}"),
+                            current.provider.as_str(),
+                            &current.model,
+                            effort.as_deref(),
+                        )
+                        .map_err(|error| pl_protocol::PureError::ConfigError(error.to_string()))?;
+                        config.mode_model_routes.insert(mode, route);
+                    }
+                    SettingsFieldUpdate::RoleModel {
+                        role,
+                        provider_id,
+                        model,
+                    } => {
+                        let role = StudioRole::from_key(role.trim()).ok_or_else(|| {
+                            pl_protocol::PureError::ConfigError(
+                                "Unsupported model role".to_string(),
+                            )
+                        })?;
+                        if role == StudioRole::Planner {
+                            return Err(pl_protocol::PureError::ConfigError(
+                                "planner is a root identity, not a configurable child model role"
+                                    .to_string(),
+                            ));
+                        }
+                        let effort = config
+                            .models
+                            .routes
+                            .get(&role.id())
+                            .filter(|route| {
+                                route.provider.as_str() == provider_id.trim()
+                                    && route.model == model.trim()
+                            })
+                            .and_then(|route| route.effort.as_ref().map(|value| value.as_str()));
+                        let route = validated_route(
+                            route_validation_config,
+                            &format!("role {}", role.key()),
+                            &provider_id,
+                            &model,
+                            effort,
+                        )
+                        .map_err(|error| pl_protocol::PureError::ConfigError(error.to_string()))?;
+                        config.models.routes.insert(role.id(), route);
+                    }
+                    SettingsFieldUpdate::RoleReasoningEffort { role, effort } => {
+                        let role = StudioRole::from_key(role.trim()).ok_or_else(|| {
+                            pl_protocol::PureError::ConfigError(
+                                "Unsupported model role".to_string(),
+                            )
+                        })?;
+                        if role == StudioRole::Planner {
+                            return Err(pl_protocol::PureError::ConfigError(
+                                "planner is a root identity, not a configurable child model role"
+                                    .to_string(),
+                            ));
+                        }
+                        let current =
+                            config
+                                .models
+                                .routes
+                                .get(&role.id())
+                                .cloned()
+                                .ok_or_else(|| {
+                                    pl_protocol::PureError::ConfigError(format!(
+                                        "role {} has no model route",
+                                        role.key()
+                                    ))
+                                })?;
+                        let route = validated_route(
+                            route_validation_config,
+                            &format!("role {}", role.key()),
+                            current.provider.as_str(),
+                            &current.model,
+                            effort.as_deref(),
+                        )
+                        .map_err(|error| pl_protocol::PureError::ConfigError(error.to_string()))?;
+                        config.models.routes.insert(role.id(), route);
+                    }
+                }
+                config.validate_declarations()?;
+                Ok(config)
+            },
+        )?;
+        self.publish_settings_state(state.clone())?;
+        if mark_skills_stale {
+            self.skills.mark_all_stale().await;
+        }
+        if reconcile_mcp {
+            self.reconcile_mcp_runtime().await?;
+        }
+        self.settings_response(&state)
     }
 
     pub fn save_permission_settings(
         &self,
         request: UpdatePermissionSettingsRequest,
-    ) -> Result<StudioSettingsSnapshot> {
+    ) -> Result<SettingsStateResponse> {
         let mode = PermissionMode::from_label(&request.mode)
             .ok_or_else(|| invalid_settings_argument("Unsupported permission mode"))?;
         let state = self
@@ -47,245 +345,98 @@ impl StudioRuntime {
                 Ok(config)
             })?;
         self.publish_settings_state(state.clone())?;
-        settings_snapshot(state)
+        self.settings_response(&state)
     }
 
-    pub fn save_instructions_settings(
-        &self,
-        request: UpdateInstructionsSettingsRequest,
-    ) -> Result<StudioSettingsSnapshot> {
-        let input = request.settings;
-        let state = self
-            .config_runtime
-            .update(request.expected_revision, |config| {
-                let mut config = config.clone();
-                config.instructions.base_override = input.base_override;
-                config.instructions.developer = input.developer;
-                config.instructions.user = input.user;
-                config.instructions.project_doc_max_bytes =
-                    usize::try_from(input.project_doc_max_bytes).map_err(|_| {
-                        pl_protocol::PureError::ConfigError(
-                            "projectDocMaxBytes exceeds this platform".to_string(),
-                        )
-                    })?;
-                config.instructions.project_doc_fallback_filenames =
-                    normalized_string_list(input.project_doc_fallback_filenames);
-                Ok(config)
-            })?;
-        self.publish_settings_state(state.clone())?;
-        settings_snapshot(state)
-    }
-
-    pub async fn save_skills_settings(
-        &self,
-        request: UpdateSkillsSettingsRequest,
-    ) -> Result<StudioSettingsSnapshot> {
-        let input = request.settings;
-        let state = self
-            .config_runtime
-            .update(request.expected_revision, |config| {
-                let mut config = config.clone();
-                config.skills.enabled = input.enabled;
-                config.skills.auto_learn = input.auto_learn;
-                config.skills.system.enabled = input.system_enabled;
-                config.skills.project_dir = input.project_dir;
-                config.skills.user_dir = input.user_dir;
-                config.skills.external_dirs = input.external_dirs;
-                config.skills.disabled = input.disabled;
-                config.skills.auto_learn_min_tool_calls = input.auto_learn_min_tool_calls;
-                Ok(config)
-            })?;
-        self.publish_settings_state(state.clone())?;
-        self.skills.mark_all_stale().await;
-        settings_snapshot(state)
-    }
-
-    pub fn save_general_settings(
-        &self,
-        request: UpdateGeneralSettingsRequest,
-    ) -> Result<StudioSettingsSnapshot> {
-        let input = request.settings;
-        anyhow::ensure!(
-            input
-                .sidebar_width
-                .is_none_or(|width| (300..=440).contains(&width)),
-            "sidebar width must be between 300 and 440"
-        );
-        anyhow::ensure!(
-            input.pinned_thread_ids.len() <= 64 && input.pinned_project_ids.len() <= 64,
-            "at most 64 pinned projects or sessions are supported"
-        );
-        let state = self
-            .config_runtime
-            .update(request.expected_revision, |config| {
-                let mut config = config.clone();
-                config.ui.follow_active_turn = input.follow_active_turn;
-                config.ui.compact_timeline = input.compact_timeline;
-                config.ui.sidebar_width = input.sidebar_width;
-                config.ui.pinned_thread_ids = input.pinned_thread_ids;
-                config.ui.pinned_project_ids = input.pinned_project_ids;
-                Ok(config)
-            })?;
-        self.publish_settings_state(state.clone())?;
-        settings_snapshot(state)
-    }
-
-    pub fn save_web_search_settings(
-        &self,
-        request: UpdateWebSearchSettingsRequest,
-    ) -> Result<StudioSettingsSnapshot> {
-        let web_search = web_search_config(request)?;
-        let expected_revision = web_search.0;
-        let state = self.config_runtime.update(expected_revision, |config| {
-            let mut config = config.clone();
-            config.web_search = web_search.1;
-            Ok(config)
-        })?;
-        self.publish_settings_state(state.clone())?;
-        settings_snapshot(state)
-    }
-
-    pub fn save_deepseek_web_search_settings(
-        &self,
-        request: UpdateDeepSeekWebSearchSettingsRequest,
-    ) -> Result<StudioSettingsSnapshot> {
-        let state = self
-            .config_runtime
-            .update(request.expected_revision, |config| {
-                let mut config = config.clone();
-                config.deepseek_web_search.enabled = request.enabled;
-                Ok(config)
-            })?;
-        self.publish_settings_state(state.clone())?;
-        settings_snapshot(state)
-    }
-
-    pub async fn reload_settings(&self, expected_revision: u64) -> Result<StudioSettingsSnapshot> {
+    pub async fn reload_settings(&self, expected_revision: u64) -> Result<SettingsStateResponse> {
         let state = self.config_runtime.reload_from_disk(expected_revision)?;
         self.publish_settings_state(state.clone())?;
         self.skills.mark_all_stale().await;
         let _ = self.apply_provider_config(&state.config).await?;
         self.reconcile_mcp_runtime().await?;
-        settings_snapshot(state)
+        self.settings_response(&state)
     }
 
-    pub async fn save_mcp_settings(
+    pub async fn save_provider(
         &self,
-        request: UpdateMcpSettingsRequest,
-    ) -> Result<StudioSettingsSnapshot> {
-        let mut config = self.config_runtime.read()?.config;
-        let mut next_servers = std::mem::take(&mut config.mcp.servers);
-        let mut next_builtin = std::mem::take(&mut config.mcp.builtin_servers);
-        for server in request.servers {
-            let server_id = server.id.trim().to_string();
-            if server_id.is_empty() {
-                continue;
-            }
-            if crate::config::mcp::is_builtin_mcp_server_id(&server_id) {
-                next_builtin.insert(
-                    server_id,
-                    crate::config::mcp::BuiltinMcpServerState {
-                        enabled: server.enabled,
-                    },
-                );
-                continue;
-            }
-            let transport = match server.transport.trim() {
-                "stdio" => pl_tool::mcp::config::McpServerTransport::Stdio,
-                "streamableHttp" => pl_tool::mcp::config::McpServerTransport::StreamableHttp,
-                _ => return Err(invalid_settings_argument("Unsupported MCP transport")),
-            };
-            let mut mcp_config = next_servers.remove(&server_id).unwrap_or_else(|| {
-                pl_tool::mcp::config::McpServerConfig {
-                    transport,
-                    ..Default::default()
-                }
-            });
-            mcp_config.enabled = server.enabled;
-            mcp_config.transport = transport;
-            let endpoint = server.endpoint.trim();
-            match transport {
-                pl_tool::mcp::config::McpServerTransport::Stdio => {
-                    mcp_config.command = (!endpoint.is_empty()).then(|| endpoint.to_string());
-                }
-                pl_tool::mcp::config::McpServerTransport::StreamableHttp => {
-                    mcp_config.url = (!endpoint.is_empty()).then(|| endpoint.to_string());
-                }
-            }
-            next_servers.insert(server_id, mcp_config);
-        }
-        config.mcp.servers = next_servers;
-        config.mcp.builtin_servers = next_builtin;
-        let state = self
-            .config_runtime
-            .replace(request.expected_revision, config)?;
-        self.publish_settings_state(state.clone())?;
-        self.reconcile_mcp_runtime().await?;
-        settings_snapshot(state)
-    }
-
-    pub async fn save_provider_settings(
-        &self,
-        request: UpdateProviderSettingsRequest,
-    ) -> Result<StudioSettingsSnapshot> {
+        request: UpdateProviderRequest,
+    ) -> Result<SettingsStateResponse> {
         let current = self.config_runtime.read()?;
-        let edit = ProviderSettingsEdit {
-            default_provider: Some(request.default_provider_id),
-            providers: request
-                .providers
-                .into_iter()
-                .map(|provider| provider_edit::provider_edit(provider, &current.config))
-                .collect::<Result<Vec<_>>>()?,
-            mode_routes: request
-                .mode_routes
-                .into_iter()
-                .map(ModeRouteEdit::from)
-                .collect(),
-            roles: request.roles.into_iter().map(RoleEdit::from).collect(),
-        };
-        let next = edit.to_config(&current.config)?;
+        let provider = provider_edit::provider_edit(request.provider, &current.config)?;
+        let next = provider.to_single_config(&current.config)?;
         let state = self
             .config_runtime
             .replace(request.expected_revision, next)?;
         self.publish_settings_state(state.clone())?;
         let _ = self.apply_provider_config(&state.config).await?;
         self.reconcile_mcp_runtime().await?;
-        settings_snapshot(state)
+        self.settings_response(&state)
     }
 
-    pub fn save_model_role(&self, request: SetModelRoleRequest) -> Result<StudioSettingsSnapshot> {
-        let role = StudioRole::from_key(request.role.trim())
-            .ok_or_else(|| invalid_settings_argument("Unsupported model role"))?;
-        anyhow::ensure!(
-            role != StudioRole::Planner,
-            "planner is a root identity, not a configurable child model role"
-        );
-        let state = self.set_model_role(
-            request.expected_revision,
-            role,
-            &request.provider_id,
-            &request.model,
-            request.effort.as_deref(),
-        )?;
-        self.publish_settings_state(state.clone())?;
-        settings_snapshot(state)
-    }
-
-    pub fn save_mode_model_route(
+    pub fn set_default_provider(
         &self,
-        request: SetModeModelRouteRequest,
-    ) -> Result<StudioSettingsSnapshot> {
-        let mode = ThreadModeId::new(request.mode_id.trim().to_string())
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-        let state = self.set_mode_model_route(
-            request.expected_revision,
-            mode,
-            &request.provider_id,
-            &request.model,
-            request.effort.as_deref(),
+        request: SetDefaultProviderRequest,
+    ) -> Result<SettingsStateResponse> {
+        let current = self.config_runtime.read()?;
+        let provider_id = ProviderId::new(request.provider_id.trim())?;
+        let provider = current
+            .config
+            .models
+            .providers
+            .get(&provider_id)
+            .ok_or_else(|| invalid_settings_argument("Default provider does not exist"))?;
+        let models = provider.effective_models()?;
+        let current_route = current
+            .config
+            .mode_model_routes
+            .get(&ThreadModeId::simple())
+            .filter(|route| route.provider == provider_id);
+        let model = current_route
+            .and_then(|route| models.iter().find(|model| model.slug == route.model))
+            .or_else(|| {
+                current
+                    .config
+                    .models
+                    .routes
+                    .values()
+                    .find(|route| route.provider == provider_id)
+                    .and_then(|route| models.iter().find(|model| model.slug == route.model))
+            })
+            .or_else(|| models.first())
+            .ok_or_else(|| invalid_settings_argument("Default provider has no usable models"))?;
+        let effort = current_route
+            .and_then(|route| (route.model == model.slug).then_some(route.effort.as_ref()))
+            .flatten()
+            .map(|effort| effort.as_str().to_string())
+            .or_else(|| model.default_effort());
+        let route = validated_route(
+            &current.config,
+            "Default provider",
+            provider_id.as_str(),
+            &model.slug,
+            effort.as_deref(),
         )?;
+        let mut next = current.config.clone();
+        next.mode_model_routes.insert(ThreadModeId::simple(), route);
+        let state = self
+            .config_runtime
+            .replace(request.expected_revision, next)?;
         self.publish_settings_state(state.clone())?;
-        settings_snapshot(state)
+        self.settings_response(&state)
+    }
+
+    pub fn remove_provider(&self, request: RemoveProviderRequest) -> Result<SettingsStateResponse> {
+        let current = self.config_runtime.read()?;
+        let next = crate::config_editor::remove_provider(
+            &current.config,
+            &request.provider_id,
+            request.replacement_provider_id.as_deref(),
+        )?;
+        let state = self
+            .config_runtime
+            .replace(request.expected_revision, next)?;
+        self.publish_settings_state(state.clone())?;
+        self.settings_response(&state)
     }
 
     pub async fn save_thread_model_route(
@@ -428,64 +579,132 @@ impl StudioRuntime {
             warning,
         })
     }
+}
 
-    pub fn set_mode_model_route(
-        &self,
-        expected_settings_revision: u64,
-        mode: ThreadModeId,
-        provider_id: &str,
-        model_slug: &str,
-        effort: Option<&str>,
-    ) -> Result<crate::ConfigRuntimeSnapshot> {
-        let current = self.config_runtime.read()?;
-        anyhow::ensure!(
-            current.revision == expected_settings_revision,
-            "settings revision conflict: expected {expected_settings_revision}, actual {}",
-            current.revision
-        );
-        let mut config = current.config;
-        let next_route = validated_route(
-            &config,
-            &format!("Thread Mode {mode}"),
-            provider_id,
-            model_slug,
-            effort,
-        )?;
-        config.mode_model_routes.insert(mode, next_route);
-        config.validate_declarations()?;
-        Ok(self.config_runtime.replace(current.revision, config)?)
+fn parse_web_search_mode(value: &str) -> pl_protocol::Result<pl_protocol::search::WebSearchMode> {
+    match value.trim() {
+        "disabled" => Ok(pl_protocol::search::WebSearchMode::Disabled),
+        "cached" => Ok(pl_protocol::search::WebSearchMode::Cached),
+        "indexed" => Ok(pl_protocol::search::WebSearchMode::Indexed),
+        "live" => Ok(pl_protocol::search::WebSearchMode::Live),
+        _ => Err(pl_protocol::PureError::ConfigError(
+            "Unsupported web search mode".to_string(),
+        )),
     }
+}
 
-    pub fn set_model_role(
-        &self,
-        expected_settings_revision: u64,
-        role: StudioRole,
-        provider_id: &str,
-        model_slug: &str,
-        effort: Option<&str>,
-    ) -> Result<crate::ConfigRuntimeSnapshot> {
-        anyhow::ensure!(
-            StudioRole::child_roles().contains(&role),
-            "planner is a root identity, not a configurable child model role"
-        );
-        let current = self.config_runtime.read()?;
-        anyhow::ensure!(
-            current.revision == expected_settings_revision,
-            "settings revision conflict: expected {expected_settings_revision}, actual {}",
-            current.revision
-        );
-        let mut config = current.config;
-        let next_route = validated_route(
-            &config,
-            &format!("role {}", role.key()),
-            provider_id,
-            model_slug,
-            effort,
-        )?;
-        config.models.routes.insert(role.id(), next_route);
-        config.validate_declarations()?;
-        Ok(self.config_runtime.replace(current.revision, config)?)
+fn parse_web_search_context_size(
+    value: Option<&str>,
+) -> pl_protocol::Result<Option<pl_protocol::WebSearchContextSize>> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(None),
+        Some("low") => Ok(Some(pl_protocol::WebSearchContextSize::Low)),
+        Some("medium") => Ok(Some(pl_protocol::WebSearchContextSize::Medium)),
+        Some("high") => Ok(Some(pl_protocol::WebSearchContextSize::High)),
+        Some(_) => Err(pl_protocol::PureError::ConfigError(
+            "Unsupported web search context size".to_string(),
+        )),
     }
+}
+
+fn update_web_search_location(
+    config: &mut crate::StudioConfig,
+    update: impl FnOnce(&mut pl_protocol::search::WebSearchLocation),
+) {
+    let location = config
+        .web_search
+        .location
+        .get_or_insert_with(Default::default);
+    update(location);
+    if location.is_empty() {
+        config.web_search.location = None;
+    }
+}
+
+fn mcp_server_id(id: &str) -> Option<String> {
+    let id = id.trim().to_string();
+    if id.is_empty() { None } else { Some(id) }
+}
+
+fn apply_mcp_server_enabled(
+    config: &mut crate::StudioConfig,
+    id: &str,
+    enabled: bool,
+) -> pl_protocol::Result<()> {
+    let Some(id) = mcp_server_id(id) else {
+        return Ok(());
+    };
+    if crate::config::mcp::is_builtin_mcp_server_id(&id) {
+        config.mcp.builtin_servers.entry(id).or_default().enabled = enabled;
+        return Ok(());
+    }
+    config.mcp.servers.entry(id).or_default().enabled = enabled;
+    Ok(())
+}
+
+fn apply_mcp_server_transport(
+    config: &mut crate::StudioConfig,
+    id: &str,
+    transport: &str,
+) -> pl_protocol::Result<()> {
+    let Some(id) = mcp_server_id(id) else {
+        return Ok(());
+    };
+    if crate::config::mcp::is_builtin_mcp_server_id(&id) {
+        return Ok(());
+    }
+    let transport = match transport.trim() {
+        "stdio" => pl_tool::mcp::config::McpServerTransport::Stdio,
+        "streamableHttp" => pl_tool::mcp::config::McpServerTransport::StreamableHttp,
+        _ => {
+            return Err(pl_protocol::PureError::ConfigError(
+                "Unsupported MCP transport".to_string(),
+            ));
+        }
+    };
+    let server = config.mcp.servers.entry(id).or_default();
+    let endpoint = match server.transport {
+        pl_tool::mcp::config::McpServerTransport::Stdio => server.command.take(),
+        pl_tool::mcp::config::McpServerTransport::StreamableHttp => server.url.take(),
+    };
+    server.transport = transport;
+    match transport {
+        pl_tool::mcp::config::McpServerTransport::Stdio => {
+            server.command = endpoint;
+            server.url = None;
+        }
+        pl_tool::mcp::config::McpServerTransport::StreamableHttp => {
+            server.url = endpoint;
+            server.command = None;
+        }
+    }
+    Ok(())
+}
+
+fn apply_mcp_server_endpoint(
+    config: &mut crate::StudioConfig,
+    id: &str,
+    endpoint: &str,
+) -> pl_protocol::Result<()> {
+    let Some(id) = mcp_server_id(id) else {
+        return Ok(());
+    };
+    if crate::config::mcp::is_builtin_mcp_server_id(&id) {
+        return Ok(());
+    }
+    let server = config.mcp.servers.entry(id).or_default();
+    let endpoint = endpoint.trim();
+    match server.transport {
+        pl_tool::mcp::config::McpServerTransport::Stdio => {
+            server.command = (!endpoint.is_empty()).then(|| endpoint.to_string());
+            server.url = None;
+        }
+        pl_tool::mcp::config::McpServerTransport::StreamableHttp => {
+            server.url = (!endpoint.is_empty()).then(|| endpoint.to_string());
+            server.command = None;
+        }
+    }
+    Ok(())
 }
 
 fn validated_route(

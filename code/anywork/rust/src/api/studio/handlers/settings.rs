@@ -1,13 +1,12 @@
 use crate::api::studio::bridge_runtime::{active_bridge, installed_bridge};
 use crate::api::studio::convert::settings::{
-    bridge_deepseek_web_search_settings, bridge_settings_snapshot, bridge_web_search_settings,
-    provider_settings_request,
+    bridge_deepseek_web_search_settings, bridge_model_catalog_snapshot, bridge_settings_snapshot,
+    bridge_web_search_settings, provider_settings_request,
 };
 use crate::api::studio::types::{
-    BridgeDeepSeekWebSearchSettingsDto, BridgeError, BridgeProviderCatalogSnapshot,
-    BridgeSettingsStateSnapshot, BridgeWebSearchSettingsDto, DeepSeekWebSearchSettingsInput,
-    InstructionsSettingsInput, McpSettingsInput, ProviderSettingsInput, SkillsSettingsInput,
-    WebSearchSettingsInput,
+    BridgeDeepSeekWebSearchSettingsDto, BridgeError, BridgeModelCatalogSnapshotDto,
+    BridgeProviderCatalogSnapshot, BridgeSettingsStateResponse, BridgeWebSearchSettingsDto,
+    ProviderSettingsInput, RemoveProviderInput, SettingsFieldInput,
 };
 // ── Settings ──
 
@@ -18,62 +17,51 @@ pub fn load_provider_catalog() -> Result<BridgeProviderCatalogSnapshot, BridgeEr
 pub async fn read_web_search_settings() -> Result<BridgeWebSearchSettingsDto, BridgeError> {
     let bridge = active_bridge().await?;
     Ok(bridge_web_search_settings(
-        bridge.studio.read_settings()?.settings.web_search,
+        bridge.studio.read_settings()?.config.settings.web_search,
     ))
-}
-
-pub async fn save_web_search_settings(
-    expected_settings_revision: u64,
-    input: WebSearchSettingsInput,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
-    let bridge = active_bridge().await?;
-    let snapshot = bridge.studio.save_web_search_settings(
-        pl_protocol::studio::UpdateWebSearchSettingsRequest {
-            expected_revision: expected_settings_revision,
-            mode: input.mode,
-            context_size: input.context_size,
-            allowed_domains: input.allowed_domains,
-            country: input.country,
-            region: input.region,
-            city: input.city,
-            timezone: input.timezone,
-        },
-    )?;
-    Ok(bridge_settings_snapshot(snapshot))
 }
 
 pub async fn read_deepseek_web_search_settings()
 -> Result<BridgeDeepSeekWebSearchSettingsDto, BridgeError> {
     let bridge = active_bridge().await?;
     Ok(bridge_deepseek_web_search_settings(
-        bridge.studio.read_settings()?.settings.deepseek_web_search,
+        bridge
+            .studio
+            .read_settings()?
+            .config
+            .settings
+            .deepseek_web_search,
     ))
 }
 
-pub async fn save_deepseek_web_search_settings(
+/// Applies one typed settings field/resource mutation. Sibling values are
+/// resolved by the runtime from its canonical desired configuration.
+pub async fn apply_settings_field(
     expected_settings_revision: u64,
-    input: DeepSeekWebSearchSettingsInput,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+    input: SettingsFieldInput,
+) -> Result<BridgeSettingsStateResponse, BridgeError> {
     let bridge = active_bridge().await?;
-    let snapshot = bridge.studio.save_deepseek_web_search_settings(
-        pl_protocol::studio::UpdateDeepSeekWebSearchSettingsRequest {
-            expected_revision: expected_settings_revision,
-            enabled: input.enabled,
-        },
-    )?;
-    Ok(bridge_settings_snapshot(snapshot))
+    Ok(bridge_settings_snapshot(
+        bridge
+            .studio
+            .apply_settings_field(pl_protocol::studio::UpdateSettingsFieldRequest {
+                expected_revision: expected_settings_revision,
+                update: input.into(),
+            })
+            .await?,
+    ))
 }
 
-pub async fn read_settings_state() -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+pub async fn read_settings_state() -> Result<BridgeSettingsStateResponse, BridgeError> {
     let bridge = active_bridge().await?;
     Ok(bridge_settings_snapshot(bridge.studio.read_settings()?))
 }
 
 pub async fn refresh_model_catalog(
     provider_id: String,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+) -> Result<BridgeModelCatalogSnapshotDto, BridgeError> {
     let bridge = active_bridge().await?;
-    Ok(bridge_settings_snapshot(
+    Ok(bridge_model_catalog_snapshot(
         bridge
             .studio
             .refresh_model_catalog(pl_protocol::studio::RefreshModelCatalogRequest { provider_id })
@@ -83,7 +71,7 @@ pub async fn refresh_model_catalog(
 
 pub async fn reload_settings_from_disk(
     expected_settings_revision: u64,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+) -> Result<BridgeSettingsStateResponse, BridgeError> {
     let bridge = active_bridge().await?;
     Ok(bridge_settings_snapshot(
         bridge
@@ -96,7 +84,7 @@ pub async fn reload_settings_from_disk(
 pub async fn save_runtime_permission_mode(
     expected_settings_revision: u64,
     mode: String,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+) -> Result<BridgeSettingsStateResponse, BridgeError> {
     let bridge = active_bridge().await?;
     Ok(bridge_settings_snapshot(
         bridge.studio.save_permission_settings(
@@ -108,147 +96,45 @@ pub async fn save_runtime_permission_mode(
     ))
 }
 
-pub async fn save_provider_settings(
+pub async fn save_provider(
     expected_settings_revision: u64,
     input: ProviderSettingsInput,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+) -> Result<BridgeSettingsStateResponse, BridgeError> {
     let bridge = active_bridge().await?;
     Ok(bridge_settings_snapshot(
         bridge
             .studio
-            .save_provider_settings(provider_settings_request(expected_settings_revision, input))
+            .save_provider(provider_settings_request(expected_settings_revision, input))
             .await?,
     ))
 }
 
-pub async fn save_instructions_settings(
+pub async fn set_default_provider(
     expected_settings_revision: u64,
-    input: InstructionsSettingsInput,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
-    let bridge = active_bridge().await?;
-    Ok(bridge_settings_snapshot(
-        bridge.studio.save_instructions_settings(
-            pl_protocol::studio::UpdateInstructionsSettingsRequest {
-                expected_revision: expected_settings_revision,
-                settings: pl_protocol::studio::StudioInstructionsSettings {
-                    base_override: input.base_override,
-                    developer: input.developer,
-                    user: input.user,
-                    project_doc_max_bytes: input.project_doc_max_bytes as u64,
-                    project_doc_fallback_filenames: input.project_doc_fallback_filenames,
-                },
-            },
-        )?,
-    ))
-}
-
-pub async fn save_skills_settings(
-    expected_settings_revision: u64,
-    input: SkillsSettingsInput,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+    provider_id: String,
+) -> Result<BridgeSettingsStateResponse, BridgeError> {
     let bridge = active_bridge().await?;
     Ok(bridge_settings_snapshot(
         bridge
             .studio
-            .save_skills_settings(pl_protocol::studio::UpdateSkillsSettingsRequest {
+            .set_default_provider(pl_protocol::studio::SetDefaultProviderRequest {
                 expected_revision: expected_settings_revision,
-                settings: pl_protocol::studio::StudioSkillsSettings {
-                    enabled: input.enabled,
-                    auto_learn: input.auto_learn,
-                    system_enabled: input.system_enabled,
-                    project_dir: input.project_dir,
-                    user_dir: input.user_dir,
-                    external_dirs: input.external_dirs,
-                    disabled: input.disabled,
-                    auto_learn_min_tool_calls: input.auto_learn_min_tool_calls,
-                },
-            })
-            .await?,
-    ))
-}
-
-pub async fn save_mcp_settings(
-    expected_settings_revision: u64,
-    input: McpSettingsInput,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
-    let bridge = active_bridge().await?;
-    Ok(bridge_settings_snapshot(
-        bridge
-            .studio
-            .save_mcp_settings(pl_protocol::studio::UpdateMcpSettingsRequest {
-                expected_revision: expected_settings_revision,
-                servers: input
-                    .servers
-                    .into_iter()
-                    .map(|server| pl_protocol::studio::McpServerUpdate {
-                        id: server.id,
-                        enabled: server.enabled,
-                        transport: server.transport,
-                        endpoint: server.endpoint,
-                    })
-                    .collect(),
-            })
-            .await?,
-    ))
-}
-
-pub async fn save_general_settings(
-    expected_settings_revision: u64,
-    input: crate::api::studio::types::GeneralSettingsInput,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
-    let bridge = active_bridge().await?;
-    Ok(bridge_settings_snapshot(
-        bridge
-            .studio
-            .save_general_settings(pl_protocol::studio::UpdateGeneralSettingsRequest {
-                expected_revision: expected_settings_revision,
-                settings: pl_protocol::studio::StudioGeneralSettings {
-                    follow_active_turn: input.follow_active_turn,
-                    compact_timeline: input.compact_timeline,
-                    sidebar_width: input.sidebar_width,
-                    pinned_thread_ids: input.pinned_thread_ids.clone(),
-                    pinned_project_ids: input.pinned_project_ids.clone(),
-                },
+                provider_id,
             })?,
     ))
 }
 
-pub async fn set_model_role(
+pub async fn remove_provider(
     expected_settings_revision: u64,
-    role_key: String,
     provider_id: String,
-    model: String,
-    effort: Option<String>,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+    input: RemoveProviderInput,
+) -> Result<BridgeSettingsStateResponse, BridgeError> {
     let bridge = active_bridge().await?;
-    Ok(bridge_settings_snapshot(bridge.studio.save_model_role(
-        pl_protocol::studio::SetModelRoleRequest {
+    Ok(bridge_settings_snapshot(bridge.studio.remove_provider(
+        pl_protocol::studio::RemoveProviderRequest {
             expected_revision: expected_settings_revision,
-            role: role_key,
             provider_id,
-            model,
-            effort,
+            replacement_provider_id: input.replacement_provider_id,
         },
     )?))
-}
-
-pub async fn set_mode_model_route(
-    expected_settings_revision: u64,
-    mode_id: String,
-    provider_id: String,
-    model: String,
-    effort: Option<String>,
-) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
-    let bridge = active_bridge().await?;
-    Ok(bridge_settings_snapshot(
-        bridge
-            .studio
-            .save_mode_model_route(pl_protocol::studio::SetModeModelRouteRequest {
-                expected_revision: expected_settings_revision,
-                mode_id,
-                provider_id,
-                model,
-                effort,
-            })?,
-    ))
 }

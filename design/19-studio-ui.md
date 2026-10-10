@@ -659,8 +659,10 @@ Timeline 和状态提示消费 canonical 输入与执行状态，区分已受理
 
 ## 19.12 配置 mutation 与 selector projection
 
-Provider、默认 provider、单个 Mode route、单个 Agent role、permission、general、搜索和
-其他设置使用独立 typed intent。它们共享一个 settings command lane 以满足 CAS 顺序，但
+Provider、默认 provider、单个 Mode route 的 model、单个 Mode route 的 reasoning effort、
+单个 Agent role 的 model、单个 Agent role 的 reasoning effort、permission、general、搜索和
+其他设置使用独立 typed intent；可编辑的复合页在提交时按字段变化拆成最小 command，不把
+同页其它控件的旧值重新写回。它们共享一个 settings command lane 以满足 CAS 顺序，但
 payload 不携带其他设置的完整旧副本；provider 编辑只有在重命名或删除确实需要迁移引用时才
 携带明确的 route migration。成功结果必须来自 Bridge canonical snapshot。
 

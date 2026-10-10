@@ -36,6 +36,7 @@ typedef StartPageView = ({
   ThreadWorkspaceMode workspaceMode,
   List<ProviderSettingsView> providers,
   List<ModeModelRouteView> modeModelRoutes,
+  bool modeRequiresFunctionCalling,
   bool modelRouteMutationPending,
 });
 
@@ -71,15 +72,6 @@ AsyncValue<HeaderView> studioHeader(Ref ref) {
   return ref.watch(
     studioControllerProvider.select(
       (state) => state.whenData(HeaderView.fromState),
-    ),
-  );
-}
-
-@riverpod
-AsyncValue<SettingsPageView> settingsPage(Ref ref) {
-  return ref.watch(
-    studioControllerProvider.select(
-      (state) => state.whenData(SettingsPageView.fromState),
     ),
   );
 }
@@ -148,9 +140,21 @@ AsyncValue<StartPageView> startPage(Ref ref) {
           workspaceMode: state.newThreadWorkspaceMode,
           providers: state.providers,
           modeModelRoutes: state.modeModelRoutes,
-          modelRouteMutationPending: state.mutationPending(
-            'new-thread-mode:${state.newThreadMode.id}',
-          ),
+          modeRequiresFunctionCalling:
+              state.threadModeCatalog.modes
+                  .where(
+                    (descriptor) => descriptor.id == state.newThreadMode.id,
+                  )
+                  .firstOrNull
+                  ?.hasWorkflow ??
+              false,
+          modelRouteMutationPending:
+              state.mutationPending(
+                'new-thread-route:model:${state.newThreadMode.id}',
+              ) ||
+              state.mutationPending(
+                'new-thread-route:effort:${state.newThreadMode.id}',
+              ),
         );
       }),
     ),

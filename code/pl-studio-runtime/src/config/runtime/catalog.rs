@@ -194,12 +194,11 @@ impl ConfigRuntime {
     }
 
     fn publish_catalog_locked(&self, state: &mut RuntimeState, affected: Vec<ProviderId>) {
-        state.snapshot.model_catalog_revision =
-            state.snapshot.model_catalog_revision.saturating_add(1);
-        state.snapshot.updated_at = unix_seconds();
-        state.snapshot.model_catalogs = statuses(&state.observations);
+        state.catalog.revision = state.catalog.revision.saturating_add(1);
+        state.catalog.updated_at = unix_seconds();
+        state.catalog.catalogs = statuses(&state.observations);
         let _ = self.catalog_updates.send(CatalogChange {
-            snapshot: state.snapshot.clone(),
+            snapshot: state.catalog.clone(),
             affected,
         });
     }
@@ -219,7 +218,7 @@ impl ConfigRuntime {
                 observation.status.error = Some(StudioModelCatalogError::Closing);
             }
         }
-        state.snapshot.model_catalogs = statuses(&state.observations);
+        state.catalog.catalogs = statuses(&state.observations);
         Ok(())
     }
 }

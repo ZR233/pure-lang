@@ -36,7 +36,14 @@ StudioState _applyBaseline(
       revision: frame.revision,
     ),
     AgentDirectoryBaseline(:final state) => applyAgentDirectory(current, state),
-    SettingsBaseline(:final state) => applySettingsState(current, state),
+    SettingsConfigBaseline(:final state) => applySettingsConfigState(
+      current,
+      state,
+    ),
+    ModelCatalogBaseline(:final state) => applyModelCatalogState(
+      current,
+      state,
+    ),
     RecoveryBaseline(:final state) => applyRecoveryState(current, state),
     McpBaseline(:final state) => applyMcpState(current, state),
     LspBaseline(:final state) => applyLspState(current, state),
@@ -96,7 +103,11 @@ StudioState applyProductTopicPayload(
       current,
       state,
     ),
-    SettingsStateChangedPayload(:final state) => applySettingsState(
+    SettingsConfigStateChangedPayload(:final state) => applySettingsConfigState(
+      current,
+      state,
+    ),
+    ModelCatalogStateChangedPayload(:final state) => applyModelCatalogState(
       current,
       state,
     ),

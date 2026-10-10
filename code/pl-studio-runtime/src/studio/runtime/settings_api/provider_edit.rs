@@ -2,18 +2,13 @@
 
 use anyhow::Result;
 use pl_model::provider::{ProviderConnectionMode, ProviderWireProtocol};
-use pl_protocol::WebSearchContextSize;
-use pl_protocol::search::WebSearchMode;
 use pl_protocol::studio::{
-    ModeRouteSettingsUpdate, ProviderModelAutoCompactUpdate, ProviderModelConnectionUpdate,
-    ProviderModelUpdate, ProviderSecretUpdate, ProviderSettingsUpdate, RoleSettingsUpdate,
-    StudioError, UpdateWebSearchSettingsRequest,
+    ProviderModelAutoCompactUpdate, ProviderModelConnectionUpdate, ProviderModelUpdate,
+    ProviderSecretUpdate, ProviderSettingsUpdate, StudioError,
 };
 
-use crate::{ModeRouteEdit, ProviderEdit, ProviderModelEdit, RoleEdit};
+use crate::{ProviderEdit, ProviderModelEdit};
 use pl_model::config::ProviderPresetId;
-
-use super::view::{normalized_optional, normalized_string_list};
 
 pub(super) fn provider_edit(
     input: ProviderSettingsUpdate,
@@ -144,64 +139,4 @@ fn parse_provider_connection_mode(value: &str) -> Result<ProviderConnectionMode>
 
 pub(super) fn invalid_settings_argument(message: &'static str) -> anyhow::Error {
     anyhow::Error::new(StudioError::invalid_argument(message))
-}
-
-impl From<RoleSettingsUpdate> for RoleEdit {
-    fn from(input: RoleSettingsUpdate) -> Self {
-        Self {
-            key: input.key,
-            provider: input.provider,
-            model: input.model,
-            effort: input.effort,
-        }
-    }
-}
-
-impl From<ModeRouteSettingsUpdate> for ModeRouteEdit {
-    fn from(input: ModeRouteSettingsUpdate) -> Self {
-        Self {
-            mode_id: input.mode_id,
-            provider: input.provider,
-            model: input.model,
-            effort: input.effort,
-        }
-    }
-}
-
-pub(super) fn web_search_config(
-    request: UpdateWebSearchSettingsRequest,
-) -> Result<(u64, pl_protocol::search::WebSearchConfig)> {
-    let mode = match request.mode.trim() {
-        "disabled" => WebSearchMode::Disabled,
-        "cached" => WebSearchMode::Cached,
-        "indexed" => WebSearchMode::Indexed,
-        "live" => WebSearchMode::Live,
-        _ => return Err(invalid_settings_argument("Unsupported web search mode")),
-    };
-    let context_size = match request.context_size.as_deref().map(str::trim) {
-        None | Some("") => None,
-        Some("low") => Some(WebSearchContextSize::Low),
-        Some("medium") => Some(WebSearchContextSize::Medium),
-        Some("high") => Some(WebSearchContextSize::High),
-        Some(_) => {
-            return Err(invalid_settings_argument(
-                "Unsupported web search context size",
-            ));
-        }
-    };
-    let location = pl_protocol::search::WebSearchLocation {
-        country: normalized_optional(request.country),
-        region: normalized_optional(request.region),
-        city: normalized_optional(request.city),
-        timezone: normalized_optional(request.timezone),
-    };
-    Ok((
-        request.expected_revision,
-        pl_protocol::search::WebSearchConfig {
-            mode,
-            context_size,
-            allowed_domains: normalized_string_list(request.allowed_domains),
-            location: (!location.is_empty()).then_some(location),
-        },
-    ))
 }

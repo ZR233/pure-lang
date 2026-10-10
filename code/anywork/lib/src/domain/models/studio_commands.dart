@@ -1,5 +1,4 @@
 import 'provider_models.dart';
-import 'settings_models.dart';
 
 enum ProviderSecretAction { preserve, replace, clear }
 
@@ -83,178 +82,46 @@ class ProviderCommand {
   final List<ProviderModelAutoCompactCommand> modelAutoCompactLimits;
 }
 
-class RoleSettingsCommand {
-  const RoleSettingsCommand({
-    required this.key,
-    required this.providerId,
-    required this.model,
-    required this.effort,
-  });
-
-  final String key;
-  final String providerId;
-  final String model;
-  final String effort;
-}
-
-class ProviderSettingsCommand {
-  const ProviderSettingsCommand({
-    required this.defaultProviderId,
-    required this.providers,
-    this.modeRoutes = const [],
-    required this.roles,
-  });
-
-  final String defaultProviderId;
-  final List<ProviderCommand> providers;
-  final List<ModeModelRouteView> modeRoutes;
-  final List<RoleSettingsCommand> roles;
-}
-
-abstract final class ProviderSettingsCommandBuilder {
-  static ProviderSettingsCommand build({
-    required List<ProviderSettingsView> providers,
-    required List<ModeModelRouteView> modeRoutes,
-    required List<RoleSettingsView> roles,
-    String? selectedProviderId,
-    String? renamedFrom,
-    String? renamedTo,
-    String? removedProviderId,
-    bool includeRouteMigrations = false,
+abstract final class ProviderCommandBuilder {
+  /// Builds the payload for one provider only.  Default provider, mode routes
+  /// and role routes use separate commands and are never copied from this
+  /// provider editor snapshot.
+  static ProviderCommand buildProvider(
+    ProviderSettingsView value, {
+    String? originalId,
   }) {
-    final normalized = providers.map(normalizeProvider).toList();
-    final fallback = normalized.isEmpty ? null : normalized.first;
-    final providerIds = normalized.map((provider) => provider.id).toSet();
-    final commands = <RoleSettingsCommand>[];
-    final modeCommands = <ModeModelRouteView>[];
-    if (fallback != null) {
-      if (includeRouteMigrations) {
-        for (final route in modeRoutes) {
-          var providerId = route.providerId;
-          if (renamedFrom != null && providerId == renamedFrom) {
-            providerId = renamedTo ?? providerId;
-          }
-          if (removedProviderId != null && providerId == removedProviderId) {
-            providerId = fallback.id;
-          }
-          final provider = _providerById(normalized, providerId);
-          final safeProvider =
-              providerIds.contains(providerId) && provider != null
-              ? provider
-              : fallback;
-          // Online observations can withdraw an existing selection. A provider
-          // field edit must keep that desired route, including its effort.
-          final preserveSelection =
-              route.providerId != removedProviderId &&
-              safeProvider.id == providerId &&
-              (safeProvider.modelCatalog.supported ||
-                  safeProvider.allModels.any(
-                    (candidate) => candidate.slug == route.model,
-                  ));
-          final model = preserveSelection
-              ? route.model
-              : safeProvider.defaultModel;
-          final selectedModel = _modelBySlug(safeProvider.allModels, model);
-          final effort = preserveSelection
-              ? route.effort
-              : selectedModel?.reasoningEfforts.contains(route.effort) == true
-              ? route.effort
-              : selectedModel?.defaultReasoningEffort.isNotEmpty == true
-              ? selectedModel!.defaultReasoningEffort
-              : selectedModel?.reasoningEfforts.firstOrNull ?? '';
-          modeCommands.add(
-            ModeModelRouteView(
-              modeId: route.modeId,
-              providerId: safeProvider.id,
-              model: model,
-              effort: effort,
-            ),
-          );
-        }
-      }
-      if (includeRouteMigrations) {
-        for (final role in roles) {
-          var providerId = role.providerId;
-          if (renamedFrom != null && providerId == renamedFrom) {
-            providerId = renamedTo ?? providerId;
-          }
-          if (removedProviderId != null && providerId == removedProviderId) {
-            providerId = fallback.id;
-          }
-          final provider = _providerById(normalized, providerId);
-          final safeProvider =
-              providerIds.contains(providerId) && provider != null
-              ? provider
-              : fallback;
-          final preserveSelection =
-              role.providerId != removedProviderId &&
-              safeProvider.id == providerId &&
-              (safeProvider.modelCatalog.supported ||
-                  safeProvider.allModels.any(
-                    (candidate) => candidate.slug == role.model,
-                  ));
-          final model = preserveSelection
-              ? role.model
-              : safeProvider.defaultModel;
-          final selectedModel = _modelBySlug(safeProvider.allModels, model);
-          final effort = preserveSelection
-              ? role.effort
-              : selectedModel?.reasoningEfforts.contains(role.effort) == true
-              ? role.effort
-              : selectedModel?.defaultReasoningEffort.isNotEmpty == true
-              ? selectedModel!.defaultReasoningEffort
-              : selectedModel?.reasoningEfforts.firstOrNull ?? '';
-          commands.add(
-            RoleSettingsCommand(
-              key: role.key,
-              providerId: safeProvider.id,
-              model: model,
-              effort: effort,
-            ),
-          );
-        }
-      }
-    }
-    return ProviderSettingsCommand(
-      defaultProviderId:
-          selectedProviderId ?? (normalized.isEmpty ? '' : normalized.first.id),
-      providers: [
-        for (final provider in normalized)
-          ProviderCommand(
-            id: provider.id,
-            originalId: provider.id == renamedTo ? renamedFrom : null,
-            templateKind: provider.templateKind,
-            name: provider.name,
-            baseUrl: provider.baseUrl,
-            secret: provider.bearerToken.trim().isNotEmpty
-                ? ProviderSecretCommand.replace(provider.bearerToken.trim())
-                : provider.hasBearerToken
-                ? const ProviderSecretCommand.preserve()
-                : const ProviderSecretCommand.clear(),
-            pricingEnabled: provider.pricingEnabled,
-            defaultModel: provider.defaultModel,
-            customModels: [
-              for (final model in provider.customModels)
-                ProviderModelCommand(
-                  slug: model.slug.trim(),
-                  displayName: model.displayName.trim(),
-                  wireProtocol: model.wireProtocol,
-                  contextWindow: model.contextWindow ?? 32000,
-                  maxOutputTokens: model.maxOutputTokens ?? 4096,
-                ),
-            ],
-            modelConnectionModes: [
-              for (final override in provider.modelConnectionModes.entries)
-                ProviderModelConnectionCommand(
-                  slug: override.key.trim(),
-                  connectionMode: override.value,
-                ),
-            ],
-            modelAutoCompactLimits: _autoCompactCommands(provider),
+    final provider = normalizeProvider(value);
+    return ProviderCommand(
+      id: provider.id,
+      originalId: originalId,
+      templateKind: provider.templateKind,
+      name: provider.name,
+      baseUrl: provider.baseUrl,
+      secret: provider.bearerToken.trim().isNotEmpty
+          ? ProviderSecretCommand.replace(provider.bearerToken.trim())
+          : provider.hasBearerToken
+          ? const ProviderSecretCommand.preserve()
+          : const ProviderSecretCommand.clear(),
+      pricingEnabled: provider.pricingEnabled,
+      defaultModel: provider.defaultModel,
+      customModels: [
+        for (final model in provider.customModels)
+          ProviderModelCommand(
+            slug: model.slug.trim(),
+            displayName: model.displayName.trim(),
+            wireProtocol: model.wireProtocol,
+            contextWindow: model.contextWindow ?? 32000,
+            maxOutputTokens: model.maxOutputTokens ?? 4096,
           ),
       ],
-      modeRoutes: modeCommands,
-      roles: commands,
+      modelConnectionModes: [
+        for (final override in provider.modelConnectionModes.entries)
+          ProviderModelConnectionCommand(
+            slug: override.key.trim(),
+            connectionMode: override.value,
+          ),
+      ],
+      modelAutoCompactLimits: _autoCompactCommands(provider),
     );
   }
 
@@ -302,126 +169,196 @@ abstract final class ProviderSettingsCommandBuilder {
           .toList(),
     );
   }
-
-  static ProviderSettingsView? _providerById(
-    List<ProviderSettingsView> providers,
-    String id,
-  ) {
-    for (final provider in providers) {
-      if (provider.id == id) return provider;
-    }
-    return null;
-  }
-
-  static ProviderModelView? _modelBySlug(
-    List<ProviderModelView> models,
-    String slug,
-  ) {
-    for (final model in models) {
-      if (model.slug == slug) return model;
-    }
-    return null;
-  }
 }
 
-class InstructionsSettingsCommand {
-  const InstructionsSettingsCommand({
-    required this.baseOverride,
-    required this.developer,
-    required this.user,
-    required this.projectDocMaxBytes,
-    required this.projectDocFallbackFilenames,
-  });
-
-  final String baseOverride;
-  final String developer;
-  final String user;
-  final int projectDocMaxBytes;
-  final List<String> projectDocFallbackFilenames;
+/// One canonical settings field/resource mutation.
+///
+/// Each command carries only the value the user changed. The repository and
+/// Bridge never receive a stale sibling settings snapshot to merge back.
+sealed class SettingsFieldCommand {
+  const SettingsFieldCommand();
 }
 
-class SkillsSettingsCommand {
-  const SkillsSettingsCommand({
-    required this.enabled,
-    required this.autoLearn,
-    required this.systemEnabled,
-    required this.projectDir,
-    required this.userDir,
-    required this.externalDirs,
-    required this.disabled,
-    required this.autoLearnMinToolCalls,
-  });
-
-  final bool enabled;
-  final bool autoLearn;
-  final bool systemEnabled;
-  final String projectDir;
-  final String userDir;
-  final List<String> externalDirs;
-  final List<String> disabled;
-  final int autoLearnMinToolCalls;
+class InstructionBaseOverrideCommand extends SettingsFieldCommand {
+  const InstructionBaseOverrideCommand(this.value);
+  final String value;
 }
 
-class McpServerCommand {
-  const McpServerCommand({
-    required this.id,
-    required this.enabled,
-    required this.transport,
-    required this.endpoint,
-  });
+class InstructionDeveloperCommand extends SettingsFieldCommand {
+  const InstructionDeveloperCommand(this.value);
+  final String value;
+}
 
+class InstructionUserCommand extends SettingsFieldCommand {
+  const InstructionUserCommand(this.value);
+  final String value;
+}
+
+class ProjectDocMaxBytesCommand extends SettingsFieldCommand {
+  const ProjectDocMaxBytesCommand(this.value);
+  final int value;
+}
+
+class ProjectDocFallbackFilenamesCommand extends SettingsFieldCommand {
+  const ProjectDocFallbackFilenamesCommand(this.value);
+  final List<String> value;
+}
+
+class SkillsEnabledCommand extends SettingsFieldCommand {
+  const SkillsEnabledCommand(this.value);
+  final bool value;
+}
+
+class SkillsAutoLearnCommand extends SettingsFieldCommand {
+  const SkillsAutoLearnCommand(this.value);
+  final bool value;
+}
+
+class SkillsSystemEnabledCommand extends SettingsFieldCommand {
+  const SkillsSystemEnabledCommand(this.value);
+  final bool value;
+}
+
+class SkillsProjectDirCommand extends SettingsFieldCommand {
+  const SkillsProjectDirCommand(this.value);
+  final String value;
+}
+
+class SkillsUserDirCommand extends SettingsFieldCommand {
+  const SkillsUserDirCommand(this.value);
+  final String value;
+}
+
+class SkillsExternalDirsCommand extends SettingsFieldCommand {
+  const SkillsExternalDirsCommand(this.value);
+  final List<String> value;
+}
+
+class SkillsDisabledCommand extends SettingsFieldCommand {
+  const SkillsDisabledCommand(this.value);
+  final List<String> value;
+}
+
+class SkillsAutoLearnMinToolCallsCommand extends SettingsFieldCommand {
+  const SkillsAutoLearnMinToolCallsCommand(this.value);
+  final int value;
+}
+
+class McpServerEnabledCommand extends SettingsFieldCommand {
+  const McpServerEnabledCommand({required this.id, required this.value});
   final String id;
-  final bool enabled;
-  final String transport;
-  final String endpoint;
+  final bool value;
 }
 
-class McpSettingsCommand {
-  const McpSettingsCommand({required this.servers});
-
-  final List<McpServerCommand> servers;
+class McpServerTransportCommand extends SettingsFieldCommand {
+  const McpServerTransportCommand({required this.id, required this.value});
+  final String id;
+  final String value;
 }
 
-class GeneralSettingsCommand {
-  const GeneralSettingsCommand({
-    required this.followActiveTurn,
-    required this.compactTimeline,
-    this.sidebarWidth,
-    this.pinnedThreadIds,
-    this.pinnedProjectIds,
+class McpServerEndpointCommand extends SettingsFieldCommand {
+  const McpServerEndpointCommand({required this.id, required this.value});
+  final String id;
+  final String value;
+}
+
+class GeneralFollowActiveTurnCommand extends SettingsFieldCommand {
+  const GeneralFollowActiveTurnCommand(this.value);
+  final bool value;
+}
+
+class GeneralCompactTimelineCommand extends SettingsFieldCommand {
+  const GeneralCompactTimelineCommand(this.value);
+  final bool value;
+}
+
+class GeneralSidebarWidthCommand extends SettingsFieldCommand {
+  const GeneralSidebarWidthCommand(this.value);
+  final int? value;
+}
+
+class GeneralPinnedThreadIdsCommand extends SettingsFieldCommand {
+  const GeneralPinnedThreadIdsCommand(this.value);
+  final List<String> value;
+}
+
+class GeneralPinnedProjectIdsCommand extends SettingsFieldCommand {
+  const GeneralPinnedProjectIdsCommand(this.value);
+  final List<String> value;
+}
+
+class WebSearchModeCommand extends SettingsFieldCommand {
+  const WebSearchModeCommand(this.value);
+  final String value;
+}
+
+class WebSearchContextSizeCommand extends SettingsFieldCommand {
+  const WebSearchContextSizeCommand(this.value);
+  final String? value;
+}
+
+class WebSearchAllowedDomainsCommand extends SettingsFieldCommand {
+  const WebSearchAllowedDomainsCommand(this.value);
+  final List<String> value;
+}
+
+class WebSearchCountryCommand extends SettingsFieldCommand {
+  const WebSearchCountryCommand(this.value);
+  final String? value;
+}
+
+class WebSearchRegionCommand extends SettingsFieldCommand {
+  const WebSearchRegionCommand(this.value);
+  final String? value;
+}
+
+class WebSearchCityCommand extends SettingsFieldCommand {
+  const WebSearchCityCommand(this.value);
+  final String? value;
+}
+
+class WebSearchTimezoneCommand extends SettingsFieldCommand {
+  const WebSearchTimezoneCommand(this.value);
+  final String? value;
+}
+
+class DeepSeekWebSearchEnabledCommand extends SettingsFieldCommand {
+  const DeepSeekWebSearchEnabledCommand(this.value);
+  final bool value;
+}
+
+class ModeModelCommand extends SettingsFieldCommand {
+  const ModeModelCommand({
+    required this.modeId,
+    required this.providerId,
+    required this.model,
   });
-
-  final bool followActiveTurn;
-  final bool compactTimeline;
-  final int? sidebarWidth;
-  final List<String>? pinnedThreadIds;
-  final List<String>? pinnedProjectIds;
+  final String modeId;
+  final String providerId;
+  final String model;
 }
 
-class WebSearchSettingsCommand {
-  const WebSearchSettingsCommand({
-    required this.mode,
-    required this.contextSize,
-    required this.allowedDomains,
-    this.country,
-    this.region,
-    this.city,
-    this.timezone,
+class ModeReasoningEffortCommand extends SettingsFieldCommand {
+  const ModeReasoningEffortCommand({required this.modeId, this.effort});
+  final String modeId;
+  final String? effort;
+}
+
+class RoleModelCommand extends SettingsFieldCommand {
+  const RoleModelCommand({
+    required this.role,
+    required this.providerId,
+    required this.model,
   });
-
-  final String mode;
-  final String? contextSize;
-  final List<String> allowedDomains;
-  final String? country;
-  final String? region;
-  final String? city;
-  final String? timezone;
+  final String role;
+  final String providerId;
+  final String model;
 }
 
-class DeepSeekWebSearchSettingsCommand {
-  const DeepSeekWebSearchSettingsCommand({required this.enabled});
-
-  final bool enabled;
+class RoleReasoningEffortCommand extends SettingsFieldCommand {
+  const RoleReasoningEffortCommand({required this.role, this.effort});
+  final String role;
+  final String? effort;
 }
 
 extension<T> on List<T> {

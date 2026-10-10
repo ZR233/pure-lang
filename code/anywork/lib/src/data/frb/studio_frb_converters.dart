@@ -14,8 +14,10 @@ ProductTopicEventPayload _productPayloadFromFrb(
       ),
     frb.BridgeProductEventPayload_AgentDirectoryChanged(:final field0) =>
       AgentDirectoryChangedPayload(_agentDirectoryFromFrb(field0)),
-    frb.BridgeProductEventPayload_SettingsStateChanged(:final field0) =>
-      SettingsStateChangedPayload(_settingsStateFromFrb(field0)),
+    frb.BridgeProductEventPayload_SettingsConfigStateChanged(:final field0) =>
+      SettingsConfigStateChangedPayload(_settingsConfigStateFromFrb(field0)),
+    frb.BridgeProductEventPayload_ModelCatalogStateChanged(:final field0) =>
+      ModelCatalogStateChangedPayload(_modelCatalogStateFromFrb(field0)),
     frb.BridgeProductEventPayload_RecoveryStateChanged(:final field0) =>
       RecoveryStateChangedPayload(_recoveryStateFromFrb(field0)),
     frb.BridgeProductEventPayload_McpStateChanged(:final field0) =>
@@ -99,7 +101,10 @@ ProductTopic _productTopicFromBridge(frb_topic_types.BridgeProductTopic topic) {
       const ThreadDirectoryTopic(),
     frb_topic_types.BridgeProductTopic_AgentDirectory() =>
       const AgentDirectoryTopic(),
-    frb_topic_types.BridgeProductTopic_Settings() => const SettingsTopic(),
+    frb_topic_types.BridgeProductTopic_SettingsConfig() =>
+      const SettingsConfigTopic(),
+    frb_topic_types.BridgeProductTopic_ModelCatalog() =>
+      const ModelCatalogTopic(),
     frb_topic_types.BridgeProductTopic_Recovery() => const RecoveryTopic(),
     frb_topic_types.BridgeProductTopic_Mcp() => const McpTopic(),
     frb_topic_types.BridgeProductTopic_Lsp() => const LspTopic(),
@@ -134,8 +139,10 @@ ProductTopic _productPayloadTopicFromBridge(
       const ThreadDirectoryTopic(),
     frb.BridgeProductEventPayload_AgentDirectoryChanged() =>
       const AgentDirectoryTopic(),
-    frb.BridgeProductEventPayload_SettingsStateChanged() =>
-      const SettingsTopic(),
+    frb.BridgeProductEventPayload_SettingsConfigStateChanged() =>
+      const SettingsConfigTopic(),
+    frb.BridgeProductEventPayload_ModelCatalogStateChanged() =>
+      const ModelCatalogTopic(),
     frb.BridgeProductEventPayload_RecoveryStateChanged() =>
       const RecoveryTopic(),
     frb.BridgeProductEventPayload_McpStateChanged() => const McpTopic(),
@@ -168,7 +175,10 @@ frb_topic_types.BridgeProductTopic bridgeProductTopic(ProductTopic topic) {
       const frb_topic_types.BridgeProductTopic.threadDirectory(),
     AgentDirectoryTopic() =>
       const frb_topic_types.BridgeProductTopic.agentDirectory(),
-    SettingsTopic() => const frb_topic_types.BridgeProductTopic.settings(),
+    SettingsConfigTopic() =>
+      const frb_topic_types.BridgeProductTopic.settingsConfig(),
+    ModelCatalogTopic() =>
+      const frb_topic_types.BridgeProductTopic.modelCatalog(),
     RecoveryTopic() => const frb_topic_types.BridgeProductTopic.recovery(),
     McpTopic() => const frb_topic_types.BridgeProductTopic.mcp(),
     LspTopic() => const frb_topic_types.BridgeProductTopic.lsp(),
@@ -205,8 +215,10 @@ ProductTopicBaselineState _productBaselineFromFrb(
       ThreadDirectoryBaseline(_threadDirectoryPageFromFrb(field0)),
     frb_topic_types.BridgeProductBaseline_AgentDirectory(:final field0) =>
       AgentDirectoryBaseline(_agentDirectoryFromFrb(field0)),
-    frb_topic_types.BridgeProductBaseline_Settings(:final field0) =>
-      SettingsBaseline(_settingsStateFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_SettingsConfig(:final field0) =>
+      SettingsConfigBaseline(_settingsConfigStateFromFrb(field0)),
+    frb_topic_types.BridgeProductBaseline_ModelCatalog(:final field0) =>
+      ModelCatalogBaseline(_modelCatalogStateFromFrb(field0)),
     frb_topic_types.BridgeProductBaseline_Recovery(:final field0) =>
       RecoveryBaseline(_recoveryStateFromFrb(field0)),
     frb_topic_types.BridgeProductBaseline_Mcp(:final field0) => McpBaseline(
@@ -357,7 +369,12 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioStateSnapshot value) {
       revision: threadPage.revision,
     ),
     agentDirectory: _agentDirectoryFromFrb(value.agentDirectory),
-    settingsState: _settingsStateFromFrb(value.settings),
+    settingsState:
+        mergeCanonicalSettingsSnapshots(
+          _settingsConfigStateFromFrb(value.settingsConfig),
+          _modelCatalogStateFromFrb(value.modelCatalog),
+        ) ??
+        _settingsConfigStateFromFrb(value.settingsConfig),
     recoveryState: _recoveryStateFromFrb(value.recovery),
     mcpState: _mcpStateFromFrb(value.mcp),
     lspState: _lspStateFromFrb(value.lsp),

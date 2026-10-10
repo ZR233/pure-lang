@@ -1,23 +1,69 @@
 use crate::api::studio::types::{
     BridgeCustomModelSettingsDto, BridgeDeepSeekWebSearchSettingsDto, BridgeGeneralSettingsDto,
     BridgeInstructionsSettingsDto, BridgeMcpServerConfiguration, BridgeMcpServerSettingsDto,
-    BridgeModeModelSettingsDto, BridgeModelAutoCompactSettingsDto,
-    BridgeModelConnectionSettingsDto, BridgeProviderSettingsDto, BridgeProviderUsageData,
-    BridgeProviderUsageState, BridgeRoleSettingsDto, BridgeSettingsStateSnapshot,
-    BridgeSkillsSettingsDto, BridgeStudioSettingsDto, BridgeWebSearchSettingsDto,
-    DeepSeekBalanceDto, DeepSeekBalanceInfoDto, ProviderSecretInput, ProviderSettingsInput,
-    ProviderUsageDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    BridgeModeModelSettingsDto, BridgeModelAutoCompactSettingsDto, BridgeModelCatalogProviderDto,
+    BridgeModelCatalogSnapshotDto, BridgeModelConnectionSettingsDto, BridgeProviderSettingsDto,
+    BridgeProviderUsageData, BridgeProviderUsageState, BridgeRoleSettingsDto,
+    BridgeSettingsConfigSnapshotDto, BridgeSettingsStateResponse, BridgeSkillsSettingsDto,
+    BridgeStudioSettingsDto, BridgeWebSearchSettingsDto, DeepSeekBalanceDto,
+    DeepSeekBalanceInfoDto, ProviderSecretInput, ProviderSettingsInput, ProviderUsageDto,
+    ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 use pl_studio_runtime::{ProviderUsageData, ProviderUsageState, ZhipuQuotaWindow};
 
 pub(crate) fn bridge_settings_snapshot(
-    snapshot: pl_protocol::studio::StudioSettingsSnapshot,
-) -> BridgeSettingsStateSnapshot {
-    super::runtime::bridge_settings_state(pl_protocol::ObservedResource::ready(
-        snapshot.revision,
-        snapshot.updated_at,
-        snapshot,
-    ))
+    snapshot: pl_protocol::studio::SettingsStateResponse,
+) -> BridgeSettingsStateResponse {
+    BridgeSettingsStateResponse {
+        config: bridge_settings_config_snapshot(snapshot.config),
+        catalog: bridge_model_catalog_snapshot(snapshot.catalog),
+    }
+}
+
+pub(crate) fn bridge_settings_config_snapshot(
+    snapshot: pl_protocol::studio::SettingsConfigSnapshot,
+) -> BridgeSettingsConfigSnapshotDto {
+    BridgeSettingsConfigSnapshotDto {
+        revision: snapshot.revision,
+        updated_at: snapshot.updated_at,
+        settings: bridge_settings(snapshot.settings),
+    }
+}
+
+pub(crate) fn bridge_model_catalog_snapshot(
+    snapshot: pl_protocol::studio::ModelCatalogSnapshot,
+) -> BridgeModelCatalogSnapshotDto {
+    BridgeModelCatalogSnapshotDto {
+        revision: snapshot.revision,
+        updated_at: snapshot.updated_at,
+        providers: snapshot
+            .providers
+            .into_iter()
+            .map(|provider| BridgeModelCatalogProviderDto {
+                id: provider.id,
+                effective_models: provider
+                    .effective_models
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                model_catalog: provider.model_catalog.into(),
+            })
+            .collect(),
+    }
+}
+
+pub(crate) fn bridge_model_catalog_provider(
+    provider: pl_protocol::studio::StudioModelCatalogProvider,
+) -> BridgeModelCatalogProviderDto {
+    BridgeModelCatalogProviderDto {
+        id: provider.id,
+        effective_models: provider
+            .effective_models
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        model_catalog: provider.model_catalog.into(),
+    }
 }
 
 pub(crate) fn bridge_settings(
@@ -29,12 +75,6 @@ pub(crate) fn bridge_settings(
             .providers
             .into_iter()
             .map(|provider| BridgeProviderSettingsDto {
-                effective_models: provider
-                    .effective_models
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-                model_catalog: provider.model_catalog.into(),
                 pricing_enabled: provider.pricing_enabled,
                 id: provider.id,
                 template_kind: provider.template_kind,
@@ -202,81 +242,57 @@ fn bridge_custom_model_settings(
 pub(crate) fn provider_settings_request(
     expected_revision: u64,
     input: ProviderSettingsInput,
-) -> pl_protocol::studio::UpdateProviderSettingsRequest {
-    pl_protocol::studio::UpdateProviderSettingsRequest {
+) -> pl_protocol::studio::UpdateProviderRequest {
+    let provider = input.provider;
+    pl_protocol::studio::UpdateProviderRequest {
         expected_revision,
-        default_provider_id: input.default_provider_id,
-        providers: input
-            .providers
-            .into_iter()
-            .map(|provider| pl_protocol::studio::ProviderSettingsUpdate {
-                id: provider.id,
-                original_id: provider.original_id,
-                template_kind: provider.template_kind,
-                name: provider.name,
-                base_url: provider.base_url,
-                secret: match provider.secret {
-                    ProviderSecretInput::Preserve => {
-                        pl_protocol::studio::ProviderSecretUpdate::Preserve
-                    }
-                    ProviderSecretInput::Replace { value } => {
-                        pl_protocol::studio::ProviderSecretUpdate::Replace { value }
-                    }
-                    ProviderSecretInput::Clear => pl_protocol::studio::ProviderSecretUpdate::Clear,
-                },
-                pricing_enabled: provider.pricing_enabled,
-                default_model: provider.default_model,
-                custom_models: provider
-                    .custom_models
-                    .into_iter()
-                    .map(|model| pl_protocol::studio::ProviderModelUpdate {
-                        slug: model.slug,
-                        display_name: model.display_name,
-                        wire_protocol: model.wire_protocol,
-                        context_window: model.context_window,
-                        max_output_tokens: model.max_output_tokens,
-                    })
-                    .collect(),
-                model_connection_modes: provider
-                    .model_connection_modes
-                    .into_iter()
-                    .map(|mode| pl_protocol::studio::ProviderModelConnectionUpdate {
-                        slug: mode.slug,
-                        connection_mode: mode.connection_mode,
-                    })
-                    .collect(),
-                model_auto_compact_limits: provider
-                    .model_auto_compact_limits
-                    .into_iter()
-                    .map(
-                        |limit| pl_protocol::studio::ProviderModelAutoCompactUpdate {
-                            slug: limit.slug,
-                            limit: limit.limit,
-                        },
-                    )
-                    .collect(),
-            })
-            .collect(),
-        mode_routes: input
-            .mode_routes
-            .into_iter()
-            .map(|route| pl_protocol::studio::ModeRouteSettingsUpdate {
-                mode_id: route.mode_id,
-                provider: route.provider,
-                model: route.model,
-                effort: route.effort,
-            })
-            .collect(),
-        roles: input
-            .roles
-            .into_iter()
-            .map(|role| pl_protocol::studio::RoleSettingsUpdate {
-                key: role.key,
-                provider: role.provider,
-                model: role.model,
-                effort: role.effort,
-            })
-            .collect(),
+        provider: pl_protocol::studio::ProviderSettingsUpdate {
+            id: provider.id,
+            original_id: provider.original_id,
+            template_kind: provider.template_kind,
+            name: provider.name,
+            base_url: provider.base_url,
+            secret: match provider.secret {
+                ProviderSecretInput::Preserve => {
+                    pl_protocol::studio::ProviderSecretUpdate::Preserve
+                }
+                ProviderSecretInput::Replace { value } => {
+                    pl_protocol::studio::ProviderSecretUpdate::Replace { value }
+                }
+                ProviderSecretInput::Clear => pl_protocol::studio::ProviderSecretUpdate::Clear,
+            },
+            pricing_enabled: provider.pricing_enabled,
+            default_model: provider.default_model,
+            custom_models: provider
+                .custom_models
+                .into_iter()
+                .map(|model| pl_protocol::studio::ProviderModelUpdate {
+                    slug: model.slug,
+                    display_name: model.display_name,
+                    wire_protocol: model.wire_protocol,
+                    context_window: model.context_window,
+                    max_output_tokens: model.max_output_tokens,
+                })
+                .collect(),
+            model_connection_modes: provider
+                .model_connection_modes
+                .into_iter()
+                .map(|mode| pl_protocol::studio::ProviderModelConnectionUpdate {
+                    slug: mode.slug,
+                    connection_mode: mode.connection_mode,
+                })
+                .collect(),
+            model_auto_compact_limits: provider
+                .model_auto_compact_limits
+                .into_iter()
+                .map(
+                    |limit| pl_protocol::studio::ProviderModelAutoCompactUpdate {
+                        slug: limit.slug,
+                        limit: limit.limit,
+                    },
+                )
+                .collect(),
+        },
     }
 }
 pub(crate) fn provider_usage_dto(

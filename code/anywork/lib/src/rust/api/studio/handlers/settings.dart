@@ -6,7 +6,6 @@
 import '../../../frb_generated.dart';
 import '../types/error.dart';
 import '../types/response.dart';
-import '../types/runtime.dart';
 import '../types/settings.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -17,43 +16,36 @@ Future<BridgeProviderCatalogSnapshot> loadProviderCatalog() =>
 Future<BridgeWebSearchSettingsDto> readWebSearchSettings() =>
     RustLib.instance.api.crateApiStudioHandlersSettingsReadWebSearchSettings();
 
-Future<BridgeSettingsStateSnapshot> saveWebSearchSettings({
-  required BigInt expectedSettingsRevision,
-  required WebSearchSettingsInput input,
-}) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveWebSearchSettings(
-  expectedSettingsRevision: expectedSettingsRevision,
-  input: input,
-);
-
 Future<BridgeDeepSeekWebSearchSettingsDto> readDeepseekWebSearchSettings() =>
     RustLib.instance.api
         .crateApiStudioHandlersSettingsReadDeepseekWebSearchSettings();
 
-Future<BridgeSettingsStateSnapshot> saveDeepseekWebSearchSettings({
+/// Applies one typed settings field/resource mutation. Sibling values are
+/// resolved by the runtime from its canonical desired configuration.
+Future<BridgeSettingsStateResponse> applySettingsField({
   required BigInt expectedSettingsRevision,
-  required DeepSeekWebSearchSettingsInput input,
-}) => RustLib.instance.api
-    .crateApiStudioHandlersSettingsSaveDeepseekWebSearchSettings(
-      expectedSettingsRevision: expectedSettingsRevision,
-      input: input,
-    );
+  required SettingsFieldInput input,
+}) => RustLib.instance.api.crateApiStudioHandlersSettingsApplySettingsField(
+  expectedSettingsRevision: expectedSettingsRevision,
+  input: input,
+);
 
-Future<BridgeSettingsStateSnapshot> readSettingsState() =>
+Future<BridgeSettingsStateResponse> readSettingsState() =>
     RustLib.instance.api.crateApiStudioHandlersSettingsReadSettingsState();
 
-Future<BridgeSettingsStateSnapshot> refreshModelCatalog({
+Future<BridgeModelCatalogSnapshotDto> refreshModelCatalog({
   required String providerId,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsRefreshModelCatalog(
   providerId: providerId,
 );
 
-Future<BridgeSettingsStateSnapshot> reloadSettingsFromDisk({
+Future<BridgeSettingsStateResponse> reloadSettingsFromDisk({
   required BigInt expectedSettingsRevision,
 }) => RustLib.instance.api.crateApiStudioHandlersSettingsReloadSettingsFromDisk(
   expectedSettingsRevision: expectedSettingsRevision,
 );
 
-Future<BridgeSettingsStateSnapshot> saveRuntimePermissionMode({
+Future<BridgeSettingsStateResponse> saveRuntimePermissionMode({
   required BigInt expectedSettingsRevision,
   required String mode,
 }) => RustLib.instance.api
@@ -62,71 +54,28 @@ Future<BridgeSettingsStateSnapshot> saveRuntimePermissionMode({
       mode: mode,
     );
 
-Future<BridgeSettingsStateSnapshot> saveProviderSettings({
+Future<BridgeSettingsStateResponse> saveProvider({
   required BigInt expectedSettingsRevision,
   required ProviderSettingsInput input,
-}) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveProviderSettings(
+}) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveProvider(
   expectedSettingsRevision: expectedSettingsRevision,
   input: input,
 );
 
-Future<BridgeSettingsStateSnapshot> saveInstructionsSettings({
+Future<BridgeSettingsStateResponse> setDefaultProvider({
   required BigInt expectedSettingsRevision,
-  required InstructionsSettingsInput input,
-}) =>
-    RustLib.instance.api.crateApiStudioHandlersSettingsSaveInstructionsSettings(
-      expectedSettingsRevision: expectedSettingsRevision,
-      input: input,
-    );
-
-Future<BridgeSettingsStateSnapshot> saveSkillsSettings({
-  required BigInt expectedSettingsRevision,
-  required SkillsSettingsInput input,
-}) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveSkillsSettings(
-  expectedSettingsRevision: expectedSettingsRevision,
-  input: input,
-);
-
-Future<BridgeSettingsStateSnapshot> saveMcpSettings({
-  required BigInt expectedSettingsRevision,
-  required McpSettingsInput input,
-}) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveMcpSettings(
-  expectedSettingsRevision: expectedSettingsRevision,
-  input: input,
-);
-
-Future<BridgeSettingsStateSnapshot> saveGeneralSettings({
-  required BigInt expectedSettingsRevision,
-  required GeneralSettingsInput input,
-}) => RustLib.instance.api.crateApiStudioHandlersSettingsSaveGeneralSettings(
-  expectedSettingsRevision: expectedSettingsRevision,
-  input: input,
-);
-
-Future<BridgeSettingsStateSnapshot> setModelRole({
-  required BigInt expectedSettingsRevision,
-  required String roleKey,
   required String providerId,
-  required String model,
-  String? effort,
-}) => RustLib.instance.api.crateApiStudioHandlersSettingsSetModelRole(
+}) => RustLib.instance.api.crateApiStudioHandlersSettingsSetDefaultProvider(
   expectedSettingsRevision: expectedSettingsRevision,
-  roleKey: roleKey,
   providerId: providerId,
-  model: model,
-  effort: effort,
 );
 
-Future<BridgeSettingsStateSnapshot> setModeModelRoute({
+Future<BridgeSettingsStateResponse> removeProvider({
   required BigInt expectedSettingsRevision,
-  required String modeId,
   required String providerId,
-  required String model,
-  String? effort,
-}) => RustLib.instance.api.crateApiStudioHandlersSettingsSetModeModelRoute(
+  required RemoveProviderInput input,
+}) => RustLib.instance.api.crateApiStudioHandlersSettingsRemoveProvider(
   expectedSettingsRevision: expectedSettingsRevision,
-  modeId: modeId,
   providerId: providerId,
-  model: model,
-  effort: effort,
+  input: input,
 );

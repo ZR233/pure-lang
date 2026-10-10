@@ -72,24 +72,37 @@ class _AgentRouteConfiguration {
     final selectedEffort = hasConfiguredRoute ? canonicalEffort : defaultEffort;
     final pending = ref.watch(
       studioControllerProvider.select(
-        (state) => state.value?.mutationPending('agent-role:$role') ?? false,
+        (state) =>
+            state.value?.mutationPending('agent-role:model:$role') == true ||
+            state.value?.mutationPending('agent-role:effort:$role') == true,
       ),
     );
 
-    Future<void> saveRole({
+    Future<void> saveRoleModel({
       required String providerId,
       required String model,
-      required String? effort,
     }) async {
       try {
         await ref
             .read(studioControllerProvider.notifier)
-            .setModelRole(
+            .setRoleModelField(
               roleKey: role,
               providerId: providerId,
               model: model,
-              effort: effort,
             );
+      } catch (error) {
+        if (!context.mounted) return;
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    }
+
+    Future<void> saveRoleEffort(String? effort) async {
+      try {
+        await ref
+            .read(studioControllerProvider.notifier)
+            .setRoleReasoningEffortField(roleKey: role, effort: effort);
       } catch (error) {
         if (!context.mounted) return;
         final messenger = ScaffoldMessenger.of(context);
@@ -114,21 +127,11 @@ class _AgentRouteConfiguration {
             value.model == selectedModel) {
           return Future<void>.value();
         }
-        return saveRole(
-          providerId: value.providerId,
-          model: value.model,
-          effort: value.defaultReasoningEffort.isNotEmpty
-              ? value.defaultReasoningEffort
-              : value.reasoningEfforts.firstOrNull,
-        );
+        return saveRoleModel(providerId: value.providerId, model: value.model);
       },
       onEffortChanged: (value) {
         if (option == null) return Future<void>.value();
-        return saveRole(
-          providerId: option.providerId,
-          model: option.model,
-          effort: value,
-        );
+        return saveRoleEffort(value);
       },
     );
   }

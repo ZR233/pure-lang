@@ -27,7 +27,8 @@ pub enum StudioProductEventKind {
     ProjectDirectoryChanged(StudioProjectDirectoryState),
     ThreadDirectoryChanged(StudioThreadDirectoryDelta),
     AgentDirectoryChanged(StudioAgentDirectoryState),
-    SettingsStateChanged(Box<StudioSettingsStateSnapshot>),
+    SettingsConfigStateChanged(Box<StudioSettingsConfigStateSnapshot>),
+    ModelCatalogStateChanged(Box<StudioModelCatalogStateSnapshot>),
     RecoveryStateChanged(StudioRecoveryStateSnapshot),
     McpStateChanged(StudioMcpStateSnapshot),
     LspStateChanged(StudioLspStateSnapshot),
@@ -108,8 +109,14 @@ pub struct StudioAgentDirectoryData {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct StudioSettingsStateSnapshot {
-    pub state: ObservedResource<pl_protocol::studio::StudioSettingsSnapshot>,
+pub struct StudioSettingsConfigStateSnapshot {
+    pub state: ObservedResource<pl_protocol::studio::SettingsConfigSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioModelCatalogStateSnapshot {
+    pub state: ObservedResource<pl_protocol::studio::ModelCatalogSnapshot>,
 }
 
 /// 全局模型性能快照：按模型汇总与最近历史窗口，不含按 root 会话费用。
@@ -308,7 +315,8 @@ pub struct StudioStateSnapshot {
     pub project_directory: StudioProjectDirectoryState,
     pub thread_directory: StudioThreadDirectoryPage,
     pub agent_directory: StudioAgentDirectoryState,
-    pub settings: StudioSettingsStateSnapshot,
+    pub settings_config: StudioSettingsConfigStateSnapshot,
+    pub model_catalog: StudioModelCatalogStateSnapshot,
     pub recovery: StudioRecoveryStateSnapshot,
     pub mcp: StudioMcpStateSnapshot,
     pub lsp: StudioLspStateSnapshot,

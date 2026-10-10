@@ -141,18 +141,22 @@ class _InstructionsTabState extends ConsumerState<InstructionsTab> {
       _error = null;
     });
     try {
-      await ref
-          .read(studioControllerProvider.notifier)
-          .saveInstructionsSettings(
-            InstructionsSettingsCommand(
-              baseOverride: _baseController.text,
-              developer: _developerController.text,
-              user: _userController.text,
-              projectDocMaxBytes: widget.settings.projectDocMaxBytes,
-              projectDocFallbackFilenames:
-                  widget.settings.projectDocFallbackFilenames,
-            ),
-          );
+      final controller = ref.read(studioControllerProvider.notifier);
+      if (_baseController.text != widget.settings.baseOverride) {
+        await controller.applySettingsField(
+          InstructionBaseOverrideCommand(_baseController.text),
+        );
+      }
+      if (_developerController.text != widget.settings.developer) {
+        await controller.applySettingsField(
+          InstructionDeveloperCommand(_developerController.text),
+        );
+      }
+      if (_userController.text != widget.settings.user) {
+        await controller.applySettingsField(
+          InstructionUserCommand(_userController.text),
+        );
+      }
     } catch (error) {
       if (mounted) {
         setState(() => _error = error.toString());

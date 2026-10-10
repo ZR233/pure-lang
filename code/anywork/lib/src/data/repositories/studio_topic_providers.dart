@@ -103,7 +103,7 @@ final persistenceQueueTopicProvider = Provider<ProductTopicLease?>(
   isAutoDispose: true,
 );
 
-/// 全局模型统计的独立投影：从 SettingsPageView 拆出，统计更新不再重建设置壳。
+/// 全局模型统计的独立投影；统计更新不再重建设置壳。
 final settingsStatisticsProvider =
     Provider<AsyncValue<ModelPerformanceSnapshotView>>(
       (ref) {

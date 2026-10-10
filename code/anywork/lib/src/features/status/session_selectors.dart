@@ -167,6 +167,13 @@ typedef ModelRouteChanged = FutureOr<void> Function(
   String? effort,
 );
 
+typedef ModelSelectionChanged = FutureOr<void> Function(
+  String providerId,
+  String model,
+);
+
+typedef EffortSelectionChanged = FutureOr<void> Function(String effort);
+
 /// 根会话或新建会话草稿的模型选择器。
 class ModelRoleSelector extends StatelessWidget {
   const ModelRoleSelector({
@@ -174,12 +181,14 @@ class ModelRoleSelector extends StatelessWidget {
     required this.providerId,
     required this.model,
     required this.effort,
-    required this.onSelected,
+    this.onSelected,
+    this.onModelSelected,
     this.pending = false,
     this.available = true,
     this.unavailableReason,
     this.blockedReason,
     this.onExplain,
+    this.requiresFunctionCalling = false,
     super.key,
   });
 
@@ -187,7 +196,12 @@ class ModelRoleSelector extends StatelessWidget {
   final String providerId;
   final String model;
   final String? effort;
-  final ModelRouteChanged onSelected;
+
+  /// Legacy combined callback for live Thread routes, whose model route is a
+  /// single runtime resource. New-session/settings callers use the two field
+  /// callbacks below so model and reasoning effort cannot overwrite siblings.
+  final ModelRouteChanged? onSelected;
+  final ModelSelectionChanged? onModelSelected;
 
   /// Kept in the projection for status/optimistic rendering. Selection stays
   /// enabled while pending so the coordinator can supersede an older intent.
@@ -197,9 +211,18 @@ class ModelRoleSelector extends StatelessWidget {
   final String? blockedReason;
   final ValueChanged<String>? onExplain;
 
+  /// Workflow modes are admitted only to models whose catalog declares
+  /// function calling.  The runtime enforces the same invariant; filtering
+  /// the projection prevents a selectable catalog item from producing a
+  /// predictable Bridge rejection.
+  final bool requiresFunctionCalling;
+
   @override
   Widget build(BuildContext context) {
-    final options = modelOptions(providers);
+    final options = modelOptions(
+      providers,
+      requiresFunctionCalling: requiresFunctionCalling,
+    );
     final current = modelForRoute(providers, providerId, model);
     final warning = !available || current == null;
     final selectionBlockedReason =
@@ -258,13 +281,21 @@ class ModelRoleSelector extends StatelessWidget {
           onBlockedTap: selectionBlockedReason == null
               ? null
               : () => explain(selectionBlockedReason),
-          onSelected: (option) {
+          onSelected: (option) async {
             final nextEffort = option.reasoningEfforts.contains(effort)
                 ? effort
                 : option.defaultReasoningEffort.isNotEmpty
                 ? option.defaultReasoningEffort
                 : option.reasoningEfforts.firstOrNull;
-            onSelected(option.providerId, option.model, nextEffort);
+            if (onModelSelected case final callback?) {
+              await callback(option.providerId, option.model);
+            } else {
+              await onSelected?.call(
+                option.providerId,
+                option.model,
+                nextEffort,
+              );
+            }
           },
           optionKeyBuilder: (option) =>
               StudioDriverKeys.modelOption(option.providerId, option.model),
@@ -281,7 +312,8 @@ class ReasoningEffortSelector extends StatelessWidget {
     required this.providerId,
     required this.model,
     required this.effort,
-    required this.onSelected,
+    this.onSelected,
+    this.onEffortSelected,
     this.pending = false,
     this.blockedReason,
     this.onExplain,
@@ -292,7 +324,8 @@ class ReasoningEffortSelector extends StatelessWidget {
   final String providerId;
   final String model;
   final String? effort;
-  final ModelRouteChanged onSelected;
+  final ModelRouteChanged? onSelected;
+  final EffortSelectionChanged? onEffortSelected;
   final bool pending;
   final String? blockedReason;
   final ValueChanged<String>? onExplain;
@@ -321,7 +354,13 @@ class ReasoningEffortSelector extends StatelessWidget {
       onBlockedTap: blockedReason == null
           ? null
           : () => onExplain?.call(blockedReason!),
-      onSelected: (nextEffort) => onSelected(providerId, model, nextEffort),
+      onSelected: (nextEffort) async {
+        if (onEffortSelected case final callback?) {
+          await callback(nextEffort);
+        } else {
+          await onSelected?.call(providerId, model, nextEffort);
+        }
+      },
       itemBuilder: (context) => [
         for (final effort in efforts)
           StudioMenuItem<String>(
@@ -384,12 +423,22 @@ ModeModelRouteView? modeRouteFor(
       routes.where((route) => route.modeId == ThreadModeId.simple).firstOrNull;
 }
 
-List<ModelSelectionOption> modelOptions(List<ProviderSettingsView> providers) {
+List<ModelSelectionOption> modelOptions(
+  List<ProviderSettingsView> providers, {
+  bool requiresFunctionCalling = false,
+}) {
   return buildModelSelectionOptions(
     providers,
     modelsForProvider: (provider) {
       final models = provider.models;
-      return models.where((model) => model.slug.isNotEmpty).toList();
+      return models
+          .where(
+            (model) =>
+                model.slug.isNotEmpty &&
+                (!requiresFunctionCalling ||
+                    model.capabilities.contains('tools')),
+          )
+          .toList();
     },
   );
 }

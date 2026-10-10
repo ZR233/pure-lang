@@ -50,7 +50,8 @@ impl CatalogSources {
             }
             StudioProductEventKind::ThreadDirectoryChanged(_)
             | StudioProductEventKind::AgentDirectoryChanged(_)
-            | StudioProductEventKind::SettingsStateChanged(_)
+            | StudioProductEventKind::SettingsConfigStateChanged(_)
+            | StudioProductEventKind::ModelCatalogStateChanged(_)
             | StudioProductEventKind::RecoveryStateChanged(_)
             | StudioProductEventKind::McpStateChanged(_)
             | StudioProductEventKind::ProviderUsageStateChanged(_)

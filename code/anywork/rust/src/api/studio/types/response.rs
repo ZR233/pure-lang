@@ -4,7 +4,7 @@ use super::runtime::{
     BridgeRefreshingResource, BridgeStaleResource, BridgeStoppedResource,
     BridgeStudioRecoveryIssueDto, BridgeUninitializedResource, RuntimeSnapshot,
 };
-use super::settings::BridgeStudioSettingsDto;
+use super::settings::{BridgeModelCatalogProviderDto, BridgeStudioSettingsDto};
 use super::thread_stream::BridgeThreadRuntimeSnapshot;
 use super::thread_stream::{BridgeRuntimeCostAmount, BridgeThread};
 use super::updater::BridgeUpdaterStateSnapshot;
@@ -19,7 +19,8 @@ pub struct BridgeStudioStateSnapshot {
     /// 目录分页窗口的首页；后续页通过 `listThreadsPage` keyset cursor 加载。
     pub thread_directory: BridgeThreadDirectoryPage,
     pub agent_directory: BridgeAgentDirectoryState,
-    pub settings: BridgeSettingsStateSnapshot,
+    pub settings_config: BridgeSettingsConfigStateSnapshot,
+    pub model_catalog: BridgeModelCatalogStateSnapshot,
     pub recovery: BridgeRecoveryStateSnapshot,
     pub mcp: BridgeMcpStateSnapshot,
     pub lsp: BridgeLspStateSnapshot,
@@ -374,24 +375,24 @@ pub struct BridgeAgentDirectoryData {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-pub enum BridgeSettingsStateSnapshot {
+pub enum BridgeSettingsConfigStateSnapshot {
     Uninitialized(BridgeUninitializedResource),
     Loading(BridgeLoadingResource),
     Ready {
         resource: BridgeReadyResource,
-        value: BridgeSettingsStateData,
+        value: BridgeSettingsConfigStateData,
     },
     Refreshing {
         resource: BridgeRefreshingResource,
-        value: BridgeSettingsStateData,
+        value: BridgeSettingsConfigStateData,
     },
     Stale {
         resource: BridgeStaleResource,
-        value: BridgeSettingsStateData,
+        value: BridgeSettingsConfigStateData,
     },
     Degraded {
         resource: BridgeDegradedResource,
-        value: BridgeSettingsStateData,
+        value: BridgeSettingsConfigStateData,
     },
     Failed(BridgeFailedResource),
     Stopped(BridgeStoppedResource),
@@ -399,15 +400,70 @@ pub enum BridgeSettingsStateSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct BridgeSettingsStateData {
-    pub model_catalog_revision: u64,
+pub struct BridgeSettingsConfigStateData {
     pub settings: BridgeStudioSettingsDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum BridgeModelCatalogStateSnapshot {
+    Uninitialized(BridgeUninitializedResource),
+    Loading(BridgeLoadingResource),
+    Ready {
+        resource: BridgeReadyResource,
+        value: BridgeModelCatalogStateData,
+    },
+    Refreshing {
+        resource: BridgeRefreshingResource,
+        value: BridgeModelCatalogStateData,
+    },
+    Stale {
+        resource: BridgeStaleResource,
+        value: BridgeModelCatalogStateData,
+    },
+    Degraded {
+        resource: BridgeDegradedResource,
+        value: BridgeModelCatalogStateData,
+    },
+    Failed(BridgeFailedResource),
+    Stopped(BridgeStoppedResource),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeModelCatalogStateData {
+    pub providers: Vec<BridgeModelCatalogProviderDto>,
+}
+
+/// Direct command response. The two clocks stay independent even though a
+/// command returns both canonical resources for convenience.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeSettingsStateResponse {
+    pub config: BridgeSettingsConfigSnapshotDto,
+    pub catalog: BridgeModelCatalogSnapshotDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeSettingsConfigSnapshotDto {
+    pub revision: u64,
+    pub updated_at: i64,
+    pub settings: BridgeStudioSettingsDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeModelCatalogSnapshotDto {
+    pub revision: u64,
+    pub updated_at: i64,
+    pub providers: Vec<BridgeModelCatalogProviderDto>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeThreadModelRouteUpdateResponse {
     pub runtime: BridgeThreadRuntimeSnapshot,
-    pub settings: BridgeSettingsStateSnapshot,
+    pub settings: BridgeSettingsStateResponse,
     pub mode_default_saved: bool,
     pub warning: Option<String>,
 }

@@ -663,7 +663,7 @@ class _Probe {
   ///
   /// The start page has no root workspace yet, so the only canonical fact is
   /// the settings route table (`settings.modeModelRoutes`), which the
-  /// start-page selector writes through `setModeModelRoute`. Once a root
+  /// start-page selector writes through the field-level mode route commands. Once a root
   /// exists the durable workspace route is the fact the next Turn will use, so
   /// a fast submit cannot race an asynchronous route change that has not been
   /// persisted yet.
@@ -685,7 +685,7 @@ class _Probe {
       final routes = settings is Map ? settings['modeModelRoutes'] : null;
       if (routes is! List) return false;
       // The route write must also be committed, so a fast submit cannot race an
-      // asynchronous `setModeModelRoute` that has only updated the draft.
+      // asynchronous field mutation that has only updated the draft.
       return _persistenceSettled(state) &&
           routes.whereType<Map>().any(
             (route) =>

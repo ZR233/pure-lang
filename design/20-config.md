@@ -49,11 +49,27 @@ anywork 使用独立产品身份，默认仅访问 `~/.anywork`，凭据服务�
 保留原文件并向协调器返回明确错误。没有转换路径的版本保留原字节进入统一备份恢复，
 环境失败则停止启动。正常运行不接受禁用主智能体或以该标识保存用户 Profile。
 
-所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整设置状态快照，
-由 Flutter 原子替换 Settings 领域；不得返回聚合状态、raw JSON 或 raw map。CAS 或校验失败
-时保留当前 canonical 状态，不覆盖新配置。
-该 revision 表示用户 desired 设置；在线目录观察使用独立目录水位，不推进 desired revision。
-完整快照同时携带两个水位，消费方拒绝迟到目录或设置快照，模型相关命令提交时重验当前有效声明。
+所有 Settings command 必须携带 `expectedSettingsRevision`，成功返回新的
+`SettingsConfigSnapshot`；目录发生变化时另返回 `ModelCatalogSnapshot`，并分别发布
+`SettingsConfigStateChanged` 与 `ModelCatalogStateChanged`。前者表示用户 desired 设置，后者
+使用独立目录水位，不推进 desired revision。直接响应为 `SettingsStateResponse`，只是为了让
+调用方一次得到两个独立资源，消费方仍按各自 revision 幂等合并；不得返回聚合状态、raw JSON
+或 raw map。CAS 或校验失败时保留当前 canonical 状态，不覆盖新配置。
+
+### 20.1.1 设置 mutation 的资源边界
+
+写入接口按业务资源划分，而不是把整个 `StudioSettings` 快照作为 patch。标量设置、列表设置、
+每个 MCP 字段、每个 Mode 的模型/思考强度以及每个 Agent role 的模型/思考强度，分别使用一个
+typed mutation；请求只携带目标标识和新值，其他字段由配置 owner 从最新 canonical state 解析。
+因此连续选择模型、思考强度或快速返回设置页不会把旧 selector 快照写回，也不会因为目录刷新
+重放其它设置。
+
+Provider 编辑和已有 Thread 的 model route 是有意保留的资源级原子接口。Provider 的 endpoint、
+凭据、模型声明和连接覆盖需要联合校验，Thread route 的模型、思考强度和 runtime route 也必须
+同时满足能力与活动状态约束；把它们拆成多个可独立落盘的请求会允许半个无效资源被观察到。
+它们仍各自拥有独立的 mutation key、CAS、pending、重试和失败状态，并且不会携带其它 provider、
+Mode 或 role 的旧快照。读响应可以为了减少往返同时返回 config/catalog 两个快照，但消费端必须
+按各自 revision 合并，读聚合不改变写入粒度。
 
 ## 20.2 配置职责
 
@@ -443,12 +459,14 @@ fingerprint。
 
 ## 20.14 独立设置命令
 
-配置 mutation 按聚合边界拆分：provider 实例编辑、provider 删除/重命名迁移、默认 provider、
-单个 Mode 默认 route、单个 Agent role route 以及 permission、instructions、skills、MCP、
-general、web search 和 DeepSeek 各自有 typed command。所有 command 携带当前
-`expectedSettingsRevision`，由同一 runtime command lock 做 CAS；成功返回新的 canonical
-Settings snapshot 并发布设置事件。一个 command 不得把页面当前完整 provider、roles、mode
-routes 副本作为无条件替换值，从而避免旧页面保存覆盖并发修改。
+配置 mutation 按最小业务资源拆分：provider 实例、默认 provider、provider 删除、单个 Mode
+route 的 model、单个 Mode route 的 reasoning effort、单个 Agent role 的 model、单个 Agent
+role 的 reasoning effort、permission、instructions 字段、skills 字段、单个 MCP server、
+general 字段、web search 字段和 DeepSeek 开关各自有 typed command。所有 command
+携带当前 `expectedSettingsRevision`，由同一 runtime command lock 做 CAS；成功返回新的 canonical
+Settings snapshot 并发布设置事件。Bridge 与 loopback HTTP 均使用 `PUT /api/v1/settings/field`
+承载 `SettingsFieldUpdate`，FRB 只暴露同一 typed handler。一个 command 不得把页面当前完整 provider、roles、mode
+routes 或其它字段的旧副本作为无条件替换值；需要迁移引用时必须在删除命令中显式给出替换目标。
 
 模型目录刷新属于另一个 command lane，只推进 `modelCatalogRevision`、provider catalog
 状态和有效模型描述。它不会修改 desired route，也不会阻塞配置 command。route 指向被撤下的

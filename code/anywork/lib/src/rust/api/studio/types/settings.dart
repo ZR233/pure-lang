@@ -10,7 +10,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'settings.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `bridge_input_source`, `bridge_modality`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`
 
 /// Provider 配置中由用户定义的模型，不复制内置 catalog 元数据。
 class BridgeCustomModelSettingsDto {
@@ -396,6 +396,33 @@ sealed class BridgeModelCatalogError with _$BridgeModelCatalogError {
   const factory BridgeModelCatalogError.closing() =
       BridgeModelCatalogError_Closing;
   const factory BridgeModelCatalogError.stale() = BridgeModelCatalogError_Stale;
+}
+
+/// A provider's observed model directory. This belongs to the catalog clock,
+/// not to the provider configuration snapshot.
+class BridgeModelCatalogProviderDto {
+  final String id;
+  final List<BridgeModelDescriptor> effectiveModels;
+  final BridgeModelCatalogStatusDto modelCatalog;
+
+  const BridgeModelCatalogProviderDto({
+    required this.id,
+    required this.effectiveModels,
+    required this.modelCatalog,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ effectiveModels.hashCode ^ modelCatalog.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelCatalogProviderDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          effectiveModels == other.effectiveModels &&
+          modelCatalog == other.modelCatalog;
 }
 
 enum BridgeModelCatalogSource { default_, cached, online }
@@ -836,8 +863,6 @@ class BridgeProviderServiceCapabilitiesDescriptor {
 
 /// 不含 secret 的 Provider canonical 设置视图。
 class BridgeProviderSettingsDto {
-  final List<BridgeModelDescriptor> effectiveModels;
-  final BridgeModelCatalogStatusDto modelCatalog;
   final bool pricingEnabled;
   final String id;
   final String templateKind;
@@ -858,8 +883,6 @@ class BridgeProviderSettingsDto {
   final String? catalogId;
 
   const BridgeProviderSettingsDto({
-    required this.effectiveModels,
-    required this.modelCatalog,
     required this.pricingEnabled,
     required this.id,
     required this.templateKind,
@@ -882,8 +905,6 @@ class BridgeProviderSettingsDto {
 
   @override
   int get hashCode =>
-      effectiveModels.hashCode ^
-      modelCatalog.hashCode ^
       pricingEnabled.hashCode ^
       id.hashCode ^
       templateKind.hashCode ^
@@ -908,8 +929,6 @@ class BridgeProviderSettingsDto {
       identical(this, other) ||
       other is BridgeProviderSettingsDto &&
           runtimeType == other.runtimeType &&
-          effectiveModels == other.effectiveModels &&
-          modelCatalog == other.modelCatalog &&
           pricingEnabled == other.pricingEnabled &&
           id == other.id &&
           templateKind == other.templateKind &&
@@ -1153,93 +1172,6 @@ class BridgeWebSearchSettingsDto {
           model == other.model;
 }
 
-/// DeepSeek 原生 Web 搜索开关的 typed bridge 输入。
-class DeepSeekWebSearchSettingsInput {
-  final bool enabled;
-
-  const DeepSeekWebSearchSettingsInput({required this.enabled});
-
-  @override
-  int get hashCode => enabled.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DeepSeekWebSearchSettingsInput &&
-          runtimeType == other.runtimeType &&
-          enabled == other.enabled;
-}
-
-class GeneralSettingsInput {
-  final bool followActiveTurn;
-  final bool compactTimeline;
-  final int? sidebarWidth;
-  final List<String> pinnedThreadIds;
-  final List<String> pinnedProjectIds;
-
-  const GeneralSettingsInput({
-    required this.followActiveTurn,
-    required this.compactTimeline,
-    this.sidebarWidth,
-    required this.pinnedThreadIds,
-    required this.pinnedProjectIds,
-  });
-
-  @override
-  int get hashCode =>
-      followActiveTurn.hashCode ^
-      compactTimeline.hashCode ^
-      sidebarWidth.hashCode ^
-      pinnedThreadIds.hashCode ^
-      pinnedProjectIds.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is GeneralSettingsInput &&
-          runtimeType == other.runtimeType &&
-          followActiveTurn == other.followActiveTurn &&
-          compactTimeline == other.compactTimeline &&
-          sidebarWidth == other.sidebarWidth &&
-          pinnedThreadIds == other.pinnedThreadIds &&
-          pinnedProjectIds == other.pinnedProjectIds;
-}
-
-class InstructionsSettingsInput {
-  final String baseOverride;
-  final String developer;
-  final String user;
-  final BigInt projectDocMaxBytes;
-  final List<String> projectDocFallbackFilenames;
-
-  const InstructionsSettingsInput({
-    required this.baseOverride,
-    required this.developer,
-    required this.user,
-    required this.projectDocMaxBytes,
-    required this.projectDocFallbackFilenames,
-  });
-
-  @override
-  int get hashCode =>
-      baseOverride.hashCode ^
-      developer.hashCode ^
-      user.hashCode ^
-      projectDocMaxBytes.hashCode ^
-      projectDocFallbackFilenames.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is InstructionsSettingsInput &&
-          runtimeType == other.runtimeType &&
-          baseOverride == other.baseOverride &&
-          developer == other.developer &&
-          user == other.user &&
-          projectDocMaxBytes == other.projectDocMaxBytes &&
-          projectDocFallbackFilenames == other.projectDocFallbackFilenames;
-}
-
 @freezed
 sealed class LspScopeInput with _$LspScopeInput {
   const LspScopeInput._();
@@ -1260,78 +1192,6 @@ sealed class McpResetInput with _$McpResetInput {
   const factory McpResetInput.server({required String serverId}) =
       McpResetInput_Server;
   const factory McpResetInput.all() = McpResetInput_All;
-}
-
-class McpServerInput {
-  final String id;
-  final bool enabled;
-  final String transport;
-  final String endpoint;
-
-  const McpServerInput({
-    required this.id,
-    required this.enabled,
-    required this.transport,
-    required this.endpoint,
-  });
-
-  @override
-  int get hashCode =>
-      id.hashCode ^ enabled.hashCode ^ transport.hashCode ^ endpoint.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is McpServerInput &&
-          runtimeType == other.runtimeType &&
-          id == other.id &&
-          enabled == other.enabled &&
-          transport == other.transport &&
-          endpoint == other.endpoint;
-}
-
-class McpSettingsInput {
-  final List<McpServerInput> servers;
-
-  const McpSettingsInput({required this.servers});
-
-  @override
-  int get hashCode => servers.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is McpSettingsInput &&
-          runtimeType == other.runtimeType &&
-          servers == other.servers;
-}
-
-class ModeRouteInput {
-  final String modeId;
-  final String provider;
-  final String model;
-  final String effort;
-
-  const ModeRouteInput({
-    required this.modeId,
-    required this.provider,
-    required this.model,
-    required this.effort,
-  });
-
-  @override
-  int get hashCode =>
-      modeId.hashCode ^ provider.hashCode ^ model.hashCode ^ effort.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ModeRouteInput &&
-          runtimeType == other.runtimeType &&
-          modeId == other.modeId &&
-          provider == other.provider &&
-          model == other.model &&
-          effort == other.effort;
 }
 
 class ProviderInput {
@@ -1482,151 +1342,135 @@ sealed class ProviderSecretInput with _$ProviderSecretInput {
 }
 
 class ProviderSettingsInput {
-  final String defaultProviderId;
-  final List<ProviderInput> providers;
-  final List<ModeRouteInput> modeRoutes;
-  final List<RoleInput> roles;
+  /// A single provider edit.  Default provider, mode routes and role routes
+  /// have their own commands and are intentionally absent from this input.
+  final ProviderInput provider;
 
-  const ProviderSettingsInput({
-    required this.defaultProviderId,
-    required this.providers,
-    required this.modeRoutes,
-    required this.roles,
-  });
+  const ProviderSettingsInput({required this.provider});
 
   @override
-  int get hashCode =>
-      defaultProviderId.hashCode ^
-      providers.hashCode ^
-      modeRoutes.hashCode ^
-      roles.hashCode;
+  int get hashCode => provider.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is ProviderSettingsInput &&
           runtimeType == other.runtimeType &&
-          defaultProviderId == other.defaultProviderId &&
-          providers == other.providers &&
-          modeRoutes == other.modeRoutes &&
-          roles == other.roles;
+          provider == other.provider;
 }
 
-class RoleInput {
-  final String key;
-  final String provider;
-  final String model;
-  final String effort;
+class RemoveProviderInput {
+  final String? replacementProviderId;
 
-  const RoleInput({
-    required this.key,
-    required this.provider,
-    required this.model,
-    required this.effort,
-  });
+  const RemoveProviderInput({this.replacementProviderId});
 
   @override
-  int get hashCode =>
-      key.hashCode ^ provider.hashCode ^ model.hashCode ^ effort.hashCode;
+  int get hashCode => replacementProviderId.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is RoleInput &&
+      other is RemoveProviderInput &&
           runtimeType == other.runtimeType &&
-          key == other.key &&
-          provider == other.provider &&
-          model == other.model &&
-          effort == other.effort;
+          replacementProviderId == other.replacementProviderId;
 }
 
-class SkillsSettingsInput {
-  final bool enabled;
-  final bool autoLearn;
-  final bool systemEnabled;
-  final String projectDir;
-  final String userDir;
-  final List<String> externalDirs;
-  final List<String> disabled;
-  final int autoLearnMinToolCalls;
+@freezed
+sealed class SettingsFieldInput with _$SettingsFieldInput {
+  const SettingsFieldInput._();
 
-  const SkillsSettingsInput({
-    required this.enabled,
-    required this.autoLearn,
-    required this.systemEnabled,
-    required this.projectDir,
-    required this.userDir,
-    required this.externalDirs,
-    required this.disabled,
-    required this.autoLearnMinToolCalls,
-  });
-
-  @override
-  int get hashCode =>
-      enabled.hashCode ^
-      autoLearn.hashCode ^
-      systemEnabled.hashCode ^
-      projectDir.hashCode ^
-      userDir.hashCode ^
-      externalDirs.hashCode ^
-      disabled.hashCode ^
-      autoLearnMinToolCalls.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is SkillsSettingsInput &&
-          runtimeType == other.runtimeType &&
-          enabled == other.enabled &&
-          autoLearn == other.autoLearn &&
-          systemEnabled == other.systemEnabled &&
-          projectDir == other.projectDir &&
-          userDir == other.userDir &&
-          externalDirs == other.externalDirs &&
-          disabled == other.disabled &&
-          autoLearnMinToolCalls == other.autoLearnMinToolCalls;
-}
-
-/// Web 搜索设置的 typed bridge 输入。
-class WebSearchSettingsInput {
-  final String mode;
-  final String? contextSize;
-  final List<String> allowedDomains;
-  final String? country;
-  final String? region;
-  final String? city;
-  final String? timezone;
-
-  const WebSearchSettingsInput({
-    required this.mode,
-    this.contextSize,
-    required this.allowedDomains,
-    this.country,
-    this.region,
-    this.city,
-    this.timezone,
-  });
-
-  @override
-  int get hashCode =>
-      mode.hashCode ^
-      contextSize.hashCode ^
-      allowedDomains.hashCode ^
-      country.hashCode ^
-      region.hashCode ^
-      city.hashCode ^
-      timezone.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is WebSearchSettingsInput &&
-          runtimeType == other.runtimeType &&
-          mode == other.mode &&
-          contextSize == other.contextSize &&
-          allowedDomains == other.allowedDomains &&
-          country == other.country &&
-          region == other.region &&
-          city == other.city &&
-          timezone == other.timezone;
+  const factory SettingsFieldInput.instructionBaseOverride({
+    required String value,
+  }) = SettingsFieldInput_InstructionBaseOverride;
+  const factory SettingsFieldInput.instructionDeveloper({
+    required String value,
+  }) = SettingsFieldInput_InstructionDeveloper;
+  const factory SettingsFieldInput.instructionUser({required String value}) =
+      SettingsFieldInput_InstructionUser;
+  const factory SettingsFieldInput.projectDocMaxBytes({required BigInt value}) =
+      SettingsFieldInput_ProjectDocMaxBytes;
+  const factory SettingsFieldInput.projectDocFallbackFilenames({
+    required List<String> value,
+  }) = SettingsFieldInput_ProjectDocFallbackFilenames;
+  const factory SettingsFieldInput.skillsEnabled({required bool value}) =
+      SettingsFieldInput_SkillsEnabled;
+  const factory SettingsFieldInput.skillsAutoLearn({required bool value}) =
+      SettingsFieldInput_SkillsAutoLearn;
+  const factory SettingsFieldInput.skillsSystemEnabled({required bool value}) =
+      SettingsFieldInput_SkillsSystemEnabled;
+  const factory SettingsFieldInput.skillsProjectDir({required String value}) =
+      SettingsFieldInput_SkillsProjectDir;
+  const factory SettingsFieldInput.skillsUserDir({required String value}) =
+      SettingsFieldInput_SkillsUserDir;
+  const factory SettingsFieldInput.skillsExternalDirs({
+    required List<String> value,
+  }) = SettingsFieldInput_SkillsExternalDirs;
+  const factory SettingsFieldInput.skillsDisabled({
+    required List<String> value,
+  }) = SettingsFieldInput_SkillsDisabled;
+  const factory SettingsFieldInput.skillsAutoLearnMinToolCalls({
+    required int value,
+  }) = SettingsFieldInput_SkillsAutoLearnMinToolCalls;
+  const factory SettingsFieldInput.mcpServerEnabled({
+    required String id,
+    required bool value,
+  }) = SettingsFieldInput_McpServerEnabled;
+  const factory SettingsFieldInput.mcpServerTransport({
+    required String id,
+    required String transport,
+  }) = SettingsFieldInput_McpServerTransport;
+  const factory SettingsFieldInput.mcpServerEndpoint({
+    required String id,
+    required String endpoint,
+  }) = SettingsFieldInput_McpServerEndpoint;
+  const factory SettingsFieldInput.generalFollowActiveTurn({
+    required bool value,
+  }) = SettingsFieldInput_GeneralFollowActiveTurn;
+  const factory SettingsFieldInput.generalCompactTimeline({
+    required bool value,
+  }) = SettingsFieldInput_GeneralCompactTimeline;
+  const factory SettingsFieldInput.generalSidebarWidth({int? value}) =
+      SettingsFieldInput_GeneralSidebarWidth;
+  const factory SettingsFieldInput.generalPinnedThreadIds({
+    required List<String> value,
+  }) = SettingsFieldInput_GeneralPinnedThreadIds;
+  const factory SettingsFieldInput.generalPinnedProjectIds({
+    required List<String> value,
+  }) = SettingsFieldInput_GeneralPinnedProjectIds;
+  const factory SettingsFieldInput.webSearchMode({required String value}) =
+      SettingsFieldInput_WebSearchMode;
+  const factory SettingsFieldInput.webSearchContextSize({String? value}) =
+      SettingsFieldInput_WebSearchContextSize;
+  const factory SettingsFieldInput.webSearchAllowedDomains({
+    required List<String> value,
+  }) = SettingsFieldInput_WebSearchAllowedDomains;
+  const factory SettingsFieldInput.webSearchCountry({String? value}) =
+      SettingsFieldInput_WebSearchCountry;
+  const factory SettingsFieldInput.webSearchRegion({String? value}) =
+      SettingsFieldInput_WebSearchRegion;
+  const factory SettingsFieldInput.webSearchCity({String? value}) =
+      SettingsFieldInput_WebSearchCity;
+  const factory SettingsFieldInput.webSearchTimezone({String? value}) =
+      SettingsFieldInput_WebSearchTimezone;
+  const factory SettingsFieldInput.deepSeekWebSearchEnabled({
+    required bool value,
+  }) = SettingsFieldInput_DeepSeekWebSearchEnabled;
+  const factory SettingsFieldInput.modeModel({
+    required String modeId,
+    required String providerId,
+    required String model,
+  }) = SettingsFieldInput_ModeModel;
+  const factory SettingsFieldInput.modeReasoningEffort({
+    required String modeId,
+    String? effort,
+  }) = SettingsFieldInput_ModeReasoningEffort;
+  const factory SettingsFieldInput.roleModel({
+    required String role,
+    required String providerId,
+    required String model,
+  }) = SettingsFieldInput_RoleModel;
+  const factory SettingsFieldInput.roleReasoningEffort({
+    required String role,
+    String? effort,
+  }) = SettingsFieldInput_RoleReasoningEffort;
 }

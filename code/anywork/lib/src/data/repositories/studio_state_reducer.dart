@@ -705,12 +705,8 @@ StudioState applySettingsState(
   SettingsStateSnapshot next,
 ) {
   final previous = current.settingsState;
-  // Settings and model discovery are two independent monotonic clocks. They are
-  // transported together by the legacy Bridge envelope, but an observation may
-  // advance either clock independently (a config write can carry an older
-  // catalog revision and a catalog refresh can carry an older config revision).
-  // Comparing the pair as one version drops valid updates and was the reason a
-  // route selected after returning from Settings appeared to snap back.
+  // Direct responses can carry both resources. Merge them through the same
+  // independent-clock path used by the two topic reducers.
   if (next.state.value != null && previous.state.value != null) {
     final merged = mergeCanonicalSettingsSnapshots(previous, next);
     if (merged == null) return current;
@@ -722,6 +718,34 @@ StudioState applySettingsState(
     next,
     (snapshot) => current.copyWith(settingsState: snapshot),
   );
+}
+
+/// Applies only the settings-config clock. A catalog carried by an older
+/// baseline is retained from the repository's newer catalog resource.
+StudioState applySettingsConfigState(
+  StudioState current,
+  SettingsStateSnapshot next,
+) {
+  final previous = current.settingsState;
+  if (next.revision <= previous.revision) return current;
+  final merged = mergeCanonicalSettingsSnapshots(previous, next);
+  if (merged == null) return current;
+  return current.copyWith(settingsState: merged);
+}
+
+/// Applies only the model-catalog clock. A catalog refresh must never replace
+/// a newer settings route with an older config snapshot.
+StudioState applyModelCatalogState(
+  StudioState current,
+  SettingsStateSnapshot next,
+) {
+  final previous = current.settingsState;
+  if (next.modelCatalogRevision <= previous.modelCatalogRevision) {
+    return current;
+  }
+  final merged = mergeCanonicalSettingsSnapshots(previous, next);
+  if (merged == null) return current;
+  return current.copyWith(settingsState: merged);
 }
 
 StudioState applyProjectDirectory(

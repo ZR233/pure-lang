@@ -302,6 +302,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelCatalogStateData
+  dco_decode_box_autoadd_bridge_model_catalog_state_data(dynamic raw);
+
+  @protected
   BridgeModelPerformanceSnapshot
   dco_decode_box_autoadd_bridge_model_performance_snapshot(dynamic raw);
 
@@ -383,9 +387,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeSettingsStateData dco_decode_box_autoadd_bridge_settings_state_data(
-    dynamic raw,
-  );
+  BridgeSettingsConfigStateData
+  dco_decode_box_autoadd_bridge_settings_config_state_data(dynamic raw);
 
   @protected
   BridgeSkillActivationCause
@@ -593,27 +596,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DeepSeekBalanceDto dco_decode_box_autoadd_deep_seek_balance_dto(dynamic raw);
 
   @protected
-  DeepSeekWebSearchSettingsInput
-  dco_decode_box_autoadd_deep_seek_web_search_settings_input(dynamic raw);
-
-  @protected
   double dco_decode_box_autoadd_f_64(dynamic raw);
-
-  @protected
-  GeneralSettingsInput dco_decode_box_autoadd_general_settings_input(
-    dynamic raw,
-  );
 
   @protected
   int dco_decode_box_autoadd_i_32(dynamic raw);
 
   @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
-
-  @protected
-  InstructionsSettingsInput dco_decode_box_autoadd_instructions_settings_input(
-    dynamic raw,
-  );
 
   @protected
   ListThreadTurnsRequest dco_decode_box_autoadd_list_thread_turns_request(
@@ -632,9 +621,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   McpResetInput dco_decode_box_autoadd_mcp_reset_input(dynamic raw);
 
   @protected
-  McpSettingsInput dco_decode_box_autoadd_mcp_settings_input(dynamic raw);
-
-  @protected
   ProjectDto dco_decode_box_autoadd_project_dto(dynamic raw);
 
   @protected
@@ -643,12 +629,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RemoveProviderInput dco_decode_box_autoadd_remove_provider_input(dynamic raw);
+
+  @protected
   SaveSshServerRequest dco_decode_box_autoadd_save_ssh_server_request(
     dynamic raw,
   );
 
   @protected
-  SkillsSettingsInput dco_decode_box_autoadd_skills_settings_input(dynamic raw);
+  SettingsFieldInput dco_decode_box_autoadd_settings_field_input(dynamic raw);
 
   @protected
   int dco_decode_box_autoadd_u_16(dynamic raw);
@@ -658,11 +647,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt dco_decode_box_autoadd_u_64(dynamic raw);
-
-  @protected
-  WebSearchSettingsInput dco_decode_box_autoadd_web_search_settings_input(
-    dynamic raw,
-  );
 
   @protected
   ZhipuCodingPlanUsageDto dco_decode_box_autoadd_zhipu_coding_plan_usage_dto(
@@ -677,6 +661,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeInteractionRequest dco_decode_box_bridge_interaction_request(
     dynamic raw,
   );
+
+  @protected
+  BridgeModelCatalogStateSnapshot
+  dco_decode_box_bridge_model_catalog_state_snapshot(dynamic raw);
 
   @protected
   BridgePersistenceQueueStateSnapshot
@@ -696,9 +684,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeSettingsStateSnapshot dco_decode_box_bridge_settings_state_snapshot(
-    dynamic raw,
-  );
+  BridgeSettingsConfigStateSnapshot
+  dco_decode_box_bridge_settings_config_state_snapshot(dynamic raw);
 
   @protected
   BridgeThreadActivity dco_decode_box_bridge_thread_activity(dynamic raw);
@@ -995,7 +982,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeModelCatalogError dco_decode_bridge_model_catalog_error(dynamic raw);
 
   @protected
+  BridgeModelCatalogProviderDto dco_decode_bridge_model_catalog_provider_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeModelCatalogSnapshotDto dco_decode_bridge_model_catalog_snapshot_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeModelCatalogSource dco_decode_bridge_model_catalog_source(dynamic raw);
+
+  @protected
+  BridgeModelCatalogStateData dco_decode_bridge_model_catalog_state_data(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeModelCatalogStateSnapshot
+  dco_decode_bridge_model_catalog_state_snapshot(dynamic raw);
 
   @protected
   BridgeModelCatalogStatusDto dco_decode_bridge_model_catalog_status_dto(
@@ -1211,10 +1217,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeSessionCostsState dco_decode_bridge_session_costs_state(dynamic raw);
 
   @protected
-  BridgeSettingsStateData dco_decode_bridge_settings_state_data(dynamic raw);
+  BridgeSettingsConfigSnapshotDto
+  dco_decode_bridge_settings_config_snapshot_dto(dynamic raw);
 
   @protected
-  BridgeSettingsStateSnapshot dco_decode_bridge_settings_state_snapshot(
+  BridgeSettingsConfigStateData dco_decode_bridge_settings_config_state_data(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeSettingsConfigStateSnapshot
+  dco_decode_bridge_settings_config_state_snapshot(dynamic raw);
+
+  @protected
+  BridgeSettingsStateResponse dco_decode_bridge_settings_state_response(
     dynamic raw,
   );
 
@@ -1648,24 +1664,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DeepSeekBalanceInfoDto dco_decode_deep_seek_balance_info_dto(dynamic raw);
 
   @protected
-  DeepSeekWebSearchSettingsInput dco_decode_deep_seek_web_search_settings_input(
-    dynamic raw,
-  );
-
-  @protected
   double dco_decode_f_64(dynamic raw);
-
-  @protected
-  GeneralSettingsInput dco_decode_general_settings_input(dynamic raw);
 
   @protected
   int dco_decode_i_32(dynamic raw);
 
   @protected
   PlatformInt64 dco_decode_i_64(dynamic raw);
-
-  @protected
-  InstructionsSettingsInput dco_decode_instructions_settings_input(dynamic raw);
 
   @protected
   InterruptTurnResponse dco_decode_interrupt_turn_response(dynamic raw);
@@ -1734,6 +1739,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeModelCatalogDescriptor>
   dco_decode_list_bridge_model_catalog_descriptor(dynamic raw);
+
+  @protected
+  List<BridgeModelCatalogProviderDto>
+  dco_decode_list_bridge_model_catalog_provider_dto(dynamic raw);
 
   @protected
   List<BridgeModelConnectionSettingsDto>
@@ -1895,19 +1904,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  List<McpServerInput> dco_decode_list_mcp_server_input(dynamic raw);
-
-  @protected
-  List<ModeRouteInput> dco_decode_list_mode_route_input(dynamic raw);
-
-  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
   List<ProjectDto> dco_decode_list_project_dto(dynamic raw);
-
-  @protected
-  List<ProviderInput> dco_decode_list_provider_input(dynamic raw);
 
   @protected
   List<ProviderModelAutoCompactInput>
@@ -1927,9 +1927,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RemoteDirectoryEntryDto> dco_decode_list_remote_directory_entry_dto(
     dynamic raw,
   );
-
-  @protected
-  List<RoleInput> dco_decode_list_role_input(dynamic raw);
 
   @protected
   List<SkillSummaryDto> dco_decode_list_skill_summary_dto(dynamic raw);
@@ -1956,15 +1953,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   McpResetInput dco_decode_mcp_reset_input(dynamic raw);
-
-  @protected
-  McpServerInput dco_decode_mcp_server_input(dynamic raw);
-
-  @protected
-  McpSettingsInput dco_decode_mcp_settings_input(dynamic raw);
-
-  @protected
-  ModeRouteInput dco_decode_mode_route_input(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
@@ -2137,13 +2125,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  RoleInput dco_decode_role_input(dynamic raw);
+  RemoveProviderInput dco_decode_remove_provider_input(dynamic raw);
 
   @protected
   RuntimeSnapshot dco_decode_runtime_snapshot(dynamic raw);
 
   @protected
   SaveSshServerRequest dco_decode_save_ssh_server_request(dynamic raw);
+
+  @protected
+  SettingsFieldInput dco_decode_settings_field_input(dynamic raw);
 
   @protected
   SkillInvocationPolicyDto dco_decode_skill_invocation_policy_dto(dynamic raw);
@@ -2153,9 +2144,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SkillSummaryDto dco_decode_skill_summary_dto(dynamic raw);
-
-  @protected
-  SkillsSettingsInput dco_decode_skills_settings_input(dynamic raw);
 
   @protected
   SshConnectionSnapshotDto dco_decode_ssh_connection_snapshot_dto(dynamic raw);
@@ -2186,9 +2174,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt dco_decode_usize(dynamic raw);
-
-  @protected
-  WebSearchSettingsInput dco_decode_web_search_settings_input(dynamic raw);
 
   @protected
   ZhipuCodingPlanUsageDto dco_decode_zhipu_coding_plan_usage_dto(dynamic raw);
@@ -2490,6 +2475,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelCatalogStateData
+  sse_decode_box_autoadd_bridge_model_catalog_state_data(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeModelPerformanceSnapshot
   sse_decode_box_autoadd_bridge_model_performance_snapshot(
     SseDeserializer deserializer,
@@ -2599,7 +2590,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeSettingsStateData sse_decode_box_autoadd_bridge_settings_state_data(
+  BridgeSettingsConfigStateData
+  sse_decode_box_autoadd_bridge_settings_config_state_data(
     SseDeserializer deserializer,
   );
 
@@ -2863,29 +2855,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  DeepSeekWebSearchSettingsInput
-  sse_decode_box_autoadd_deep_seek_web_search_settings_input(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
-
-  @protected
-  GeneralSettingsInput sse_decode_box_autoadd_general_settings_input(
-    SseDeserializer deserializer,
-  );
 
   @protected
   int sse_decode_box_autoadd_i_32(SseDeserializer deserializer);
 
   @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
-
-  @protected
-  InstructionsSettingsInput sse_decode_box_autoadd_instructions_settings_input(
-    SseDeserializer deserializer,
-  );
 
   @protected
   ListThreadTurnsRequest sse_decode_box_autoadd_list_thread_turns_request(
@@ -2908,15 +2884,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  McpSettingsInput sse_decode_box_autoadd_mcp_settings_input(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   ProjectDto sse_decode_box_autoadd_project_dto(SseDeserializer deserializer);
 
   @protected
   ProviderSettingsInput sse_decode_box_autoadd_provider_settings_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RemoveProviderInput sse_decode_box_autoadd_remove_provider_input(
     SseDeserializer deserializer,
   );
 
@@ -2926,7 +2902,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  SkillsSettingsInput sse_decode_box_autoadd_skills_settings_input(
+  SettingsFieldInput sse_decode_box_autoadd_settings_field_input(
     SseDeserializer deserializer,
   );
 
@@ -2938,11 +2914,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
-
-  @protected
-  WebSearchSettingsInput sse_decode_box_autoadd_web_search_settings_input(
-    SseDeserializer deserializer,
-  );
 
   @protected
   ZhipuCodingPlanUsageDto sse_decode_box_autoadd_zhipu_coding_plan_usage_dto(
@@ -2957,6 +2928,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeInteractionRequest sse_decode_box_bridge_interaction_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelCatalogStateSnapshot
+  sse_decode_box_bridge_model_catalog_state_snapshot(
     SseDeserializer deserializer,
   );
 
@@ -2982,7 +2959,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeSettingsStateSnapshot sse_decode_box_bridge_settings_state_snapshot(
+  BridgeSettingsConfigStateSnapshot
+  sse_decode_box_bridge_settings_config_state_snapshot(
     SseDeserializer deserializer,
   );
 
@@ -3381,9 +3359,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelCatalogProviderDto sse_decode_bridge_model_catalog_provider_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelCatalogSnapshotDto sse_decode_bridge_model_catalog_snapshot_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeModelCatalogSource sse_decode_bridge_model_catalog_source(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeModelCatalogStateData sse_decode_bridge_model_catalog_state_data(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelCatalogStateSnapshot
+  sse_decode_bridge_model_catalog_state_snapshot(SseDeserializer deserializer);
 
   @protected
   BridgeModelCatalogStatusDto sse_decode_bridge_model_catalog_status_dto(
@@ -3653,12 +3650,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeSettingsStateData sse_decode_bridge_settings_state_data(
+  BridgeSettingsConfigSnapshotDto
+  sse_decode_bridge_settings_config_snapshot_dto(SseDeserializer deserializer);
+
+  @protected
+  BridgeSettingsConfigStateData sse_decode_bridge_settings_config_state_data(
     SseDeserializer deserializer,
   );
 
   @protected
-  BridgeSettingsStateSnapshot sse_decode_bridge_settings_state_snapshot(
+  BridgeSettingsConfigStateSnapshot
+  sse_decode_bridge_settings_config_state_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSettingsStateResponse sse_decode_bridge_settings_state_response(
     SseDeserializer deserializer,
   );
 
@@ -4198,28 +4205,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  DeepSeekWebSearchSettingsInput sse_decode_deep_seek_web_search_settings_input(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   double sse_decode_f_64(SseDeserializer deserializer);
-
-  @protected
-  GeneralSettingsInput sse_decode_general_settings_input(
-    SseDeserializer deserializer,
-  );
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
-
-  @protected
-  InstructionsSettingsInput sse_decode_instructions_settings_input(
-    SseDeserializer deserializer,
-  );
 
   @protected
   InterruptTurnResponse sse_decode_interrupt_turn_response(
@@ -4306,6 +4298,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeModelCatalogDescriptor>
   sse_decode_list_bridge_model_catalog_descriptor(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeModelCatalogProviderDto>
+  sse_decode_list_bridge_model_catalog_provider_dto(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<BridgeModelConnectionSettingsDto>
@@ -4505,25 +4503,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  List<McpServerInput> sse_decode_list_mcp_server_input(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  List<ModeRouteInput> sse_decode_list_mode_route_input(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
   List<ProjectDto> sse_decode_list_project_dto(SseDeserializer deserializer);
-
-  @protected
-  List<ProviderInput> sse_decode_list_provider_input(
-    SseDeserializer deserializer,
-  );
 
   @protected
   List<ProviderModelAutoCompactInput>
@@ -4549,9 +4532,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RemoteDirectoryEntryDto> sse_decode_list_remote_directory_entry_dto(
     SseDeserializer deserializer,
   );
-
-  @protected
-  List<RoleInput> sse_decode_list_role_input(SseDeserializer deserializer);
 
   @protected
   List<SkillSummaryDto> sse_decode_list_skill_summary_dto(
@@ -4588,15 +4568,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   McpResetInput sse_decode_mcp_reset_input(SseDeserializer deserializer);
-
-  @protected
-  McpServerInput sse_decode_mcp_server_input(SseDeserializer deserializer);
-
-  @protected
-  McpSettingsInput sse_decode_mcp_settings_input(SseDeserializer deserializer);
-
-  @protected
-  ModeRouteInput sse_decode_mode_route_input(SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
@@ -4815,13 +4786,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  RoleInput sse_decode_role_input(SseDeserializer deserializer);
+  RemoveProviderInput sse_decode_remove_provider_input(
+    SseDeserializer deserializer,
+  );
 
   @protected
   RuntimeSnapshot sse_decode_runtime_snapshot(SseDeserializer deserializer);
 
   @protected
   SaveSshServerRequest sse_decode_save_ssh_server_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SettingsFieldInput sse_decode_settings_field_input(
     SseDeserializer deserializer,
   );
 
@@ -4837,11 +4815,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SkillSummaryDto sse_decode_skill_summary_dto(SseDeserializer deserializer);
-
-  @protected
-  SkillsSettingsInput sse_decode_skills_settings_input(
-    SseDeserializer deserializer,
-  );
 
   @protected
   SshConnectionSnapshotDto sse_decode_ssh_connection_snapshot_dto(
@@ -4878,11 +4851,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt sse_decode_usize(SseDeserializer deserializer);
-
-  @protected
-  WebSearchSettingsInput sse_decode_web_search_settings_input(
-    SseDeserializer deserializer,
-  );
 
   @protected
   ZhipuCodingPlanUsageDto sse_decode_zhipu_coding_plan_usage_dto(
@@ -5233,6 +5201,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_model_catalog_state_data(
+    BridgeModelCatalogStateData self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_model_performance_snapshot(
     BridgeModelPerformanceSnapshot self,
     SseSerializer serializer,
@@ -5353,8 +5327,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_box_autoadd_bridge_settings_state_data(
-    BridgeSettingsStateData self,
+  void sse_encode_box_autoadd_bridge_settings_config_state_data(
+    BridgeSettingsConfigStateData self,
     SseSerializer serializer,
   );
 
@@ -5647,19 +5621,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_box_autoadd_deep_seek_web_search_settings_input(
-    DeepSeekWebSearchSettingsInput self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_box_autoadd_general_settings_input(
-    GeneralSettingsInput self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_box_autoadd_i_32(int self, SseSerializer serializer);
@@ -5667,12 +5629,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_box_autoadd_instructions_settings_input(
-    InstructionsSettingsInput self,
     SseSerializer serializer,
   );
 
@@ -5701,12 +5657,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_box_autoadd_mcp_settings_input(
-    McpSettingsInput self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_box_autoadd_project_dto(
     ProjectDto self,
     SseSerializer serializer,
@@ -5719,14 +5669,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_remove_provider_input(
+    RemoveProviderInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_save_ssh_server_request(
     SaveSshServerRequest self,
     SseSerializer serializer,
   );
 
   @protected
-  void sse_encode_box_autoadd_skills_settings_input(
-    SkillsSettingsInput self,
+  void sse_encode_box_autoadd_settings_field_input(
+    SettingsFieldInput self,
     SseSerializer serializer,
   );
 
@@ -5738,12 +5694,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_box_autoadd_web_search_settings_input(
-    WebSearchSettingsInput self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_box_autoadd_zhipu_coding_plan_usage_dto(
@@ -5760,6 +5710,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_bridge_interaction_request(
     BridgeInteractionRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_bridge_model_catalog_state_snapshot(
+    BridgeModelCatalogStateSnapshot self,
     SseSerializer serializer,
   );
 
@@ -5788,8 +5744,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_box_bridge_settings_state_snapshot(
-    BridgeSettingsStateSnapshot self,
+  void sse_encode_box_bridge_settings_config_state_snapshot(
+    BridgeSettingsConfigStateSnapshot self,
     SseSerializer serializer,
   );
 
@@ -6280,8 +6236,32 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_model_catalog_provider_dto(
+    BridgeModelCatalogProviderDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_catalog_snapshot_dto(
+    BridgeModelCatalogSnapshotDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_model_catalog_source(
     BridgeModelCatalogSource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_catalog_state_data(
+    BridgeModelCatalogStateData self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_catalog_state_snapshot(
+    BridgeModelCatalogStateSnapshot self,
     SseSerializer serializer,
   );
 
@@ -6610,14 +6590,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_bridge_settings_state_data(
-    BridgeSettingsStateData self,
+  void sse_encode_bridge_settings_config_snapshot_dto(
+    BridgeSettingsConfigSnapshotDto self,
     SseSerializer serializer,
   );
 
   @protected
-  void sse_encode_bridge_settings_state_snapshot(
-    BridgeSettingsStateSnapshot self,
+  void sse_encode_bridge_settings_config_state_data(
+    BridgeSettingsConfigStateData self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_settings_config_state_snapshot(
+    BridgeSettingsConfigStateSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_settings_state_response(
+    BridgeSettingsStateResponse self,
     SseSerializer serializer,
   );
 
@@ -7282,31 +7274,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_deep_seek_web_search_settings_input(
-    DeepSeekWebSearchSettingsInput self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_general_settings_input(
-    GeneralSettingsInput self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_instructions_settings_input(
-    InstructionsSettingsInput self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_interrupt_turn_response(
@@ -7410,6 +7384,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_model_catalog_descriptor(
     List<BridgeModelCatalogDescriptor> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_model_catalog_provider_dto(
+    List<BridgeModelCatalogProviderDto> self,
     SseSerializer serializer,
   );
 
@@ -7642,18 +7622,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_list_mcp_server_input(
-    List<McpServerInput> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_mode_route_input(
-    List<ModeRouteInput> self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
     SseSerializer serializer,
@@ -7662,12 +7630,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_project_dto(
     List<ProjectDto> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_provider_input(
-    List<ProviderInput> self,
     SseSerializer serializer,
   );
 
@@ -7698,12 +7660,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_remote_directory_entry_dto(
     List<RemoteDirectoryEntryDto> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_role_input(
-    List<RoleInput> self,
     SseSerializer serializer,
   );
 
@@ -7748,24 +7704,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_mcp_reset_input(McpResetInput self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_mcp_server_input(
-    McpServerInput self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_mcp_settings_input(
-    McpSettingsInput self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_mode_route_input(
-    ModeRouteInput self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
@@ -8014,7 +7952,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_role_input(RoleInput self, SseSerializer serializer);
+  void sse_encode_remove_provider_input(
+    RemoveProviderInput self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_runtime_snapshot(
@@ -8025,6 +7966,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_save_ssh_server_request(
     SaveSshServerRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_settings_field_input(
+    SettingsFieldInput self,
     SseSerializer serializer,
   );
 
@@ -8043,12 +7990,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_skill_summary_dto(
     SkillSummaryDto self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_skills_settings_input(
-    SkillsSettingsInput self,
     SseSerializer serializer,
   );
 
@@ -8090,12 +8031,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_usize(BigInt self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_web_search_settings_input(
-    WebSearchSettingsInput self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_zhipu_coding_plan_usage_dto(

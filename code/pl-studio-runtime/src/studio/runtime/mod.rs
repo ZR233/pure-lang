@@ -242,14 +242,14 @@ impl StudioRuntime {
         expected_settings_revision: u64,
         profile_id: &str,
         profile: &crate::config::UserAgentProfile,
-    ) -> Result<pl_protocol::studio::StudioSettingsSnapshot> {
+    ) -> Result<pl_protocol::studio::SettingsStateResponse> {
         let state = self.config_runtime.save_user_agent_profile(
             expected_settings_revision,
             profile_id,
             profile,
         )?;
         self.publish_settings_state(state.clone())?;
-        settings_api::settings_snapshot(state)
+        settings_api::settings_state_response(&state, &self.config_runtime.read_catalog()?)
     }
 
     /// 启用或禁用不可编辑、不可删除的系统 Agent Profile。
@@ -258,7 +258,7 @@ impl StudioRuntime {
         expected_settings_revision: u64,
         profile_id: &str,
         enabled: bool,
-    ) -> Result<pl_protocol::studio::StudioSettingsSnapshot> {
+    ) -> Result<pl_protocol::studio::SettingsStateResponse> {
         if !crate::config::is_system_profile_id(profile_id) {
             anyhow::bail!("`{profile_id}` is not a system Agent Profile");
         }
@@ -275,7 +275,7 @@ impl StudioRuntime {
                 Ok(config)
             })?;
         self.publish_settings_state(state.clone())?;
-        settings_api::settings_snapshot(state)
+        settings_api::settings_state_response(&state, &self.config_runtime.read_catalog()?)
     }
 
     /// 立即重试待落库事实；查询和停止路径不需要调用本命令。

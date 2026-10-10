@@ -605,10 +605,10 @@ SSH 选项或任意命令。缺少别名、启动失败等错误给予对应提�
 ## 18.6 Settings 与 Model Catalog 的独立时钟
 
 Settings 配置事实与模型目录观察是两个资源，分别使用 `settingsRevision` 与
-`modelCatalogRevision`。Bridge 旧版 envelope 可能同时携带两个水位，但消费者必须分别比较：
-配置水位前进时只替换配置字段，目录水位前进时只替换 provider 的模型与目录状态；同一水位
-幂等丢弃，较低水位不得覆盖较新事实。direct response、topic frame 和 baseline 进入同一
-reducer merge path，页面不得按到达顺序直接替换整棵 `StudioState`。
+`modelCatalogRevision`。Bridge 的直接响应会同时返回两个资源，但 topic 事件分别只携带
+对应资源；消费者必须分别比较：配置水位前进时只替换配置字段，目录水位前进时只替换 provider
+的模型与目录状态。同一水位幂等丢弃，较低水位不得覆盖较新事实。direct response、topic
+frame 和 baseline 进入同一 reducer merge path，页面不得按到达顺序直接替换整棵 `StudioState`。
 
 Flutter 的新会话 draft、Thread route 和 Settings canonical state 是三种不同事实。draft
 只按 project 保存在 `SessionDraftStore` 投影中，canonical snapshot 到达时不得清除或复制

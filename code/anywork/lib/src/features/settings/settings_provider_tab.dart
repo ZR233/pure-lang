@@ -17,16 +17,12 @@ class ProvidersTab extends ConsumerStatefulWidget {
     required this.providers,
     required this.providerCatalog,
     required this.defaultProviderId,
-    required this.modeRoutes,
-    required this.roles,
     required this.tabIndex,
   });
 
   final List<ProviderSettingsView> providers;
   final ProviderCatalogView providerCatalog;
   final String? defaultProviderId;
-  final List<ModeModelRouteView> modeRoutes;
-  final List<RoleSettingsView> roles;
 
   /// 本页在设置壳中的 tab 索引，用于「仅在可见时持有租约」。
   final int tabIndex;
@@ -414,32 +410,23 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       _draftError = null;
     });
     try {
-      final provider = ProviderSettingsCommandBuilder.normalizeProvider(
+      final provider = ProviderCommandBuilder.normalizeProvider(
         current.provider,
       );
-      final canonicalProviders = _canonicalProviders;
-      final providers = current.mode == ProviderDraftMode.create
-          ? [...canonicalProviders, provider]
-          : [
-              for (final item in canonicalProviders)
-                item.id == current.originalId ? provider : item,
-            ];
       final makeDefault =
           current.mode == ProviderDraftMode.create ||
           ref.read(studioControllerProvider).asData?.value.defaultProviderId ==
               current.originalId;
-      final saved = await _saveProviders(
-        providers,
-        selectedProviderId: ref
-            .read(studioControllerProvider)
-            .asData
-            ?.value
-            .defaultProviderId,
-        renamedFrom: current.originalId == provider.id
-            ? null
-            : current.originalId,
-        renamedTo: current.originalId == provider.id ? null : provider.id,
-      );
+      final saved = await ref
+          .read(studioControllerProvider.notifier)
+          .saveProvider(
+            ProviderCommandBuilder.buildProvider(
+              provider,
+              originalId: current.mode == ProviderDraftMode.edit
+                  ? current.originalId
+                  : null,
+            ),
+          );
       if (!saved.providers.any((candidate) => candidate.id == provider.id)) {
         throw StateError(
           'Provider save returned a canonical snapshot without ${provider.id}.',
@@ -485,11 +472,9 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
     final selectedProviderId = currentDefaultId == provider.id
         ? providers.firstOrNull?.id
         : currentDefaultId;
-    final saved = await _saveProviders(
-      providers,
-      selectedProviderId: selectedProviderId,
-      removedProviderId: provider.id,
-    );
+    final saved = await ref
+        .read(studioControllerProvider.notifier)
+        .removeProvider(provider.id, replacementProviderId: selectedProviderId);
     if (saved.providers.any((candidate) => candidate.id == provider.id)) {
       throw StateError(
         'Provider removal returned a canonical snapshot that still contains '
@@ -534,43 +519,9 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         .refresh(providerId: providerId);
   }
 
-  Future<SettingsStateSnapshot> _saveProviders(
-    List<ProviderSettingsView> providers, {
-    required String? selectedProviderId,
-    String? renamedFrom,
-    String? renamedTo,
-    String? removedProviderId,
-    bool includeRouteMigrations = false,
-  }) async {
-    return ref
-        .read(studioControllerProvider.notifier)
-        .saveProviderSettings(
-          ProviderSettingsCommandBuilder.build(
-            providers: providers,
-            modeRoutes: _canonicalModeRoutes,
-            roles: _canonicalRoles,
-            selectedProviderId: selectedProviderId,
-            renamedFrom: renamedFrom,
-            renamedTo: renamedTo,
-            removedProviderId: removedProviderId,
-            includeRouteMigrations:
-                includeRouteMigrations ||
-                renamedFrom != null ||
-                removedProviderId != null,
-          ),
-        );
-  }
-
   List<ProviderSettingsView> get _canonicalProviders =>
       ref.read(studioControllerProvider).asData?.value.providers ??
       widget.providers;
-
-  List<ModeModelRouteView> get _canonicalModeRoutes =>
-      ref.read(studioControllerProvider).asData?.value.modeModelRoutes ??
-      widget.modeRoutes;
-
-  List<RoleSettingsView> get _canonicalRoles =>
-      ref.read(studioControllerProvider).asData?.value.roles ?? widget.roles;
 
   /// Keep the editor open until the parent Settings projection has observed the
   /// canonical save. This prevents a successful backend response from briefly
@@ -581,7 +532,12 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
   }) async {
     final deadline = DateTime.now().add(const Duration(seconds: 5));
     while (DateTime.now().isBefore(deadline)) {
-      final exists = widget.providers.any(
+      final providers = ref
+          .read(studioControllerProvider)
+          .asData
+          ?.value
+          .providers;
+      final exists = (providers ?? widget.providers).any(
         (provider) => provider.id == providerId,
       );
       if (exists == shouldExist) return;

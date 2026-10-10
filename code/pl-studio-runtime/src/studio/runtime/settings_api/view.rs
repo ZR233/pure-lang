@@ -6,30 +6,73 @@ use pl_model::provider::{ProviderConnectionMode, ProviderWireProtocol};
 use pl_protocol::WebSearchContextSize;
 use pl_protocol::search::WebSearchMode;
 use pl_protocol::studio::{
-    StudioCustomModelSettings, StudioDeepSeekWebSearchSettings, StudioGeneralSettings,
-    StudioInstructionsSettings, StudioMcpServerSettings, StudioModeModelSettings,
-    StudioModelAutoCompactSettings, StudioModelConnectionSettings, StudioProviderSettings,
-    StudioRoleSettings, StudioSettings, StudioSettingsSnapshot, StudioSkillsSettings,
-    StudioWebSearchSettings,
+    ModelCatalogSnapshot, SettingsConfigSnapshot, SettingsStateResponse, StudioCustomModelSettings,
+    StudioDeepSeekWebSearchSettings, StudioGeneralSettings, StudioInstructionsSettings,
+    StudioMcpServerSettings, StudioModeModelSettings, StudioModelAutoCompactSettings,
+    StudioModelCatalogProvider, StudioModelConnectionSettings, StudioProviderSettings,
+    StudioRoleSettings, StudioSettings, StudioSkillsSettings, StudioWebSearchSettings,
 };
 
-use crate::{ConfigRuntimeSnapshot, StudioRole};
+use crate::{ConfigRuntimeSnapshot, ModelCatalogRuntimeSnapshot, StudioRole};
 use pl_model::config::{ProviderCapabilitySelection, ProviderModelCatalogConfig};
 use pl_tool::search::WebSearchAvailability;
 
-pub(crate) fn settings_snapshot(state: ConfigRuntimeSnapshot) -> Result<StudioSettingsSnapshot> {
-    let mut settings = settings_view(&state.config)?;
-    for provider in &mut settings.providers {
-        let id = pl_model::config::ProviderId::new(provider.id.clone())?;
-        if let Some(status) = state.model_catalogs.get(&id) {
-            provider.model_catalog = status.clone();
-        }
-    }
-    Ok(StudioSettingsSnapshot {
+pub(crate) fn settings_config_snapshot(
+    state: &ConfigRuntimeSnapshot,
+) -> Result<SettingsConfigSnapshot> {
+    Ok(SettingsConfigSnapshot {
         revision: state.revision,
-        model_catalog_revision: state.model_catalog_revision,
         updated_at: state.updated_at,
-        settings,
+        settings: settings_view(state.canonical_config())?,
+    })
+}
+
+pub(crate) fn model_catalog_snapshot(
+    state: &ConfigRuntimeSnapshot,
+    catalog: &ModelCatalogRuntimeSnapshot,
+) -> Result<ModelCatalogSnapshot> {
+    let providers = state
+        .config
+        .models
+        .providers
+        .iter()
+        .map(|(id, provider)| {
+            let status = catalog.catalogs.get(id).cloned().unwrap_or_else(|| {
+                pl_protocol::studio::StudioModelCatalogStatus {
+                    supported: provider.supports_model_discovery(),
+                    source: pl_protocol::studio::StudioModelCatalogSource::Default,
+                    probing: false,
+                    last_success_at: None,
+                    checked_at: None,
+                    error: None,
+                    cache_warning: None,
+                }
+            });
+            Ok(StudioModelCatalogProvider {
+                id: id.to_string(),
+                effective_models: provider
+                    .effective_models()?
+                    .iter()
+                    .map(pl_model::config::model_descriptor)
+                    .collect(),
+                model_catalog: status,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(ModelCatalogSnapshot {
+        revision: catalog.revision,
+        updated_at: catalog.updated_at,
+        providers,
+    })
+}
+
+pub(crate) fn settings_state_response(
+    state: &ConfigRuntimeSnapshot,
+    catalog: &ModelCatalogRuntimeSnapshot,
+) -> Result<SettingsStateResponse> {
+    Ok(SettingsStateResponse {
+        config: settings_config_snapshot(state)?,
+        catalog: model_catalog_snapshot(state, catalog)?,
     })
 }
 
@@ -54,19 +97,6 @@ fn settings_view(config: &crate::StudioConfig) -> Result<StudioSettings> {
                 ProviderModelCatalogConfig::Explicit { .. } => None,
             };
             Ok(StudioProviderSettings {
-                effective_models: models
-                    .iter()
-                    .map(pl_model::config::model_descriptor)
-                    .collect(),
-                model_catalog: pl_protocol::studio::StudioModelCatalogStatus {
-                    supported: provider.supports_model_discovery(),
-                    source: pl_protocol::studio::StudioModelCatalogSource::Default,
-                    probing: false,
-                    last_success_at: None,
-                    checked_at: None,
-                    error: None,
-                    cache_warning: None,
-                },
                 pricing_enabled: provider.pricing_mode == pl_protocol::PricingMode::Catalog,
                 id: id.to_string(),
                 template_kind: provider

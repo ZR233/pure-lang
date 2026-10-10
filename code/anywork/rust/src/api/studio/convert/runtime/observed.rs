@@ -3,7 +3,9 @@
 use pl_protocol::ObservedResource;
 use pl_studio_runtime::*;
 
-use crate::api::studio::convert::settings::{bridge_settings, provider_usage_dto};
+use crate::api::studio::convert::settings::{
+    bridge_model_catalog_provider, bridge_settings, provider_usage_dto,
+};
 use crate::api::studio::convert::thread_stream::bridge_thread;
 use crate::api::studio::types::*;
 
@@ -142,16 +144,31 @@ pub(crate) fn bridge_agent_directory(
     )
 }
 
-pub(crate) fn bridge_settings_state(
-    state: ObservedResource<pl_protocol::studio::StudioSettingsSnapshot>,
-) -> BridgeSettingsStateSnapshot {
+pub(crate) fn bridge_settings_config_state(
+    state: ObservedResource<pl_protocol::studio::SettingsConfigSnapshot>,
+) -> BridgeSettingsConfigStateSnapshot {
     concrete_observed!(
         state,
-        |settings| BridgeSettingsStateData {
-            model_catalog_revision: settings.model_catalog_revision,
+        |settings| BridgeSettingsConfigStateData {
             settings: bridge_settings(settings.settings),
         },
-        BridgeSettingsStateSnapshot
+        BridgeSettingsConfigStateSnapshot
+    )
+}
+
+pub(crate) fn bridge_model_catalog_state(
+    state: ObservedResource<pl_protocol::studio::ModelCatalogSnapshot>,
+) -> BridgeModelCatalogStateSnapshot {
+    concrete_observed!(
+        state,
+        |catalog| BridgeModelCatalogStateData {
+            providers: catalog
+                .providers
+                .into_iter()
+                .map(bridge_model_catalog_provider)
+                .collect(),
+        },
+        BridgeModelCatalogStateSnapshot
     )
 }
 

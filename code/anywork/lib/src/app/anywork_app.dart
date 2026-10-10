@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/frb/studio_api.dart';
-import '../data/repositories/studio_api_provider.dart';
+import '../data/repositories/studio_repository.dart';
 import '../features/settings/settings.dart';
 import '../features/shell/studio_shell.dart';
 import '../features/update/studio_update_controller.dart';
@@ -17,29 +17,49 @@ import 'studio_host_lifecycle.dart';
 import 'studio_shutdown.dart';
 import 'theme/material3_theme.dart';
 
-class AnyworkApp extends StatelessWidget {
+class AnyworkApp extends ConsumerStatefulWidget {
   const AnyworkApp({super.key});
 
-  static final GoRouter _router = GoRouter(
-    restorationScopeId: 'anywork-router',
-    routes: [
-      GoRoute(
-        path: '/',
-        name: 'studio',
-        builder: (context, state) => const StudioShell(),
-        routes: [
-          GoRoute(
-            path: 'settings',
-            name: 'settings',
-            pageBuilder: (context, state) => const MaterialPage<void>(
-              restorationId: 'settings-page',
-              child: SettingsPage(),
+  @override
+  ConsumerState<AnyworkApp> createState() => _AnyworkAppState();
+}
+
+class _AnyworkAppState extends ConsumerState<AnyworkApp> {
+  late final GoRouter _router;
+
+  @override
+  void initState() {
+    super.initState();
+    _router = GoRouter(
+      restorationScopeId: 'anywork-router',
+      observers: [
+        StudioRouteLifecycle(ref.read(studioControllerProvider.notifier)),
+      ],
+      routes: [
+        GoRoute(
+          path: '/',
+          name: 'studio',
+          builder: (context, state) => const StudioShell(),
+          routes: [
+            GoRoute(
+              path: 'settings',
+              name: 'settings',
+              pageBuilder: (context, state) => const MaterialPage<void>(
+                restorationId: 'settings-page',
+                child: SettingsPage(),
+              ),
             ),
-          ),
-        ],
-      ),
-    ],
-  );
+          ],
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _router.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,6 +79,54 @@ class AnyworkApp extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Owns conversation visibility at the navigation stack boundary.  The shell
+/// can be disposed while a settings mutation is still pending, so widget
+/// lifecycle callbacks must not be the source of this business signal.
+final class StudioRouteLifecycle extends NavigatorObserver {
+  StudioRouteLifecycle(this._controller);
+
+  final StudioController _controller;
+  bool? _visible;
+
+  bool _isSettings(Route<dynamic>? route) {
+    final name = route?.settings.name;
+    return name == 'settings' || name?.endsWith('/settings') == true;
+  }
+
+  void _sync(Route<dynamic>? route) {
+    final visible = !_isSettings(route);
+    if (_visible == visible) return;
+    _visible = visible;
+    unawaited(
+      _controller.setConversationVisible(visible).catchError((error, stack) {
+        debugPrint(
+          'route_visibility_failed visible=$visible error=$error\n$stack',
+        );
+      }),
+    );
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _sync(route);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _sync(previousRoute);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _sync(previousRoute);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    _sync(newRoute);
   }
 }
 

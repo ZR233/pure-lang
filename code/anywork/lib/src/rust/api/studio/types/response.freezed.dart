@@ -3005,6 +3005,754 @@ as BridgeStoppedResource,
 }
 
 /// @nodoc
+mixin _$BridgeModelCatalogStateSnapshot {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogStateSnapshot);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeModelCatalogStateSnapshot()';
+}
+
+
+}
+
+/// @nodoc
+class $BridgeModelCatalogStateSnapshotCopyWith<$Res>  {
+$BridgeModelCatalogStateSnapshotCopyWith(BridgeModelCatalogStateSnapshot _, $Res Function(BridgeModelCatalogStateSnapshot) __);
+}
+
+
+/// Adds pattern-matching-related methods to [BridgeModelCatalogStateSnapshot].
+extension BridgeModelCatalogStateSnapshotPatterns on BridgeModelCatalogStateSnapshot {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeModelCatalogStateSnapshot_Uninitialized value)?  uninitialized,TResult Function( BridgeModelCatalogStateSnapshot_Loading value)?  loading,TResult Function( BridgeModelCatalogStateSnapshot_Ready value)?  ready,TResult Function( BridgeModelCatalogStateSnapshot_Refreshing value)?  refreshing,TResult Function( BridgeModelCatalogStateSnapshot_Stale value)?  stale,TResult Function( BridgeModelCatalogStateSnapshot_Degraded value)?  degraded,TResult Function( BridgeModelCatalogStateSnapshot_Failed value)?  failed,TResult Function( BridgeModelCatalogStateSnapshot_Stopped value)?  stopped,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case BridgeModelCatalogStateSnapshot_Uninitialized() when uninitialized != null:
+return uninitialized(_that);case BridgeModelCatalogStateSnapshot_Loading() when loading != null:
+return loading(_that);case BridgeModelCatalogStateSnapshot_Ready() when ready != null:
+return ready(_that);case BridgeModelCatalogStateSnapshot_Refreshing() when refreshing != null:
+return refreshing(_that);case BridgeModelCatalogStateSnapshot_Stale() when stale != null:
+return stale(_that);case BridgeModelCatalogStateSnapshot_Degraded() when degraded != null:
+return degraded(_that);case BridgeModelCatalogStateSnapshot_Failed() when failed != null:
+return failed(_that);case BridgeModelCatalogStateSnapshot_Stopped() when stopped != null:
+return stopped(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeModelCatalogStateSnapshot_Uninitialized value)  uninitialized,required TResult Function( BridgeModelCatalogStateSnapshot_Loading value)  loading,required TResult Function( BridgeModelCatalogStateSnapshot_Ready value)  ready,required TResult Function( BridgeModelCatalogStateSnapshot_Refreshing value)  refreshing,required TResult Function( BridgeModelCatalogStateSnapshot_Stale value)  stale,required TResult Function( BridgeModelCatalogStateSnapshot_Degraded value)  degraded,required TResult Function( BridgeModelCatalogStateSnapshot_Failed value)  failed,required TResult Function( BridgeModelCatalogStateSnapshot_Stopped value)  stopped,}){
+final _that = this;
+switch (_that) {
+case BridgeModelCatalogStateSnapshot_Uninitialized():
+return uninitialized(_that);case BridgeModelCatalogStateSnapshot_Loading():
+return loading(_that);case BridgeModelCatalogStateSnapshot_Ready():
+return ready(_that);case BridgeModelCatalogStateSnapshot_Refreshing():
+return refreshing(_that);case BridgeModelCatalogStateSnapshot_Stale():
+return stale(_that);case BridgeModelCatalogStateSnapshot_Degraded():
+return degraded(_that);case BridgeModelCatalogStateSnapshot_Failed():
+return failed(_that);case BridgeModelCatalogStateSnapshot_Stopped():
+return stopped(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeModelCatalogStateSnapshot_Uninitialized value)?  uninitialized,TResult? Function( BridgeModelCatalogStateSnapshot_Loading value)?  loading,TResult? Function( BridgeModelCatalogStateSnapshot_Ready value)?  ready,TResult? Function( BridgeModelCatalogStateSnapshot_Refreshing value)?  refreshing,TResult? Function( BridgeModelCatalogStateSnapshot_Stale value)?  stale,TResult? Function( BridgeModelCatalogStateSnapshot_Degraded value)?  degraded,TResult? Function( BridgeModelCatalogStateSnapshot_Failed value)?  failed,TResult? Function( BridgeModelCatalogStateSnapshot_Stopped value)?  stopped,}){
+final _that = this;
+switch (_that) {
+case BridgeModelCatalogStateSnapshot_Uninitialized() when uninitialized != null:
+return uninitialized(_that);case BridgeModelCatalogStateSnapshot_Loading() when loading != null:
+return loading(_that);case BridgeModelCatalogStateSnapshot_Ready() when ready != null:
+return ready(_that);case BridgeModelCatalogStateSnapshot_Refreshing() when refreshing != null:
+return refreshing(_that);case BridgeModelCatalogStateSnapshot_Stale() when stale != null:
+return stale(_that);case BridgeModelCatalogStateSnapshot_Degraded() when degraded != null:
+return degraded(_that);case BridgeModelCatalogStateSnapshot_Failed() when failed != null:
+return failed(_that);case BridgeModelCatalogStateSnapshot_Stopped() when stopped != null:
+return stopped(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeUninitializedResource field0)?  uninitialized,TResult Function( BridgeLoadingResource field0)?  loading,TResult Function( BridgeReadyResource resource,  BridgeModelCatalogStateData value)?  ready,TResult Function( BridgeRefreshingResource resource,  BridgeModelCatalogStateData value)?  refreshing,TResult Function( BridgeStaleResource resource,  BridgeModelCatalogStateData value)?  stale,TResult Function( BridgeDegradedResource resource,  BridgeModelCatalogStateData value)?  degraded,TResult Function( BridgeFailedResource field0)?  failed,TResult Function( BridgeStoppedResource field0)?  stopped,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case BridgeModelCatalogStateSnapshot_Uninitialized() when uninitialized != null:
+return uninitialized(_that.field0);case BridgeModelCatalogStateSnapshot_Loading() when loading != null:
+return loading(_that.field0);case BridgeModelCatalogStateSnapshot_Ready() when ready != null:
+return ready(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Refreshing() when refreshing != null:
+return refreshing(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Stale() when stale != null:
+return stale(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Degraded() when degraded != null:
+return degraded(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Failed() when failed != null:
+return failed(_that.field0);case BridgeModelCatalogStateSnapshot_Stopped() when stopped != null:
+return stopped(_that.field0);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeUninitializedResource field0)  uninitialized,required TResult Function( BridgeLoadingResource field0)  loading,required TResult Function( BridgeReadyResource resource,  BridgeModelCatalogStateData value)  ready,required TResult Function( BridgeRefreshingResource resource,  BridgeModelCatalogStateData value)  refreshing,required TResult Function( BridgeStaleResource resource,  BridgeModelCatalogStateData value)  stale,required TResult Function( BridgeDegradedResource resource,  BridgeModelCatalogStateData value)  degraded,required TResult Function( BridgeFailedResource field0)  failed,required TResult Function( BridgeStoppedResource field0)  stopped,}) {final _that = this;
+switch (_that) {
+case BridgeModelCatalogStateSnapshot_Uninitialized():
+return uninitialized(_that.field0);case BridgeModelCatalogStateSnapshot_Loading():
+return loading(_that.field0);case BridgeModelCatalogStateSnapshot_Ready():
+return ready(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Refreshing():
+return refreshing(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Stale():
+return stale(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Degraded():
+return degraded(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Failed():
+return failed(_that.field0);case BridgeModelCatalogStateSnapshot_Stopped():
+return stopped(_that.field0);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeUninitializedResource field0)?  uninitialized,TResult? Function( BridgeLoadingResource field0)?  loading,TResult? Function( BridgeReadyResource resource,  BridgeModelCatalogStateData value)?  ready,TResult? Function( BridgeRefreshingResource resource,  BridgeModelCatalogStateData value)?  refreshing,TResult? Function( BridgeStaleResource resource,  BridgeModelCatalogStateData value)?  stale,TResult? Function( BridgeDegradedResource resource,  BridgeModelCatalogStateData value)?  degraded,TResult? Function( BridgeFailedResource field0)?  failed,TResult? Function( BridgeStoppedResource field0)?  stopped,}) {final _that = this;
+switch (_that) {
+case BridgeModelCatalogStateSnapshot_Uninitialized() when uninitialized != null:
+return uninitialized(_that.field0);case BridgeModelCatalogStateSnapshot_Loading() when loading != null:
+return loading(_that.field0);case BridgeModelCatalogStateSnapshot_Ready() when ready != null:
+return ready(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Refreshing() when refreshing != null:
+return refreshing(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Stale() when stale != null:
+return stale(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Degraded() when degraded != null:
+return degraded(_that.resource,_that.value);case BridgeModelCatalogStateSnapshot_Failed() when failed != null:
+return failed(_that.field0);case BridgeModelCatalogStateSnapshot_Stopped() when stopped != null:
+return stopped(_that.field0);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogStateSnapshot_Uninitialized extends BridgeModelCatalogStateSnapshot {
+  const BridgeModelCatalogStateSnapshot_Uninitialized(this.field0): super._();
+
+
+ final  BridgeUninitializedResource field0;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeModelCatalogStateSnapshot_UninitializedCopyWith<BridgeModelCatalogStateSnapshot_Uninitialized> get copyWith => _$BridgeModelCatalogStateSnapshot_UninitializedCopyWithImpl<BridgeModelCatalogStateSnapshot_Uninitialized>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogStateSnapshot_Uninitialized&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
+
+@override
+String toString() {
+    return 'BridgeModelCatalogStateSnapshot.uninitialized(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeModelCatalogStateSnapshot_UninitializedCopyWith<$Res> implements $BridgeModelCatalogStateSnapshotCopyWith<$Res> {
+  factory $BridgeModelCatalogStateSnapshot_UninitializedCopyWith(BridgeModelCatalogStateSnapshot_Uninitialized value, $Res Function(BridgeModelCatalogStateSnapshot_Uninitialized) _then) = _$BridgeModelCatalogStateSnapshot_UninitializedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeUninitializedResource field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeModelCatalogStateSnapshot_UninitializedCopyWithImpl<$Res>
+    implements $BridgeModelCatalogStateSnapshot_UninitializedCopyWith<$Res> {
+  _$BridgeModelCatalogStateSnapshot_UninitializedCopyWithImpl(this._self, this._then);
+
+  final BridgeModelCatalogStateSnapshot_Uninitialized _self;
+  final $Res Function(BridgeModelCatalogStateSnapshot_Uninitialized) _then;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeModelCatalogStateSnapshot_Uninitialized(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeUninitializedResource,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogStateSnapshot_Loading extends BridgeModelCatalogStateSnapshot {
+  const BridgeModelCatalogStateSnapshot_Loading(this.field0): super._();
+
+
+ final  BridgeLoadingResource field0;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeModelCatalogStateSnapshot_LoadingCopyWith<BridgeModelCatalogStateSnapshot_Loading> get copyWith => _$BridgeModelCatalogStateSnapshot_LoadingCopyWithImpl<BridgeModelCatalogStateSnapshot_Loading>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogStateSnapshot_Loading&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
+
+@override
+String toString() {
+    return 'BridgeModelCatalogStateSnapshot.loading(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeModelCatalogStateSnapshot_LoadingCopyWith<$Res> implements $BridgeModelCatalogStateSnapshotCopyWith<$Res> {
+  factory $BridgeModelCatalogStateSnapshot_LoadingCopyWith(BridgeModelCatalogStateSnapshot_Loading value, $Res Function(BridgeModelCatalogStateSnapshot_Loading) _then) = _$BridgeModelCatalogStateSnapshot_LoadingCopyWithImpl;
+@useResult
+$Res call({
+ BridgeLoadingResource field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeModelCatalogStateSnapshot_LoadingCopyWithImpl<$Res>
+    implements $BridgeModelCatalogStateSnapshot_LoadingCopyWith<$Res> {
+  _$BridgeModelCatalogStateSnapshot_LoadingCopyWithImpl(this._self, this._then);
+
+  final BridgeModelCatalogStateSnapshot_Loading _self;
+  final $Res Function(BridgeModelCatalogStateSnapshot_Loading) _then;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeModelCatalogStateSnapshot_Loading(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeLoadingResource,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogStateSnapshot_Ready extends BridgeModelCatalogStateSnapshot {
+  const BridgeModelCatalogStateSnapshot_Ready({required this.resource, required this.value}): super._();
+
+
+ final  BridgeReadyResource resource;
+ final  BridgeModelCatalogStateData value;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeModelCatalogStateSnapshot_ReadyCopyWith<BridgeModelCatalogStateSnapshot_Ready> get copyWith => _$BridgeModelCatalogStateSnapshot_ReadyCopyWithImpl<BridgeModelCatalogStateSnapshot_Ready>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogStateSnapshot_Ready&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,resource,value);
+}
+
+@override
+String toString() {
+    return 'BridgeModelCatalogStateSnapshot.ready(resource: $resource, value: $value)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeModelCatalogStateSnapshot_ReadyCopyWith<$Res> implements $BridgeModelCatalogStateSnapshotCopyWith<$Res> {
+  factory $BridgeModelCatalogStateSnapshot_ReadyCopyWith(BridgeModelCatalogStateSnapshot_Ready value, $Res Function(BridgeModelCatalogStateSnapshot_Ready) _then) = _$BridgeModelCatalogStateSnapshot_ReadyCopyWithImpl;
+@useResult
+$Res call({
+ BridgeReadyResource resource, BridgeModelCatalogStateData value
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeModelCatalogStateSnapshot_ReadyCopyWithImpl<$Res>
+    implements $BridgeModelCatalogStateSnapshot_ReadyCopyWith<$Res> {
+  _$BridgeModelCatalogStateSnapshot_ReadyCopyWithImpl(this._self, this._then);
+
+  final BridgeModelCatalogStateSnapshot_Ready _self;
+  final $Res Function(BridgeModelCatalogStateSnapshot_Ready) _then;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
+  return _then(BridgeModelCatalogStateSnapshot_Ready(
+resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
+as BridgeReadyResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
+as BridgeModelCatalogStateData,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogStateSnapshot_Refreshing extends BridgeModelCatalogStateSnapshot {
+  const BridgeModelCatalogStateSnapshot_Refreshing({required this.resource, required this.value}): super._();
+
+
+ final  BridgeRefreshingResource resource;
+ final  BridgeModelCatalogStateData value;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeModelCatalogStateSnapshot_RefreshingCopyWith<BridgeModelCatalogStateSnapshot_Refreshing> get copyWith => _$BridgeModelCatalogStateSnapshot_RefreshingCopyWithImpl<BridgeModelCatalogStateSnapshot_Refreshing>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogStateSnapshot_Refreshing&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,resource,value);
+}
+
+@override
+String toString() {
+    return 'BridgeModelCatalogStateSnapshot.refreshing(resource: $resource, value: $value)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeModelCatalogStateSnapshot_RefreshingCopyWith<$Res> implements $BridgeModelCatalogStateSnapshotCopyWith<$Res> {
+  factory $BridgeModelCatalogStateSnapshot_RefreshingCopyWith(BridgeModelCatalogStateSnapshot_Refreshing value, $Res Function(BridgeModelCatalogStateSnapshot_Refreshing) _then) = _$BridgeModelCatalogStateSnapshot_RefreshingCopyWithImpl;
+@useResult
+$Res call({
+ BridgeRefreshingResource resource, BridgeModelCatalogStateData value
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeModelCatalogStateSnapshot_RefreshingCopyWithImpl<$Res>
+    implements $BridgeModelCatalogStateSnapshot_RefreshingCopyWith<$Res> {
+  _$BridgeModelCatalogStateSnapshot_RefreshingCopyWithImpl(this._self, this._then);
+
+  final BridgeModelCatalogStateSnapshot_Refreshing _self;
+  final $Res Function(BridgeModelCatalogStateSnapshot_Refreshing) _then;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
+  return _then(BridgeModelCatalogStateSnapshot_Refreshing(
+resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
+as BridgeRefreshingResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
+as BridgeModelCatalogStateData,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogStateSnapshot_Stale extends BridgeModelCatalogStateSnapshot {
+  const BridgeModelCatalogStateSnapshot_Stale({required this.resource, required this.value}): super._();
+
+
+ final  BridgeStaleResource resource;
+ final  BridgeModelCatalogStateData value;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeModelCatalogStateSnapshot_StaleCopyWith<BridgeModelCatalogStateSnapshot_Stale> get copyWith => _$BridgeModelCatalogStateSnapshot_StaleCopyWithImpl<BridgeModelCatalogStateSnapshot_Stale>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogStateSnapshot_Stale&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,resource,value);
+}
+
+@override
+String toString() {
+    return 'BridgeModelCatalogStateSnapshot.stale(resource: $resource, value: $value)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeModelCatalogStateSnapshot_StaleCopyWith<$Res> implements $BridgeModelCatalogStateSnapshotCopyWith<$Res> {
+  factory $BridgeModelCatalogStateSnapshot_StaleCopyWith(BridgeModelCatalogStateSnapshot_Stale value, $Res Function(BridgeModelCatalogStateSnapshot_Stale) _then) = _$BridgeModelCatalogStateSnapshot_StaleCopyWithImpl;
+@useResult
+$Res call({
+ BridgeStaleResource resource, BridgeModelCatalogStateData value
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeModelCatalogStateSnapshot_StaleCopyWithImpl<$Res>
+    implements $BridgeModelCatalogStateSnapshot_StaleCopyWith<$Res> {
+  _$BridgeModelCatalogStateSnapshot_StaleCopyWithImpl(this._self, this._then);
+
+  final BridgeModelCatalogStateSnapshot_Stale _self;
+  final $Res Function(BridgeModelCatalogStateSnapshot_Stale) _then;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
+  return _then(BridgeModelCatalogStateSnapshot_Stale(
+resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
+as BridgeStaleResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
+as BridgeModelCatalogStateData,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogStateSnapshot_Degraded extends BridgeModelCatalogStateSnapshot {
+  const BridgeModelCatalogStateSnapshot_Degraded({required this.resource, required this.value}): super._();
+
+
+ final  BridgeDegradedResource resource;
+ final  BridgeModelCatalogStateData value;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeModelCatalogStateSnapshot_DegradedCopyWith<BridgeModelCatalogStateSnapshot_Degraded> get copyWith => _$BridgeModelCatalogStateSnapshot_DegradedCopyWithImpl<BridgeModelCatalogStateSnapshot_Degraded>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogStateSnapshot_Degraded&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,resource,value);
+}
+
+@override
+String toString() {
+    return 'BridgeModelCatalogStateSnapshot.degraded(resource: $resource, value: $value)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeModelCatalogStateSnapshot_DegradedCopyWith<$Res> implements $BridgeModelCatalogStateSnapshotCopyWith<$Res> {
+  factory $BridgeModelCatalogStateSnapshot_DegradedCopyWith(BridgeModelCatalogStateSnapshot_Degraded value, $Res Function(BridgeModelCatalogStateSnapshot_Degraded) _then) = _$BridgeModelCatalogStateSnapshot_DegradedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeDegradedResource resource, BridgeModelCatalogStateData value
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeModelCatalogStateSnapshot_DegradedCopyWithImpl<$Res>
+    implements $BridgeModelCatalogStateSnapshot_DegradedCopyWith<$Res> {
+  _$BridgeModelCatalogStateSnapshot_DegradedCopyWithImpl(this._self, this._then);
+
+  final BridgeModelCatalogStateSnapshot_Degraded _self;
+  final $Res Function(BridgeModelCatalogStateSnapshot_Degraded) _then;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
+  return _then(BridgeModelCatalogStateSnapshot_Degraded(
+resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
+as BridgeDegradedResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
+as BridgeModelCatalogStateData,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogStateSnapshot_Failed extends BridgeModelCatalogStateSnapshot {
+  const BridgeModelCatalogStateSnapshot_Failed(this.field0): super._();
+
+
+ final  BridgeFailedResource field0;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeModelCatalogStateSnapshot_FailedCopyWith<BridgeModelCatalogStateSnapshot_Failed> get copyWith => _$BridgeModelCatalogStateSnapshot_FailedCopyWithImpl<BridgeModelCatalogStateSnapshot_Failed>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogStateSnapshot_Failed&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
+
+@override
+String toString() {
+    return 'BridgeModelCatalogStateSnapshot.failed(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeModelCatalogStateSnapshot_FailedCopyWith<$Res> implements $BridgeModelCatalogStateSnapshotCopyWith<$Res> {
+  factory $BridgeModelCatalogStateSnapshot_FailedCopyWith(BridgeModelCatalogStateSnapshot_Failed value, $Res Function(BridgeModelCatalogStateSnapshot_Failed) _then) = _$BridgeModelCatalogStateSnapshot_FailedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeFailedResource field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeModelCatalogStateSnapshot_FailedCopyWithImpl<$Res>
+    implements $BridgeModelCatalogStateSnapshot_FailedCopyWith<$Res> {
+  _$BridgeModelCatalogStateSnapshot_FailedCopyWithImpl(this._self, this._then);
+
+  final BridgeModelCatalogStateSnapshot_Failed _self;
+  final $Res Function(BridgeModelCatalogStateSnapshot_Failed) _then;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeModelCatalogStateSnapshot_Failed(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeFailedResource,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeModelCatalogStateSnapshot_Stopped extends BridgeModelCatalogStateSnapshot {
+  const BridgeModelCatalogStateSnapshot_Stopped(this.field0): super._();
+
+
+ final  BridgeStoppedResource field0;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeModelCatalogStateSnapshot_StoppedCopyWith<BridgeModelCatalogStateSnapshot_Stopped> get copyWith => _$BridgeModelCatalogStateSnapshot_StoppedCopyWithImpl<BridgeModelCatalogStateSnapshot_Stopped>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogStateSnapshot_Stopped&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
+
+@override
+String toString() {
+    return 'BridgeModelCatalogStateSnapshot.stopped(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeModelCatalogStateSnapshot_StoppedCopyWith<$Res> implements $BridgeModelCatalogStateSnapshotCopyWith<$Res> {
+  factory $BridgeModelCatalogStateSnapshot_StoppedCopyWith(BridgeModelCatalogStateSnapshot_Stopped value, $Res Function(BridgeModelCatalogStateSnapshot_Stopped) _then) = _$BridgeModelCatalogStateSnapshot_StoppedCopyWithImpl;
+@useResult
+$Res call({
+ BridgeStoppedResource field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeModelCatalogStateSnapshot_StoppedCopyWithImpl<$Res>
+    implements $BridgeModelCatalogStateSnapshot_StoppedCopyWith<$Res> {
+  _$BridgeModelCatalogStateSnapshot_StoppedCopyWithImpl(this._self, this._then);
+
+  final BridgeModelCatalogStateSnapshot_Stopped _self;
+  final $Res Function(BridgeModelCatalogStateSnapshot_Stopped) _then;
+
+/// Create a copy of BridgeModelCatalogStateSnapshot
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(BridgeModelCatalogStateSnapshot_Stopped(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as BridgeStoppedResource,
+  ));
+}
+
+
+}
+
+/// @nodoc
 mixin _$BridgePersistenceState {
 
  BigInt get pendingCommits;
@@ -6539,7 +7287,7 @@ as BridgeStoppedResource,
 }
 
 /// @nodoc
-mixin _$BridgeSettingsStateSnapshot {
+mixin _$BridgeSettingsConfigStateSnapshot {
 
 
 
@@ -6547,7 +7295,7 @@ mixin _$BridgeSettingsStateSnapshot {
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsStateSnapshot);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsConfigStateSnapshot);
 }
 
 
@@ -6556,20 +7304,20 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-    return 'BridgeSettingsStateSnapshot()';
+    return 'BridgeSettingsConfigStateSnapshot()';
 }
 
 
 }
 
 /// @nodoc
-class $BridgeSettingsStateSnapshotCopyWith<$Res>  {
-$BridgeSettingsStateSnapshotCopyWith(BridgeSettingsStateSnapshot _, $Res Function(BridgeSettingsStateSnapshot) __);
+class $BridgeSettingsConfigStateSnapshotCopyWith<$Res>  {
+$BridgeSettingsConfigStateSnapshotCopyWith(BridgeSettingsConfigStateSnapshot _, $Res Function(BridgeSettingsConfigStateSnapshot) __);
 }
 
 
-/// Adds pattern-matching-related methods to [BridgeSettingsStateSnapshot].
-extension BridgeSettingsStateSnapshotPatterns on BridgeSettingsStateSnapshot {
+/// Adds pattern-matching-related methods to [BridgeSettingsConfigStateSnapshot].
+extension BridgeSettingsConfigStateSnapshotPatterns on BridgeSettingsConfigStateSnapshot {
 /// A variant of `map` that fallback to returning `orElse`.
 ///
 /// It is equivalent to doing:
@@ -6582,17 +7330,17 @@ extension BridgeSettingsStateSnapshotPatterns on BridgeSettingsStateSnapshot {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeSettingsStateSnapshot_Uninitialized value)?  uninitialized,TResult Function( BridgeSettingsStateSnapshot_Loading value)?  loading,TResult Function( BridgeSettingsStateSnapshot_Ready value)?  ready,TResult Function( BridgeSettingsStateSnapshot_Refreshing value)?  refreshing,TResult Function( BridgeSettingsStateSnapshot_Stale value)?  stale,TResult Function( BridgeSettingsStateSnapshot_Degraded value)?  degraded,TResult Function( BridgeSettingsStateSnapshot_Failed value)?  failed,TResult Function( BridgeSettingsStateSnapshot_Stopped value)?  stopped,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeSettingsConfigStateSnapshot_Uninitialized value)?  uninitialized,TResult Function( BridgeSettingsConfigStateSnapshot_Loading value)?  loading,TResult Function( BridgeSettingsConfigStateSnapshot_Ready value)?  ready,TResult Function( BridgeSettingsConfigStateSnapshot_Refreshing value)?  refreshing,TResult Function( BridgeSettingsConfigStateSnapshot_Stale value)?  stale,TResult Function( BridgeSettingsConfigStateSnapshot_Degraded value)?  degraded,TResult Function( BridgeSettingsConfigStateSnapshot_Failed value)?  failed,TResult Function( BridgeSettingsConfigStateSnapshot_Stopped value)?  stopped,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
-case BridgeSettingsStateSnapshot_Uninitialized() when uninitialized != null:
-return uninitialized(_that);case BridgeSettingsStateSnapshot_Loading() when loading != null:
-return loading(_that);case BridgeSettingsStateSnapshot_Ready() when ready != null:
-return ready(_that);case BridgeSettingsStateSnapshot_Refreshing() when refreshing != null:
-return refreshing(_that);case BridgeSettingsStateSnapshot_Stale() when stale != null:
-return stale(_that);case BridgeSettingsStateSnapshot_Degraded() when degraded != null:
-return degraded(_that);case BridgeSettingsStateSnapshot_Failed() when failed != null:
-return failed(_that);case BridgeSettingsStateSnapshot_Stopped() when stopped != null:
+case BridgeSettingsConfigStateSnapshot_Uninitialized() when uninitialized != null:
+return uninitialized(_that);case BridgeSettingsConfigStateSnapshot_Loading() when loading != null:
+return loading(_that);case BridgeSettingsConfigStateSnapshot_Ready() when ready != null:
+return ready(_that);case BridgeSettingsConfigStateSnapshot_Refreshing() when refreshing != null:
+return refreshing(_that);case BridgeSettingsConfigStateSnapshot_Stale() when stale != null:
+return stale(_that);case BridgeSettingsConfigStateSnapshot_Degraded() when degraded != null:
+return degraded(_that);case BridgeSettingsConfigStateSnapshot_Failed() when failed != null:
+return failed(_that);case BridgeSettingsConfigStateSnapshot_Stopped() when stopped != null:
 return stopped(_that);case _:
   return orElse();
 
@@ -6611,17 +7359,17 @@ return stopped(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeSettingsStateSnapshot_Uninitialized value)  uninitialized,required TResult Function( BridgeSettingsStateSnapshot_Loading value)  loading,required TResult Function( BridgeSettingsStateSnapshot_Ready value)  ready,required TResult Function( BridgeSettingsStateSnapshot_Refreshing value)  refreshing,required TResult Function( BridgeSettingsStateSnapshot_Stale value)  stale,required TResult Function( BridgeSettingsStateSnapshot_Degraded value)  degraded,required TResult Function( BridgeSettingsStateSnapshot_Failed value)  failed,required TResult Function( BridgeSettingsStateSnapshot_Stopped value)  stopped,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeSettingsConfigStateSnapshot_Uninitialized value)  uninitialized,required TResult Function( BridgeSettingsConfigStateSnapshot_Loading value)  loading,required TResult Function( BridgeSettingsConfigStateSnapshot_Ready value)  ready,required TResult Function( BridgeSettingsConfigStateSnapshot_Refreshing value)  refreshing,required TResult Function( BridgeSettingsConfigStateSnapshot_Stale value)  stale,required TResult Function( BridgeSettingsConfigStateSnapshot_Degraded value)  degraded,required TResult Function( BridgeSettingsConfigStateSnapshot_Failed value)  failed,required TResult Function( BridgeSettingsConfigStateSnapshot_Stopped value)  stopped,}){
 final _that = this;
 switch (_that) {
-case BridgeSettingsStateSnapshot_Uninitialized():
-return uninitialized(_that);case BridgeSettingsStateSnapshot_Loading():
-return loading(_that);case BridgeSettingsStateSnapshot_Ready():
-return ready(_that);case BridgeSettingsStateSnapshot_Refreshing():
-return refreshing(_that);case BridgeSettingsStateSnapshot_Stale():
-return stale(_that);case BridgeSettingsStateSnapshot_Degraded():
-return degraded(_that);case BridgeSettingsStateSnapshot_Failed():
-return failed(_that);case BridgeSettingsStateSnapshot_Stopped():
+case BridgeSettingsConfigStateSnapshot_Uninitialized():
+return uninitialized(_that);case BridgeSettingsConfigStateSnapshot_Loading():
+return loading(_that);case BridgeSettingsConfigStateSnapshot_Ready():
+return ready(_that);case BridgeSettingsConfigStateSnapshot_Refreshing():
+return refreshing(_that);case BridgeSettingsConfigStateSnapshot_Stale():
+return stale(_that);case BridgeSettingsConfigStateSnapshot_Degraded():
+return degraded(_that);case BridgeSettingsConfigStateSnapshot_Failed():
+return failed(_that);case BridgeSettingsConfigStateSnapshot_Stopped():
 return stopped(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
@@ -6636,17 +7384,17 @@ return stopped(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeSettingsStateSnapshot_Uninitialized value)?  uninitialized,TResult? Function( BridgeSettingsStateSnapshot_Loading value)?  loading,TResult? Function( BridgeSettingsStateSnapshot_Ready value)?  ready,TResult? Function( BridgeSettingsStateSnapshot_Refreshing value)?  refreshing,TResult? Function( BridgeSettingsStateSnapshot_Stale value)?  stale,TResult? Function( BridgeSettingsStateSnapshot_Degraded value)?  degraded,TResult? Function( BridgeSettingsStateSnapshot_Failed value)?  failed,TResult? Function( BridgeSettingsStateSnapshot_Stopped value)?  stopped,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeSettingsConfigStateSnapshot_Uninitialized value)?  uninitialized,TResult? Function( BridgeSettingsConfigStateSnapshot_Loading value)?  loading,TResult? Function( BridgeSettingsConfigStateSnapshot_Ready value)?  ready,TResult? Function( BridgeSettingsConfigStateSnapshot_Refreshing value)?  refreshing,TResult? Function( BridgeSettingsConfigStateSnapshot_Stale value)?  stale,TResult? Function( BridgeSettingsConfigStateSnapshot_Degraded value)?  degraded,TResult? Function( BridgeSettingsConfigStateSnapshot_Failed value)?  failed,TResult? Function( BridgeSettingsConfigStateSnapshot_Stopped value)?  stopped,}){
 final _that = this;
 switch (_that) {
-case BridgeSettingsStateSnapshot_Uninitialized() when uninitialized != null:
-return uninitialized(_that);case BridgeSettingsStateSnapshot_Loading() when loading != null:
-return loading(_that);case BridgeSettingsStateSnapshot_Ready() when ready != null:
-return ready(_that);case BridgeSettingsStateSnapshot_Refreshing() when refreshing != null:
-return refreshing(_that);case BridgeSettingsStateSnapshot_Stale() when stale != null:
-return stale(_that);case BridgeSettingsStateSnapshot_Degraded() when degraded != null:
-return degraded(_that);case BridgeSettingsStateSnapshot_Failed() when failed != null:
-return failed(_that);case BridgeSettingsStateSnapshot_Stopped() when stopped != null:
+case BridgeSettingsConfigStateSnapshot_Uninitialized() when uninitialized != null:
+return uninitialized(_that);case BridgeSettingsConfigStateSnapshot_Loading() when loading != null:
+return loading(_that);case BridgeSettingsConfigStateSnapshot_Ready() when ready != null:
+return ready(_that);case BridgeSettingsConfigStateSnapshot_Refreshing() when refreshing != null:
+return refreshing(_that);case BridgeSettingsConfigStateSnapshot_Stale() when stale != null:
+return stale(_that);case BridgeSettingsConfigStateSnapshot_Degraded() when degraded != null:
+return degraded(_that);case BridgeSettingsConfigStateSnapshot_Failed() when failed != null:
+return failed(_that);case BridgeSettingsConfigStateSnapshot_Stopped() when stopped != null:
 return stopped(_that);case _:
   return null;
 
@@ -6664,16 +7412,16 @@ return stopped(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeUninitializedResource field0)?  uninitialized,TResult Function( BridgeLoadingResource field0)?  loading,TResult Function( BridgeReadyResource resource,  BridgeSettingsStateData value)?  ready,TResult Function( BridgeRefreshingResource resource,  BridgeSettingsStateData value)?  refreshing,TResult Function( BridgeStaleResource resource,  BridgeSettingsStateData value)?  stale,TResult Function( BridgeDegradedResource resource,  BridgeSettingsStateData value)?  degraded,TResult Function( BridgeFailedResource field0)?  failed,TResult Function( BridgeStoppedResource field0)?  stopped,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeUninitializedResource field0)?  uninitialized,TResult Function( BridgeLoadingResource field0)?  loading,TResult Function( BridgeReadyResource resource,  BridgeSettingsConfigStateData value)?  ready,TResult Function( BridgeRefreshingResource resource,  BridgeSettingsConfigStateData value)?  refreshing,TResult Function( BridgeStaleResource resource,  BridgeSettingsConfigStateData value)?  stale,TResult Function( BridgeDegradedResource resource,  BridgeSettingsConfigStateData value)?  degraded,TResult Function( BridgeFailedResource field0)?  failed,TResult Function( BridgeStoppedResource field0)?  stopped,required TResult orElse(),}) {final _that = this;
 switch (_that) {
-case BridgeSettingsStateSnapshot_Uninitialized() when uninitialized != null:
-return uninitialized(_that.field0);case BridgeSettingsStateSnapshot_Loading() when loading != null:
-return loading(_that.field0);case BridgeSettingsStateSnapshot_Ready() when ready != null:
-return ready(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Refreshing() when refreshing != null:
-return refreshing(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Stale() when stale != null:
-return stale(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Degraded() when degraded != null:
-return degraded(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Failed() when failed != null:
-return failed(_that.field0);case BridgeSettingsStateSnapshot_Stopped() when stopped != null:
+case BridgeSettingsConfigStateSnapshot_Uninitialized() when uninitialized != null:
+return uninitialized(_that.field0);case BridgeSettingsConfigStateSnapshot_Loading() when loading != null:
+return loading(_that.field0);case BridgeSettingsConfigStateSnapshot_Ready() when ready != null:
+return ready(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Refreshing() when refreshing != null:
+return refreshing(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Stale() when stale != null:
+return stale(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Degraded() when degraded != null:
+return degraded(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Failed() when failed != null:
+return failed(_that.field0);case BridgeSettingsConfigStateSnapshot_Stopped() when stopped != null:
 return stopped(_that.field0);case _:
   return orElse();
 
@@ -6692,16 +7440,16 @@ return stopped(_that.field0);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeUninitializedResource field0)  uninitialized,required TResult Function( BridgeLoadingResource field0)  loading,required TResult Function( BridgeReadyResource resource,  BridgeSettingsStateData value)  ready,required TResult Function( BridgeRefreshingResource resource,  BridgeSettingsStateData value)  refreshing,required TResult Function( BridgeStaleResource resource,  BridgeSettingsStateData value)  stale,required TResult Function( BridgeDegradedResource resource,  BridgeSettingsStateData value)  degraded,required TResult Function( BridgeFailedResource field0)  failed,required TResult Function( BridgeStoppedResource field0)  stopped,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeUninitializedResource field0)  uninitialized,required TResult Function( BridgeLoadingResource field0)  loading,required TResult Function( BridgeReadyResource resource,  BridgeSettingsConfigStateData value)  ready,required TResult Function( BridgeRefreshingResource resource,  BridgeSettingsConfigStateData value)  refreshing,required TResult Function( BridgeStaleResource resource,  BridgeSettingsConfigStateData value)  stale,required TResult Function( BridgeDegradedResource resource,  BridgeSettingsConfigStateData value)  degraded,required TResult Function( BridgeFailedResource field0)  failed,required TResult Function( BridgeStoppedResource field0)  stopped,}) {final _that = this;
 switch (_that) {
-case BridgeSettingsStateSnapshot_Uninitialized():
-return uninitialized(_that.field0);case BridgeSettingsStateSnapshot_Loading():
-return loading(_that.field0);case BridgeSettingsStateSnapshot_Ready():
-return ready(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Refreshing():
-return refreshing(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Stale():
-return stale(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Degraded():
-return degraded(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Failed():
-return failed(_that.field0);case BridgeSettingsStateSnapshot_Stopped():
+case BridgeSettingsConfigStateSnapshot_Uninitialized():
+return uninitialized(_that.field0);case BridgeSettingsConfigStateSnapshot_Loading():
+return loading(_that.field0);case BridgeSettingsConfigStateSnapshot_Ready():
+return ready(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Refreshing():
+return refreshing(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Stale():
+return stale(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Degraded():
+return degraded(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Failed():
+return failed(_that.field0);case BridgeSettingsConfigStateSnapshot_Stopped():
 return stopped(_that.field0);}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -6716,16 +7464,16 @@ return stopped(_that.field0);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeUninitializedResource field0)?  uninitialized,TResult? Function( BridgeLoadingResource field0)?  loading,TResult? Function( BridgeReadyResource resource,  BridgeSettingsStateData value)?  ready,TResult? Function( BridgeRefreshingResource resource,  BridgeSettingsStateData value)?  refreshing,TResult? Function( BridgeStaleResource resource,  BridgeSettingsStateData value)?  stale,TResult? Function( BridgeDegradedResource resource,  BridgeSettingsStateData value)?  degraded,TResult? Function( BridgeFailedResource field0)?  failed,TResult? Function( BridgeStoppedResource field0)?  stopped,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeUninitializedResource field0)?  uninitialized,TResult? Function( BridgeLoadingResource field0)?  loading,TResult? Function( BridgeReadyResource resource,  BridgeSettingsConfigStateData value)?  ready,TResult? Function( BridgeRefreshingResource resource,  BridgeSettingsConfigStateData value)?  refreshing,TResult? Function( BridgeStaleResource resource,  BridgeSettingsConfigStateData value)?  stale,TResult? Function( BridgeDegradedResource resource,  BridgeSettingsConfigStateData value)?  degraded,TResult? Function( BridgeFailedResource field0)?  failed,TResult? Function( BridgeStoppedResource field0)?  stopped,}) {final _that = this;
 switch (_that) {
-case BridgeSettingsStateSnapshot_Uninitialized() when uninitialized != null:
-return uninitialized(_that.field0);case BridgeSettingsStateSnapshot_Loading() when loading != null:
-return loading(_that.field0);case BridgeSettingsStateSnapshot_Ready() when ready != null:
-return ready(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Refreshing() when refreshing != null:
-return refreshing(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Stale() when stale != null:
-return stale(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Degraded() when degraded != null:
-return degraded(_that.resource,_that.value);case BridgeSettingsStateSnapshot_Failed() when failed != null:
-return failed(_that.field0);case BridgeSettingsStateSnapshot_Stopped() when stopped != null:
+case BridgeSettingsConfigStateSnapshot_Uninitialized() when uninitialized != null:
+return uninitialized(_that.field0);case BridgeSettingsConfigStateSnapshot_Loading() when loading != null:
+return loading(_that.field0);case BridgeSettingsConfigStateSnapshot_Ready() when ready != null:
+return ready(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Refreshing() when refreshing != null:
+return refreshing(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Stale() when stale != null:
+return stale(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Degraded() when degraded != null:
+return degraded(_that.resource,_that.value);case BridgeSettingsConfigStateSnapshot_Failed() when failed != null:
+return failed(_that.field0);case BridgeSettingsConfigStateSnapshot_Stopped() when stopped != null:
 return stopped(_that.field0);case _:
   return null;
 
@@ -6737,23 +7485,23 @@ return stopped(_that.field0);case _:
 /// @nodoc
 
 
-class BridgeSettingsStateSnapshot_Uninitialized extends BridgeSettingsStateSnapshot {
-  const BridgeSettingsStateSnapshot_Uninitialized(this.field0): super._();
+class BridgeSettingsConfigStateSnapshot_Uninitialized extends BridgeSettingsConfigStateSnapshot {
+  const BridgeSettingsConfigStateSnapshot_Uninitialized(this.field0): super._();
 
 
  final  BridgeUninitializedResource field0;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeSettingsStateSnapshot_UninitializedCopyWith<BridgeSettingsStateSnapshot_Uninitialized> get copyWith => _$BridgeSettingsStateSnapshot_UninitializedCopyWithImpl<BridgeSettingsStateSnapshot_Uninitialized>(this, _$identity);
+$BridgeSettingsConfigStateSnapshot_UninitializedCopyWith<BridgeSettingsConfigStateSnapshot_Uninitialized> get copyWith => _$BridgeSettingsConfigStateSnapshot_UninitializedCopyWithImpl<BridgeSettingsConfigStateSnapshot_Uninitialized>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsStateSnapshot_Uninitialized&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsConfigStateSnapshot_Uninitialized&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
@@ -6764,15 +7512,15 @@ int get hashCode {
 
 @override
 String toString() {
-    return 'BridgeSettingsStateSnapshot.uninitialized(field0: $field0)';
+    return 'BridgeSettingsConfigStateSnapshot.uninitialized(field0: $field0)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeSettingsStateSnapshot_UninitializedCopyWith<$Res> implements $BridgeSettingsStateSnapshotCopyWith<$Res> {
-  factory $BridgeSettingsStateSnapshot_UninitializedCopyWith(BridgeSettingsStateSnapshot_Uninitialized value, $Res Function(BridgeSettingsStateSnapshot_Uninitialized) _then) = _$BridgeSettingsStateSnapshot_UninitializedCopyWithImpl;
+abstract mixin class $BridgeSettingsConfigStateSnapshot_UninitializedCopyWith<$Res> implements $BridgeSettingsConfigStateSnapshotCopyWith<$Res> {
+  factory $BridgeSettingsConfigStateSnapshot_UninitializedCopyWith(BridgeSettingsConfigStateSnapshot_Uninitialized value, $Res Function(BridgeSettingsConfigStateSnapshot_Uninitialized) _then) = _$BridgeSettingsConfigStateSnapshot_UninitializedCopyWithImpl;
 @useResult
 $Res call({
  BridgeUninitializedResource field0
@@ -6783,17 +7531,17 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeSettingsStateSnapshot_UninitializedCopyWithImpl<$Res>
-    implements $BridgeSettingsStateSnapshot_UninitializedCopyWith<$Res> {
-  _$BridgeSettingsStateSnapshot_UninitializedCopyWithImpl(this._self, this._then);
+class _$BridgeSettingsConfigStateSnapshot_UninitializedCopyWithImpl<$Res>
+    implements $BridgeSettingsConfigStateSnapshot_UninitializedCopyWith<$Res> {
+  _$BridgeSettingsConfigStateSnapshot_UninitializedCopyWithImpl(this._self, this._then);
 
-  final BridgeSettingsStateSnapshot_Uninitialized _self;
-  final $Res Function(BridgeSettingsStateSnapshot_Uninitialized) _then;
+  final BridgeSettingsConfigStateSnapshot_Uninitialized _self;
+  final $Res Function(BridgeSettingsConfigStateSnapshot_Uninitialized) _then;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeSettingsStateSnapshot_Uninitialized(
+  return _then(BridgeSettingsConfigStateSnapshot_Uninitialized(
 null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
 as BridgeUninitializedResource,
   ));
@@ -6805,23 +7553,23 @@ as BridgeUninitializedResource,
 /// @nodoc
 
 
-class BridgeSettingsStateSnapshot_Loading extends BridgeSettingsStateSnapshot {
-  const BridgeSettingsStateSnapshot_Loading(this.field0): super._();
+class BridgeSettingsConfigStateSnapshot_Loading extends BridgeSettingsConfigStateSnapshot {
+  const BridgeSettingsConfigStateSnapshot_Loading(this.field0): super._();
 
 
  final  BridgeLoadingResource field0;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeSettingsStateSnapshot_LoadingCopyWith<BridgeSettingsStateSnapshot_Loading> get copyWith => _$BridgeSettingsStateSnapshot_LoadingCopyWithImpl<BridgeSettingsStateSnapshot_Loading>(this, _$identity);
+$BridgeSettingsConfigStateSnapshot_LoadingCopyWith<BridgeSettingsConfigStateSnapshot_Loading> get copyWith => _$BridgeSettingsConfigStateSnapshot_LoadingCopyWithImpl<BridgeSettingsConfigStateSnapshot_Loading>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsStateSnapshot_Loading&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsConfigStateSnapshot_Loading&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
@@ -6832,15 +7580,15 @@ int get hashCode {
 
 @override
 String toString() {
-    return 'BridgeSettingsStateSnapshot.loading(field0: $field0)';
+    return 'BridgeSettingsConfigStateSnapshot.loading(field0: $field0)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeSettingsStateSnapshot_LoadingCopyWith<$Res> implements $BridgeSettingsStateSnapshotCopyWith<$Res> {
-  factory $BridgeSettingsStateSnapshot_LoadingCopyWith(BridgeSettingsStateSnapshot_Loading value, $Res Function(BridgeSettingsStateSnapshot_Loading) _then) = _$BridgeSettingsStateSnapshot_LoadingCopyWithImpl;
+abstract mixin class $BridgeSettingsConfigStateSnapshot_LoadingCopyWith<$Res> implements $BridgeSettingsConfigStateSnapshotCopyWith<$Res> {
+  factory $BridgeSettingsConfigStateSnapshot_LoadingCopyWith(BridgeSettingsConfigStateSnapshot_Loading value, $Res Function(BridgeSettingsConfigStateSnapshot_Loading) _then) = _$BridgeSettingsConfigStateSnapshot_LoadingCopyWithImpl;
 @useResult
 $Res call({
  BridgeLoadingResource field0
@@ -6851,17 +7599,17 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeSettingsStateSnapshot_LoadingCopyWithImpl<$Res>
-    implements $BridgeSettingsStateSnapshot_LoadingCopyWith<$Res> {
-  _$BridgeSettingsStateSnapshot_LoadingCopyWithImpl(this._self, this._then);
+class _$BridgeSettingsConfigStateSnapshot_LoadingCopyWithImpl<$Res>
+    implements $BridgeSettingsConfigStateSnapshot_LoadingCopyWith<$Res> {
+  _$BridgeSettingsConfigStateSnapshot_LoadingCopyWithImpl(this._self, this._then);
 
-  final BridgeSettingsStateSnapshot_Loading _self;
-  final $Res Function(BridgeSettingsStateSnapshot_Loading) _then;
+  final BridgeSettingsConfigStateSnapshot_Loading _self;
+  final $Res Function(BridgeSettingsConfigStateSnapshot_Loading) _then;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeSettingsStateSnapshot_Loading(
+  return _then(BridgeSettingsConfigStateSnapshot_Loading(
 null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
 as BridgeLoadingResource,
   ));
@@ -6873,24 +7621,24 @@ as BridgeLoadingResource,
 /// @nodoc
 
 
-class BridgeSettingsStateSnapshot_Ready extends BridgeSettingsStateSnapshot {
-  const BridgeSettingsStateSnapshot_Ready({required this.resource, required this.value}): super._();
+class BridgeSettingsConfigStateSnapshot_Ready extends BridgeSettingsConfigStateSnapshot {
+  const BridgeSettingsConfigStateSnapshot_Ready({required this.resource, required this.value}): super._();
 
 
  final  BridgeReadyResource resource;
- final  BridgeSettingsStateData value;
+ final  BridgeSettingsConfigStateData value;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeSettingsStateSnapshot_ReadyCopyWith<BridgeSettingsStateSnapshot_Ready> get copyWith => _$BridgeSettingsStateSnapshot_ReadyCopyWithImpl<BridgeSettingsStateSnapshot_Ready>(this, _$identity);
+$BridgeSettingsConfigStateSnapshot_ReadyCopyWith<BridgeSettingsConfigStateSnapshot_Ready> get copyWith => _$BridgeSettingsConfigStateSnapshot_ReadyCopyWithImpl<BridgeSettingsConfigStateSnapshot_Ready>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsStateSnapshot_Ready&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsConfigStateSnapshot_Ready&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
 }
 
 
@@ -6901,18 +7649,18 @@ int get hashCode {
 
 @override
 String toString() {
-    return 'BridgeSettingsStateSnapshot.ready(resource: $resource, value: $value)';
+    return 'BridgeSettingsConfigStateSnapshot.ready(resource: $resource, value: $value)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeSettingsStateSnapshot_ReadyCopyWith<$Res> implements $BridgeSettingsStateSnapshotCopyWith<$Res> {
-  factory $BridgeSettingsStateSnapshot_ReadyCopyWith(BridgeSettingsStateSnapshot_Ready value, $Res Function(BridgeSettingsStateSnapshot_Ready) _then) = _$BridgeSettingsStateSnapshot_ReadyCopyWithImpl;
+abstract mixin class $BridgeSettingsConfigStateSnapshot_ReadyCopyWith<$Res> implements $BridgeSettingsConfigStateSnapshotCopyWith<$Res> {
+  factory $BridgeSettingsConfigStateSnapshot_ReadyCopyWith(BridgeSettingsConfigStateSnapshot_Ready value, $Res Function(BridgeSettingsConfigStateSnapshot_Ready) _then) = _$BridgeSettingsConfigStateSnapshot_ReadyCopyWithImpl;
 @useResult
 $Res call({
- BridgeReadyResource resource, BridgeSettingsStateData value
+ BridgeReadyResource resource, BridgeSettingsConfigStateData value
 });
 
 
@@ -6920,20 +7668,20 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeSettingsStateSnapshot_ReadyCopyWithImpl<$Res>
-    implements $BridgeSettingsStateSnapshot_ReadyCopyWith<$Res> {
-  _$BridgeSettingsStateSnapshot_ReadyCopyWithImpl(this._self, this._then);
+class _$BridgeSettingsConfigStateSnapshot_ReadyCopyWithImpl<$Res>
+    implements $BridgeSettingsConfigStateSnapshot_ReadyCopyWith<$Res> {
+  _$BridgeSettingsConfigStateSnapshot_ReadyCopyWithImpl(this._self, this._then);
 
-  final BridgeSettingsStateSnapshot_Ready _self;
-  final $Res Function(BridgeSettingsStateSnapshot_Ready) _then;
+  final BridgeSettingsConfigStateSnapshot_Ready _self;
+  final $Res Function(BridgeSettingsConfigStateSnapshot_Ready) _then;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
-  return _then(BridgeSettingsStateSnapshot_Ready(
+  return _then(BridgeSettingsConfigStateSnapshot_Ready(
 resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
 as BridgeReadyResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
-as BridgeSettingsStateData,
+as BridgeSettingsConfigStateData,
   ));
 }
 
@@ -6943,24 +7691,24 @@ as BridgeSettingsStateData,
 /// @nodoc
 
 
-class BridgeSettingsStateSnapshot_Refreshing extends BridgeSettingsStateSnapshot {
-  const BridgeSettingsStateSnapshot_Refreshing({required this.resource, required this.value}): super._();
+class BridgeSettingsConfigStateSnapshot_Refreshing extends BridgeSettingsConfigStateSnapshot {
+  const BridgeSettingsConfigStateSnapshot_Refreshing({required this.resource, required this.value}): super._();
 
 
  final  BridgeRefreshingResource resource;
- final  BridgeSettingsStateData value;
+ final  BridgeSettingsConfigStateData value;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeSettingsStateSnapshot_RefreshingCopyWith<BridgeSettingsStateSnapshot_Refreshing> get copyWith => _$BridgeSettingsStateSnapshot_RefreshingCopyWithImpl<BridgeSettingsStateSnapshot_Refreshing>(this, _$identity);
+$BridgeSettingsConfigStateSnapshot_RefreshingCopyWith<BridgeSettingsConfigStateSnapshot_Refreshing> get copyWith => _$BridgeSettingsConfigStateSnapshot_RefreshingCopyWithImpl<BridgeSettingsConfigStateSnapshot_Refreshing>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsStateSnapshot_Refreshing&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsConfigStateSnapshot_Refreshing&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
 }
 
 
@@ -6971,18 +7719,18 @@ int get hashCode {
 
 @override
 String toString() {
-    return 'BridgeSettingsStateSnapshot.refreshing(resource: $resource, value: $value)';
+    return 'BridgeSettingsConfigStateSnapshot.refreshing(resource: $resource, value: $value)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeSettingsStateSnapshot_RefreshingCopyWith<$Res> implements $BridgeSettingsStateSnapshotCopyWith<$Res> {
-  factory $BridgeSettingsStateSnapshot_RefreshingCopyWith(BridgeSettingsStateSnapshot_Refreshing value, $Res Function(BridgeSettingsStateSnapshot_Refreshing) _then) = _$BridgeSettingsStateSnapshot_RefreshingCopyWithImpl;
+abstract mixin class $BridgeSettingsConfigStateSnapshot_RefreshingCopyWith<$Res> implements $BridgeSettingsConfigStateSnapshotCopyWith<$Res> {
+  factory $BridgeSettingsConfigStateSnapshot_RefreshingCopyWith(BridgeSettingsConfigStateSnapshot_Refreshing value, $Res Function(BridgeSettingsConfigStateSnapshot_Refreshing) _then) = _$BridgeSettingsConfigStateSnapshot_RefreshingCopyWithImpl;
 @useResult
 $Res call({
- BridgeRefreshingResource resource, BridgeSettingsStateData value
+ BridgeRefreshingResource resource, BridgeSettingsConfigStateData value
 });
 
 
@@ -6990,20 +7738,20 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeSettingsStateSnapshot_RefreshingCopyWithImpl<$Res>
-    implements $BridgeSettingsStateSnapshot_RefreshingCopyWith<$Res> {
-  _$BridgeSettingsStateSnapshot_RefreshingCopyWithImpl(this._self, this._then);
+class _$BridgeSettingsConfigStateSnapshot_RefreshingCopyWithImpl<$Res>
+    implements $BridgeSettingsConfigStateSnapshot_RefreshingCopyWith<$Res> {
+  _$BridgeSettingsConfigStateSnapshot_RefreshingCopyWithImpl(this._self, this._then);
 
-  final BridgeSettingsStateSnapshot_Refreshing _self;
-  final $Res Function(BridgeSettingsStateSnapshot_Refreshing) _then;
+  final BridgeSettingsConfigStateSnapshot_Refreshing _self;
+  final $Res Function(BridgeSettingsConfigStateSnapshot_Refreshing) _then;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
-  return _then(BridgeSettingsStateSnapshot_Refreshing(
+  return _then(BridgeSettingsConfigStateSnapshot_Refreshing(
 resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
 as BridgeRefreshingResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
-as BridgeSettingsStateData,
+as BridgeSettingsConfigStateData,
   ));
 }
 
@@ -7013,24 +7761,24 @@ as BridgeSettingsStateData,
 /// @nodoc
 
 
-class BridgeSettingsStateSnapshot_Stale extends BridgeSettingsStateSnapshot {
-  const BridgeSettingsStateSnapshot_Stale({required this.resource, required this.value}): super._();
+class BridgeSettingsConfigStateSnapshot_Stale extends BridgeSettingsConfigStateSnapshot {
+  const BridgeSettingsConfigStateSnapshot_Stale({required this.resource, required this.value}): super._();
 
 
  final  BridgeStaleResource resource;
- final  BridgeSettingsStateData value;
+ final  BridgeSettingsConfigStateData value;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeSettingsStateSnapshot_StaleCopyWith<BridgeSettingsStateSnapshot_Stale> get copyWith => _$BridgeSettingsStateSnapshot_StaleCopyWithImpl<BridgeSettingsStateSnapshot_Stale>(this, _$identity);
+$BridgeSettingsConfigStateSnapshot_StaleCopyWith<BridgeSettingsConfigStateSnapshot_Stale> get copyWith => _$BridgeSettingsConfigStateSnapshot_StaleCopyWithImpl<BridgeSettingsConfigStateSnapshot_Stale>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsStateSnapshot_Stale&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsConfigStateSnapshot_Stale&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
 }
 
 
@@ -7041,18 +7789,18 @@ int get hashCode {
 
 @override
 String toString() {
-    return 'BridgeSettingsStateSnapshot.stale(resource: $resource, value: $value)';
+    return 'BridgeSettingsConfigStateSnapshot.stale(resource: $resource, value: $value)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeSettingsStateSnapshot_StaleCopyWith<$Res> implements $BridgeSettingsStateSnapshotCopyWith<$Res> {
-  factory $BridgeSettingsStateSnapshot_StaleCopyWith(BridgeSettingsStateSnapshot_Stale value, $Res Function(BridgeSettingsStateSnapshot_Stale) _then) = _$BridgeSettingsStateSnapshot_StaleCopyWithImpl;
+abstract mixin class $BridgeSettingsConfigStateSnapshot_StaleCopyWith<$Res> implements $BridgeSettingsConfigStateSnapshotCopyWith<$Res> {
+  factory $BridgeSettingsConfigStateSnapshot_StaleCopyWith(BridgeSettingsConfigStateSnapshot_Stale value, $Res Function(BridgeSettingsConfigStateSnapshot_Stale) _then) = _$BridgeSettingsConfigStateSnapshot_StaleCopyWithImpl;
 @useResult
 $Res call({
- BridgeStaleResource resource, BridgeSettingsStateData value
+ BridgeStaleResource resource, BridgeSettingsConfigStateData value
 });
 
 
@@ -7060,20 +7808,20 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeSettingsStateSnapshot_StaleCopyWithImpl<$Res>
-    implements $BridgeSettingsStateSnapshot_StaleCopyWith<$Res> {
-  _$BridgeSettingsStateSnapshot_StaleCopyWithImpl(this._self, this._then);
+class _$BridgeSettingsConfigStateSnapshot_StaleCopyWithImpl<$Res>
+    implements $BridgeSettingsConfigStateSnapshot_StaleCopyWith<$Res> {
+  _$BridgeSettingsConfigStateSnapshot_StaleCopyWithImpl(this._self, this._then);
 
-  final BridgeSettingsStateSnapshot_Stale _self;
-  final $Res Function(BridgeSettingsStateSnapshot_Stale) _then;
+  final BridgeSettingsConfigStateSnapshot_Stale _self;
+  final $Res Function(BridgeSettingsConfigStateSnapshot_Stale) _then;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
-  return _then(BridgeSettingsStateSnapshot_Stale(
+  return _then(BridgeSettingsConfigStateSnapshot_Stale(
 resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
 as BridgeStaleResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
-as BridgeSettingsStateData,
+as BridgeSettingsConfigStateData,
   ));
 }
 
@@ -7083,24 +7831,24 @@ as BridgeSettingsStateData,
 /// @nodoc
 
 
-class BridgeSettingsStateSnapshot_Degraded extends BridgeSettingsStateSnapshot {
-  const BridgeSettingsStateSnapshot_Degraded({required this.resource, required this.value}): super._();
+class BridgeSettingsConfigStateSnapshot_Degraded extends BridgeSettingsConfigStateSnapshot {
+  const BridgeSettingsConfigStateSnapshot_Degraded({required this.resource, required this.value}): super._();
 
 
  final  BridgeDegradedResource resource;
- final  BridgeSettingsStateData value;
+ final  BridgeSettingsConfigStateData value;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeSettingsStateSnapshot_DegradedCopyWith<BridgeSettingsStateSnapshot_Degraded> get copyWith => _$BridgeSettingsStateSnapshot_DegradedCopyWithImpl<BridgeSettingsStateSnapshot_Degraded>(this, _$identity);
+$BridgeSettingsConfigStateSnapshot_DegradedCopyWith<BridgeSettingsConfigStateSnapshot_Degraded> get copyWith => _$BridgeSettingsConfigStateSnapshot_DegradedCopyWithImpl<BridgeSettingsConfigStateSnapshot_Degraded>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsStateSnapshot_Degraded&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsConfigStateSnapshot_Degraded&&(identical(other.resource, resource) || other.resource == resource)&&(identical(other.value, value) || other.value == value));
 }
 
 
@@ -7111,18 +7859,18 @@ int get hashCode {
 
 @override
 String toString() {
-    return 'BridgeSettingsStateSnapshot.degraded(resource: $resource, value: $value)';
+    return 'BridgeSettingsConfigStateSnapshot.degraded(resource: $resource, value: $value)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeSettingsStateSnapshot_DegradedCopyWith<$Res> implements $BridgeSettingsStateSnapshotCopyWith<$Res> {
-  factory $BridgeSettingsStateSnapshot_DegradedCopyWith(BridgeSettingsStateSnapshot_Degraded value, $Res Function(BridgeSettingsStateSnapshot_Degraded) _then) = _$BridgeSettingsStateSnapshot_DegradedCopyWithImpl;
+abstract mixin class $BridgeSettingsConfigStateSnapshot_DegradedCopyWith<$Res> implements $BridgeSettingsConfigStateSnapshotCopyWith<$Res> {
+  factory $BridgeSettingsConfigStateSnapshot_DegradedCopyWith(BridgeSettingsConfigStateSnapshot_Degraded value, $Res Function(BridgeSettingsConfigStateSnapshot_Degraded) _then) = _$BridgeSettingsConfigStateSnapshot_DegradedCopyWithImpl;
 @useResult
 $Res call({
- BridgeDegradedResource resource, BridgeSettingsStateData value
+ BridgeDegradedResource resource, BridgeSettingsConfigStateData value
 });
 
 
@@ -7130,20 +7878,20 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeSettingsStateSnapshot_DegradedCopyWithImpl<$Res>
-    implements $BridgeSettingsStateSnapshot_DegradedCopyWith<$Res> {
-  _$BridgeSettingsStateSnapshot_DegradedCopyWithImpl(this._self, this._then);
+class _$BridgeSettingsConfigStateSnapshot_DegradedCopyWithImpl<$Res>
+    implements $BridgeSettingsConfigStateSnapshot_DegradedCopyWith<$Res> {
+  _$BridgeSettingsConfigStateSnapshot_DegradedCopyWithImpl(this._self, this._then);
 
-  final BridgeSettingsStateSnapshot_Degraded _self;
-  final $Res Function(BridgeSettingsStateSnapshot_Degraded) _then;
+  final BridgeSettingsConfigStateSnapshot_Degraded _self;
+  final $Res Function(BridgeSettingsConfigStateSnapshot_Degraded) _then;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? resource = null,Object? value = null,}) {
-  return _then(BridgeSettingsStateSnapshot_Degraded(
+  return _then(BridgeSettingsConfigStateSnapshot_Degraded(
 resource: null == resource ? _self.resource : resource // ignore: cast_nullable_to_non_nullable
 as BridgeDegradedResource,value: null == value ? _self.value : value // ignore: cast_nullable_to_non_nullable
-as BridgeSettingsStateData,
+as BridgeSettingsConfigStateData,
   ));
 }
 
@@ -7153,23 +7901,23 @@ as BridgeSettingsStateData,
 /// @nodoc
 
 
-class BridgeSettingsStateSnapshot_Failed extends BridgeSettingsStateSnapshot {
-  const BridgeSettingsStateSnapshot_Failed(this.field0): super._();
+class BridgeSettingsConfigStateSnapshot_Failed extends BridgeSettingsConfigStateSnapshot {
+  const BridgeSettingsConfigStateSnapshot_Failed(this.field0): super._();
 
 
  final  BridgeFailedResource field0;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeSettingsStateSnapshot_FailedCopyWith<BridgeSettingsStateSnapshot_Failed> get copyWith => _$BridgeSettingsStateSnapshot_FailedCopyWithImpl<BridgeSettingsStateSnapshot_Failed>(this, _$identity);
+$BridgeSettingsConfigStateSnapshot_FailedCopyWith<BridgeSettingsConfigStateSnapshot_Failed> get copyWith => _$BridgeSettingsConfigStateSnapshot_FailedCopyWithImpl<BridgeSettingsConfigStateSnapshot_Failed>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsStateSnapshot_Failed&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsConfigStateSnapshot_Failed&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
@@ -7180,15 +7928,15 @@ int get hashCode {
 
 @override
 String toString() {
-    return 'BridgeSettingsStateSnapshot.failed(field0: $field0)';
+    return 'BridgeSettingsConfigStateSnapshot.failed(field0: $field0)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeSettingsStateSnapshot_FailedCopyWith<$Res> implements $BridgeSettingsStateSnapshotCopyWith<$Res> {
-  factory $BridgeSettingsStateSnapshot_FailedCopyWith(BridgeSettingsStateSnapshot_Failed value, $Res Function(BridgeSettingsStateSnapshot_Failed) _then) = _$BridgeSettingsStateSnapshot_FailedCopyWithImpl;
+abstract mixin class $BridgeSettingsConfigStateSnapshot_FailedCopyWith<$Res> implements $BridgeSettingsConfigStateSnapshotCopyWith<$Res> {
+  factory $BridgeSettingsConfigStateSnapshot_FailedCopyWith(BridgeSettingsConfigStateSnapshot_Failed value, $Res Function(BridgeSettingsConfigStateSnapshot_Failed) _then) = _$BridgeSettingsConfigStateSnapshot_FailedCopyWithImpl;
 @useResult
 $Res call({
  BridgeFailedResource field0
@@ -7199,17 +7947,17 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeSettingsStateSnapshot_FailedCopyWithImpl<$Res>
-    implements $BridgeSettingsStateSnapshot_FailedCopyWith<$Res> {
-  _$BridgeSettingsStateSnapshot_FailedCopyWithImpl(this._self, this._then);
+class _$BridgeSettingsConfigStateSnapshot_FailedCopyWithImpl<$Res>
+    implements $BridgeSettingsConfigStateSnapshot_FailedCopyWith<$Res> {
+  _$BridgeSettingsConfigStateSnapshot_FailedCopyWithImpl(this._self, this._then);
 
-  final BridgeSettingsStateSnapshot_Failed _self;
-  final $Res Function(BridgeSettingsStateSnapshot_Failed) _then;
+  final BridgeSettingsConfigStateSnapshot_Failed _self;
+  final $Res Function(BridgeSettingsConfigStateSnapshot_Failed) _then;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeSettingsStateSnapshot_Failed(
+  return _then(BridgeSettingsConfigStateSnapshot_Failed(
 null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
 as BridgeFailedResource,
   ));
@@ -7221,23 +7969,23 @@ as BridgeFailedResource,
 /// @nodoc
 
 
-class BridgeSettingsStateSnapshot_Stopped extends BridgeSettingsStateSnapshot {
-  const BridgeSettingsStateSnapshot_Stopped(this.field0): super._();
+class BridgeSettingsConfigStateSnapshot_Stopped extends BridgeSettingsConfigStateSnapshot {
+  const BridgeSettingsConfigStateSnapshot_Stopped(this.field0): super._();
 
 
  final  BridgeStoppedResource field0;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
 @pragma('vm:prefer-inline')
-$BridgeSettingsStateSnapshot_StoppedCopyWith<BridgeSettingsStateSnapshot_Stopped> get copyWith => _$BridgeSettingsStateSnapshot_StoppedCopyWithImpl<BridgeSettingsStateSnapshot_Stopped>(this, _$identity);
+$BridgeSettingsConfigStateSnapshot_StoppedCopyWith<BridgeSettingsConfigStateSnapshot_Stopped> get copyWith => _$BridgeSettingsConfigStateSnapshot_StoppedCopyWithImpl<BridgeSettingsConfigStateSnapshot_Stopped>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsStateSnapshot_Stopped&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeSettingsConfigStateSnapshot_Stopped&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
@@ -7248,15 +7996,15 @@ int get hashCode {
 
 @override
 String toString() {
-    return 'BridgeSettingsStateSnapshot.stopped(field0: $field0)';
+    return 'BridgeSettingsConfigStateSnapshot.stopped(field0: $field0)';
 }
 
 
 }
 
 /// @nodoc
-abstract mixin class $BridgeSettingsStateSnapshot_StoppedCopyWith<$Res> implements $BridgeSettingsStateSnapshotCopyWith<$Res> {
-  factory $BridgeSettingsStateSnapshot_StoppedCopyWith(BridgeSettingsStateSnapshot_Stopped value, $Res Function(BridgeSettingsStateSnapshot_Stopped) _then) = _$BridgeSettingsStateSnapshot_StoppedCopyWithImpl;
+abstract mixin class $BridgeSettingsConfigStateSnapshot_StoppedCopyWith<$Res> implements $BridgeSettingsConfigStateSnapshotCopyWith<$Res> {
+  factory $BridgeSettingsConfigStateSnapshot_StoppedCopyWith(BridgeSettingsConfigStateSnapshot_Stopped value, $Res Function(BridgeSettingsConfigStateSnapshot_Stopped) _then) = _$BridgeSettingsConfigStateSnapshot_StoppedCopyWithImpl;
 @useResult
 $Res call({
  BridgeStoppedResource field0
@@ -7267,17 +8015,17 @@ $Res call({
 
 }
 /// @nodoc
-class _$BridgeSettingsStateSnapshot_StoppedCopyWithImpl<$Res>
-    implements $BridgeSettingsStateSnapshot_StoppedCopyWith<$Res> {
-  _$BridgeSettingsStateSnapshot_StoppedCopyWithImpl(this._self, this._then);
+class _$BridgeSettingsConfigStateSnapshot_StoppedCopyWithImpl<$Res>
+    implements $BridgeSettingsConfigStateSnapshot_StoppedCopyWith<$Res> {
+  _$BridgeSettingsConfigStateSnapshot_StoppedCopyWithImpl(this._self, this._then);
 
-  final BridgeSettingsStateSnapshot_Stopped _self;
-  final $Res Function(BridgeSettingsStateSnapshot_Stopped) _then;
+  final BridgeSettingsConfigStateSnapshot_Stopped _self;
+  final $Res Function(BridgeSettingsConfigStateSnapshot_Stopped) _then;
 
-/// Create a copy of BridgeSettingsStateSnapshot
+/// Create a copy of BridgeSettingsConfigStateSnapshot
 /// with the given fields replaced by the non-null parameter values.
 @pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeSettingsStateSnapshot_Stopped(
+  return _then(BridgeSettingsConfigStateSnapshot_Stopped(
 null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
 as BridgeStoppedResource,
   ));

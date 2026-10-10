@@ -94,21 +94,37 @@ class StartPageComposerDock extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(studioControllerProvider.notifier);
     final canonicalRoute = modeRouteFor(view.modeModelRoutes, view.mode);
-    final pendingMutation = ref.watch(
+    final modelMutation = ref.watch(
       studioControllerProvider.select(
-        (state) => state.value?.mutation('new-thread-mode:${view.mode.id}'),
+        (state) =>
+            state.value?.mutation('new-thread-route:model:${view.mode.id}'),
+      ),
+    );
+    final effortMutation = ref.watch(
+      studioControllerProvider.select(
+        (state) =>
+            state.value?.mutation('new-thread-route:effort:${view.mode.id}'),
       ),
     );
     final route =
-        pendingMutation != null &&
-            pendingMutation.isPending &&
-            pendingMutation.providerId != null &&
-            pendingMutation.model != null
+        modelMutation != null &&
+            modelMutation.isPending &&
+            modelMutation.providerId != null &&
+            modelMutation.model != null
         ? ModeModelRouteView(
             modeId: view.mode,
-            providerId: pendingMutation.providerId!,
-            model: pendingMutation.model!,
-            effort: pendingMutation.effort ?? canonicalRoute?.effort ?? '',
+            providerId: modelMutation.providerId!,
+            model: modelMutation.model!,
+            effort: modelMutation.effort ?? canonicalRoute?.effort ?? '',
+          )
+        : effortMutation != null &&
+              effortMutation.isPending &&
+              canonicalRoute != null
+        ? ModeModelRouteView(
+            modeId: view.mode,
+            providerId: canonicalRoute.providerId,
+            model: canonicalRoute.model,
+            effort: effortMutation.effort ?? canonicalRoute.effort,
           )
         : canonicalRoute;
     final model = route == null
@@ -149,12 +165,13 @@ class StartPageComposerDock extends ConsumerWidget {
                       providerId: route.providerId,
                       model: route.model,
                       effort: route.effort,
+                      requiresFunctionCalling: view.modeRequiresFunctionCalling,
                       pending: view.modelRouteMutationPending,
-                      onSelected: (providerId, model, effort) =>
-                          controller.setModeModelRoute(
+                      onModelSelected: (providerId, model) =>
+                          controller.setModeModelField(
+                            mode: view.mode,
                             providerId: providerId,
                             model: model,
-                            effort: effort,
                           ),
                     ),
                     ReasoningEffortSelector(
@@ -163,10 +180,9 @@ class StartPageComposerDock extends ConsumerWidget {
                       model: route.model,
                       effort: route.effort,
                       pending: view.modelRouteMutationPending,
-                      onSelected: (providerId, model, effort) =>
-                          controller.setModeModelRoute(
-                            providerId: providerId,
-                            model: model,
+                      onEffortSelected: (effort) =>
+                          controller.setModeReasoningEffortField(
+                            mode: view.mode,
                             effort: effort,
                           ),
                     ),
@@ -268,6 +284,16 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
       ),
     );
     final canonicalRoute = workspace.runtime.modelRoute;
+    final requiresFunctionCalling = ref.watch(
+      studioControllerProvider.select(
+        (state) =>
+            state.value?.threadModeCatalog.modes
+                .where((mode) => mode.id == workspace.thread.mode.id)
+                .firstOrNull
+                ?.hasWorkflow ??
+            false,
+      ),
+    );
     final pendingMutation = ref.watch(
       studioControllerProvider.select(
         (state) => state.value?.mutation('thread-route:${workspace.threadId}'),
@@ -365,6 +391,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                         providerId: route.providerId,
                         model: route.model,
                         effort: route.effort,
+                        requiresFunctionCalling: requiresFunctionCalling,
                         pending: threadRoutePending,
                         available: route.available,
                         unavailableReason: route.unavailableReason,
@@ -373,6 +400,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                             setState(() => _modelNotice = message),
                         onSelected: (providerId, model, effort) =>
                             controller.setThreadModelRoute(
+                              threadId: workspace.threadId,
                               providerId: providerId,
                               model: model,
                               effort: effort,
@@ -389,6 +417,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                             setState(() => _modelNotice = message),
                         onSelected: (providerId, model, effort) =>
                             controller.setThreadModelRoute(
+                              threadId: workspace.threadId,
                               providerId: providerId,
                               model: model,
                               effort: effort,

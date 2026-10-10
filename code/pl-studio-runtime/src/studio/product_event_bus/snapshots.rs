@@ -10,9 +10,10 @@ use crate::{
     PersistenceStateSnapshot, ProviderUsageStateSnapshot, SkillsStateSnapshot,
     StudioAgentDirectoryData, StudioAgentDirectoryEntry, StudioAgentDirectoryState,
     StudioAgentProfilesStateSnapshot, StudioLspStateSnapshot, StudioMcpStateSnapshot,
-    StudioModelPerformanceSnapshot, StudioPersistenceQueueStateSnapshot,
-    StudioProductEventEnvelope, StudioProductEventKind, StudioRecoveryStateSnapshot,
-    StudioSessionCostsState, StudioSettingsStateSnapshot, StudioUpdateStateSnapshot,
+    StudioModelCatalogStateSnapshot, StudioModelPerformanceSnapshot,
+    StudioPersistenceQueueStateSnapshot, StudioProductEventEnvelope, StudioProductEventKind,
+    StudioRecoveryStateSnapshot, StudioSessionCostsState, StudioSettingsConfigStateSnapshot,
+    StudioUpdateStateSnapshot,
 };
 
 use super::ProductEventBus;
@@ -45,11 +46,20 @@ impl ProductEventBus {
         self.emit_agent_directory(self.read_agent_directory().await)
     }
 
-    pub fn emit_settings_state(
+    pub fn emit_settings_config_state(
         &self,
-        state: StudioSettingsStateSnapshot,
+        state: StudioSettingsConfigStateSnapshot,
     ) -> StudioProductEventEnvelope {
-        self.emit(StudioProductEventKind::SettingsStateChanged(Box::new(
+        self.emit(StudioProductEventKind::SettingsConfigStateChanged(
+            Box::new(state),
+        ))
+    }
+
+    pub fn emit_model_catalog_state(
+        &self,
+        state: StudioModelCatalogStateSnapshot,
+    ) -> StudioProductEventEnvelope {
+        self.emit(StudioProductEventKind::ModelCatalogStateChanged(Box::new(
             state,
         )))
     }

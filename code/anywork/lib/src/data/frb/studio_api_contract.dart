@@ -101,20 +101,6 @@ abstract class StudioApi {
     String threadId,
     int faultGeneration,
   );
-  Future<SettingsStateSnapshot> setModelRole({
-    required int expectedSettingsRevision,
-    required String roleKey,
-    required String providerId,
-    required String model,
-    String? effort,
-  });
-  Future<SettingsStateSnapshot> setModeModelRoute({
-    required int expectedSettingsRevision,
-    required ThreadModeId mode,
-    required String providerId,
-    required String model,
-    String? effort,
-  });
   Future<ThreadModelRouteUpdateResult> setThreadModelRoute({
     required String threadId,
     required int expectedModelRouteRevision,
@@ -203,33 +189,22 @@ abstract class StudioApi {
     int expectedSettingsRevision,
     PermissionMode mode,
   );
-  Future<SettingsStateSnapshot> saveProviderSettings(
+  Future<SettingsStateSnapshot> saveProvider(
     int expectedSettingsRevision,
-    ProviderSettingsCommand command,
+    ProviderCommand command,
   );
-  Future<SettingsStateSnapshot> saveInstructionsSettings(
+  Future<SettingsStateSnapshot> setDefaultProvider(
     int expectedSettingsRevision,
-    InstructionsSettingsCommand command,
+    String providerId,
   );
-  Future<SettingsStateSnapshot> saveSkillsSettings(
+  Future<SettingsStateSnapshot> removeProvider(
     int expectedSettingsRevision,
-    SkillsSettingsCommand command,
-  );
-  Future<SettingsStateSnapshot> saveMcpSettings(
+    String providerId, {
+    String? replacementProviderId,
+  });
+  Future<SettingsStateSnapshot> applySettingsField(
     int expectedSettingsRevision,
-    McpSettingsCommand command,
-  );
-  Future<SettingsStateSnapshot> saveGeneralSettings(
-    int expectedSettingsRevision,
-    GeneralSettingsCommand command,
-  );
-  Future<SettingsStateSnapshot> saveWebSearchSettings(
-    int expectedSettingsRevision,
-    WebSearchSettingsCommand command,
-  );
-  Future<SettingsStateSnapshot> saveDeepSeekWebSearchSettings(
-    int expectedSettingsRevision,
-    DeepSeekWebSearchSettingsCommand command,
+    SettingsFieldCommand command,
   );
 
   /// 重新读取 backend canonical settings 快照（不依赖本地缓存）。
@@ -431,6 +406,49 @@ class _BeginExitOutcome {
   final StudioShutdownIssue? issue;
   final Object? error;
   final StackTrace? stackTrace;
+}
+
+frb.ProviderInput _providerInputFromCommand(ProviderCommand provider) {
+  return frb.ProviderInput(
+    id: provider.id,
+    originalId: provider.originalId,
+    templateKind: provider.templateKind,
+    name: provider.name,
+    baseUrl: provider.baseUrl,
+    secret: switch (provider.secret.action) {
+      ProviderSecretAction.preserve => const frb.ProviderSecretInput.preserve(),
+      ProviderSecretAction.replace => frb.ProviderSecretInput.replace(
+        value: provider.secret.value!,
+      ),
+      ProviderSecretAction.clear => const frb.ProviderSecretInput.clear(),
+    },
+    pricingEnabled: provider.pricingEnabled,
+    defaultModel: provider.defaultModel,
+    customModels: [
+      for (final model in provider.customModels)
+        frb.ProviderModelInput(
+          slug: model.slug,
+          displayName: model.displayName,
+          wireProtocol: model.wireProtocol,
+          contextWindow: BigInt.from(model.contextWindow),
+          maxOutputTokens: BigInt.from(model.maxOutputTokens),
+        ),
+    ],
+    modelConnectionModes: [
+      for (final model in provider.modelConnectionModes)
+        frb.ProviderModelConnectionInput(
+          slug: model.slug,
+          connectionMode: model.connectionMode,
+        ),
+    ],
+    modelAutoCompactLimits: [
+      for (final limit in provider.modelAutoCompactLimits)
+        frb.ProviderModelAutoCompactInput(
+          slug: limit.slug,
+          limit: BigInt.from(limit.limit),
+        ),
+    ],
+  );
 }
 
 class FrbStudioApi
@@ -1463,50 +1481,6 @@ class FrbStudioApi
   }
 
   @override
-  Future<SettingsStateSnapshot> setModelRole({
-    required int expectedSettingsRevision,
-    required String roleKey,
-    required String providerId,
-    required String model,
-    String? effort,
-  }) async {
-    await _ensureReady();
-    return _settingsStateFromFrb(
-      await _bridgeCall(
-        () => frb.setModelRole(
-          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
-          roleKey: roleKey,
-          providerId: providerId,
-          model: model,
-          effort: effort,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Future<SettingsStateSnapshot> setModeModelRoute({
-    required int expectedSettingsRevision,
-    required ThreadModeId mode,
-    required String providerId,
-    required String model,
-    String? effort,
-  }) async {
-    await _ensureReady();
-    return _settingsStateFromFrb(
-      await _bridgeCall(
-        () => frb.setModeModelRoute(
-          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
-          modeId: mode.id,
-          providerId: providerId,
-          model: model,
-          effort: effort,
-        ),
-      ),
-    );
-  }
-
-  @override
   Future<ThreadModelRouteUpdateResult> setThreadModelRoute({
     required String threadId,
     required int expectedModelRouteRevision,
@@ -2106,7 +2080,7 @@ class FrbStudioApi
   @override
   Future<SettingsStateSnapshot> refreshModelCatalog(String providerId) async {
     await _ensureReady();
-    return _settingsStateFromFrb(
+    return _modelCatalogSnapshotFromFrb(
       await _bridgeCall(() => frb.refreshModelCatalog(providerId: providerId)),
     );
   }
@@ -2128,81 +2102,17 @@ class FrbStudioApi
   }
 
   @override
-  Future<SettingsStateSnapshot> saveProviderSettings(
+  Future<SettingsStateSnapshot> saveProvider(
     int expectedSettingsRevision,
-    ProviderSettingsCommand command,
+    ProviderCommand command,
   ) async {
     await _ensureReady();
     return _settingsStateFromFrb(
       await _bridgeCall(
-        () => frb.saveProviderSettings(
+        () => frb.saveProvider(
           expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
           input: frb.ProviderSettingsInput(
-            defaultProviderId: command.defaultProviderId,
-            providers: [
-              for (final provider in command.providers)
-                frb.ProviderInput(
-                  id: provider.id,
-                  originalId: provider.originalId,
-                  templateKind: provider.templateKind,
-                  name: provider.name,
-                  baseUrl: provider.baseUrl,
-                  secret: switch (provider.secret.action) {
-                    ProviderSecretAction.preserve =>
-                      const frb.ProviderSecretInput.preserve(),
-                    ProviderSecretAction.replace =>
-                      frb.ProviderSecretInput.replace(
-                        value: provider.secret.value!,
-                      ),
-                    ProviderSecretAction.clear =>
-                      const frb.ProviderSecretInput.clear(),
-                  },
-                  pricingEnabled: provider.pricingEnabled,
-                  defaultModel: provider.defaultModel,
-                  customModels: [
-                    for (final model in provider.customModels)
-                      frb.ProviderModelInput(
-                        slug: model.slug,
-                        displayName: model.displayName,
-                        wireProtocol: model.wireProtocol,
-                        contextWindow: BigInt.from(model.contextWindow),
-                        maxOutputTokens: BigInt.from(model.maxOutputTokens),
-                      ),
-                  ],
-                  modelConnectionModes: [
-                    for (final model in provider.modelConnectionModes)
-                      frb.ProviderModelConnectionInput(
-                        slug: model.slug,
-                        connectionMode: model.connectionMode,
-                      ),
-                  ],
-                  modelAutoCompactLimits: [
-                    for (final limit in provider.modelAutoCompactLimits)
-                      frb.ProviderModelAutoCompactInput(
-                        slug: limit.slug,
-                        limit: BigInt.from(limit.limit),
-                      ),
-                  ],
-                ),
-            ],
-            modeRoutes: [
-              for (final route in command.modeRoutes)
-                frb.ModeRouteInput(
-                  modeId: route.modeId.id,
-                  provider: route.providerId,
-                  model: route.model,
-                  effort: route.effort,
-                ),
-            ],
-            roles: [
-              for (final role in command.roles)
-                frb.RoleInput(
-                  key: role.key,
-                  provider: role.providerId,
-                  model: role.model,
-                  effort: role.effort,
-                ),
-            ],
+            provider: _providerInputFromCommand(command),
           ),
         ),
       ),
@@ -2210,21 +2120,35 @@ class FrbStudioApi
   }
 
   @override
-  Future<SettingsStateSnapshot> saveInstructionsSettings(
+  Future<SettingsStateSnapshot> setDefaultProvider(
     int expectedSettingsRevision,
-    InstructionsSettingsCommand command,
+    String providerId,
   ) async {
     await _ensureReady();
     return _settingsStateFromFrb(
       await _bridgeCall(
-        () => frb.saveInstructionsSettings(
+        () => frb.setDefaultProvider(
           expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
-          input: frb.InstructionsSettingsInput(
-            baseOverride: command.baseOverride,
-            developer: command.developer,
-            user: command.user,
-            projectDocMaxBytes: BigInt.from(command.projectDocMaxBytes),
-            projectDocFallbackFilenames: command.projectDocFallbackFilenames,
+          providerId: providerId,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<SettingsStateSnapshot> removeProvider(
+    int expectedSettingsRevision,
+    String providerId, {
+    String? replacementProviderId,
+  }) async {
+    await _ensureReady();
+    return _settingsStateFromFrb(
+      await _bridgeCall(
+        () => frb.removeProvider(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
+          providerId: providerId,
+          input: frb.RemoveProviderInput(
+            replacementProviderId: replacementProviderId,
           ),
         ),
       ),
@@ -2232,113 +2156,16 @@ class FrbStudioApi
   }
 
   @override
-  Future<SettingsStateSnapshot> saveSkillsSettings(
+  Future<SettingsStateSnapshot> applySettingsField(
     int expectedSettingsRevision,
-    SkillsSettingsCommand command,
+    SettingsFieldCommand command,
   ) async {
     await _ensureReady();
     return _settingsStateFromFrb(
       await _bridgeCall(
-        () => frb.saveSkillsSettings(
+        () => frb.applySettingsField(
           expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
-          input: frb.SkillsSettingsInput(
-            enabled: command.enabled,
-            autoLearn: command.autoLearn,
-            systemEnabled: command.systemEnabled,
-            projectDir: command.projectDir,
-            userDir: command.userDir,
-            externalDirs: command.externalDirs,
-            disabled: command.disabled,
-            autoLearnMinToolCalls: command.autoLearnMinToolCalls,
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Future<SettingsStateSnapshot> saveMcpSettings(
-    int expectedSettingsRevision,
-    McpSettingsCommand command,
-  ) async {
-    await _ensureReady();
-    return _settingsStateFromFrb(
-      await _bridgeCall(
-        () => frb.saveMcpSettings(
-          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
-          input: frb.McpSettingsInput(
-            servers: [
-              for (final server in command.servers)
-                frb.McpServerInput(
-                  id: server.id,
-                  enabled: server.enabled,
-                  transport: server.transport,
-                  endpoint: server.endpoint,
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Future<SettingsStateSnapshot> saveGeneralSettings(
-    int expectedSettingsRevision,
-    GeneralSettingsCommand command,
-  ) async {
-    await _ensureReady();
-    return _settingsStateFromFrb(
-      await _bridgeCall(
-        () => frb.saveGeneralSettings(
-          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
-          input: frb.GeneralSettingsInput(
-            followActiveTurn: command.followActiveTurn,
-            compactTimeline: command.compactTimeline,
-            sidebarWidth: command.sidebarWidth,
-            pinnedThreadIds: command.pinnedThreadIds ?? const [],
-            pinnedProjectIds: command.pinnedProjectIds ?? const [],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Future<SettingsStateSnapshot> saveWebSearchSettings(
-    int expectedSettingsRevision,
-    WebSearchSettingsCommand command,
-  ) async {
-    await _ensureReady();
-    return _settingsStateFromFrb(
-      await _bridgeCall(
-        () => frb.saveWebSearchSettings(
-          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
-          input: frb.WebSearchSettingsInput(
-            mode: command.mode,
-            contextSize: command.contextSize,
-            allowedDomains: command.allowedDomains,
-            country: command.country,
-            region: command.region,
-            city: command.city,
-            timezone: command.timezone,
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Future<SettingsStateSnapshot> saveDeepSeekWebSearchSettings(
-    int expectedSettingsRevision,
-    DeepSeekWebSearchSettingsCommand command,
-  ) async {
-    await _ensureReady();
-    return _settingsStateFromFrb(
-      await _bridgeCall(
-        () => frb.saveDeepseekWebSearchSettings(
-          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
-          input: frb.DeepSeekWebSearchSettingsInput(enabled: command.enabled),
+          input: _settingsFieldInputFromDomain(command),
         ),
       ),
     );

@@ -589,15 +589,16 @@ Future<void> _saveSidebarPreferences(
   final projects = [...general.pinnedProjectIds];
   if (threadId != null && !threads.remove(threadId)) threads.add(threadId);
   if (projectId != null && !projects.remove(projectId)) projects.add(projectId);
-  await ref
-      .read(studioControllerProvider.notifier)
-      .saveGeneralSettings(
-        GeneralSettingsCommand(
-          followActiveTurn: general.followActiveTurn,
-          compactTimeline: general.compactTimeline,
-          sidebarWidth: width ?? general.sidebarWidth,
-          pinnedThreadIds: threads,
-          pinnedProjectIds: projects,
-        ),
-      );
+  final controller = ref.read(studioControllerProvider.notifier);
+  if (width != null && width != general.sidebarWidth) {
+    await controller.applySettingsField(GeneralSidebarWidthCommand(width));
+  }
+  if (threadId != null) {
+    await controller.applySettingsField(GeneralPinnedThreadIdsCommand(threads));
+  }
+  if (projectId != null) {
+    await controller.applySettingsField(
+      GeneralPinnedProjectIdsCommand(projects),
+    );
+  }
 }

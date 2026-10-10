@@ -374,24 +374,56 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
       _error = null;
     });
     try {
-      final snapshot = await ref
-          .read(studioControllerProvider.notifier)
-          .saveWebSearchSettings(
-            WebSearchSettingsCommand(
-              mode: _mode,
-              contextSize: _contextSize,
-              allowedDomains: _domainsController.text
-                  .split(RegExp(r'[,\n]'))
-                  .map((value) => value.trim())
-                  .where((value) => value.isNotEmpty)
-                  .toSet()
-                  .toList(),
-              country: _nullableText(_countryController),
-              region: _nullableText(_regionController),
-              city: _nullableText(_cityController),
-              timezone: _nullableText(_timezoneController),
-            ),
-          );
+      final controller = ref.read(studioControllerProvider.notifier);
+      var snapshot = ref
+          .read(studioControllerProvider)
+          .requireValue
+          .settingsState;
+      final domains = _domainsController.text
+          .split(RegExp(r'[,\n]'))
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toSet()
+          .toList();
+      if (_mode != widget.settings.configuredMode) {
+        snapshot = await controller.applySettingsField(
+          WebSearchModeCommand(_mode),
+        );
+      }
+      if (_contextSize != widget.settings.contextSize) {
+        snapshot = await controller.applySettingsField(
+          WebSearchContextSizeCommand(_contextSize),
+        );
+      }
+      if (!_sameStrings(domains, widget.settings.allowedDomains)) {
+        snapshot = await controller.applySettingsField(
+          WebSearchAllowedDomainsCommand(domains),
+        );
+      }
+      final country = _nullableText(_countryController);
+      final region = _nullableText(_regionController);
+      final city = _nullableText(_cityController);
+      final timezone = _nullableText(_timezoneController);
+      if (country != widget.settings.country) {
+        snapshot = await controller.applySettingsField(
+          WebSearchCountryCommand(country),
+        );
+      }
+      if (region != widget.settings.region) {
+        snapshot = await controller.applySettingsField(
+          WebSearchRegionCommand(region),
+        );
+      }
+      if (city != widget.settings.city) {
+        snapshot = await controller.applySettingsField(
+          WebSearchCityCommand(city),
+        );
+      }
+      if (timezone != widget.settings.timezone) {
+        snapshot = await controller.applySettingsField(
+          WebSearchTimezoneCommand(timezone),
+        );
+      }
       if (!mounted) return;
       // 成功后显式采用已发布的 canonical 快照，清除 dirty，草稿与已保存值回到同一事实源。
       setState(() {
@@ -413,6 +445,14 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
   String? _nullableText(TextEditingController controller) {
     final value = controller.text.trim();
     return value.isEmpty ? null : value;
+  }
+
+  bool _sameStrings(List<String> left, List<String> right) {
+    if (left.length != right.length) return false;
+    for (var index = 0; index < left.length; index += 1) {
+      if (left[index] != right[index]) return false;
+    }
+    return true;
   }
 
   void _replaceText(TextEditingController controller, String value) {
@@ -570,9 +610,7 @@ class _DeepSeekWebSearchSettingsCardState
     try {
       await ref
           .read(studioControllerProvider.notifier)
-          .saveDeepSeekWebSearchSettings(
-            DeepSeekWebSearchSettingsCommand(enabled: enabled),
-          );
+          .applySettingsField(DeepSeekWebSearchEnabledCommand(enabled));
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {

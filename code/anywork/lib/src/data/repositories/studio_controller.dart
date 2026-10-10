@@ -11,6 +11,7 @@ import '../../platform/clipboard_image_reader.dart';
 import '../frb/studio_api.dart';
 import 'studio_api_provider.dart';
 import 'studio_product_topics.dart';
+import 'session_draft_store.dart';
 import 'studio_settings_repository.dart';
 import 'studio_state_reducer.dart';
 import 'studio_stream_coordinators.dart';
@@ -51,6 +52,10 @@ class StudioController extends _$StudioController {
   final StreamController<TimelineEvent> _timelineEvents =
       StreamController<TimelineEvent>.broadcast();
   final Map<String, int> _timelineEventVersions = {};
+
+  /// Local new-session intent survives route disposal and is never overwritten
+  /// by a canonical Bridge snapshot.
+  final SessionDraftStore _sessionDrafts = SessionDraftStore();
 
   /// 当前打开会话的唯一事件流。调用方只能订阅指定 threadId，不会收到其他会话事件。
   Stream<TimelineEvent> timelineEvents(String threadId) =>
@@ -114,15 +119,13 @@ class StudioController extends _$StudioController {
   int _chatWindowOperation = 0;
   Future<void>? _openingChatWindow;
 
-  /// 新会话 model route 保存的串行链尾：快速切换模型/effort 按顺序落库，每次执行时重读最新
-  /// revision，避免并发 CAS 互冲；链本身永不失败，单次失败由 [_modeRouteSaveError] 记录。
-  Future<void> _modeRouteSaveChain = Future<void>.value();
-
   /// All settings mutations share one write barrier.  This keeps the in-memory
   /// snapshot and the backend CAS revision ordered across independent Settings
   /// tabs, instead of letting a late save overwrite a newer one.
   final StudioMutationCoordinator _settingsMutations =
       StudioMutationCoordinator();
+  final StudioSettingsRepository _settingsRepository =
+      StudioSettingsRepository();
 
   /// Latest intent generation per route target. A menu callback may outlive
   /// the page that created it (for example while Settings is being popped), so
@@ -131,14 +134,16 @@ class StudioController extends _$StudioController {
   /// an already-running request is reconciled and followed by the newest one.
   final Map<String, int> _routeIntentGenerations = {};
 
+  /// Latest intent per independent settings field/resource.  A settings page
+  /// may emit several edits while the previous Bridge CAS is in flight; only
+  /// the newest intent for the same target should reach the Bridge.
+  final Map<String, int> _settingsIntentGenerations = {};
+
   /// Model discovery has its own revision clock and command lane. Duplicate
   /// refreshes for one provider share a future, while configuration writes keep
   /// flowing through the app-level settings mutation coordinator.
   final Map<String, Future<void>> _catalogRefreshes = {};
   int _mutationSequence = 0;
-
-  /// 最近一次新会话 model route 保存失败；成功后清空。submit 前若仍存在则拒绝用旧模型启动。
-  Object? _modeRouteSaveError;
 
   /// 固定活动条展开详情的在途请求：同一活动身份只保留一个，避免每 token 排队全量读。
   Future<void>? _activityDetailInFlight;
@@ -162,6 +167,21 @@ class StudioController extends _$StudioController {
   final Set<String> _renamingThreadIds = {};
 
   StudioApi get _api => ref.read(studioApiProvider);
+
+  StudioState _applySettingsCanonical(
+    StudioState current,
+    SettingsStateSnapshot incoming, {
+    required String source,
+  }) {
+    final merged = _settingsRepository.applyTo(
+      current.settingsState,
+      incoming,
+      source: source,
+    );
+    return identical(merged, current.settingsState)
+        ? current
+        : current.copyWith(settingsState: merged);
+  }
 
   bool _isInitialized(StudioState? current) => current != null;
 
@@ -197,11 +217,13 @@ class StudioController extends _$StudioController {
     final bootstrapped = _resolveSelection(
       _attachProviderCatalog(snapshot, catalog),
       previous: null,
+      drafts: _sessionDrafts,
       intent: _BootstrapSelection(
         preferredProjectId: snapshot.selectedProjectId,
         preferredThreadId: snapshot.selectedThreadId,
       ),
     );
+    _settingsRepository.seed(bootstrapped.settingsState);
     // 先提交 bootstrap 状态再建立 Shell 常驻 topics：Baseline 首帧到达时
     // reducer 已能读到 state（帧不会被 AsyncLoading 阶段丢弃）。
     state = AsyncData(bootstrapped);
@@ -454,6 +476,7 @@ class StudioController extends _$StudioController {
       incoming = _resolveSelection(
         snapshot,
         previous: current,
+        drafts: _sessionDrafts,
         intent: _ProjectDefaultSelection(expectedId),
       );
     } on Object {
@@ -504,13 +527,11 @@ class StudioController extends _$StudioController {
             null) {
       return;
     }
+    _sessionDrafts.setComposer(projectId, const ComposerThreadState.idle());
     state = AsyncData(
       current.copyWith(
         selectedThreadId: null,
-        newThreadComposerByProject: {
-          ...current.newThreadComposerByProject,
-          projectId: const ComposerThreadState.idle(),
-        },
+        newThreadComposerByProject: _sessionDrafts.composers,
       ),
     );
     await _subscribeThread(null);
@@ -525,15 +546,9 @@ class StudioController extends _$StudioController {
         current.newThreadMode == mode) {
       return;
     }
-    // 切换 mode 后，上一 mode 的未落库 model 意图不再相关，清除其失败标记以免误挡提交。
-    _modeRouteSaveError = null;
+    _sessionDrafts.setMode(projectId, mode);
     state = AsyncData(
-      current.copyWith(
-        newThreadModeByProject: {
-          ...current.newThreadModeByProject,
-          projectId: mode,
-        },
-      ),
+      current.copyWith(newThreadModeByProject: _sessionDrafts.modes),
     );
   }
 
@@ -549,12 +564,10 @@ class StudioController extends _$StudioController {
         current.newThreadWorkspaceMode == mode) {
       return;
     }
+    _sessionDrafts.setWorkspaceMode(projectId, mode);
     state = AsyncData(
       current.copyWith(
-        newThreadWorkspaceModeByProject: {
-          ...current.newThreadWorkspaceModeByProject,
-          projectId: mode,
-        },
+        newThreadWorkspaceModeByProject: _sessionDrafts.workspaceModes,
       ),
     );
   }
@@ -1685,16 +1698,11 @@ class StudioController extends _$StudioController {
         current.selectedThreadId != null) {
       return;
     }
-    final composer =
-        current.newThreadComposerByProject[projectId] ??
-        const ComposerThreadState.idle();
+    final composer = _sessionDrafts.composerFor(projectId);
+    final updated = composer.updateDraft(value);
+    _sessionDrafts.setComposer(projectId, updated);
     state = AsyncData(
-      current.copyWith(
-        newThreadComposerByProject: {
-          ...current.newThreadComposerByProject,
-          projectId: composer.updateDraft(value),
-        },
-      ),
+      current.copyWith(newThreadComposerByProject: _sessionDrafts.composers),
     );
   }
 
@@ -1734,14 +1742,17 @@ class StudioController extends _$StudioController {
         (threadId == null && current.selectedThreadId != null)) {
       return;
     }
+    if (threadId == null && current.selectedProjectId != null) {
+      final projectId = current.selectedProjectId!;
+      _sessionDrafts.setComposer(
+        projectId,
+        current.newThreadComposer.reportFailure(error),
+      );
+    }
     state = AsyncData(
       threadId == null
           ? current.copyWith(
-              newThreadComposerByProject: {
-                ...current.newThreadComposerByProject,
-                ?current.selectedProjectId: current.newThreadComposer
-                    .reportFailure(error),
-              },
+              newThreadComposerByProject: _sessionDrafts.composers,
             )
           : _withWorkspaceUi(
               current,
@@ -1797,13 +1808,16 @@ class StudioController extends _$StudioController {
       if (!ref.mounted) return;
       final latest = state.value;
       if (latest == null) return;
+      if (threadId == null && projectId != null) {
+        _sessionDrafts.setComposer(
+          projectId,
+          latest.newThreadComposer.reportFailure(error),
+        );
+      }
       state = AsyncData(
         threadId == null
             ? latest.copyWith(
-                newThreadComposerByProject: {
-                  ...latest.newThreadComposerByProject,
-                  ?projectId: latest.newThreadComposer.reportFailure(error),
-                },
+                newThreadComposerByProject: _sessionDrafts.composers,
               )
             : _withWorkspaceUi(
                 latest,
@@ -1829,13 +1843,13 @@ class StudioController extends _$StudioController {
       ...active.attachments,
       ...admitted,
     ]);
+    if (threadId == null && projectId != null) {
+      _sessionDrafts.setComposer(projectId, updated);
+    }
     state = AsyncData(
       threadId == null
           ? latest.copyWith(
-              newThreadComposerByProject: {
-                ...latest.newThreadComposerByProject,
-                ?projectId: updated,
-              },
+              newThreadComposerByProject: _sessionDrafts.composers,
             )
           : _withWorkspaceUi(
               latest,
@@ -1863,14 +1877,16 @@ class StudioController extends _$StudioController {
       if (!ref.mounted) return;
       final latest = state.value;
       if (latest == null) return;
+      if (threadId == null && latest.selectedProjectId != null) {
+        _sessionDrafts.setComposer(
+          latest.selectedProjectId!,
+          latest.newThreadComposer.reportFailure(error),
+        );
+      }
       state = AsyncData(
         threadId == null
             ? latest.copyWith(
-                newThreadComposerByProject: {
-                  ...latest.newThreadComposerByProject,
-                  ?latest.selectedProjectId: latest.newThreadComposer
-                      .reportFailure(error),
-                },
+                newThreadComposerByProject: _sessionDrafts.composers,
               )
             : _withWorkspaceUi(
                 latest,
@@ -1890,13 +1906,13 @@ class StudioController extends _$StudioController {
       for (final attachment in active.attachments)
         if (attachment.id != draftId) attachment,
     ]);
+    if (threadId == null && latest.selectedProjectId != null) {
+      _sessionDrafts.setComposer(latest.selectedProjectId!, updated);
+    }
     state = AsyncData(
       threadId == null
           ? latest.copyWith(
-              newThreadComposerByProject: {
-                ...latest.newThreadComposerByProject,
-                ?latest.selectedProjectId: updated,
-              },
+              newThreadComposerByProject: _sessionDrafts.composers,
             )
           : _withWorkspaceUi(
               latest,
@@ -1929,41 +1945,35 @@ class StudioController extends _$StudioController {
 
     final submitting = composer.beginSubmission();
     final submissionRevision = submitting.submissionRevision;
+    _sessionDrafts.setComposer(projectId, submitting);
     state = AsyncData(
-      current.copyWith(
-        newThreadComposerByProject: {
-          ...current.newThreadComposerByProject,
-          projectId: submitting,
-        },
-      ),
+      current.copyWith(newThreadComposerByProject: _sessionDrafts.composers),
     );
 
-    // 先等所选 mode 的在途 model 路由保存落库，runtime 才会读到 canonical 并按所选模型创建
-    // root；不得用本地乐观模型抢先创建。保存失败则展示错误并终止本次提交（保留草稿）。
-    await _awaitModeRouteSaves();
-    if (!ref.mounted) return;
-    final routeError = _modeRouteSaveError;
-    if (routeError != null) {
-      final latest = state.value;
-      if (latest == null) return;
-      final active =
-          latest.newThreadComposerByProject[projectId] ??
-          const ComposerThreadState.idle();
-      final failed = active.fail(
-        routeError,
-        submissionRevision: submissionRevision,
-      );
-      state = AsyncData(
-        latest.copyWith(
-          newThreadComposerByProject: {
-            ...latest.newThreadComposerByProject,
-            projectId: failed,
-          },
+    // 等待字段级路由 mutation 到达 canonical；提交读取 Bridge 的事实配置，
+    // 不依赖页面上的乐观投影。协调器有固定截止时间，超时后保留草稿并
+    // 把失败投影回 composer，避免提交按钮永久停在 submitting。
+    if (!await flushPending(timeout: const Duration(seconds: 5))) {
+      await _failNewThreadSubmission(
+        projectId,
+        submissionRevision,
+        StateError(
+          'Settings changes did not finish before the submit deadline.',
         ),
       );
       return;
     }
+    if (!ref.mounted) return;
     final submitMode = state.value?.newThreadMode ?? current.newThreadMode;
+    final routeFailure = _newThreadRouteFailure(submitMode);
+    if (routeFailure != null) {
+      await _failNewThreadSubmission(
+        projectId,
+        submissionRevision,
+        routeFailure,
+      );
+      return;
+    }
     final submitWorkspaceMode =
         state.value?.newThreadWorkspaceMode.id ??
         current.newThreadWorkspaceMode.id;
@@ -1990,13 +2000,9 @@ class StudioController extends _$StudioController {
           latest.newThreadComposerByProject[projectId] ??
           const ComposerThreadState.idle();
       final failed = active.fail(error, submissionRevision: submissionRevision);
+      _sessionDrafts.setComposer(projectId, failed);
       state = AsyncData(
-        latest.copyWith(
-          newThreadComposerByProject: {
-            ...latest.newThreadComposerByProject,
-            projectId: failed,
-          },
-        ),
+        latest.copyWith(newThreadComposerByProject: _sessionDrafts.composers),
       );
       return;
     }
@@ -2023,13 +2029,9 @@ class StudioController extends _$StudioController {
         validationError,
         submissionRevision: submissionRevision,
       );
+      _sessionDrafts.setComposer(projectId, failed);
       state = AsyncData(
-        latest.copyWith(
-          newThreadComposerByProject: {
-            ...latest.newThreadComposerByProject,
-            projectId: failed,
-          },
-        ),
+        latest.copyWith(newThreadComposerByProject: _sessionDrafts.composers),
       );
       return;
     }
@@ -2057,6 +2059,10 @@ class StudioController extends _$StudioController {
         syncState: AgentWorkspaceSyncState.loading,
       ),
     );
+    _sessionDrafts.setComposer(
+      projectId,
+      shouldSelect ? const ComposerThreadState.idle() : active,
+    );
     next = next.copyWith(
       selectedThreadId: shouldSelect
           ? result.thread.id
@@ -2065,15 +2071,47 @@ class StudioController extends _$StudioController {
       openedThreadIds: shouldSelect
           ? {...next.openedThreadIds, result.thread.id}
           : next.openedThreadIds,
-      newThreadComposerByProject: {
-        ...next.newThreadComposerByProject,
-        projectId: shouldSelect ? const ComposerThreadState.idle() : active,
-      },
+      newThreadComposerByProject: _sessionDrafts.composers,
     );
     state = AsyncData(next);
     if (shouldSelect) {
       await _subscribeThread(result.thread.id);
     }
+  }
+
+  Object? _newThreadRouteFailure(ThreadModeId mode) {
+    final current = state.value;
+    if (current == null) return _settingsNotReady();
+    for (final key in [
+      'new-thread-route:model:${mode.id}',
+      'new-thread-route:effort:${mode.id}',
+    ]) {
+      final mutation = current.mutation(key);
+      if (mutation == null) continue;
+      if (mutation.phase == StudioMutationPhase.failed ||
+          mutation.phase == StudioMutationPhase.timeout) {
+        return StateError(mutation.error ?? 'Settings mutation failed.');
+      }
+    }
+    return null;
+  }
+
+  Future<void> _failNewThreadSubmission(
+    String projectId,
+    int submissionRevision,
+    Object error,
+  ) async {
+    if (!ref.mounted) return;
+    final latest = state.value;
+    if (latest == null) return;
+    final active =
+        latest.newThreadComposerByProject[projectId] ??
+        const ComposerThreadState.idle();
+    final failed = active.fail(error, submissionRevision: submissionRevision);
+    _sessionDrafts.setComposer(projectId, failed);
+    state = AsyncData(
+      latest.copyWith(newThreadComposerByProject: _sessionDrafts.composers),
+    );
   }
 
   Future<void> submitComposer(String threadId) async {
@@ -2186,10 +2224,6 @@ class StudioController extends _$StudioController {
     );
   }
 
-  /// Changes the default provider through the same typed mode route command
-  /// used by the new-session selector. Provider editing and default selection
-  /// therefore have independent payloads and cannot replay a stale provider,
-  /// role, or mode-route collection from a settings page.
   Future<void> setDefaultProvider(String providerId) async {
     final current = state.value;
     if (current == null) return;
@@ -2199,19 +2233,9 @@ class StudioController extends _$StudioController {
     if (provider == null) {
       throw StateError('Provider is unavailable: $providerId');
     }
-    final model = _findModel(current, providerId, provider.defaultModel);
-    if (model == null) {
-      throw StateError(
-        'Provider default model is unavailable: $providerId / ${provider.defaultModel}',
-      );
-    }
-    await setModeModelRoute(
-      mode: ThreadModeId.simple,
-      providerId: providerId,
-      model: provider.defaultModel,
-      effort: model.defaultReasoningEffort.isNotEmpty
-          ? model.defaultReasoningEffort
-          : model.reasoningEfforts.firstOrNull,
+    await _saveConfigSettings(
+      (revision) => _api.setDefaultProvider(revision, providerId),
+      mutationKey: 'default-provider',
     );
   }
 
@@ -2244,230 +2268,12 @@ class StudioController extends _$StudioController {
     }
   }
 
-  Future<void> setModelRole({
-    required String roleKey,
-    required String providerId,
-    required String model,
-    String? effort,
-  }) async {
-    final current = state.value;
-    if (current == null) return;
-    final target = current.providers
-        .where((provider) => provider.id == providerId)
-        .expand((provider) => provider.allModels)
-        .where((candidate) => candidate.slug == model)
-        .firstOrNull;
-    final role = current.role(roleKey);
-    if (role != null &&
-        role.providerId == providerId &&
-        role.model == model &&
-        (effort == null || role.effort == effort)) {
-      return;
-    }
-    final intentKey = 'agent-role:$roleKey';
-    final operationId = _beginMutation(
-      intentKey,
-      providerId: providerId,
-      model: model,
-      effort: effort,
-    );
-    try {
-      await _saveConfigSettings(
-        (revision) => _api.setModelRole(
-          expectedSettingsRevision: revision,
-          roleKey: roleKey,
-          providerId: providerId,
-          model: model,
-          effort: effort ?? target?.reasoningEfforts.firstOrNull,
-        ),
-      );
-      _finishMutation(intentKey, operationId, StudioMutationPhase.succeeded);
-    } catch (error) {
-      _finishMutation(
-        intentKey,
-        operationId,
-        StudioMutationPhase.failed,
-        error,
-      );
-      rethrow;
-    }
-  }
-
-  /// 排队保存新会话 mode 的路由（provider/model/effort）。
-  ///
-  /// 返回的 future 完成即代表该次保存已结束：成功应用到 canonical，或失败已记录并展示。
-  /// 多次快速切换通过 [_modeRouteSaveChain] 串行执行，每次执行时重读最新 settings revision，
-  /// 因此不会并发 CAS 互冲；新会话提交进行中不再接受新的路由变更，保证 submit 等待的队列有界。
-  Future<void> setModeModelRoute({
-    ThreadModeId? mode,
-    required String providerId,
-    required String model,
-    String? effort,
-  }) {
-    final current = state.value;
-    // Resolve the mode at command execution time. The selector may have been
-    // built before the user changed Simple → Task; a captured `view.mode`
-    // would otherwise write the old route or silently no-op.
-    final requiresCurrentMode = mode == null;
-    final selectedMode = mode ?? current?.newThreadMode;
-    if (current == null ||
-        selectedMode == null ||
-        current.newThreadComposer.isSubmissionPending) {
-      return Future<void>.value();
-    }
-    final intentKey = 'new-thread-mode:${selectedMode.id}';
-    final generation = (_routeIntentGenerations[intentKey] ?? 0) + 1;
-    _routeIntentGenerations[intentKey] = generation;
-    final operationId = _beginMutation(
-      intentKey,
-      providerId: providerId,
-      model: model,
-      effort: effort,
-    );
-    final task = _modeRouteSaveChain.then((_) async {
-      if (_routeIntentGenerations[intentKey] != generation) {
-        _finishMutation(intentKey, operationId, StudioMutationPhase.superseded);
-        return;
-      }
-      await _enqueueSettingsMutation(
-        () => _runSetModeModelRoute(
-          mode: selectedMode,
-          providerId: providerId,
-          model: model,
-          effort: effort,
-          requiresCurrentMode: requiresCurrentMode,
-          intentKey: intentKey,
-          generation: generation,
-          operationId: operationId,
-        ),
-      );
-    });
-    _modeRouteSaveChain = task.then((_) {}, onError: (_) {});
-    return task;
-  }
-
-  Future<void> _runSetModeModelRoute({
-    required ThreadModeId mode,
-    required String providerId,
-    required String model,
-    String? effort,
-    required bool requiresCurrentMode,
-    required String intentKey,
-    required int generation,
-    required String operationId,
-  }) async {
-    if (!ref.mounted) return;
-    if (_routeIntentGenerations[intentKey] != generation) {
-      _finishMutation(intentKey, operationId, StudioMutationPhase.superseded);
-      return;
-    }
-    final current = state.value;
-    if (current == null ||
-        (requiresCurrentMode && current.newThreadMode != mode)) {
-      _finishMutation(intentKey, operationId, StudioMutationPhase.superseded);
-      return;
-    }
-    final target = _findModel(current, providerId, model);
-    if (target == null ||
-        (requiresCurrentMode &&
-            !_acceptsAttachments(current.newThreadComposer, target))) {
-      // 当前 mode 的这一选择无法落库：记录并经既有 composer 错误通道展示，submit 据此拒绝用
-      // 旧模型启动 root（不猜 provider 可用性，只报告所选路由不可用）。
-      final error = StateError(
-        'Selected model route is unavailable: $providerId / $model',
-      );
-      _finishMutation(
-        intentKey,
-        operationId,
-        StudioMutationPhase.failed,
-        error,
-      );
-      _modeRouteSaveError = error;
-      reportComposerFailure(error);
-      throw error;
-    }
-    final route = current.modeModelRoutes
-        .where((candidate) => candidate.modeId == mode)
-        .firstOrNull;
-    if (route != null &&
-        route.providerId == providerId &&
-        route.model == model &&
-        (effort == null || route.effort == effort)) {
-      // 目标与 canonical 一致：没有待保存意图，清除仍属于当前 mode 的历史失败。
-      if (!requiresCurrentMode || state.value?.newThreadMode == mode) {
-        _modeRouteSaveError = null;
-      }
-      _finishMutation(intentKey, operationId, StudioMutationPhase.succeeded);
-      return;
-    }
-    try {
-      if (_routeIntentGenerations[intentKey] != generation) {
-        _finishMutation(intentKey, operationId, StudioMutationPhase.superseded);
-        return;
-      }
-      final next = await _requestSettings(
-        (revision) => _api.setModeModelRoute(
-          expectedSettingsRevision: revision,
-          mode: mode,
-          providerId: providerId,
-          model: model,
-          effort: effort ?? target.reasoningEfforts.firstOrNull,
-        ),
-        current.settingsRevision,
-      );
-      // await 期间 controller 可能已被回收：不得再读取/写入 state。
-      if (!ref.mounted) return;
-      if (_routeIntentGenerations[intentKey] != generation) {
-        _finishMutation(intentKey, operationId, StudioMutationPhase.superseded);
-        return;
-      }
-      final latest = state.value;
-      if (latest != null) state = AsyncData(applySettingsState(latest, next));
-      // 只清除仍属于当前 mode 的失败标记，避免吞掉其它 mode 的实际失败。
-      if (!requiresCurrentMode || state.value?.newThreadMode == mode) {
-        _modeRouteSaveError = null;
-      }
-      _finishMutation(intentKey, operationId, StudioMutationPhase.succeeded);
-    } catch (error, stackTrace) {
-      // 回收后不得读取/写入 state，也不把回收后的失败写进 UI。
-      if (!ref.mounted) return;
-      // 期间换 mode 时，旧 mode 的失败不应覆盖新 mode 的标记或误挡 submit。
-      if (_routeIntentGenerations[intentKey] != generation) {
-        _finishMutation(intentKey, operationId, StudioMutationPhase.superseded);
-        return;
-      }
-      if (!requiresCurrentMode || state.value?.newThreadMode == mode) {
-        _finishMutation(
-          intentKey,
-          operationId,
-          StudioMutationPhase.failed,
-          error,
-        );
-        _modeRouteSaveError = error;
-        reportComposerFailure(error);
-      }
-      Error.throwWithStackTrace(error, stackTrace);
-    }
-  }
-
-  /// 等待所有在途新会话 mode 路由保存结束。
-  ///
-  /// 提交进行中不再接受新的路由变更，因此这里最多再多等一轮即稳定，不会无限等待。
-  Future<void> _awaitModeRouteSaves() async {
-    while (true) {
-      final tail = _modeRouteSaveChain;
-      await tail;
-      if (identical(tail, _modeRouteSaveChain)) return;
-    }
-  }
-
   /// Wait for settings and route mutations with an absolute bound before a
   /// navigation pop. The caller can leave immediately on timeout; the
   /// keep-alive controller continues reconciling the canonical response.
   Future<bool> flushPending({
     Duration timeout = const Duration(seconds: 5),
   }) async {
-    final deadline = DateTime.now().add(timeout);
     try {
       final settingsFlushed = await _settingsMutations.flush(timeout: timeout);
       if (!settingsFlushed) {
@@ -2477,15 +2283,6 @@ class StudioController extends _$StudioController {
         _markPendingMutationsTimeout();
         return false;
       }
-      final remaining = deadline.difference(DateTime.now());
-      if (remaining <= Duration.zero) {
-        debugPrint(
-          'settings_flush_timeout timeout_ms=${timeout.inMilliseconds}',
-        );
-        _markPendingMutationsTimeout();
-        return false;
-      }
-      await _modeRouteSaveChain.timeout(remaining);
       return true;
     } on TimeoutException {
       debugPrint('settings_flush_timeout timeout_ms=${timeout.inMilliseconds}');
@@ -2495,13 +2292,14 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> setThreadModelRoute({
+    String? threadId,
     required String providerId,
     required String model,
     String? effort,
   }) {
-    final threadId = state.value?.selectedThreadId;
-    if (threadId == null) return Future<void>.value();
-    final intentKey = 'thread-route:$threadId';
+    final targetThreadId = threadId ?? state.value?.selectedThreadId;
+    if (targetThreadId == null) return Future<void>.value();
+    final intentKey = 'thread-route:$targetThreadId';
     final generation = (_routeIntentGenerations[intentKey] ?? 0) + 1;
     _routeIntentGenerations[intentKey] = generation;
     final operationId = _beginMutation(
@@ -2512,6 +2310,7 @@ class StudioController extends _$StudioController {
     );
     return _enqueueSettingsMutation(
       () => _runSetThreadModelRoute(
+        threadId: targetThreadId,
         providerId: providerId,
         model: model,
         effort: effort,
@@ -2523,6 +2322,7 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> _runSetThreadModelRoute({
+    required String threadId,
     required String providerId,
     required String model,
     String? effort,
@@ -2539,19 +2339,25 @@ class StudioController extends _$StudioController {
       return;
     }
     final current = state.value;
-    final thread = current?.selectedThread;
-    final workspace = current?.selectedWorkspace;
+    final thread = current?.threads
+        .where((candidate) => candidate.id == threadId)
+        .firstOrNull;
+    final workspace = current?.workspacesByThread[threadId];
     if (current == null ||
         thread == null ||
         workspace == null ||
         !thread.isRoot ||
         thread.status != ThreadStatusView.idle ||
-        current.runtime.hasActiveWorkflow) {
+        workspace.runtime.hasActiveWorkflow) {
       _finishMutation(intentKey, operationId, StudioMutationPhase.superseded);
       return;
     }
     final target = _findModel(current, providerId, model);
-    if (target == null || !_acceptsAttachments(current.composer, target)) {
+    if (target == null ||
+        !_acceptsAttachments(
+          _workspaceUi(current, threadId).composer,
+          target,
+        )) {
       final error = StateError(
         'Selected thread model route is unavailable: $providerId / $model',
       );
@@ -2565,7 +2371,7 @@ class StudioController extends _$StudioController {
         state = AsyncData(
           _withWorkspaceUi(
             current,
-            thread.id,
+            threadId,
             (ui) => ui.copyWith(composer: ui.composer.reportFailure(error)),
           ),
         );
@@ -2577,7 +2383,7 @@ class StudioController extends _$StudioController {
       state = AsyncData(
         _withWorkspaceUi(
           current,
-          thread.id,
+          threadId,
           (ui) => ui.copyWith(
             composer: ui.composer.reportFailure(
               StateError('Current Thread model route is unavailable.'),
@@ -2590,7 +2396,7 @@ class StudioController extends _$StudioController {
     }
     try {
       final response = await _requestThreadModelRoute(
-        threadId: thread.id,
+        threadId: threadId,
         providerId: providerId,
         model: model,
         effort: effort,
@@ -2602,8 +2408,12 @@ class StudioController extends _$StudioController {
       }
       final latest = state.value;
       if (latest == null) return;
-      var next = applySettingsState(latest, response.settings);
-      final latestWorkspace = next.workspacesByThread[thread.id];
+      var next = _applySettingsCanonical(
+        latest,
+        response.settings,
+        source: 'thread-route-response',
+      );
+      final latestWorkspace = next.workspacesByThread[threadId];
       if (latestWorkspace != null) {
         final latestRouteRevision =
             latestWorkspace.runtime.modelRoute?.revision;
@@ -2614,7 +2424,7 @@ class StudioController extends _$StudioController {
           next = next.copyWith(
             workspacesByThread: {
               ...next.workspacesByThread,
-              thread.id: latestWorkspace.copyWith(
+              threadId: latestWorkspace.copyWith(
                 runtime: latestWorkspace.runtime.copyWith(
                   modelRoute: responseRoute,
                 ),
@@ -2626,7 +2436,7 @@ class StudioController extends _$StudioController {
       if (response.warning case final warning?) {
         next = _withWorkspaceUi(
           next,
-          thread.id,
+          threadId,
           (ui) => ui.copyWith(
             composer: ui.composer.reportFailure(StateError(warning)),
           ),
@@ -2636,9 +2446,13 @@ class StudioController extends _$StudioController {
       _finishMutation(intentKey, operationId, StudioMutationPhase.succeeded);
     } catch (error) {
       if (!ref.mounted) return;
+      if (_routeIntentGenerations[intentKey] != generation) {
+        _finishMutation(intentKey, operationId, StudioMutationPhase.superseded);
+        return;
+      }
       final latest = state.value;
       if (latest == null ||
-          !latest.threads.any((candidate) => candidate.id == thread.id)) {
+          !latest.threads.any((candidate) => candidate.id == threadId)) {
         _finishMutation(
           intentKey,
           operationId,
@@ -2650,7 +2464,7 @@ class StudioController extends _$StudioController {
       state = AsyncData(
         _withWorkspaceUi(
           latest,
-          thread.id,
+          threadId,
           (ui) => ui.copyWith(composer: ui.composer.reportFailure(error)),
         ),
       );
@@ -2755,13 +2569,16 @@ class StudioController extends _$StudioController {
     );
     final current = state.value;
     if (current == null) return false;
+    if (current.selectedThreadId == null && current.selectedProjectId != null) {
+      _sessionDrafts.setComposer(
+        current.selectedProjectId!,
+        composer.reportFailure(error),
+      );
+    }
     state = AsyncData(
       current.selectedThreadId == null
           ? current.copyWith(
-              newThreadComposerByProject: {
-                ...current.newThreadComposerByProject,
-                ?current.selectedProjectId: composer.reportFailure(error),
-              },
+              newThreadComposerByProject: _sessionDrafts.composers,
             )
           : _withWorkspaceUi(
               current,
@@ -2772,76 +2589,145 @@ class StudioController extends _$StudioController {
     return false;
   }
 
-  Future<SettingsStateSnapshot> saveProviderSettings(
-    ProviderSettingsCommand command,
-  ) {
+  Future<SettingsStateSnapshot> saveProvider(ProviderCommand command) {
     return _saveConfigSettings(
-      (revision) => _api.saveProviderSettings(revision, command),
-      mutationKey: 'provider-settings',
+      (revision) => _api.saveProvider(revision, command),
+      mutationKey: 'provider:${command.id}',
     );
   }
 
-  Future<void> saveInstructionsSettings(
-    InstructionsSettingsCommand command,
-  ) async {
-    await _saveConfigSettings(
-      (revision) => _api.saveInstructionsSettings(revision, command),
-      mutationKey: 'instructions-settings',
-    );
-  }
-
-  Future<void> saveSkillsSettings(SkillsSettingsCommand command) async {
-    await _saveConfigSettings(
-      (revision) => _api.saveSkillsSettings(revision, command),
-      mutationKey: 'skills-settings',
-    );
-  }
-
-  Future<void> saveMcpSettings(McpSettingsCommand command) async {
-    await _saveConfigSettings(
-      (revision) => _api.saveMcpSettings(revision, command),
-      mutationKey: 'mcp-settings',
-    );
-  }
-
-  Future<void> saveGeneralSettings(GeneralSettingsCommand command) async {
-    await _saveConfigSettings((revision) {
-      final general = state.requireValue.general;
-      return _api.saveGeneralSettings(
+  Future<SettingsStateSnapshot> removeProvider(
+    String providerId, {
+    String? replacementProviderId,
+  }) {
+    return _saveConfigSettings(
+      (revision) => _api.removeProvider(
         revision,
-        GeneralSettingsCommand(
-          followActiveTurn: command.followActiveTurn,
-          compactTimeline: command.compactTimeline,
-          sidebarWidth: command.sidebarWidth ?? general.sidebarWidth,
-          pinnedThreadIds: command.pinnedThreadIds ?? general.pinnedThreadIds,
-          pinnedProjectIds:
-              command.pinnedProjectIds ?? general.pinnedProjectIds,
-        ),
-      );
-    }, mutationKey: 'general-settings');
-  }
-
-  /// 保存网页搜索设置，并返回应用后的 canonical settings 快照（必非空）。
-  ///
-  /// 调用方用返回值把已发布的 canonical 值同步回草稿；状态不可读或保存失败都会抛出
-  /// 类型化 [StudioFailure]，不返回 null，避免把未保存当成成功。其他 `save*` 消费者
-  /// 忽略返回值，保持既有行为。
-  Future<SettingsStateSnapshot> saveWebSearchSettings(
-    WebSearchSettingsCommand command,
-  ) {
-    return _saveConfigSettings(
-      (revision) => _api.saveWebSearchSettings(revision, command),
-      mutationKey: 'web-search-settings',
+        providerId,
+        replacementProviderId: replacementProviderId,
+      ),
+      mutationKey: 'provider:$providerId',
     );
   }
 
-  /// 保存 DeepSeek 原生网页搜索开关，并返回应用后的 canonical settings 快照（必非空）。
-  Future<SettingsStateSnapshot> saveDeepSeekWebSearchSettings(
-    DeepSeekWebSearchSettingsCommand command,
-  ) {
-    return _saveConfigSettings(
-      (revision) => _api.saveDeepSeekWebSearchSettings(revision, command),
-      mutationKey: 'deepseek-web-search-settings',
+  /// Applies one independent canonical settings field/resource.
+  ///
+  /// This is the only path used by selectors and field editors.  The
+  /// operation is serialized with all other settings writes, retries a stale
+  /// revision against the latest canonical snapshot, and supersedes queued
+  /// intents for the same stable target.
+  Future<SettingsStateSnapshot> applySettingsField(
+    SettingsFieldCommand command, {
+    String? mutationKey,
+  }) async {
+    final key = mutationKey ?? _settingsFieldMutationKey(command);
+    final generation = (_settingsIntentGenerations[key] ?? 0) + 1;
+    _settingsIntentGenerations[key] = generation;
+    final operationId = _beginMutation(
+      key,
+      providerId: _settingsFieldProviderId(command),
+      model: _settingsFieldModel(command),
+      effort: _settingsFieldEffort(command),
+    );
+    return _enqueueSettingsMutation(() async {
+      final current = state.value;
+      if (current == null) {
+        final error = _settingsNotReady();
+        _finishMutation(key, operationId, StudioMutationPhase.failed, error);
+        throw error;
+      }
+      if (_settingsIntentGenerations[key] != generation) {
+        _finishMutation(key, operationId, StudioMutationPhase.superseded);
+        return current.settingsState;
+      }
+      try {
+        final next = await _requestSettings(
+          (revision) => _api.applySettingsField(revision, command),
+          current.settingsRevision,
+        );
+        final latest = state.value;
+        final updated = latest == null
+            ? null
+            : _applySettingsCanonical(latest, next, source: 'field-response');
+        if (updated != null) {
+          state = AsyncData(updated);
+        }
+        _finishMutation(
+          key,
+          operationId,
+          _settingsIntentGenerations[key] == generation
+              ? StudioMutationPhase.succeeded
+              : StudioMutationPhase.superseded,
+        );
+        return updated?.settingsState ?? next;
+      } catch (error) {
+        final superseded = _settingsIntentGenerations[key] != generation;
+        _finishMutation(
+          key,
+          operationId,
+          superseded
+              ? StudioMutationPhase.superseded
+              : StudioMutationPhase.failed,
+          error,
+        );
+        if (superseded) {
+          final latest = state.value;
+          if (latest != null) return latest.settingsState;
+        }
+        rethrow;
+      }
+    });
+  }
+
+  Future<void> setModeModelField({
+    ThreadModeId? mode,
+    required String providerId,
+    required String model,
+  }) async {
+    final current = state.value;
+    final resolvedMode = mode ?? current?.newThreadMode;
+    if (resolvedMode == null) return;
+    await applySettingsField(
+      ModeModelCommand(
+        modeId: resolvedMode.id,
+        providerId: providerId,
+        model: model,
+      ),
+      mutationKey: 'new-thread-route:model:${resolvedMode.id}',
+    );
+  }
+
+  Future<void> setModeReasoningEffortField({
+    ThreadModeId? mode,
+    required String? effort,
+  }) async {
+    final current = state.value;
+    final resolvedMode = mode ?? current?.newThreadMode;
+    if (resolvedMode == null) return;
+    await applySettingsField(
+      ModeReasoningEffortCommand(modeId: resolvedMode.id, effort: effort),
+      mutationKey: 'new-thread-route:effort:${resolvedMode.id}',
+    );
+  }
+
+  Future<void> setRoleModelField({
+    required String roleKey,
+    required String providerId,
+    required String model,
+  }) async {
+    await applySettingsField(
+      RoleModelCommand(role: roleKey, providerId: providerId, model: model),
+      mutationKey: 'agent-role:model:$roleKey',
+    );
+  }
+
+  Future<void> setRoleReasoningEffortField({
+    required String roleKey,
+    required String? effort,
+  }) async {
+    await applySettingsField(
+      RoleReasoningEffortCommand(role: roleKey, effort: effort),
+      mutationKey: 'agent-role:effort:$roleKey',
     );
   }
 
@@ -2889,6 +2775,12 @@ class StudioController extends _$StudioController {
     Future<SettingsStateSnapshot> Function(int revision) request, {
     String? mutationKey,
   }) async {
+    final generation = mutationKey == null
+        ? null
+        : (_settingsIntentGenerations[mutationKey] ?? 0) + 1;
+    if (mutationKey != null) {
+      _settingsIntentGenerations[mutationKey] = generation!;
+    }
     final operationId = mutationKey == null
         ? null
         : _beginMutation(mutationKey);
@@ -2896,10 +2788,23 @@ class StudioController extends _$StudioController {
       final operation = _enqueueSettingsMutation(() async {
         final current = state.value;
         if (current == null) throw _settingsNotReady();
+        if (mutationKey != null &&
+            _settingsIntentGenerations[mutationKey] != generation) {
+          _finishMutation(
+            mutationKey,
+            operationId!,
+            StudioMutationPhase.superseded,
+          );
+          return current.settingsState;
+        }
         final next = await _requestSettings(request, current.settingsRevision);
         final latest = state.value;
         if (latest != null) {
-          final updated = applySettingsState(latest, next);
+          final updated = _applySettingsCanonical(
+            latest,
+            next,
+            source: 'direct-response',
+          );
           state = AsyncData(updated);
           return updated.settingsState;
         }
@@ -2910,18 +2815,28 @@ class StudioController extends _$StudioController {
         _finishMutation(
           mutationKey,
           operationId,
-          StudioMutationPhase.succeeded,
+          _settingsIntentGenerations[mutationKey] == generation
+              ? StudioMutationPhase.succeeded
+              : StudioMutationPhase.superseded,
         );
       }
       return result;
     } catch (error) {
       if (mutationKey != null && operationId != null) {
+        final superseded =
+            _settingsIntentGenerations[mutationKey] != generation;
         _finishMutation(
           mutationKey,
           operationId,
-          StudioMutationPhase.failed,
+          superseded
+              ? StudioMutationPhase.superseded
+              : StudioMutationPhase.failed,
           error,
         );
+        if (superseded) {
+          final latest = state.value;
+          if (latest != null) return latest.settingsState;
+        }
       }
       rethrow;
     }
@@ -3063,7 +2978,9 @@ class StudioController extends _$StudioController {
       final snapshot = await _api.readSettingsState();
       final latest = state.value;
       if (latest != null) {
-        state = AsyncData(applySettingsState(latest, snapshot));
+        state = AsyncData(
+          _applySettingsCanonical(latest, snapshot, source: 'baseline-refresh'),
+        );
       }
       return snapshot;
     } catch (_) {
@@ -3079,6 +2996,66 @@ class StudioController extends _$StudioController {
     correlationId: 'client-settings-not-ready',
   );
 
+  String _settingsFieldMutationKey(
+    SettingsFieldCommand command,
+  ) => switch (command) {
+    InstructionBaseOverrideCommand() => 'instructions:base-override',
+    InstructionDeveloperCommand() => 'instructions:developer',
+    InstructionUserCommand() => 'instructions:user',
+    ProjectDocMaxBytesCommand() => 'instructions:project-doc-max-bytes',
+    ProjectDocFallbackFilenamesCommand() =>
+      'instructions:project-doc-fallback-filenames',
+    SkillsEnabledCommand() => 'skills:enabled',
+    SkillsAutoLearnCommand() => 'skills:auto-learn',
+    SkillsSystemEnabledCommand() => 'skills:system-enabled',
+    SkillsProjectDirCommand() => 'skills:project-dir',
+    SkillsUserDirCommand() => 'skills:user-dir',
+    SkillsExternalDirsCommand() => 'skills:external-dirs',
+    SkillsDisabledCommand() => 'skills:disabled',
+    SkillsAutoLearnMinToolCallsCommand() => 'skills:auto-learn-min-tool-calls',
+    McpServerEnabledCommand(:final id) => 'mcp:$id:enabled',
+    McpServerTransportCommand(:final id) => 'mcp:$id:transport',
+    McpServerEndpointCommand(:final id) => 'mcp:$id:endpoint',
+    GeneralFollowActiveTurnCommand() => 'general:follow-active-turn',
+    GeneralCompactTimelineCommand() => 'general:compact-timeline',
+    GeneralSidebarWidthCommand() => 'general:sidebar-width',
+    GeneralPinnedThreadIdsCommand() => 'general:pinned-thread-ids',
+    GeneralPinnedProjectIdsCommand() => 'general:pinned-project-ids',
+    WebSearchModeCommand() => 'web-search:mode',
+    WebSearchContextSizeCommand() => 'web-search:context-size',
+    WebSearchAllowedDomainsCommand() => 'web-search:allowed-domains',
+    WebSearchCountryCommand() => 'web-search:country',
+    WebSearchRegionCommand() => 'web-search:region',
+    WebSearchCityCommand() => 'web-search:city',
+    WebSearchTimezoneCommand() => 'web-search:timezone',
+    DeepSeekWebSearchEnabledCommand() => 'deepseek:web-search-enabled',
+    ModeModelCommand(:final modeId) => 'mode-route:model:$modeId',
+    ModeReasoningEffortCommand(:final modeId) => 'mode-route:effort:$modeId',
+    RoleModelCommand(:final role) => 'agent-role:model:$role',
+    RoleReasoningEffortCommand(:final role) => 'agent-role:effort:$role',
+  };
+
+  String? _settingsFieldProviderId(SettingsFieldCommand command) =>
+      switch (command) {
+        ModeModelCommand(:final providerId) => providerId,
+        RoleModelCommand(:final providerId) => providerId,
+        _ => null,
+      };
+
+  String? _settingsFieldModel(SettingsFieldCommand command) =>
+      switch (command) {
+        ModeModelCommand(:final model) => model,
+        RoleModelCommand(:final model) => model,
+        _ => null,
+      };
+
+  String? _settingsFieldEffort(SettingsFieldCommand command) =>
+      switch (command) {
+        ModeReasoningEffortCommand(:final effort) => effort,
+        RoleReasoningEffortCommand(:final effort) => effort,
+        _ => null,
+      };
+
   Future<void> refreshModelCatalog(String providerId) async {
     final existing = _catalogRefreshes[providerId];
     if (existing != null) {
@@ -3090,7 +3067,9 @@ class StudioController extends _$StudioController {
       if (!ref.mounted) return;
       final latest = state.value;
       if (latest != null) {
-        state = AsyncData(applySettingsState(latest, next));
+        state = AsyncData(
+          _applySettingsCanonical(latest, next, source: 'catalog-response'),
+        );
       }
     }();
     _catalogRefreshes[providerId] = operation;
@@ -3342,6 +3321,7 @@ class StudioController extends _$StudioController {
         _resolveSelection(
           await _api.readStudioState(),
           previous: current,
+          drafts: _sessionDrafts,
           intent: selection,
         ),
       );
@@ -3493,6 +3473,17 @@ class StudioController extends _$StudioController {
   Future<void> _adoptProductState(StudioState incoming) async {
     final current = state.value;
     final previousThreadId = current?.selectedThreadId;
+    if (current == null) {
+      _settingsRepository.seed(incoming.settingsState, source: 'snapshot');
+    } else {
+      incoming = incoming.copyWith(
+        settingsState: _settingsRepository.applyTo(
+          current.settingsState,
+          incoming.settingsState,
+          source: 'snapshot',
+        ),
+      );
+    }
     // 选择已由显式 selection intent 解析并随 incoming 携带；这里不再改写。
     var next = current == null
         ? incoming
@@ -3630,6 +3621,7 @@ final class _ExactThreadSelection extends _SelectionIntent {
 StudioState _resolveSelection(
   StudioState incoming, {
   required StudioState? previous,
+  required SessionDraftStore drafts,
   required _SelectionIntent intent,
 }) {
   final requestedProjectId = switch (intent) {
@@ -3663,50 +3655,16 @@ StudioState _resolveSelection(
       firstRootId,
     ),
   };
-  // Product snapshots describe backend-owned state only; they do not carry
-  // the local new-session draft. Keep drafts for projects that still exist in
-  // the canonical directory while resolving any snapshot (topic baseline,
-  // explicit reload, or project activation). Otherwise a settings round-trip
-  // can silently replace a user's selected mode, workspace, or composer text
-  // with defaults.
   final canonicalProjectIds = incoming.projects
       .map((project) => project.id)
       .toSet();
-  final modeDrafts = {
-    for (final entry in incoming.newThreadModeByProject.entries)
-      if (canonicalProjectIds.contains(entry.key)) entry.key: entry.value,
-  };
-  final workspaceDrafts = {
-    for (final entry in incoming.newThreadWorkspaceModeByProject.entries)
-      if (canonicalProjectIds.contains(entry.key)) entry.key: entry.value,
-  };
-  final composerDrafts = {
-    for (final entry in incoming.newThreadComposerByProject.entries)
-      if (canonicalProjectIds.contains(entry.key)) entry.key: entry.value,
-  };
-  if (previous != null) {
-    for (final entry in previous.newThreadModeByProject.entries) {
-      if (canonicalProjectIds.contains(entry.key)) {
-        modeDrafts[entry.key] = entry.value;
-      }
-    }
-    for (final entry in previous.newThreadWorkspaceModeByProject.entries) {
-      if (canonicalProjectIds.contains(entry.key)) {
-        workspaceDrafts[entry.key] = entry.value;
-      }
-    }
-    for (final entry in previous.newThreadComposerByProject.entries) {
-      if (canonicalProjectIds.contains(entry.key)) {
-        composerDrafts[entry.key] = entry.value;
-      }
-    }
-  }
+  drafts.pruneTo(canonicalProjectIds);
   return incoming.copyWith(
     selectedProjectId: projectId,
     selectedThreadId: threadId,
-    newThreadModeByProject: modeDrafts,
-    newThreadWorkspaceModeByProject: workspaceDrafts,
-    newThreadComposerByProject: composerDrafts,
+    newThreadModeByProject: drafts.modes,
+    newThreadWorkspaceModeByProject: drafts.workspaceModes,
+    newThreadComposerByProject: drafts.composers,
     mutations: previous?.mutations ?? incoming.mutations,
   );
 }

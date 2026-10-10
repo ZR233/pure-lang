@@ -41,14 +41,11 @@ pub use pl_tool::skill::{SkillCatalog, SkillMetadata, SkillResourceBase, SkillSo
 
 pub use config::{
     ConfigPaths, ConfigRuntimeError, ConfigRuntimeSnapshot, ConfigStore, DeepSeekWebSearchConfig,
-    ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioMcpConfig,
-    StudioRole, StudioUiConfig, UserAgentProfile, WebSearchContextSize, WebSearchLocation,
-    WebSearchMode,
+    ModelCatalogRuntimeSnapshot, ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION,
+    StudioConfig, StudioMcpConfig, StudioRole, StudioUiConfig, UserAgentProfile,
+    WebSearchContextSize, WebSearchLocation, WebSearchMode,
 };
-pub use config_editor::{
-    ModeRouteEdit, ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit,
-    provider_template_kind,
-};
+pub use config_editor::{ProviderEdit, ProviderModelEdit, provider_template_kind};
 pub use error_mapping::studio_error_from_anyhow;
 pub use first_run::{
     FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,
@@ -59,15 +56,15 @@ pub use protocol::{
     McpMissingCredential, McpUnavailable, StudioAgentDirectoryData, StudioAgentDirectoryEntry,
     StudioAgentDirectoryState, StudioLspHealth, StudioLspServer, StudioLspServerState,
     StudioLspStateSnapshot, StudioMcpHealth, StudioMcpServer, StudioMcpServerState,
-    StudioMcpStateData, StudioMcpStateSnapshot, StudioModelPerformanceSample,
-    StudioModelPerformanceSnapshot, StudioModelPerformanceSummary, StudioPendingPersistence,
-    StudioProductBaseline, StudioProductBaselineState, StudioProductEventEnvelope,
-    StudioProductEventKind, StudioProductFrame, StudioProductTopic, StudioProductTopicScopeError,
-    StudioProjectDirectoryData, StudioProjectDirectoryState, StudioPurposeCostSnapshot,
-    StudioRecoveryStateSnapshot, StudioSessionCostSnapshot, StudioSessionCostsState,
-    StudioSettingsStateSnapshot, StudioShutdownIssue, StudioShutdownOutcome,
-    StudioShutdownProgress, StudioShutdownReport, StudioSkillsStateSnapshot, StudioStartupStage,
-    StudioStateSnapshot, StudioThreadDirectoryData, StudioThreadDirectoryDelta,
+    StudioMcpStateData, StudioMcpStateSnapshot, StudioModelCatalogStateSnapshot,
+    StudioModelPerformanceSample, StudioModelPerformanceSnapshot, StudioModelPerformanceSummary,
+    StudioPendingPersistence, StudioProductBaseline, StudioProductBaselineState,
+    StudioProductEventEnvelope, StudioProductEventKind, StudioProductFrame, StudioProductTopic,
+    StudioProductTopicScopeError, StudioProjectDirectoryData, StudioProjectDirectoryState,
+    StudioPurposeCostSnapshot, StudioRecoveryStateSnapshot, StudioSessionCostSnapshot,
+    StudioSessionCostsState, StudioSettingsConfigStateSnapshot, StudioShutdownIssue,
+    StudioShutdownOutcome, StudioShutdownProgress, StudioShutdownReport, StudioSkillsStateSnapshot,
+    StudioStartupStage, StudioStateSnapshot, StudioThreadDirectoryData, StudioThreadDirectoryDelta,
     StudioThreadDirectoryPage, StudioThreadDirectoryPageData, StudioThreadDirectoryState,
 };
 

@@ -45,7 +45,10 @@ pub use pl_tool::mcp::config::validate_mcp_identifier;
 pub use profiles_resource::{AgentProfilesResource, AgentProfilesSnapshot};
 
 pub use pl_model::config::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
-pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot, ResolvedAgentProfile};
+pub use runtime::{
+    ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot, ModelCatalogRuntimeSnapshot,
+    ResolvedAgentProfile,
+};
 pub use store::{ConfigPaths, ConfigStore};
 
 pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 20;

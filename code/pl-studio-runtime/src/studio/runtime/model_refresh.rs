@@ -179,8 +179,9 @@ impl StudioRuntime {
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                                 let Ok(snapshot) = runtime.config_runtime.read() else { continue; };
+                                let Ok(catalog) = runtime.config_runtime.read_catalog() else { continue; };
                                 let ids = snapshot.config.models.providers.keys().cloned().collect();
-                                let _ = runtime.publish_model_catalog_state(snapshot);
+                                let _ = runtime.publish_model_catalog_state(catalog);
                                 Some(ids)
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -192,7 +193,12 @@ impl StudioRuntime {
                 };
                 let revision = format!(
                     "{}:{}",
-                    watermarks.revision, watermarks.model_catalog_revision
+                    watermarks.revision,
+                    runtime
+                        .config_runtime
+                        .read_catalog()
+                        .map(|catalog| catalog.revision)
+                        .unwrap_or_default()
                 );
                 for (id, thread) in runtime.threads.observed_threads() {
                     if let Some(affected) = &affected {

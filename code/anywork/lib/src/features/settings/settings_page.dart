@@ -22,12 +22,36 @@ import 'settings_skills_tab.dart';
 import 'settings_ssh_tab.dart';
 import 'settings_statistics_tab.dart';
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
 
   @override
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends ConsumerState<SettingsPage> {
+  bool _popping = false;
+
+  Future<void> _popAfterFlush() async {
+    if (_popping) return;
+    _popping = true;
+    try {
+      await ref.read(studioControllerProvider.notifier).flushPending();
+      if (mounted && context.canPop()) context.pop();
+    } finally {
+      _popping = false;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const _SettingsPageShell();
+    return PopScope<void>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) unawaited(_popAfterFlush());
+      },
+      child: const _SettingsPageShell(),
+    );
   }
 }
 
@@ -54,31 +78,31 @@ class _SettingsPageBody extends ConsumerStatefulWidget {
 }
 
 class _SettingsPageBodyState extends ConsumerState<_SettingsPageBody> {
-  SettingsPageView? _lastView;
-
   @override
   Widget build(BuildContext context) {
-    final asyncState = ref.watch(settingsPageProvider);
-    final view = asyncState.value;
-    if (view != null) _lastView = view;
-    final resolved = view ?? _lastView;
-    if (resolved == null) {
+    // Only the readiness edge belongs to the page shell.  Once the app-level
+    // repository has a canonical snapshot, field updates must rebuild their
+    // own tab projection instead of replacing the retained TabBarView.
+    final readiness = ref.watch(
+      studioControllerProvider.select(
+        (state) => (ready: state.value != null, error: state.error),
+      ),
+    );
+    if (!readiness.ready) {
       // 仅在首帧尚无任何 canonical 设置视图时占位。
-      return asyncState.when(
-        data: (_) => const SizedBox.shrink(),
-        loading: () =>
-            const Scaffold(body: Center(child: CircularProgressIndicator())),
-        error: (error, stackTrace) =>
-            Scaffold(body: Center(child: Text(error.toString()))),
+      return Scaffold(
+        body: Center(
+          child: readiness.error == null
+              ? const CircularProgressIndicator()
+              : Text(readiness.error.toString()),
+        ),
       );
     }
     return Scaffold(
       backgroundColor: context.colors.surface,
       body: KeyedSubtree(
         key: StudioDriverKeys.settingsPage,
-        child: _SettingsTabVisibilitySync(
-          child: _SettingsScaffold(state: resolved),
-        ),
+        child: _SettingsTabVisibilitySync(child: const _SettingsScaffold()),
       ),
     );
   }
@@ -133,6 +157,107 @@ class _SettingsTabVisibilitySyncState
   Widget build(BuildContext context) => widget.child;
 }
 
+/// Each settings tab subscribes to the smallest projection it can render.
+/// The retained settings shell therefore survives catalog/config events and a
+/// model click only rebuilds the provider tab that displays that catalog.
+class _ProvidersSettingsTab extends ConsumerWidget {
+  const _ProvidersSettingsTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final providers = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.providers ?? const <ProviderSettingsView>[],
+      ),
+    );
+    final catalog = ref.watch(
+      studioControllerProvider.select(
+        (state) =>
+            state.value?.providerCatalog ?? const ProviderCatalogView.empty(),
+      ),
+    );
+    final defaultProviderId = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.defaultProviderId,
+      ),
+    );
+    return ProvidersTab(
+      providers: providers,
+      providerCatalog: catalog,
+      defaultProviderId: defaultProviderId,
+      tabIndex: _SettingsTab.providers.index,
+    );
+  }
+}
+
+class _InstructionsSettingsTab extends ConsumerWidget {
+  const _InstructionsSettingsTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(
+      studioControllerProvider.select(
+        (state) =>
+            state.value?.instructions ?? const InstructionsSettingsView(),
+      ),
+    );
+    return InstructionsTab(settings: settings);
+  }
+}
+
+class _SecuritySettingsTab extends ConsumerWidget {
+  const _SecuritySettingsTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(
+      studioControllerProvider.select(
+        (state) =>
+            state.value?.permissionMode ?? PermissionMode.requestApproval,
+      ),
+    );
+    return SecurityTab(mode: mode);
+  }
+}
+
+class _GeneralSettingsTab extends ConsumerWidget {
+  const _GeneralSettingsTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.general ?? const GeneralSettingsView(),
+      ),
+    );
+    final webSearch = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.webSearch ?? const WebSearchSettingsView(),
+      ),
+    );
+    final deepSeekWebSearch = ref.watch(
+      studioControllerProvider.select(
+        (state) =>
+            state.value?.deepSeekWebSearch ??
+            const DeepSeekWebSearchSettingsView(),
+      ),
+    );
+    final runtimeBusy = ref.watch(
+      studioControllerProvider.select(
+        (state) =>
+            state.value?.isBusy == true ||
+            state.value?.runtime.hasActiveWorkflow == true,
+      ),
+    );
+    return GeneralTab(
+      settings: settings,
+      webSearch: webSearch,
+      deepSeekWebSearch: deepSeekWebSearch,
+      runtimeBusy: runtimeBusy,
+    );
+  }
+}
+
 const _settingsTabs = [
   _SettingsTabInfo(Icons.cloud_outlined, _SettingsTab.providers),
   _SettingsTabInfo(Icons.notes_outlined, _SettingsTab.instructions),
@@ -182,35 +307,21 @@ enum _SettingsTab {
 }
 
 class _SettingsScaffold extends StatelessWidget {
-  const _SettingsScaffold({required this.state});
-
-  final SettingsPageView state;
+  const _SettingsScaffold();
 
   @override
   Widget build(BuildContext context) {
     final views = [
-      ProvidersTab(
-        providers: state.providers,
-        providerCatalog: state.providerCatalog,
-        defaultProviderId: state.defaultProviderId,
-        modeRoutes: state.modeModelRoutes,
-        roles: state.roles,
-        tabIndex: _SettingsTab.providers.index,
-      ),
-      InstructionsTab(settings: state.instructions),
+      const _ProvidersSettingsTab(),
+      const _InstructionsSettingsTab(),
       SkillsTab(tabIndex: _SettingsTab.skills.index),
       AgentsTab(tabIndex: _SettingsTab.agents.index),
       McpTab(tabIndex: _SettingsTab.mcp.index),
       LspTab(tabIndex: _SettingsTab.lsp.index),
       const SshTab(),
       StatisticsTab(tabIndex: _SettingsTab.statistics.index),
-      SecurityTab(mode: state.permissionMode),
-      GeneralTab(
-        settings: state.general,
-        webSearch: state.webSearch,
-        deepSeekWebSearch: state.deepSeekWebSearch,
-        runtimeBusy: state.runtimeBusy,
-      ),
+      const _SecuritySettingsTab(),
+      const _GeneralSettingsTab(),
     ];
     return LayoutBuilder(
       builder: (context, constraints) {

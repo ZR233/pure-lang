@@ -6,11 +6,11 @@ use super::error::BridgeError;
 use super::event::BridgeProductEventEnvelope;
 use super::{
     BridgeAgentDirectoryState, BridgeAgentProfilesStateSnapshot, BridgeLspStateSnapshot,
-    BridgeMcpStateSnapshot, BridgeModelPerformanceSnapshot, BridgePersistenceQueueStateSnapshot,
-    BridgePersistenceStateSnapshot, BridgeProjectDirectoryState, BridgeProviderUsageStateSnapshot,
-    BridgeRecoveryStateSnapshot, BridgeSessionCostsState, BridgeSettingsStateSnapshot,
-    BridgeSkillsStateSnapshot, BridgeThreadDirectoryPage, BridgeThreadModeCatalogSnapshot,
-    BridgeUpdaterStateSnapshot,
+    BridgeMcpStateSnapshot, BridgeModelCatalogStateSnapshot, BridgeModelPerformanceSnapshot,
+    BridgePersistenceQueueStateSnapshot, BridgePersistenceStateSnapshot,
+    BridgeProjectDirectoryState, BridgeProviderUsageStateSnapshot, BridgeRecoveryStateSnapshot,
+    BridgeSessionCostsState, BridgeSettingsConfigStateSnapshot, BridgeSkillsStateSnapshot,
+    BridgeThreadDirectoryPage, BridgeThreadModeCatalogSnapshot, BridgeUpdaterStateSnapshot,
 };
 
 /// 产品订阅 topic；带 payload 的变体表达作用域，不存在无作用域组合形式。
@@ -20,7 +20,8 @@ pub enum BridgeProductTopic {
     ProjectDirectory,
     ThreadDirectory,
     AgentDirectory,
-    Settings,
+    SettingsConfig,
+    ModelCatalog,
     Recovery,
     Mcp,
     Lsp,
@@ -56,7 +57,8 @@ impl BridgeProductTopic {
             Self::ProjectDirectory => StudioProductTopic::ProjectDirectory,
             Self::ThreadDirectory => StudioProductTopic::ThreadDirectory,
             Self::AgentDirectory => StudioProductTopic::AgentDirectory,
-            Self::Settings => StudioProductTopic::Settings,
+            Self::SettingsConfig => StudioProductTopic::SettingsConfig,
+            Self::ModelCatalog => StudioProductTopic::ModelCatalog,
             Self::Recovery => StudioProductTopic::Recovery,
             Self::Mcp => StudioProductTopic::Mcp,
             Self::Lsp => StudioProductTopic::Lsp,
@@ -82,7 +84,8 @@ pub enum BridgeProductBaseline {
     ProjectDirectory(BridgeProjectDirectoryState),
     ThreadDirectory(BridgeThreadDirectoryPage),
     AgentDirectory(BridgeAgentDirectoryState),
-    Settings(Box<BridgeSettingsStateSnapshot>),
+    SettingsConfig(Box<BridgeSettingsConfigStateSnapshot>),
+    ModelCatalog(Box<BridgeModelCatalogStateSnapshot>),
     Recovery(BridgeRecoveryStateSnapshot),
     Mcp(BridgeMcpStateSnapshot),
     Lsp(BridgeLspStateSnapshot),

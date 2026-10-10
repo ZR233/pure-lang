@@ -1,9 +1,6 @@
 use anyhow::Result;
 
-use crate::{
-    StudioSettingsStateSnapshot, StudioSkillsStateSnapshot, StudioStateSnapshot,
-    StudioThreadDirectoryPage,
-};
+use crate::{StudioSkillsStateSnapshot, StudioStateSnapshot, StudioThreadDirectoryPage};
 
 use super::StudioRuntime;
 
@@ -28,7 +25,12 @@ impl StudioRuntime {
             .product_events
             .read_agent_directory()
             .await;
-        let settings = self.read_settings()?;
+        let settings = self.config_runtime.read()?;
+        let settings_config = super::settings_api::settings_config_snapshot(&settings)?;
+        let model_catalog = super::settings_api::model_catalog_snapshot(
+            &settings,
+            &self.config_runtime.read_catalog()?,
+        )?;
         let recovery = crate::StudioRecoveryStateSnapshot {
             state: self.recovery.state(),
         };
@@ -49,11 +51,18 @@ impl StudioRuntime {
             project_directory,
             thread_directory,
             agent_directory,
-            settings: StudioSettingsStateSnapshot {
+            settings_config: crate::StudioSettingsConfigStateSnapshot {
                 state: pl_protocol::ObservedResource::ready(
-                    settings.revision,
-                    settings.updated_at,
-                    settings,
+                    settings_config.revision,
+                    settings_config.updated_at,
+                    settings_config,
+                ),
+            },
+            model_catalog: crate::StudioModelCatalogStateSnapshot {
+                state: pl_protocol::ObservedResource::ready(
+                    model_catalog.revision,
+                    model_catalog.updated_at,
+                    model_catalog,
                 ),
             },
             recovery,
