@@ -5021,6 +5021,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeThreadRuntimeLiveUsage
+  dco_decode_box_autoadd_bridge_thread_runtime_live_usage(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_thread_runtime_live_usage(raw);
+  }
+
+  @protected
   BridgeThreadRuntimeSnapshot
   dco_decode_box_autoadd_bridge_thread_runtime_snapshot(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -9048,33 +9055,55 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeThreadRuntimeLiveUsage dco_decode_bridge_thread_runtime_live_usage(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return BridgeThreadRuntimeLiveUsage(
+      turnId: dco_decode_String(arr[0]),
+      attemptId: dco_decode_String(arr[1]),
+      completionTokens: dco_decode_opt_box_autoadd_u_64(arr[2]),
+      decodeMillis: dco_decode_opt_box_autoadd_u_64(arr[3]),
+      latestContextTokens: dco_decode_opt_box_autoadd_u_64(arr[4]),
+      state: dco_decode_bridge_thread_runtime_usage_state(arr[5]),
+      observationSequence: dco_decode_u_64(arr[6]),
+    );
+  }
+
+  @protected
   BridgeThreadRuntimeSnapshot dco_decode_bridge_thread_runtime_snapshot(
     dynamic raw,
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return BridgeThreadRuntimeSnapshot(
       threadId: dco_decode_String(arr[0]),
       modelRoute: dco_decode_opt_box_autoadd_bridge_thread_model_route_snapshot(
         arr[1],
       ),
       usage: dco_decode_bridge_thread_runtime_usage(arr[2]),
-      turnCompletionTokens: dco_decode_u_64(arr[3]),
-      turnDecodeMillis: dco_decode_u_64(arr[4]),
-      todo: dco_decode_opt_box_autoadd_bridge_todo_list_snapshot(arr[5]),
-      activeSkills: dco_decode_list_String(arr[6]),
-      activeMcpServers: dco_decode_list_String(arr[7]),
-      activeLspServers: dco_decode_list_String(arr[8]),
-      progress: dco_decode_opt_String(arr[9]),
-      mcpHealth: dco_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
-        arr[10],
+      liveUsage: dco_decode_opt_box_autoadd_bridge_thread_runtime_live_usage(
+        arr[3],
       ),
-      workflow: dco_decode_opt_box_autoadd_bridge_workflow_runtime_snapshot(
+      turnCompletionTokens: dco_decode_u_64(arr[4]),
+      turnDecodeMillis: dco_decode_u_64(arr[5]),
+      todo: dco_decode_opt_box_autoadd_bridge_todo_list_snapshot(arr[6]),
+      activeSkills: dco_decode_list_String(arr[7]),
+      activeMcpServers: dco_decode_list_String(arr[8]),
+      activeLspServers: dco_decode_list_String(arr[9]),
+      progress: dco_decode_opt_String(arr[10]),
+      mcpHealth: dco_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
         arr[11],
       ),
-      updatedAt: dco_decode_i_64(arr[12]),
+      workflow: dco_decode_opt_box_autoadd_bridge_workflow_runtime_snapshot(
+        arr[12],
+      ),
+      updatedAt: dco_decode_i_64(arr[13]),
     );
   }
 
@@ -9110,6 +9139,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           ),
       updatedAt: dco_decode_i_64(arr[18]),
     );
+  }
+
+  @protected
+  BridgeThreadRuntimeUsageState dco_decode_bridge_thread_runtime_usage_state(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeThreadRuntimeUsageState.values[raw as int];
   }
 
   @protected
@@ -10843,6 +10880,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeThreadRuntimeLiveUsage?
+  dco_decode_opt_box_autoadd_bridge_thread_runtime_live_usage(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_bridge_thread_runtime_live_usage(raw);
+  }
+
+  @protected
   BridgeThreadRuntimeSnapshot?
   dco_decode_opt_box_autoadd_bridge_thread_runtime_snapshot(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -12365,6 +12411,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_thread_model_route_snapshot(deserializer));
+  }
+
+  @protected
+  BridgeThreadRuntimeLiveUsage
+  sse_decode_box_autoadd_bridge_thread_runtime_live_usage(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_thread_runtime_live_usage(deserializer));
   }
 
   @protected
@@ -17554,6 +17609,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeThreadRuntimeLiveUsage sse_decode_bridge_thread_runtime_live_usage(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_turnId = sse_decode_String(deserializer);
+    var var_attemptId = sse_decode_String(deserializer);
+    var var_completionTokens = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_decodeMillis = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_latestContextTokens = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_state = sse_decode_bridge_thread_runtime_usage_state(deserializer);
+    var var_observationSequence = sse_decode_u_64(deserializer);
+    return BridgeThreadRuntimeLiveUsage(
+      turnId: var_turnId,
+      attemptId: var_attemptId,
+      completionTokens: var_completionTokens,
+      decodeMillis: var_decodeMillis,
+      latestContextTokens: var_latestContextTokens,
+      state: var_state,
+      observationSequence: var_observationSequence,
+    );
+  }
+
+  @protected
   BridgeThreadRuntimeSnapshot sse_decode_bridge_thread_runtime_snapshot(
     SseDeserializer deserializer,
   ) {
@@ -17564,6 +17642,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           deserializer,
         );
     var var_usage = sse_decode_bridge_thread_runtime_usage(deserializer);
+    var var_liveUsage =
+        sse_decode_opt_box_autoadd_bridge_thread_runtime_live_usage(
+          deserializer,
+        );
     var var_turnCompletionTokens = sse_decode_u_64(deserializer);
     var var_turnDecodeMillis = sse_decode_u_64(deserializer);
     var var_todo = sse_decode_opt_box_autoadd_bridge_todo_list_snapshot(
@@ -17586,6 +17668,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       threadId: var_threadId,
       modelRoute: var_modelRoute,
       usage: var_usage,
+      liveUsage: var_liveUsage,
       turnCompletionTokens: var_turnCompletionTokens,
       turnDecodeMillis: var_turnDecodeMillis,
       todo: var_todo,
@@ -17651,6 +17734,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       prefixChangedReason: var_prefixChangedReason,
       updatedAt: var_updatedAt,
     );
+  }
+
+  @protected
+  BridgeThreadRuntimeUsageState sse_decode_bridge_thread_runtime_usage_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeThreadRuntimeUsageState.values[inner];
   }
 
   @protected
@@ -20124,6 +20216,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeThreadRuntimeLiveUsage?
+  sse_decode_opt_box_autoadd_bridge_thread_runtime_live_usage(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_thread_runtime_live_usage(
+        deserializer,
+      ));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   BridgeThreadRuntimeSnapshot?
   sse_decode_opt_box_autoadd_bridge_thread_runtime_snapshot(
     SseDeserializer deserializer,
@@ -21893,6 +22001,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_thread_model_route_snapshot(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_thread_runtime_live_usage(
+    BridgeThreadRuntimeLiveUsage self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_thread_runtime_live_usage(self, serializer);
   }
 
   @protected
@@ -26047,6 +26164,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_thread_runtime_live_usage(
+    BridgeThreadRuntimeLiveUsage self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.turnId, serializer);
+    sse_encode_String(self.attemptId, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.completionTokens, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.decodeMillis, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.latestContextTokens, serializer);
+    sse_encode_bridge_thread_runtime_usage_state(self.state, serializer);
+    sse_encode_u_64(self.observationSequence, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_thread_runtime_snapshot(
     BridgeThreadRuntimeSnapshot self,
     SseSerializer serializer,
@@ -26058,6 +26190,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       serializer,
     );
     sse_encode_bridge_thread_runtime_usage(self.usage, serializer);
+    sse_encode_opt_box_autoadd_bridge_thread_runtime_live_usage(
+      self.liveUsage,
+      serializer,
+    );
     sse_encode_u_64(self.turnCompletionTokens, serializer);
     sse_encode_u_64(self.turnDecodeMillis, serializer);
     sse_encode_opt_box_autoadd_bridge_todo_list_snapshot(self.todo, serializer);
@@ -26107,6 +26243,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       serializer,
     );
     sse_encode_i_64(self.updatedAt, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_thread_runtime_usage_state(
+    BridgeThreadRuntimeUsageState self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -28194,6 +28339,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         self,
         serializer,
       );
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_thread_runtime_live_usage(
+    BridgeThreadRuntimeLiveUsage? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_thread_runtime_live_usage(self, serializer);
     }
   }
 

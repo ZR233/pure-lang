@@ -31,7 +31,16 @@ class ThreadStatusBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final workspace = view ?? StatusBarView.fromWorkspace(this.workspace!);
-    final runtime = workspace.runtime;
+    final runtimeProjection = ref.watch(runtimeProjectionProvider).value;
+    final contextProjection = ref.watch(contextUsageProjectionProvider).value;
+    final throughputProjection = ref.watch(throughputProjectionProvider).value;
+    final runtime = runtimeProjection?.runtime ?? workspace.runtime;
+    final contextUsage =
+        contextProjection ??
+        StudioContextProjection.fromRuntime(
+          runtimeProjection?.threadId,
+          runtime,
+        );
     final thread = workspace.thread;
     final capabilityLabel = _runtimeCapabilityLabel(context, runtime);
     final lspActiveServers = [
@@ -119,12 +128,13 @@ class ThreadStatusBar extends ConsumerWidget {
                       ),
                     if (runtime.workflow?.currentRun case final run?)
                       _WorkflowRuntimeReadout(run: run),
-                    ContextUsageReadout(runtime: runtime),
+                    ContextUsageReadout(projection: contextUsage),
                     _StatusReadout(
                       key: StudioDriverKeys.threadThroughput,
                       icon: Icons.speed_outlined,
                       label: context.tokenThroughputLabel(
-                        runtime.turnTokensPerSecond,
+                        throughputProjection?.tokensPerSecond ??
+                            runtime.turnTokensPerSecond,
                       ),
                       tooltip: context.l10n.statusCurrentAgentTokenSpeed,
                       maxWidth: 84,

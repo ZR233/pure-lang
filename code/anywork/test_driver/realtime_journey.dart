@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_driver/flutter_driver.dart';
 
+import 'driver_observation.dart';
 import 'flutter_driver_session.dart';
 import 'window_control.dart';
 
@@ -194,15 +195,21 @@ Future<void> main(List<String> args) async {
   if (shutdownFailure != null) {
     journey.shutdownError ??= shutdownFailure.toString();
   }
+  // The current Driver has no runtime event endpoint. Record that typed
+  // limitation before resolving the stage so polling-only evidence cannot look
+  // like a completed realtime proof.
+  journey.recordRuntimeEvidence();
   // Resolve the terminal stage before writing either artifact so the summary and
   // the stage file can never disagree: a clean run reports `complete`, a journey
-  // exception keeps the exact stage it stopped at, and a shutdown-only failure
-  // or a failed check reports a stage that names the failure.
+  // exception keeps the exact stage it stopped at, and a shutdown-only failure,
+  // failed check, or pending runtime evidence reports a non-complete stage.
   if (failure == null) {
     if (shutdownFailure != null || journey.shutdownError != null) {
       journey.stage = 'shutdown_failed';
     } else if (journey.failed) {
       journey.stage = 'checks_failed';
+    } else if (journey.evidencePending) {
+      journey.stage = 'evidence_pending';
     } else {
       journey.stage = 'complete';
     }
@@ -346,6 +353,15 @@ class RealtimeJourney {
   /// the next live activity can prove a different identity starts collapsed.
   String? expandedActivityIdentity;
 
+  /// Samples come from the same read-only Driver polling loop used by the
+  /// journey. They are never synthesized from text length or a timer, but the
+  /// current build has no runtime event endpoint, so they remain readiness
+  /// observations rather than a realtime event verdict.
+  final List<DriverRuntimeObservation> _runtimeSamples =
+      <DriverRuntimeObservation>[];
+  bool _runtimeEvidenceRecorded = false;
+  bool _runtimeEvidencePending = false;
+
   /// Whether the previous live activity was left actually expanded, so the
   /// cross-identity reset has a real expanded reference to reset.
   bool activityLeftExpanded = false;
@@ -367,6 +383,8 @@ class RealtimeJourney {
 
   bool get failed =>
       checks.values.any((value) => value != true) || shutdownError != null;
+
+  bool get evidencePending => _runtimeEvidencePending;
 
   Future<void> run() async {
     await mark('connected');
@@ -396,6 +414,10 @@ class RealtimeJourney {
 
   Future<Map<String, dynamic>> snapshot() async {
     final state = await driver.readSnapshot();
+    _runtimeSamples.add(driverRuntimeObservation(state));
+    if (_runtimeSamples.length > 4096) {
+      _runtimeSamples.removeRange(0, 1024);
+    }
     final workspace = state['workspace'] as Map?;
     final route = workspace?['modelRoute'] as Map?;
     if (route != null && workspace?['isBusy'] == true) {
@@ -1918,6 +1940,7 @@ class RealtimeJourney {
     required Object? shutdownFailure,
     required Map<String, dynamic>? frames,
   }) async {
+    recordRuntimeEvidence();
     final failedChecks = checks.entries
         .where((entry) => entry.value != true)
         .map((entry) => entry.key)
@@ -1928,7 +1951,11 @@ class RealtimeJourney {
     final summary = <String, Object?>{
       'scenario': 'realtime',
       'verdict': 'pending',
-      'status': failure == null && failedChecks.isEmpty ? 'complete' : 'failed',
+      'status': failure != null || failedChecks.isNotEmpty
+          ? 'failed'
+          : evidencePending
+          ? 'pending'
+          : 'complete',
       'stage': stage,
       'error': failure?.toString(),
       'shutdownError': shutdownFailure?.toString(),
@@ -1941,10 +1968,57 @@ class RealtimeJourney {
       'frameSampleCount': frameSamples is List ? frameSamples.length : null,
       'completedAt': DateTime.now().toUtc().toIso8601String(),
       'pendingEvidence': pendingEvidence,
+      'runtimeEvidencePending': evidencePending,
     };
     await File(
       '${output.path}/realtime-summary.json',
     ).writeAsString('${const JsonEncoder.withIndent('  ').convert(summary)}\n');
+  }
+
+  void recordRuntimeEvidence() {
+    if (_runtimeEvidenceRecorded) return;
+    _runtimeEvidenceRecorded = true;
+    final evidence = evaluatePacedRuntime(_runtimeSamples);
+    observations['runtime'] = evidence.toJson();
+
+    // There is no Driver runtime-event endpoint in this build. Snapshot
+    // polling may be retained for UI readiness, but it cannot be promoted to a
+    // paced event pass merely because two reads happened 100ms apart.
+    _runtimeEvidencePending = true;
+    pendingEvidence.add(
+      'runtime paced event verdict: unsupported; no Driver runtime event '
+      'endpoint is available, so snapshot polling remains pending evidence',
+    );
+
+    // A build exposing typed live usage must produce multiple observations from
+    // one attempt. Older fixtures may not expose partial usage; that remains an
+    // explicit pending gap rather than a fake pass or a zero-valued reading.
+    if (evidence.liveSamples.length >= 2) {
+      checks['runtimeLiveSequenceStrictlyIncreasing'] =
+          evidence.liveSequenceStrictlyIncreasing;
+    } else {
+      pendingEvidence.add(
+        'runtime live usage: fewer than two typed live samples from one '
+        'turn/attempt were exposed; paced live freshness remains pending',
+      );
+    }
+    if (evidence.authoritativeSamples.isEmpty) {
+      pendingEvidence.add(
+        'runtime authoritative usage: no authoritative typed sample was '
+        'exposed after the fixture turn',
+      );
+    } else if (evidence.liveSamples.isNotEmpty) {
+      checks['runtimeAuthoritativeAfterLive'] = evidence.authoritativeAfterLive;
+    }
+    if (evidence.terminalSamples.isNotEmpty &&
+        evidence.liveSamples.isNotEmpty) {
+      checks['runtimeTerminalAfterLive'] = evidence.terminalAfterLive;
+    } else {
+      pendingEvidence.add(
+        'runtime terminal usage: no same-identity authoritative/unknown '
+        'sample was observed after live samples',
+      );
+    }
   }
 
   Future<void> raiseIfFailed(Object? shutdownFailure) async {
@@ -1957,6 +2031,12 @@ class RealtimeJourney {
     }
     if (shutdownFailure != null) {
       throw StateError('native GUI shutdown failed: $shutdownFailure');
+    }
+    if (evidencePending) {
+      throw StateError(
+        'realtime evidence remains pending: runtime live/authoritative '
+        'event proof is unsupported by the current Driver seam',
+      );
     }
   }
 }
@@ -2234,6 +2314,7 @@ Map<String, Object?> summarize(Map<String, dynamic> snapshot) {
     'turnId': turnId(snapshot),
     'turnStatus': turnStatus(snapshot),
     'interactionKind': interactionKind(snapshot),
+    'runtime': driverRuntimeObservation(snapshot).toJson(),
     'outputTokens': usage is Map ? usage['outputTokens'] : null,
     'persistenceKind': persistence is Map ? persistence['kind'] : null,
     'pendingCommits': persistence is Map ? persistence['pendingCommits'] : null,

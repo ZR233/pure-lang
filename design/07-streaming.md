@@ -310,3 +310,21 @@ sequence，FRB 与 HTTP 的 transport buffer 也不共享 sequence 或取消句�
 
 Thread title 的生成与提交流程是领域生命周期话题，见 [18](./18-studio-state.md)；流层只保证
 成功的 title mutation 通过 `ThreadDirectoryChanged` 增量事件发布，不新增平行 title 通知。
+
+## 7.7 实时运行事实与 Flutter 投影边界
+
+Thread 的 runtime、turn、interaction、workflow、activity 与 storage 继续共享同一个带
+`epoch`、`base_revision` 和 `revision` 的有序状态流。Flutter 可以为这些事实提供独立的
+`runtime`、`context`、`throughput`、`activity`、`storage` 与 `interaction` selector，
+但 selector 是同一 canonical 工作区的不可变投影，不是绕过水位的第二条底层 stream。这样
+跨字段的状态在同一个 revision 上原子可见，缺口仍能由同一代订阅重同步。
+
+运行中的模型 usage 分为两类：`live` 是模型适配器或运行时 owner 能确认的尽力观察，
+`authoritative` 是 attempt 完成回执或持久化事实。适配器不能提供增量 token 时，live
+token 保持未知，宿主不得用字符数、字节数或本地计时冒充 token。live 观察不写入 durable
+`UsageSummary`，attempt 结束时由 authoritative 事实覆盖并清除 live 标识；重订阅首帧必须
+携带当前 live/authoritative 状态。
+
+所有用户可见实时字段都必须有可追踪的 owner、事件或快照、Dart reducer、watermark、selector
+和可见 lease。Widget 不能通过页面切换、延迟或轮询获得本应由事件提供的更新；缺失事件、
+`lagged`、关闭和旧 generation 统一按当前订阅生命周期处理，迟到事实不得写入新 Thread。

@@ -44,6 +44,26 @@ final class _ControllerTimelineSession implements TimelineSession {
 
 enum _ChatWindowLoad { older, newer, extendLatest }
 
+sealed class _AttachmentTargetResolution {
+  const _AttachmentTargetResolution();
+}
+
+final class _AttachmentTargetReady extends _AttachmentTargetResolution {
+  const _AttachmentTargetReady(this.composer);
+
+  final ComposerThreadState composer;
+}
+
+final class _AttachmentTargetTerminated extends _AttachmentTargetResolution {
+  const _AttachmentTargetTerminated(this.status);
+
+  final ThreadStatusView status;
+}
+
+final class _AttachmentTargetMissing extends _AttachmentTargetResolution {
+  const _AttachmentTargetMissing();
+}
+
 @Riverpod(keepAlive: true, retry: _disableStudioRetry)
 class StudioController extends _$StudioController {
   static bool _startupProjectActivated = false;
@@ -147,6 +167,8 @@ class StudioController extends _$StudioController {
   /// refreshes for one provider share a future, while configuration writes keep
   /// flowing through the app-level settings mutation coordinator.
   final Map<String, Future<void>> _catalogRefreshes = {};
+  final Map<String, Future<void>> _attachmentRemovalInFlight = {};
+  int _attachmentLifecycleToken = 0;
   int _mutationSequence = 0;
 
   /// 固定活动条展开详情的在途请求：同一活动身份只保留一个，避免每 token 排队全量读。
@@ -217,6 +239,10 @@ class StudioController extends _$StudioController {
       _windowLoadGeneration.clear();
       _streamEpochByThread.clear();
       _historyRequests.clear();
+      // Do not clear the barrier map while owned cleanup futures are still
+      // running. The lifecycle token makes their continuations no-op for
+      // state writes; each future removes its own tail on completion.
+      _attachmentLifecycleToken++;
       _timelineEventVersions.clear();
       unawaited(_timelineEvents.close());
     });
@@ -1817,17 +1843,21 @@ class StudioController extends _$StudioController {
     String? threadId,
   }) async {
     final current = state.value;
-    final projectId = current?.selectedProjectId;
-    if (current == null ||
-        (threadId != null && current.selectedThreadId != threadId) ||
-        (threadId == null &&
-            (projectId == null || current.selectedThreadId != null))) {
+    if (current == null) {
       return;
     }
-    final composer = threadId == null
-        ? current.newThreadComposer
-        : _workspaceUi(current, threadId).composer;
+    final projectId = _attachmentProjectIdForTarget(current, threadId);
+    if (projectId == null) return;
+    final initialTarget = _composerForAttachmentTarget(
+      current,
+      projectId,
+      threadId,
+    );
+    if (initialTarget is! _AttachmentTargetReady) return;
+    final composer = initialTarget.composer;
     if (composer.isSubmissionPending) return;
+    final submissionRevision = composer.submissionRevision;
+    final admissionAttachmentGeneration = composer.attachmentGeneration;
     List<AttachmentDraftView> admitted = const [];
     try {
       admitted = await _api.admitAttachmentDrafts(
@@ -1836,134 +1866,761 @@ class StudioController extends _$StudioController {
             : AttachmentAdmissionContext.existingThread(threadId),
         sources,
       );
-      admitted = await Future.wait([
-        for (final draft in admitted)
-          if (draft.modality == AttachmentModalityView.image)
-            _api
-                .readAttachmentDraft(draft.id)
-                .then((bytes) => draft.copyWith(previewBytes: bytes))
-          else
-            Future.value(draft),
-      ]);
     } catch (error) {
-      await Future.wait([
-        for (final draft in admitted) _api.removeAttachmentDraft(draft.id),
-      ]);
       if (!ref.mounted) return;
       final latest = state.value;
-      if (latest == null) return;
-      if (threadId == null && projectId != null) {
-        _sessionDrafts.setComposer(
+      if (latest != null) {
+        final target = _composerForAttachmentTarget(
+          latest,
           projectId,
-          latest.newThreadComposer.reportFailure(error),
+          threadId,
         );
+        if (_isAttachmentAdmissionSelectionCurrent(
+              latest,
+              projectId: projectId,
+              threadId: threadId,
+            ) &&
+            target is _AttachmentTargetReady &&
+            !target.composer.isSubmissionPending &&
+            target.composer.submissionRevision == submissionRevision &&
+            target.composer.attachmentGeneration ==
+                admissionAttachmentGeneration) {
+          state = AsyncData(
+            _writeComposer(
+              latest,
+              projectId,
+              threadId,
+              target.composer.reportFailure(error),
+            ),
+          );
+        }
       }
-      state = AsyncData(
-        threadId == null
-            ? latest.copyWith(
-                newThreadComposerByProject: _sessionDrafts.composers,
-              )
-            : _withWorkspaceUi(
-                latest,
-                threadId,
-                (ui) => ui.copyWith(composer: ui.composer.reportFailure(error)),
-              ),
+      return;
+    }
+
+    // No durable batch was created; there is nothing to clean up and no state
+    // transition to publish.
+    if (admitted.isEmpty) return;
+    if (!ref.mounted) {
+      await _removeAdmittedDrafts(
+        admitted.map((draft) => draft.id),
+        projectId: projectId,
+        threadId: threadId,
+        submissionRevision: submissionRevision,
       );
       return;
     }
-    if (!ref.mounted) return;
     final latest = state.value;
-    if (latest == null) return;
-    final active = threadId == null
-        ? latest.newThreadComposer
-        : _workspaceUi(latest, threadId).composer;
-    if (active.isSubmissionPending) {
-      await Future.wait([
-        for (final draft in admitted) _api.removeAttachmentDraft(draft.id),
-      ]);
+    if (latest == null) {
+      await _removeAdmittedDrafts(
+        admitted.map((draft) => draft.id),
+        projectId: projectId,
+        threadId: threadId,
+        submissionRevision: submissionRevision,
+      );
+      return;
+    }
+    final target = _composerForAttachmentTarget(latest, projectId, threadId);
+    if (!_isAttachmentAdmissionSelectionCurrent(
+          latest,
+          projectId: projectId,
+          threadId: threadId,
+        ) ||
+        target is! _AttachmentTargetReady) {
+      await _removeAdmittedDrafts(
+        admitted.map((draft) => draft.id),
+        projectId: projectId,
+        threadId: threadId,
+        submissionRevision: submissionRevision,
+      );
+      return;
+    }
+    final active = target.composer;
+    // A submission that started while admission was in flight owns the old
+    // draft snapshot. Do not append the late batch to that submission.
+    if (active.isSubmissionPending ||
+        active.submissionRevision != submissionRevision ||
+        active.attachmentGeneration != admissionAttachmentGeneration) {
+      await _removeAdmittedDrafts(
+        admitted.map((draft) => draft.id),
+        projectId: projectId,
+        threadId: threadId,
+        submissionRevision: submissionRevision,
+      );
       return;
     }
     final updated = active.updateAttachments([
       ...active.attachments,
       ...admitted,
     ]);
-    if (threadId == null && projectId != null) {
-      _sessionDrafts.setComposer(projectId, updated);
+    state = AsyncData(_writeComposer(latest, projectId, threadId, updated));
+
+    // Metadata is now visible. Preview reads are deliberately independent
+    // continuations: each one re-reads canonical state before replacing only
+    // its own draft preview. A preview failure retains the admitted draft.
+    await Future.wait([
+      for (final draft in admitted)
+        if (draft.modality == AttachmentModalityView.image)
+          _readAttachmentPreview(
+            draft,
+            projectId: projectId,
+            threadId: threadId,
+            submissionRevision: submissionRevision,
+            attachmentGeneration: updated.attachmentGeneration,
+          ),
+    ]);
+  }
+
+  Future<void> _readAttachmentPreview(
+    AttachmentDraftView draft, {
+    required String projectId,
+    required String? threadId,
+    required int submissionRevision,
+    required int attachmentGeneration,
+  }) async {
+    final Uint8List bytes;
+    try {
+      bytes = await _api.readAttachmentDraft(draft.id);
+    } catch (error) {
+      await _reportAttachmentPreviewFailure(
+        error,
+        projectId: projectId,
+        threadId: threadId,
+        draftId: draft.id,
+        submissionRevision: submissionRevision,
+        attachmentGeneration: attachmentGeneration,
+      );
+      return;
+    }
+    if (!ref.mounted) {
+      await _removeAdmittedDrafts(
+        [draft.id],
+        projectId: projectId,
+        threadId: threadId,
+        submissionRevision: submissionRevision,
+      );
+      return;
+    }
+    final latest = state.value;
+    if (latest == null) {
+      await _removeAdmittedDrafts(
+        [draft.id],
+        projectId: projectId,
+        threadId: threadId,
+        submissionRevision: submissionRevision,
+      );
+      return;
+    }
+    if (!_isAttachmentAdmissionSelectionCurrent(
+      latest,
+      projectId: projectId,
+      threadId: threadId,
+    )) {
+      unawaited(
+        _removeAdmittedDrafts(
+          [draft.id],
+          projectId: projectId,
+          threadId: threadId,
+          submissionRevision: submissionRevision,
+        ),
+      );
+      return;
+    }
+    final target = _composerForAttachmentTarget(latest, projectId, threadId);
+    if (target is! _AttachmentTargetReady) {
+      unawaited(
+        _removeAdmittedDrafts(
+          [draft.id],
+          projectId: projectId,
+          threadId: threadId,
+          submissionRevision: submissionRevision,
+        ),
+      );
+      return;
+    }
+    final active = target.composer;
+    if (active.isSubmissionPending ||
+        active.submissionRevision != submissionRevision) {
+      return;
+    }
+    final currentDraft = active.attachments
+        .where((attachment) => attachment.id == draft.id)
+        .firstOrNull;
+    if (currentDraft == null || currentDraft.previewBytes != null) {
+      return;
+    }
+    if (active.attachmentGeneration != attachmentGeneration) {
+      _rescheduleAttachmentPreview(
+        latest,
+        projectId: projectId,
+        threadId: threadId,
+        draftId: draft.id,
+        submissionRevision: submissionRevision,
+        observedGeneration: attachmentGeneration,
+      );
+      return;
+    }
+    final updated = active.updateAttachmentPreview(draft.id, bytes);
+    if (identical(updated, active)) return;
+    state = AsyncData(_writeComposer(latest, projectId, threadId, updated));
+  }
+
+  Future<void> _reportAttachmentPreviewFailure(
+    Object error, {
+    required String projectId,
+    required String? threadId,
+    required String draftId,
+    required int submissionRevision,
+    required int attachmentGeneration,
+  }) async {
+    if (!ref.mounted) {
+      await _removeAdmittedDrafts(
+        [draftId],
+        projectId: projectId,
+        threadId: threadId,
+        submissionRevision: submissionRevision,
+      );
+      return;
+    }
+    final latest = state.value;
+    if (latest == null) {
+      await _removeAdmittedDrafts(
+        [draftId],
+        projectId: projectId,
+        threadId: threadId,
+        submissionRevision: submissionRevision,
+      );
+      return;
+    }
+    if (!_isAttachmentAdmissionSelectionCurrent(
+      latest,
+      projectId: projectId,
+      threadId: threadId,
+    )) {
+      unawaited(
+        _removeAdmittedDrafts(
+          [draftId],
+          projectId: projectId,
+          threadId: threadId,
+          submissionRevision: submissionRevision,
+        ),
+      );
+      return;
+    }
+    final target = _composerForAttachmentTarget(latest, projectId, threadId);
+    if (target is! _AttachmentTargetReady) {
+      unawaited(
+        _removeAdmittedDrafts(
+          [draftId],
+          projectId: projectId,
+          threadId: threadId,
+          submissionRevision: submissionRevision,
+        ),
+      );
+      return;
+    }
+    final active = target.composer;
+    if (active.isSubmissionPending ||
+        active.submissionRevision != submissionRevision) {
+      return;
+    }
+    final currentDraft = active.attachments
+        .where((attachment) => attachment.id == draftId)
+        .firstOrNull;
+    if (currentDraft == null || currentDraft.previewBytes != null) {
+      return;
+    }
+    if (active.attachmentGeneration != attachmentGeneration) {
+      _rescheduleAttachmentPreview(
+        latest,
+        projectId: projectId,
+        threadId: threadId,
+        draftId: draftId,
+        submissionRevision: submissionRevision,
+        observedGeneration: attachmentGeneration,
+      );
+      return;
     }
     state = AsyncData(
-      threadId == null
-          ? latest.copyWith(
-              newThreadComposerByProject: _sessionDrafts.composers,
-            )
-          : _withWorkspaceUi(
-              latest,
-              threadId,
-              (ui) => ui.copyWith(composer: updated),
-            ),
+      _writeComposer(
+        latest,
+        projectId,
+        threadId,
+        active.reportAttachmentFailure(error),
+      ),
     );
+  }
+
+  void _rescheduleAttachmentPreview(
+    StudioState latest, {
+    required String projectId,
+    required String? threadId,
+    required String draftId,
+    required int submissionRevision,
+    required int observedGeneration,
+  }) {
+    if (!_isAttachmentAdmissionSelectionCurrent(
+      latest,
+      projectId: projectId,
+      threadId: threadId,
+    )) {
+      unawaited(
+        _removeAdmittedDrafts(
+          [draftId],
+          projectId: projectId,
+          threadId: threadId,
+          submissionRevision: submissionRevision,
+        ),
+      );
+      return;
+    }
+    final target = _composerForAttachmentTarget(latest, projectId, threadId);
+    if (target is! _AttachmentTargetReady) {
+      unawaited(
+        _removeAdmittedDrafts(
+          [draftId],
+          projectId: projectId,
+          threadId: threadId,
+          submissionRevision: submissionRevision,
+        ),
+      );
+      return;
+    }
+    final active = target.composer;
+    if (active.isSubmissionPending ||
+        active.submissionRevision != submissionRevision ||
+        active.attachmentGeneration == observedGeneration) {
+      return;
+    }
+    final draft = active.attachments
+        .where((attachment) => attachment.id == draftId)
+        .firstOrNull;
+    if (draft == null || draft.previewBytes != null) return;
+    unawaited(
+      _readAttachmentPreview(
+        draft,
+        projectId: projectId,
+        threadId: threadId,
+        submissionRevision: submissionRevision,
+        attachmentGeneration: active.attachmentGeneration,
+      ),
+    );
+  }
+
+  Future<void> _removeAdmittedDrafts(
+    Iterable<String> draftIds, {
+    required String projectId,
+    required String? threadId,
+    required int submissionRevision,
+  }) async {
+    final failures = <String, Object>{};
+    await _withAttachmentTargetBarrier(projectId, threadId, (token) async {
+      for (final draftId in draftIds) {
+        var removed = false;
+        Object? lastError;
+        // Draft removal is idempotent at the bridge boundary; retry once so a
+        // transient cleanup failure cannot silently leak an admitted durable
+        // draft that never entered canonical composer state.
+        for (var attempt = 0; attempt < 2 && !removed; attempt++) {
+          try {
+            removed = await _api.removeAttachmentDraft(draftId);
+            if (!removed) {
+              lastError = StateError(
+                'Attachment draft removal returned false: $draftId',
+              );
+            }
+          } catch (error) {
+            lastError = error;
+          }
+        }
+        if (!removed) {
+          failures[draftId] =
+              lastError ?? StateError('Attachment draft cleanup failed.');
+        }
+      }
+      if (failures.isEmpty) return;
+      if (!_canWriteAttachmentState(token)) {
+        _logAttachmentCleanupFailures(
+          projectId,
+          threadId,
+          failures,
+          reason: 'lifecycle_inactive',
+        );
+        return;
+      }
+      final latest = state.value;
+      if (latest == null) {
+        _logAttachmentCleanupFailures(
+          projectId,
+          threadId,
+          failures,
+          reason: 'state_unavailable',
+        );
+        return;
+      }
+      final target = _composerForAttachmentTarget(latest, projectId, threadId);
+      final message =
+          'Attachment cleanup failed for draft IDs: ${failures.keys.join(', ')}';
+      var next = _recordComposerTargetDiagnostic(
+        latest,
+        projectId: projectId,
+        threadId: threadId,
+        message: message,
+        cleanupFailureDraftIds: failures.keys,
+      );
+      if (target is _AttachmentTargetReady) {
+        next = _writeComposer(
+          next,
+          projectId,
+          threadId,
+          target.composer.reportAttachmentCleanupFailure(failures.keys),
+        );
+      } else {
+        next = _terminateAttachmentTarget(next, projectId, threadId);
+      }
+      state = AsyncData(next);
+    });
+  }
+
+  void _logAttachmentCleanupFailures(
+    String projectId,
+    String? threadId,
+    Map<String, Object> failures, {
+    required String reason,
+  }) {
+    for (final entry in failures.entries) {
+      debugPrint(
+        'attachment_cleanup_failed reason=$reason projectId=$projectId '
+        'threadId=$threadId draftId=${entry.key} error=${entry.value}',
+      );
+    }
+  }
+
+  bool _canWriteAttachmentState(int lifecycleToken) =>
+      ref.mounted && lifecycleToken == _attachmentLifecycleToken;
+
+  Future<void> _withAttachmentTargetBarrier(
+    String projectId,
+    String? threadId,
+    Future<void> Function(int lifecycleToken) operation,
+  ) async {
+    final key = _attachmentTargetKey(projectId, threadId);
+    final previous = _attachmentRemovalInFlight[key];
+    final completion = Completer<void>();
+    _attachmentRemovalInFlight[key] = completion.future;
+    try {
+      if (previous != null) {
+        try {
+          await previous;
+        } catch (_) {
+          // An earlier target operation must not poison the per-target tail.
+        }
+      }
+      await operation(_attachmentLifecycleToken);
+    } finally {
+      completion.complete();
+      if (identical(_attachmentRemovalInFlight[key], completion.future)) {
+        _attachmentRemovalInFlight.remove(key);
+      }
+    }
+  }
+
+  StudioState _recordComposerTargetDiagnostic(
+    StudioState current, {
+    required String projectId,
+    required String? threadId,
+    required String message,
+    Iterable<String> cleanupFailureDraftIds = const [],
+  }) {
+    final key = _attachmentTargetKey(projectId, threadId);
+    final previous = current.composerDiagnosticsByTarget[key];
+    final draftIds = {
+      ...?previous?.cleanupFailureDraftIds,
+      ...cleanupFailureDraftIds,
+    }.toList()..sort();
+    final diagnostic = ComposerTargetDiagnostic(
+      projectId: projectId,
+      threadId: threadId,
+      message: message,
+      cleanupFailureDraftIds: List.unmodifiable(draftIds),
+    );
+    return current.copyWith(
+      composerDiagnosticsByTarget: {
+        ...current.composerDiagnosticsByTarget,
+        key: diagnostic,
+      },
+    );
+  }
+
+  String _attachmentTargetKey(String projectId, String? threadId) =>
+      attachmentTargetKey(projectId, threadId);
+
+  String? _attachmentProjectIdForTarget(StudioState current, String? threadId) {
+    if (threadId == null) {
+      if (current.selectedThreadId != null) return null;
+      return current.selectedProjectId;
+    }
+    final directoryThread = current.threads
+        .where((thread) => thread.id == threadId)
+        .firstOrNull;
+    return directoryThread?.projectId ??
+        current.workspacesByThread[threadId]?.thread.projectId;
+  }
+
+  bool _isAttachmentAdmissionSelectionCurrent(
+    StudioState current, {
+    required String projectId,
+    required String? threadId,
+  }) {
+    if (threadId != null) return true;
+    return current.selectedProjectId == projectId &&
+        current.selectedThreadId == null;
+  }
+
+  _AttachmentTargetResolution? _composerForAttachmentTarget(
+    StudioState current,
+    String projectId,
+    String? threadId,
+  ) {
+    if (threadId == null) {
+      if (!current.projects.any((project) => project.id == projectId)) {
+        return null;
+      }
+      // A new project can legitimately have no map entry yet (the
+      // attachment-only start page has an implicit idle composer). Returning
+      // that canonical default lets the caller write the entry before
+      // appending admitted metadata instead of cleaning up a valid draft.
+      return _AttachmentTargetReady(
+        current.newThreadComposerByProject[projectId] ??
+            const ComposerThreadState.idle(),
+      );
+    }
+    final directoryThread = current.threads
+        .where((candidate) => candidate.id == threadId)
+        .firstOrNull;
+    final workspace = current.workspacesByThread[threadId];
+    final thread = directoryThread ?? workspace?.thread;
+    if (thread == null || thread.projectId != projectId) {
+      return const _AttachmentTargetMissing();
+    }
+    if (thread.status
+        case ThreadStatusView.closing ||
+            ThreadStatusView.closed ||
+            ThreadStatusView.faulted) {
+      return _AttachmentTargetTerminated(thread.status);
+    }
+    return _AttachmentTargetReady(_workspaceUi(current, threadId).composer);
+  }
+
+  StudioState _terminateAttachmentTarget(
+    StudioState current,
+    String projectId,
+    String? threadId,
+  ) {
+    if (threadId != null) {
+      _releaseThreadSession(threadId);
+      return current;
+    }
+    if (!current.projects.any((project) => project.id == projectId)) {
+      final composers = {...current.newThreadComposerByProject}
+        ..remove(projectId);
+      if (composers.length != current.newThreadComposerByProject.length) {
+        current = current.copyWith(newThreadComposerByProject: composers);
+      }
+    }
+    debugPrint(
+      'attachment_target_terminated project=$projectId thread=$threadId',
+    );
+    return current;
+  }
+
+  StudioState _writeComposer(
+    StudioState current,
+    String? projectId,
+    String? threadId,
+    ComposerThreadState composer,
+  ) {
+    return threadId == null
+        ? current.copyWith(
+            newThreadComposerByProject: {
+              ...current.newThreadComposerByProject,
+              ?projectId: composer,
+            },
+          )
+        : _withWorkspaceUi(
+            current,
+            threadId,
+            (ui) => ui.copyWith(composer: composer),
+          );
+  }
+
+  String? _attachmentProjectIdForRemoval(
+    StudioState current, {
+    required String draftId,
+    required String? threadId,
+  }) {
+    if (threadId == null) {
+      for (final entry in current.newThreadComposerByProject.entries) {
+        if (entry.value.attachments.any(
+          (attachment) => attachment.id == draftId,
+        )) {
+          return entry.key;
+        }
+      }
+    }
+    final direct = _attachmentProjectIdForTarget(current, threadId);
+    if (direct != null) return direct;
+    for (final entry in current.workspaceUiByThread.entries) {
+      if (entry.value.composer.attachments.every(
+        (attachment) => attachment.id != draftId,
+      )) {
+        continue;
+      }
+      final directoryThread = current.threads
+          .where((thread) => thread.id == entry.key)
+          .firstOrNull;
+      return directoryThread?.projectId ??
+          current.workspacesByThread[entry.key]?.thread.projectId;
+    }
+    if (threadId != null && current.selectedThreadId == threadId) {
+      return current.selectedProjectId;
+    }
+    return null;
+  }
+
+  Future<void> _removeAttachmentDraftWithoutCanonicalTarget(
+    String draftId,
+  ) async {
+    try {
+      if (!await _api.removeAttachmentDraft(draftId)) {
+        debugPrint(
+          'attachment_removal_unresolved_target draft=$draftId result=false',
+        );
+      }
+    } catch (error) {
+      debugPrint(
+        'attachment_removal_unresolved_target draft=$draftId error=$error',
+      );
+    }
   }
 
   Future<void> removeAttachmentDraft(String draftId, {String? threadId}) async {
     final current = state.value;
     if (current == null) return;
-    final composer = threadId == null
-        ? current.newThreadComposer
-        : _workspaceUi(current, threadId).composer;
-    if (composer.isSubmissionPending ||
-        !composer.attachments.any((attachment) => attachment.id == draftId)) {
+    final projectId = _attachmentProjectIdForRemoval(
+      current,
+      draftId: draftId,
+      threadId: threadId,
+    );
+    if (projectId == null) {
+      await _removeAttachmentDraftWithoutCanonicalTarget(draftId);
       return;
     }
+    await _withAttachmentTargetBarrier(projectId, threadId, (token) async {
+      if (!_canWriteAttachmentState(token)) return;
+      await _removeAttachmentDraftForTarget(
+        draftId,
+        projectId: projectId,
+        threadId: threadId,
+        lifecycleToken: token,
+      );
+    });
+  }
+
+  Future<void> _removeAttachmentDraftForTarget(
+    String draftId, {
+    required String projectId,
+    required String? threadId,
+    required int lifecycleToken,
+  }) async {
     try {
       if (!await _api.removeAttachmentDraft(draftId)) {
         throw StateError('Attachment draft is unavailable.');
       }
     } catch (error) {
-      if (!ref.mounted) return;
+      if (!_canWriteAttachmentState(lifecycleToken)) return;
       final latest = state.value;
-      if (latest == null) return;
-      if (threadId == null && latest.selectedProjectId != null) {
-        _sessionDrafts.setComposer(
-          latest.selectedProjectId!,
-          latest.newThreadComposer.reportFailure(error),
+      if (latest == null) {
+        return;
+      }
+      var next = _terminateAttachmentTarget(latest, projectId, threadId);
+      next = _recordComposerTargetDiagnostic(
+        next,
+        projectId: projectId,
+        threadId: threadId,
+        message: 'Attachment removal failed for draft ID: $draftId: $error',
+        cleanupFailureDraftIds: [draftId],
+      );
+      final latestTarget = _composerForAttachmentTarget(
+        next,
+        projectId,
+        threadId,
+      );
+      if (latestTarget is _AttachmentTargetReady &&
+          latestTarget.composer.attachments.any(
+            (attachment) => attachment.id == draftId,
+          )) {
+        next = _writeComposer(
+          next,
+          projectId,
+          threadId,
+          latestTarget.composer.reportAttachmentCleanupFailure([draftId]),
         );
       }
-      state = AsyncData(
-        threadId == null
-            ? latest.copyWith(
-                newThreadComposerByProject: _sessionDrafts.composers,
-              )
-            : _withWorkspaceUi(
-                latest,
-                threadId,
-                (ui) => ui.copyWith(composer: ui.composer.reportFailure(error)),
-              ),
-      );
+      state = AsyncData(next);
       return;
     }
-    if (!ref.mounted) return;
+    if (!_canWriteAttachmentState(lifecycleToken)) return;
     final latest = state.value;
-    if (latest == null) return;
-    final active = threadId == null
-        ? latest.newThreadComposer
-        : _workspaceUi(latest, threadId).composer;
-    final updated = active.updateAttachments([
-      for (final attachment in active.attachments)
-        if (attachment.id != draftId) attachment,
-    ]);
-    if (threadId == null && latest.selectedProjectId != null) {
-      _sessionDrafts.setComposer(latest.selectedProjectId!, updated);
+    if (latest == null) {
+      return;
     }
-    state = AsyncData(
-      threadId == null
-          ? latest.copyWith(
-              newThreadComposerByProject: _sessionDrafts.composers,
-            )
-          : _withWorkspaceUi(
-              latest,
-              threadId,
-              (ui) => ui.copyWith(composer: updated),
-            ),
+    final latestTarget = _composerForAttachmentTarget(
+      latest,
+      projectId,
+      threadId,
     );
+    if (latestTarget is! _AttachmentTargetReady) {
+      final next = _terminateAttachmentTarget(latest, projectId, threadId);
+      if (!identical(next, latest)) state = AsyncData(next);
+      return;
+    }
+    final active = latestTarget.composer;
+    final updated = active.removeAttachment(draftId);
+    if (identical(updated, active)) return;
+    state = AsyncData(_writeComposer(latest, projectId, threadId, updated));
+  }
+
+  Future<void> _waitForAttachmentRemoval(
+    String projectId,
+    String? threadId,
+  ) async {
+    final pending =
+        _attachmentRemovalInFlight[_attachmentTargetKey(projectId, threadId)];
+    if (pending != null) await pending;
+  }
+
+  List<String> _attachmentDraftIds(ComposerThreadState composer) => [
+    for (final attachment in composer.attachments) attachment.id,
+  ];
+
+  bool _sameAttachmentDraftIdSet(
+    ComposerThreadState left,
+    ComposerThreadState right,
+  ) {
+    final leftIds = _attachmentDraftIds(left).toSet();
+    final rightIds = _attachmentDraftIds(right).toSet();
+    return leftIds.length == rightIds.length &&
+        leftIds.every(rightIds.contains);
+  }
+
+  bool _sameAttachmentDraftIdSetWithIds(
+    ComposerThreadState composer,
+    Set<String> expectedIds,
+  ) {
+    final actualIds = _attachmentDraftIds(composer).toSet();
+    return actualIds.length == expectedIds.length &&
+        actualIds.every(expectedIds.contains);
   }
 
   Future<void> submitNewThreadComposer() async {
@@ -1987,16 +2644,50 @@ class StudioController extends _$StudioController {
       return;
     }
 
-    final submitting = composer.beginSubmission();
+    // A removal already targeting this project must settle before the
+    // submission revision is created. Otherwise the bridge input could be
+    // built from the pre-removal attachment collection.
+    await _waitForAttachmentRemoval(projectId, null);
+    if (!ref.mounted) return;
+    final submissionBase = state.value;
+    if (submissionBase == null ||
+        submissionBase.selectedProjectId != projectId ||
+        submissionBase.selectedThreadId != null ||
+        submissionBase.recoveryIssue(
+              blockingOnly: true,
+              scope: RecoveryIssueScope.project,
+              projectId: projectId,
+            ) !=
+            null) {
+      return;
+    }
+    final latestTarget = _composerForAttachmentTarget(
+      submissionBase,
+      projectId,
+      null,
+    );
+    if (latestTarget is! _AttachmentTargetReady ||
+        latestTarget.composer.isSubmissionPending ||
+        (latestTarget.composer.draft.trim().isEmpty &&
+            latestTarget.composer.attachments.isEmpty)) {
+      return;
+    }
+    final latestComposer = latestTarget.composer;
+    final submitting = latestComposer.beginSubmission();
     final submissionRevision = submitting.submissionRevision;
     _sessionDrafts.setComposer(projectId, submitting);
     state = AsyncData(
-      current.copyWith(newThreadComposerByProject: _sessionDrafts.composers),
+      submissionBase.copyWith(
+        newThreadComposerByProject: {
+          ...submissionBase.newThreadComposerByProject,
+          projectId: submitting,
+        },
+      ),
     );
 
-    // 等待字段级路由 mutation 到达 canonical；提交读取 Bridge 的事实配置，
-    // 不依赖页面上的乐观投影。协调器有固定截止时间，超时后保留草稿并
-    // 把失败投影回 composer，避免提交按钮永久停在 submitting。
+    // Settings mutations are owned by the app-level coordinator. Wait for the
+    // canonical response before creating a root; never submit from the local
+    // optimistic route projection.
     if (!await flushPending(timeout: const Duration(seconds: 5))) {
       await _failNewThreadSubmission(
         projectId,
@@ -2008,7 +2699,8 @@ class StudioController extends _$StudioController {
       return;
     }
     if (!ref.mounted) return;
-    final submitMode = state.value?.newThreadMode ?? current.newThreadMode;
+    final submitMode =
+        state.value?.newThreadMode ?? submissionBase.newThreadMode;
     final routeFailure = _newThreadRouteFailure(submitMode);
     if (routeFailure != null) {
       await _failNewThreadSubmission(
@@ -2018,109 +2710,213 @@ class StudioController extends _$StudioController {
       );
       return;
     }
-    final submitWorkspaceMode =
-        state.value?.newThreadWorkspaceMode.id ??
-        current.newThreadWorkspaceMode.id;
-
-    final StartNewThreadResult result;
-    try {
-      result = await _api.startNewThread(
+    // Route-save and attachment removal barriers may have advanced the
+    // project-scoped composer while this submission was waiting. The final
+    // request and its acceptance stay inside the same target barrier so no
+    // removal can interleave between the canonical read and bridge call.
+    await _withAttachmentTargetBarrier(projectId, null, (token) async {
+      if (!_canWriteAttachmentState(token)) return;
+      final latestBeforeSubmit = state.value;
+      if (latestBeforeSubmit == null) return;
+      final target = _composerForAttachmentTarget(
+        latestBeforeSubmit,
         projectId,
-        StudioPromptInput(
-          inputId: submitting.inputId!,
-          text: prompt,
-          attachmentDraftIds: [
-            for (final attachment in composer.attachments) attachment.id,
-          ],
-        ),
-        submitMode,
-        workspaceMode: submitWorkspaceMode,
+        null,
       );
-    } catch (error) {
-      if (!ref.mounted) return;
+      if (target is! _AttachmentTargetReady) {
+        final next = _recordComposerTargetDiagnostic(
+          _terminateAttachmentTarget(latestBeforeSubmit, projectId, null),
+          projectId: projectId,
+          threadId: null,
+          message: 'New Thread submission target is no longer available.',
+        );
+        state = AsyncData(next);
+        return;
+      }
+      final active = target.composer;
+      if (active is! SubmittingComposerThreadState ||
+          active.submissionRevision != submissionRevision ||
+          active.inputId != submitting.inputId) {
+        return;
+      }
+      final attachmentSnapshotChanged =
+          active.attachmentGeneration != submitting.attachmentGeneration ||
+          !_sameAttachmentDraftIdSet(active, submitting);
+      final submitMode =
+          latestBeforeSubmit.newThreadModeByProject[projectId] ??
+          ThreadModeId.simple;
+      final submitWorkspaceMode =
+          latestBeforeSubmit.newThreadWorkspaceModeByProject[projectId]?.id ??
+          ThreadWorkspaceMode.local.id;
+      final submitPrompt = attachmentSnapshotChanged
+          ? active.draft.trim()
+          : submitting.draft.trim();
+      final submitAttachmentIds = attachmentSnapshotChanged
+          ? _attachmentDraftIds(active)
+          : _attachmentDraftIds(submitting);
+      final requestInputId = active.inputId;
+      final requestSubmissionRevision = active.submissionRevision;
+      final requestAttachmentGeneration = active.attachmentGeneration;
+      final requestDraftIds = submitAttachmentIds.toSet();
+
+      final StartNewThreadResult result;
+      try {
+        result = await _api.startNewThread(
+          projectId,
+          StudioPromptInput(
+            inputId: requestInputId,
+            text: submitPrompt,
+            attachmentDraftIds: submitAttachmentIds,
+          ),
+          submitMode,
+          workspaceMode: submitWorkspaceMode,
+        );
+      } catch (error) {
+        if (!_canWriteAttachmentState(token)) return;
+        final latest = state.value;
+        if (latest == null) return;
+        final latestTarget = _composerForAttachmentTarget(
+          latest,
+          projectId,
+          null,
+        );
+        if (latestTarget is _AttachmentTargetReady &&
+            latestTarget.composer is SubmittingComposerThreadState &&
+            latestTarget.composer.submissionRevision == submissionRevision &&
+            latestTarget.composer.inputId == submitting.inputId) {
+          final failed = latestTarget.composer.fail(
+            error,
+            submissionRevision: submissionRevision,
+          );
+          state = AsyncData(
+            latest.copyWith(
+              newThreadComposerByProject: {
+                ...latest.newThreadComposerByProject,
+                projectId: failed,
+              },
+            ),
+          );
+        } else {
+          state = AsyncData(
+            _recordComposerTargetDiagnostic(
+              latest,
+              projectId: projectId,
+              threadId: null,
+              message: 'New Thread submission failed: $error',
+            ),
+          );
+        }
+        return;
+      }
+      if (!_canWriteAttachmentState(token)) return;
       final latest = state.value;
       if (latest == null) return;
-      final active =
-          latest.newThreadComposerByProject[projectId] ??
-          const ComposerThreadState.idle();
-      final failed = active.fail(error, submissionRevision: submissionRevision);
-      _sessionDrafts.setComposer(projectId, failed);
-      state = AsyncData(
-        latest.copyWith(newThreadComposerByProject: _sessionDrafts.composers),
+      final latestTarget = _composerForAttachmentTarget(
+        latest,
+        projectId,
+        null,
       );
-      return;
-    }
-    if (!ref.mounted) return;
-    final latest = state.value;
-    if (latest == null) return;
+      if (latestTarget is! _AttachmentTargetReady ||
+          latestTarget.composer is! SubmittingComposerThreadState ||
+          latestTarget.composer.submissionRevision !=
+              requestSubmissionRevision ||
+          latestTarget.composer.inputId != requestInputId) {
+        var next = _terminateAttachmentTarget(latest, projectId, null);
+        next = _recordComposerTargetDiagnostic(
+          next,
+          projectId: projectId,
+          threadId: null,
+          message: 'New Thread submission target changed before acceptance.',
+        );
+        state = AsyncData(next);
+        return;
+      }
+      final currentActive = latestTarget.composer;
+      Object? validationError;
+      if (result.thread.projectId != projectId) {
+        validationError = StateError(
+          'new Thread project ${result.thread.projectId} does not match $projectId',
+        );
+      } else if (result.receipt.threadId != result.thread.id) {
+        validationError = StateError(
+          'submit receipt thread ${result.receipt.threadId} does not match '
+          '${result.thread.id}',
+        );
+      } else if (result.receipt.inputId != currentActive.inputId) {
+        validationError = StateError(
+          'submit receipt input ${result.receipt.inputId} does not match '
+          '${currentActive.inputId}',
+        );
+      }
+      if (validationError != null) {
+        final failed = currentActive.fail(
+          validationError,
+          submissionRevision: submissionRevision,
+        );
+        state = AsyncData(
+          latest.copyWith(
+            newThreadComposerByProject: {
+              ...latest.newThreadComposerByProject,
+              projectId: failed,
+            },
+          ),
+        );
+        return;
+      }
 
-    final active =
-        latest.newThreadComposerByProject[projectId] ??
-        const ComposerThreadState.idle();
-    Object? validationError;
-    if (result.thread.projectId != projectId) {
-      validationError = StateError(
-        'new Thread project ${result.thread.projectId} does not match $projectId',
-      );
-    } else if (result.receipt.threadId != result.thread.id) {
-      validationError = StateError(
-        'submit receipt thread ${result.receipt.threadId} does not match '
-        '${result.thread.id}',
-      );
-    }
-    if (validationError != null) {
-      final failed = active.fail(
-        validationError,
-        submissionRevision: submissionRevision,
-      );
-      _sessionDrafts.setComposer(projectId, failed);
-      state = AsyncData(
-        latest.copyWith(newThreadComposerByProject: _sessionDrafts.composers),
-      );
-      return;
-    }
+      final requestSnapshotChanged =
+          currentActive.attachmentGeneration != requestAttachmentGeneration ||
+          !_sameAttachmentDraftIdSetWithIds(currentActive, requestDraftIds);
+      if (requestSnapshotChanged) {
+        state = AsyncData(
+          _recordComposerTargetDiagnostic(
+            latest,
+            projectId: projectId,
+            threadId: null,
+            message: 'New Thread attachments changed while submission was in flight.',
+          ),
+        );
+        return;
+      }
 
-    final accepted = submitting.accept(
-      result.receipt,
-      submissionRevision: submissionRevision,
-    );
-    final shouldSelect =
-        latest.selectedProjectId == projectId &&
-        latest.selectedThreadId == null &&
-        active is SubmittingComposerThreadState &&
-        active.submissionRevision == submissionRevision;
-    var next = applyThreadDirectoryDelta(
-      latest,
-      revision: latest.threadDirectory.revision,
-      upserted: [result.thread],
-      removed: const [],
-    );
-    next = _withWorkspaceUi(
-      next,
-      result.thread.id,
-      (ui) => ui.copyWith(
-        composer: accepted,
-        syncState: AgentWorkspaceSyncState.loading,
-      ),
-    );
-    _sessionDrafts.setComposer(
-      projectId,
-      shouldSelect ? const ComposerThreadState.idle() : active,
-    );
-    next = next.copyWith(
-      selectedThreadId: shouldSelect
-          ? result.thread.id
-          : latest.selectedThreadId,
-      // 新建会话是显式用户动作：创建后直接打开它。
-      openedThreadIds: shouldSelect
-          ? {...next.openedThreadIds, result.thread.id}
-          : next.openedThreadIds,
-      newThreadComposerByProject: _sessionDrafts.composers,
-    );
-    state = AsyncData(next);
-    if (shouldSelect) {
-      await _subscribeThread(result.thread.id);
-    }
+      final accepted = currentActive.accept(
+        result.receipt,
+        submissionRevision: requestSubmissionRevision,
+        inputId: requestInputId,
+      );
+      final shouldSelect =
+          latest.selectedProjectId == projectId &&
+          latest.selectedThreadId == null;
+      var next = applyThreadDirectoryDelta(
+        latest,
+        revision: latest.threadDirectory.revision,
+        upserted: [result.thread],
+        removed: const [],
+      );
+      if (shouldSelect) {
+        next = _withWorkspaceUi(
+          next,
+          result.thread.id,
+          (ui) => ui.copyWith(
+            composer: accepted,
+            syncState: AgentWorkspaceSyncState.loading,
+          ),
+        );
+        next = next.copyWith(
+          selectedThreadId: result.thread.id,
+          // 新建会话是显式用户动作：创建后直接打开它。
+          openedThreadIds: {...next.openedThreadIds, result.thread.id},
+          newThreadComposerByProject: {
+            ...next.newThreadComposerByProject,
+            projectId: const ComposerThreadState.idle(),
+          },
+        );
+      }
+      state = AsyncData(next);
+      if (shouldSelect) {
+        await _subscribeThread(result.thread.id);
+      }
+    });
   }
 
   Object? _newThreadRouteFailure(ThreadModeId mode) {
@@ -2162,36 +2958,39 @@ class StudioController extends _$StudioController {
     // 提交是显式交互：未打开的会话先激活，随后才受理输入。
     await _ensureThreadOpen(threadId);
     final current = state.value;
+    final projectId = current?.selectedProjectId;
+    if (projectId == null) return;
+    await _waitForAttachmentRemoval(projectId, threadId);
+    if (!ref.mounted) return;
+    final latest = state.value;
     final composer = current == null
         ? const ComposerThreadState.idle()
-        : _workspaceUi(current, threadId).composer;
+        : _workspaceUi(latest ?? current, threadId).composer;
     final prompt = composer.draft.trim();
-    if (current == null ||
-        !_isInitialized(current) ||
-        current.selectedThreadId != threadId ||
+    if (latest == null ||
+        !_isInitialized(latest) ||
+        latest.selectedThreadId != threadId ||
         (prompt.isEmpty && composer.attachments.isEmpty) ||
         composer.isSubmissionPending) {
       return;
     }
     final submitting = composer.beginSubmission();
-    final input = StudioPromptInput(
-      inputId: submitting.inputId!,
-      text: prompt,
-      attachmentDraftIds: [
-        for (final attachment in composer.attachments) attachment.id,
-      ],
-    );
-    Future<SubmitPromptReceipt> submit() => _api.submitPrompt(threadId, input);
-    await _submitThreadInput(current, threadId, submitting, submit);
+    await _submitThreadInput(projectId, latest, threadId, submitting);
   }
 
   Future<void> _submitThreadInput(
+    String projectId,
     StudioState current,
     String threadId,
     ComposerThreadState submitting,
-    Future<SubmitPromptReceipt> Function() submit,
   ) async {
     final submissionRevision = submitting.submissionRevision;
+    final initialTarget = _composerForAttachmentTarget(
+      current,
+      projectId,
+      threadId,
+    );
+    if (initialTarget is! _AttachmentTargetReady) return;
     state = AsyncData(
       _withWorkspaceUi(
         current,
@@ -2199,54 +2998,168 @@ class StudioController extends _$StudioController {
         (ui) => ui.copyWith(composer: submitting),
       ),
     );
-    final SubmitPromptReceipt receipt;
-    try {
-      receipt = await submit();
-    } catch (error) {
-      if (!ref.mounted) return;
+    await _withAttachmentTargetBarrier(projectId, threadId, (token) async {
+      if (!_canWriteAttachmentState(token)) return;
+      final latestBeforeSubmit = state.value;
+      if (latestBeforeSubmit == null) return;
+      final target = _composerForAttachmentTarget(
+        latestBeforeSubmit,
+        projectId,
+        threadId,
+      );
+      if (target is! _AttachmentTargetReady) {
+        var next = _terminateAttachmentTarget(
+          latestBeforeSubmit,
+          projectId,
+          threadId,
+        );
+        next = _recordComposerTargetDiagnostic(
+          next,
+          projectId: projectId,
+          threadId: threadId,
+          message: 'Thread submission target is no longer available.',
+        );
+        state = AsyncData(next);
+        return;
+      }
+      final active = target.composer;
+      if (active is! SubmittingComposerThreadState ||
+          active.submissionRevision != submissionRevision ||
+          active.inputId != submitting.inputId) {
+        return;
+      }
+      final attachmentSnapshotChanged =
+          active.attachmentGeneration != submitting.attachmentGeneration ||
+          !_sameAttachmentDraftIdSet(active, submitting);
+      final input = StudioPromptInput(
+        inputId: active.inputId,
+        text: attachmentSnapshotChanged
+            ? active.draft.trim()
+            : submitting.draft.trim(),
+        attachmentDraftIds: attachmentSnapshotChanged
+            ? _attachmentDraftIds(active)
+            : _attachmentDraftIds(submitting),
+      );
+      final requestInputId = input.inputId;
+      final requestSubmissionRevision = active.submissionRevision;
+      final requestAttachmentGeneration = active.attachmentGeneration;
+      final requestDraftIds = input.attachmentDraftIds.toSet();
+      final SubmitPromptReceipt receipt;
+      try {
+        receipt = await _api.submitPrompt(threadId, input);
+      } catch (error) {
+        if (!_canWriteAttachmentState(token)) return;
+        final latest = state.value;
+        if (latest == null) return;
+        final latestTarget = _composerForAttachmentTarget(
+          latest,
+          projectId,
+          threadId,
+        );
+        if (latestTarget is _AttachmentTargetReady &&
+            latestTarget.composer is SubmittingComposerThreadState &&
+            latestTarget.composer.submissionRevision == submissionRevision &&
+            latestTarget.composer.inputId == submitting.inputId) {
+          final failed = latestTarget.composer.fail(
+            error,
+            submissionRevision: submissionRevision,
+          );
+          state = AsyncData(
+            _withWorkspaceUi(
+              latest,
+              threadId,
+              (ui) => ui.copyWith(composer: failed),
+            ),
+          );
+        } else {
+          state = AsyncData(
+            _recordComposerTargetDiagnostic(
+              latest,
+              projectId: projectId,
+              threadId: threadId,
+              message: 'Thread submission failed: $error',
+            ),
+          );
+        }
+        return;
+      }
+      if (!_canWriteAttachmentState(token)) return;
       final latest = state.value;
       if (latest == null) return;
-      final active = _workspaceUi(latest, threadId).composer;
-      final failed = active.fail(error, submissionRevision: submissionRevision);
-      state = AsyncData(
-        _withWorkspaceUi(
-          latest,
-          threadId,
-          (ui) => ui.copyWith(composer: failed),
-        ),
+      final latestTarget = _composerForAttachmentTarget(
+        latest,
+        projectId,
+        threadId,
       );
-      return;
-    }
-    if (!ref.mounted) return;
-    final latest = state.value;
-    if (latest == null) return;
-    final active = _workspaceUi(latest, threadId).composer;
-    if (receipt.threadId != threadId) {
-      final failed = active.fail(
-        StateError(
+      if (latestTarget is! _AttachmentTargetReady ||
+          latestTarget.composer is! SubmittingComposerThreadState ||
+          latestTarget.composer.submissionRevision !=
+              requestSubmissionRevision ||
+          latestTarget.composer.inputId != requestInputId) {
+        var next = _terminateAttachmentTarget(latest, projectId, threadId);
+        next = _recordComposerTargetDiagnostic(
+          next,
+          projectId: projectId,
+          threadId: threadId,
+          message: 'Thread attachments changed before submission acceptance.',
+        );
+        state = AsyncData(next);
+        return;
+      }
+      final currentActive = latestTarget.composer;
+      Object? validationError;
+      if (receipt.threadId != threadId) {
+        validationError = StateError(
           'submit receipt thread ${receipt.threadId} does not match $threadId',
-        ),
-        submissionRevision: submissionRevision,
+        );
+      } else if (receipt.inputId != currentActive.inputId) {
+        validationError = StateError(
+          'submit receipt input ${receipt.inputId} does not match '
+          '${currentActive.inputId}',
+        );
+      }
+      if (validationError != null) {
+        final failed = currentActive.fail(
+          validationError,
+          submissionRevision: submissionRevision,
+        );
+        state = AsyncData(
+          _withWorkspaceUi(
+            latest,
+            threadId,
+            (ui) => ui.copyWith(composer: failed),
+          ),
+        );
+        return;
+      }
+      final requestSnapshotChanged =
+          currentActive.attachmentGeneration != requestAttachmentGeneration ||
+          !_sameAttachmentDraftIdSetWithIds(currentActive, requestDraftIds);
+      if (requestSnapshotChanged) {
+        state = AsyncData(
+          _recordComposerTargetDiagnostic(
+            latest,
+            projectId: projectId,
+            threadId: threadId,
+            message:
+                'Thread attachments changed while submission was in flight.',
+          ),
+        );
+        return;
+      }
+      final accepted = currentActive.accept(
+        receipt,
+        submissionRevision: requestSubmissionRevision,
+        inputId: requestInputId,
       );
       state = AsyncData(
         _withWorkspaceUi(
           latest,
           threadId,
-          (ui) => ui.copyWith(composer: failed),
+          (ui) => ui.copyWith(composer: accepted),
         ),
       );
-      return;
-    }
-    final accepted = active.accept(
-      receipt,
-      submissionRevision: submissionRevision,
-    );
-    final next = _withWorkspaceUi(
-      latest,
-      threadId,
-      (ui) => ui.copyWith(composer: accepted),
-    );
-    state = AsyncData(next);
+    });
   }
 
   Future<void> stop(String threadId) async {
@@ -2452,32 +3365,11 @@ class StudioController extends _$StudioController {
       }
       final latest = state.value;
       if (latest == null) return;
-      var next = _applySettingsCanonical(
-        latest,
-        response.settings,
-        source: 'thread-route-response',
-        operationId: operationId,
-      );
-      final latestWorkspace = next.workspacesByThread[threadId];
-      if (latestWorkspace != null) {
-        final latestRouteRevision =
-            latestWorkspace.runtime.modelRoute?.revision;
-        final responseRoute = response.runtime.modelRoute;
-        if (responseRoute != null &&
-            (latestRouteRevision == null ||
-                responseRoute.revision >= latestRouteRevision)) {
-          next = next.copyWith(
-            workspacesByThread: {
-              ...next.workspacesByThread,
-              threadId: latestWorkspace.copyWith(
-                runtime: latestWorkspace.runtime.copyWith(
-                  modelRoute: responseRoute,
-                ),
-              ),
-            },
-          );
-        }
-      }
+      var next = applySettingsState(latest, response.settings);
+      // The command response does not carry the Thread stream's epoch,
+      // baseRevision, and ordered revision envelope. Runtime/modelRoute must
+      // therefore converge only through the existing ordered Thread reducer;
+      // never apply response.runtime as a second, unsequenced state source.
       if (response.warning case final warning?) {
         next = _withWorkspaceUi(
           next,
@@ -3287,38 +4179,11 @@ class StudioController extends _$StudioController {
         interaction.id != interactionId) {
       throw _interactionConflict();
     }
-    final interactionsBeforeResponse = {
-      for (final candidate in workspace.interactions) candidate.id,
-    };
     await _api.respondInteraction(interactionId, resolution);
-    if (!ref.mounted) return;
-    final latest = state.value;
-    final active = latest?.workspacesByThread[threadId];
-    if (latest == null || active == null) return;
-    final pending = [...active.interactions]
-      ..sort(
-        (left, right) =>
-            interactionPriority(left.kind)
-                .compareTo(interactionPriority(right.kind)),
-      );
-    final replacement = pending.firstOrNull;
-    if (replacement != null &&
-        replacement.id != interactionId &&
-        !interactionsBeforeResponse.contains(replacement.id)) {
-      throw _interactionConflict();
-    }
-    state = AsyncData(
-      latest.copyWith(
-        workspacesByThread: {
-          ...latest.workspacesByThread,
-          threadId: active.copyWith(
-            interactions: active.interactions
-                .where((candidate) => candidate.id != interactionId)
-                .toList(),
-          ),
-        },
-      ),
-    );
+    // The mutation result has no epoch/baseRevision/revision envelope. The
+    // response only acknowledges the command; the subscribed Thread stream is
+    // the sole path that applies the canonical interaction frame through the
+    // ordered reducer. Never delete the interaction from StudioState here.
   }
 
   StudioFailure _interactionConflict() => const StudioFailure(
@@ -3636,8 +4501,14 @@ WorkspaceUiState _workspaceUi(StudioState state, String threadId) {
 StudioState _withWorkspaceUi(
   StudioState state,
   String threadId,
-  WorkspaceUiState Function(WorkspaceUiState ui) update,
-) {
+  WorkspaceUiState Function(WorkspaceUiState ui) update, {
+  bool allowMissingThread = false,
+}) {
+  if (!allowMissingThread &&
+      !state.threads.any((thread) => thread.id == threadId) &&
+      !state.workspacesByThread.containsKey(threadId)) {
+    return state;
+  }
   return state.copyWith(
     workspaceUiByThread: {
       ...state.workspaceUiByThread,

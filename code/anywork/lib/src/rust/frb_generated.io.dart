@@ -486,6 +486,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_box_autoadd_bridge_thread_model_route_snapshot(dynamic raw);
 
   @protected
+  BridgeThreadRuntimeLiveUsage
+  dco_decode_box_autoadd_bridge_thread_runtime_live_usage(dynamic raw);
+
+  @protected
   BridgeThreadRuntimeSnapshot
   dco_decode_box_autoadd_bridge_thread_runtime_snapshot(dynamic raw);
 
@@ -1446,12 +1450,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeThreadRuntimeLiveUsage dco_decode_bridge_thread_runtime_live_usage(
+    dynamic raw,
+  );
+
+  @protected
   BridgeThreadRuntimeSnapshot dco_decode_bridge_thread_runtime_snapshot(
     dynamic raw,
   );
 
   @protected
   BridgeThreadRuntimeUsage dco_decode_bridge_thread_runtime_usage(dynamic raw);
+
+  @protected
+  BridgeThreadRuntimeUsageState dco_decode_bridge_thread_runtime_usage_state(
+    dynamic raw,
+  );
 
   @protected
   BridgeThreadSnapshot dco_decode_bridge_thread_snapshot(dynamic raw);
@@ -2020,6 +2034,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeThreadModelRouteSnapshot?
   dco_decode_opt_box_autoadd_bridge_thread_model_route_snapshot(dynamic raw);
+
+  @protected
+  BridgeThreadRuntimeLiveUsage?
+  dco_decode_opt_box_autoadd_bridge_thread_runtime_live_usage(dynamic raw);
 
   @protected
   BridgeThreadRuntimeSnapshot?
@@ -2711,6 +2729,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeThreadModelRouteSnapshot
   sse_decode_box_autoadd_bridge_thread_model_route_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeThreadRuntimeLiveUsage
+  sse_decode_box_autoadd_bridge_thread_runtime_live_usage(
     SseDeserializer deserializer,
   );
 
@@ -3927,12 +3951,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeThreadRuntimeLiveUsage sse_decode_bridge_thread_runtime_live_usage(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeThreadRuntimeSnapshot sse_decode_bridge_thread_runtime_snapshot(
     SseDeserializer deserializer,
   );
 
   @protected
   BridgeThreadRuntimeUsage sse_decode_bridge_thread_runtime_usage(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeThreadRuntimeUsageState sse_decode_bridge_thread_runtime_usage_state(
     SseDeserializer deserializer,
   );
 
@@ -4657,6 +4691,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeThreadModelRouteSnapshot?
   sse_decode_opt_box_autoadd_bridge_thread_model_route_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeThreadRuntimeLiveUsage?
+  sse_decode_opt_box_autoadd_bridge_thread_runtime_live_usage(
     SseDeserializer deserializer,
   );
 
@@ -5461,6 +5501,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_thread_model_route_snapshot(
     BridgeThreadModelRouteSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_thread_runtime_live_usage(
+    BridgeThreadRuntimeLiveUsage self,
     SseSerializer serializer,
   );
 
@@ -6929,6 +6975,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_thread_runtime_live_usage(
+    BridgeThreadRuntimeLiveUsage self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_thread_runtime_snapshot(
     BridgeThreadRuntimeSnapshot self,
     SseSerializer serializer,
@@ -6937,6 +6989,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_thread_runtime_usage(
     BridgeThreadRuntimeUsage self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_thread_runtime_usage_state(
+    BridgeThreadRuntimeUsageState self,
     SseSerializer serializer,
   );
 
@@ -7801,6 +7859,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_thread_model_route_snapshot(
     BridgeThreadModelRouteSnapshot? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_thread_runtime_live_usage(
+    BridgeThreadRuntimeLiveUsage? self,
     SseSerializer serializer,
   );
 

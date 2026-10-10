@@ -200,6 +200,53 @@ final class StudioHeaderProvider
 
 String _$studioHeaderHash() => r'8b726c8fce95c93dbb23f265869ba39ea61f7d13';
 
+@ProviderFor(settingsPage)
+final settingsPageProvider = SettingsPageProvider._();
+
+final class SettingsPageProvider
+    extends
+        $FunctionalProvider<
+          AsyncValue<SettingsPageView>,
+          AsyncValue<SettingsPageView>,
+          AsyncValue<SettingsPageView>
+        >
+    with $Provider<AsyncValue<SettingsPageView>> {
+  SettingsPageProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'settingsPageProvider',
+        isAutoDispose: true,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$settingsPageHash();
+
+  @$internal
+  @override
+  $ProviderElement<AsyncValue<SettingsPageView>> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  AsyncValue<SettingsPageView> create(Ref ref) {
+    return settingsPage(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(AsyncValue<SettingsPageView> value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<AsyncValue<SettingsPageView>>(value),
+    );
+  }
+}
+
+String _$settingsPageHash() => r'f132d212f9cd3a3dd6b5d1208ed661dc38321705';
+
 @ProviderFor(selectedWorkspaceLayout)
 final selectedWorkspaceLayoutProvider = SelectedWorkspaceLayoutProvider._();
 
@@ -298,7 +345,7 @@ final class SelectedWorkspaceControlsProvider
 }
 
 String _$selectedWorkspaceControlsHash() =>
-    r'645c053de6ffcb48451d07298c17d6e0d7547141';
+    r'd22be192c070c2b73e118436d9610a278f412d4f';
 
 @ProviderFor(startPage)
 final startPageProvider = StartPageProvider._();
@@ -394,7 +441,7 @@ final class StatusBarProvider
   }
 }
 
-String _$statusBarHash() => r'a95bf8df29e6004593e57f2fd947d05953c67bb2';
+String _$statusBarHash() => r'c5b1670386107c4292b1e357fdba80cbda80116b';
 
 @ProviderFor(agentTimeline)
 final agentTimelineProvider = AgentTimelineFamily._();
@@ -461,7 +508,7 @@ final class AgentTimelineProvider
   }
 }
 
-String _$agentTimelineHash() => r'5e5e17dc43139aa6e15a84418a49836770a55a4c';
+String _$agentTimelineHash() => r'993c4e9df7dc1b617e12c83f22590babeb5c3146';
 
 final class AgentTimelineFamily extends $Family
     with $FunctionalFamilyOverride<AsyncValue<TimelinePaneView?>, String> {
@@ -572,7 +619,7 @@ final class ConversationActivityProvider
 }
 
 String _$conversationActivityHash() =>
-    r'b66224605d48c252e2c8c50e200a87cc4d184ce1';
+    r'ac507d644ed5b33051beea725ad610d5d96b2522';
 
 /// 固定活动条的唯一输入。
 ///

@@ -241,6 +241,7 @@ pub struct BridgeThreadRuntimeSnapshot {
     pub thread_id: String,
     pub model_route: Option<BridgeThreadModelRouteSnapshot>,
     pub usage: BridgeThreadRuntimeUsage,
+    pub live_usage: Option<BridgeThreadRuntimeLiveUsage>,
     pub turn_completion_tokens: u64,
     pub turn_decode_millis: u64,
     pub todo: Option<BridgeTodoListSnapshot>,
@@ -251,6 +252,23 @@ pub struct BridgeThreadRuntimeSnapshot {
     pub mcp_health: Option<BridgeThreadMcpHealthSnapshot>,
     pub workflow: Option<BridgeWorkflowRuntimeSnapshot>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeThreadRuntimeUsageState {
+    Live,
+    Authoritative,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeThreadRuntimeLiveUsage {
+    pub turn_id: String,
+    pub attempt_id: String,
+    pub completion_tokens: Option<u64>,
+    pub decode_millis: Option<u64>,
+    pub latest_context_tokens: Option<u64>,
+    pub state: BridgeThreadRuntimeUsageState,
+    pub observation_sequence: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_driver/flutter_driver.dart';
 
+import 'driver_observation.dart';
 import 'flutter_driver_session.dart';
 
 /// Manual Driver journey for the provider context-compaction threshold UI.
@@ -37,17 +38,18 @@ Future<void> main(List<String> args) async {
       throw StateError('no provider present to exercise the threshold editor');
     }
     await recorder.capture('baseline', baseline);
-
-    // Navigate once into the settings providers tab; every later step works
-    // from the list the shell shows after a successful save.
-    await recorder.openProviders();
-
-    // 0. Explicit fixture provider (no preset id) must open, edit and save.
     final fixtureId = baselineIds.first;
     final fixtureModel = _models(_provider(baseline, fixtureId)).firstOrNull;
     if (fixtureModel == null) {
       throw StateError('initial fixture provider exposes no model');
     }
+
+    // Navigate once into the settings providers tab; every later step works
+    // from the list the shell shows after a successful save.
+    await recorder.openProviders();
+    await recorder.assertProviderListRedacted(fixtureId, fixtureModel);
+
+    // 0. Explicit fixture provider (no preset id) must open, edit and save.
     await recorder.openProviderEditor(fixtureId);
     await recorder.expandCustomAdvanced(0);
     await recorder.setCompactInput(fixtureId, fixtureModel, '18000');
@@ -209,6 +211,30 @@ class _Recorder {
     );
     await File('${output.path}/screenshot-$ordinal-$name.png')
         .writeAsBytes(await driver.screenshot());
+  }
+
+  Future<void> assertProviderListRedacted(
+    String providerId,
+    String fixtureModel,
+  ) async {
+    final snapshot = await readSnapshot();
+    verifyProviderListRedacted(
+      snapshot,
+      fixtureModelSlug: fixtureModel,
+      providerId: providerId,
+    );
+    final renderTree = await driver.renderTree();
+    final treeContainsFixtureSlug = renderTree.contains(fixtureModel);
+    final treeContainsPlusN = RegExp(r'\+\d+').hasMatch(renderTree);
+    if (treeContainsFixtureSlug || treeContainsPlusN) {
+      throw StateError(
+        'provider list rendered a model slug or +N label: '
+        'slug=$treeContainsFixtureSlug plusN=$treeContainsPlusN',
+      );
+    }
+    await File('${output.path}/provider-list-observation.json').writeAsString(
+      '${const JsonEncoder.withIndent('  ').convert({'providerId': providerId, 'fixtureModel': fixtureModel, 'snapshotListRedacted': true, 'detailModelObserved': true, 'renderedFixtureSlug': treeContainsFixtureSlug, 'renderedPlusN': treeContainsPlusN})}\n',
+    );
   }
 
   Future<void> writeSummary(Map<String, Object?> summary) => File(

@@ -87,15 +87,23 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         .where((provider) => provider.id == selectedId)
         .firstOrNull;
     final filtered = _filteredProviders();
-    final usageAsync = ref.watch(providerUsageControllerProvider);
-    final usageState = usageAsync.value;
+    final usageState = ref.watch(providerUsageControllerProvider);
+    // Provider usage is a separate canonical topic. The controller only owns
+    // refresh/loading/error UI state; its one-shot read must not become a
+    // second usage fact source that hides later topic events.
+    final canonicalUsages = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.providerUsages ?? const <ProviderUsageView>[],
+      ),
+    );
     final usageByProvider = {
-      for (final usage in usageState?.usages ?? const <ProviderUsageView>[])
-        usage.providerId: usage,
+      for (final usage in canonicalUsages) usage.providerId: usage,
     };
-    final loadingProviderIds = usageAsync.isLoading
-        ? widget.providers.map((provider) => provider.id).toSet()
-        : usageState?.loadingProviderIds ?? const <String>{};
+    final usageErrorsByProviderId = usageState.visibleErrorsByProviderId(
+      providerIds: widget.providers.map((provider) => provider.id),
+      canonicalUsages: canonicalUsages,
+    );
+    final loadingProviderIds = usageState.loadingProviderIds;
     if (_draft != null) {
       return Padding(
         padding: const EdgeInsets.all(20),
@@ -130,7 +138,9 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       usage: selected == null ? null : usageByProvider[selected.id],
       usageLoading:
           selected != null && loadingProviderIds.contains(selected.id),
-      usageError: selected == null ? null : usageState?.errorFor(selected.id),
+      usageError: selected == null
+          ? null
+          : usageErrorsByProviderId[selected.id],
       onBack: () => setState(() => _showDetails = false),
       onEdit: _startEdit,
       catalogRefreshing: selected != null && _refreshingCatalog == selected.id,
@@ -148,7 +158,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       filtering: _query.trim().isNotEmpty,
       usageByProvider: usageByProvider,
       loadingProviderIds: loadingProviderIds,
-      usageErrorsByProviderId: usageState?.errorsByProviderId ?? const {},
+      usageErrorsByProviderId: usageErrorsByProviderId,
       onQueryChanged: (value) => setState(() => _query = value),
       onAdd: _startAdd,
       onSelect: (provider) => setState(() {

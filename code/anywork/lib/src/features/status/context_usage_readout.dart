@@ -9,9 +9,9 @@ import '../../shared/studio_driver_keys.dart';
 import 'status_detail_popover.dart';
 
 class ContextUsageReadout extends StatefulWidget {
-  const ContextUsageReadout({required this.runtime, super.key});
+  const ContextUsageReadout({required this.projection, super.key});
 
-  final ThreadRuntimeView runtime;
+  final StudioContextProjection projection;
 
   @override
   State<ContextUsageReadout> createState() => _ContextUsageReadoutState();
@@ -23,10 +23,10 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
 
   @override
   Widget build(BuildContext context) {
-    final runtime = widget.runtime;
-    final hasKnownCapacity = runtime.contextWindow > 0;
+    final projection = widget.projection;
+    final hasKnownCapacity = projection.contextWindow > 0;
     final progress = hasKnownCapacity
-        ? (runtime.contextTokens / runtime.contextWindow).clamp(0.0, 1.0)
+        ? (projection.contextTokens / projection.contextWindow).clamp(0.0, 1.0)
         : 0.0;
     return KeyedSubtree(
       key: StudioDriverKeys.contextUsage(),
@@ -41,7 +41,7 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
         detailBuilder: (context) => KeyedSubtree(
           key: StudioDriverKeys.contextUsageDetail(),
           child: _ContextDetail(
-            runtime: runtime,
+            projection: projection,
             progress: progress,
             progressColor: _progressColor(context, progress),
           ),
@@ -93,40 +93,41 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
 
 class _ContextDetail extends StatelessWidget {
   const _ContextDetail({
-    required this.runtime,
+    required this.projection,
     required this.progress,
     required this.progressColor,
   });
 
-  final ThreadRuntimeView runtime;
+  final StudioContextProjection projection;
   final double progress;
   final Color progressColor;
 
   @override
   Widget build(BuildContext context) {
-    final hasKnownCapacity = runtime.contextWindow > 0;
+    final hasKnownCapacity = projection.contextWindow > 0;
     final percentLabel = _contextPercentLabel(
       progress: progress,
       hasKnownCapacity: hasKnownCapacity,
     );
     final capacityLabel = hasKnownCapacity
-        ? formatTokenCount(runtime.contextWindow)
+        ? formatTokenCount(projection.contextWindow)
         : _unknownCapacityPlaceholder;
-    final cache = runtime.cacheUsage;
+    final cache = projection.cacheUsage;
     final cacheRateLabel = cache.hitRate == null
         ? '-'
         : '${(cache.hitRate! * 100).round()}%';
     final cacheRateValue = cache.hasIncompleteUsage
         ? '$cacheRateLabel · ${context.l10n.statusCacheReportedOnlyLabel}'
         : cacheRateLabel;
-    final cost = runtime.estimatedCosts.isEmpty
-        ? runtime.costLabel
-        : formatRuntimeCosts(runtime.estimatedCosts);
+    final cost = projection.estimatedCosts.isEmpty
+        ? projection.costLabel
+        : formatRuntimeCosts(projection.estimatedCosts);
     final costWithPricingStatus = cost.isEmpty
         ? ''
         : [
             cost,
-            if (runtime.hasUnpricedUsage) context.l10n.statusUnpricedUsageLabel,
+            if (projection.hasUnpricedUsage)
+              context.l10n.statusUnpricedUsageLabel,
           ].join(' · ');
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -164,13 +165,13 @@ class _ContextDetail extends StatelessWidget {
               StatusDetailRow(
                 label: context.l10n.statusContextLabel,
                 value:
-                    '${formatTokenCount(runtime.contextTokens)} / $capacityLabel',
+                    '${formatTokenCount(projection.contextTokens)} / $capacityLabel',
               ),
               StatusDetailRow(
                 label: context.l10n.statusTotalTokensLabel,
-                value: runtime.hasIncompleteUsage
-                    ? '${formatTokenCount(runtime.totalTokens)} · ${context.l10n.statusReportedUsageOnly}'
-                    : formatTokenCount(runtime.totalTokens),
+                value: projection.hasIncompleteUsage
+                    ? '${formatTokenCount(projection.totalTokens)} · ${context.l10n.statusReportedUsageOnly}'
+                    : formatTokenCount(projection.totalTokens),
               ),
               StatusDetailRow(
                 label: context.l10n.statusCacheLabel,
@@ -186,20 +187,20 @@ class _ContextDetail extends StatelessWidget {
                   label: context.l10n.statusCacheMissTokensLabel,
                   value: formatTokenCount(cache.missTokens),
                 ),
-              if (runtime.cacheWriteTokens > 0)
+              if (projection.cacheWriteTokens > 0)
                 StatusDetailRow(
                   label: context.l10n.statusCacheWriteTokensLabel,
-                  value: formatTokenCount(runtime.cacheWriteTokens),
+                  value: formatTokenCount(projection.cacheWriteTokens),
                 ),
-              if (runtime.reasoningTokens > 0)
+              if (projection.reasoningTokens > 0)
                 StatusDetailRow(
                   label: context.l10n.statusReasoningTokensLabel,
-                  value: formatTokenCount(runtime.reasoningTokens),
+                  value: formatTokenCount(projection.reasoningTokens),
                 ),
-              if (runtime.hasUsage)
+              if (projection.hasUsage)
                 StatusDetailRow(
                   label: context.l10n.statusInferenceCountLabel,
-                  value: _formatCount(runtime.inferenceCount),
+                  value: _formatCount(projection.inferenceCount),
                 ),
               StatusDetailRow(
                 label: context.l10n.statusCost,
@@ -207,15 +208,15 @@ class _ContextDetail extends StatelessWidget {
                     ? '-'
                     : costWithPricingStatus,
               ),
-              if (runtime.estimatedCacheSavings.isNotEmpty)
+              if (projection.estimatedCacheSavings.isNotEmpty)
                 StatusDetailRow(
                   label: context.l10n.statusCacheSavingsLabel,
-                  value: formatRuntimeCosts(runtime.estimatedCacheSavings),
+                  value: formatRuntimeCosts(projection.estimatedCacheSavings),
                 ),
-              if (runtime.model.isNotEmpty)
+              if (projection.model.isNotEmpty)
                 StatusDetailRow(
                   label: context.l10n.statusModelLabel,
-                  value: runtime.model,
+                  value: projection.model,
                 ),
             ],
           ),

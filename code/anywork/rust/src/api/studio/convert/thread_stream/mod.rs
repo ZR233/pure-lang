@@ -9,12 +9,12 @@ use pl_protocol::{
     BudgetLimitKind, BudgetLimitSnapshot, McpAvailabilityDescriptor, McpHealthSnapshot,
     McpServerDescriptor, PromptPrefixChangedReason, RuntimeCostAmount, Thread, ThreadAgentState,
     ThreadAttachment, ThreadContentLifecycle, ThreadInferenceState, ThreadItem, ThreadItemState,
-    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
-    ThreadSnapshot, ThreadStatus, ThreadSubscriptionUpdate, ThreadTextChannel,
-    ThreadToolFailureKind, ThreadToolOutput, ThreadToolState, TodoItem, TodoListSnapshot,
-    TodoStatus, TokenUsageSnapshot, Turn, TurnCancellationCause, TurnCompletion, TurnPhase,
-    TurnRolloverOutcome, TurnState, WorkflowRunLifecycle, WorkflowRuntimeRunSnapshot,
-    WorkflowRuntimeSnapshot,
+    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeLiveUsage, ThreadRuntimeSnapshot,
+    ThreadRuntimeUsage, ThreadRuntimeUsageState, ThreadSnapshot, ThreadStatus,
+    ThreadSubscriptionUpdate, ThreadTextChannel, ThreadToolFailureKind, ThreadToolOutput,
+    ThreadToolState, TodoItem, TodoListSnapshot, TodoStatus, TokenUsageSnapshot, Turn,
+    TurnCancellationCause, TurnCompletion, TurnPhase, TurnRolloverOutcome, TurnState,
+    WorkflowRunLifecycle, WorkflowRuntimeRunSnapshot, WorkflowRuntimeSnapshot,
 };
 
 use crate::api::studio::types::*;
@@ -528,6 +528,7 @@ pub(crate) fn runtime_snapshot(value: ThreadRuntimeSnapshot) -> BridgeThreadRunt
                 unavailable_reason: route.unavailable_reason,
             }),
         usage: runtime_usage(value.usage),
+        live_usage: value.live_usage.map(runtime_live_usage),
         turn_completion_tokens: value.turn_completion_tokens,
         turn_decode_millis: value.turn_decode_millis,
         todo: value.todo.map(todo),
@@ -538,6 +539,21 @@ pub(crate) fn runtime_snapshot(value: ThreadRuntimeSnapshot) -> BridgeThreadRunt
         mcp_health: value.mcp_health.map(mcp_health),
         workflow: value.workflow.map(workflow_runtime_snapshot),
         updated_at: value.updated_at,
+    }
+}
+
+fn runtime_live_usage(value: ThreadRuntimeLiveUsage) -> BridgeThreadRuntimeLiveUsage {
+    BridgeThreadRuntimeLiveUsage {
+        turn_id: value.turn_id,
+        attempt_id: value.attempt_id,
+        completion_tokens: value.completion_tokens,
+        decode_millis: value.decode_millis,
+        latest_context_tokens: value.latest_context_tokens,
+        state: match value.state {
+            ThreadRuntimeUsageState::Live => BridgeThreadRuntimeUsageState::Live,
+            ThreadRuntimeUsageState::Authoritative => BridgeThreadRuntimeUsageState::Authoritative,
+        },
+        observation_sequence: value.observation_sequence,
     }
 }
 

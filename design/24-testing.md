@@ -331,3 +331,41 @@ Studio 人工场景另观察每实例启动一次、并发一家失败另一家�
 加载完成；提交使用唯一观察编号，验收同时核对已受理输入身份、对应轮次完成状态和新答复。
 待提交状态或旧历史答复不得证明重启后继续成功。覆盖批准后的非初始阶段、连续压缩、正常
 关闭重启、独立根与父子兄弟代理隔离，以及模型基础指令更新和辅助调用身份关联。
+
+## 24.4 实时新鲜度矩阵
+
+实时验收必须维护一张覆盖 Thread runtime、turn/activity/storage、timeline、composer、产品
+settings、provider usage/model performance/session costs、MCP/LSP/Skills/Profiles、persistence
+queue、updater、recovery 与 lifecycle 的矩阵。每行记录可见字段、生产 owner、事件/快照、Dart
+reducer/store、revision/watermark、selector/projection、作用域与 lease、隐藏后释放及重进基线、
+lagged/失败/重连行为和未支持能力；无缺陷的行也保留静态证据，不能因已有类名推断实时正确。
+
+实施前的基线矩阵如下；代码审计和验收在对应行补充实际事件、版本与证据，不得省略无缺陷领域：
+
+| 领域 | 可见字段/页面 | 生产触发与事件 | Dart reducer/store | selector/projection | lease/可见性 | 验收判据 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Thread runtime | context、total/input/output/cache/reasoning tokens、context window、throughput、model、workflow/run | runtime snapshot/update、live usage | Thread ordered reducer | runtime/status/context/throughput | selected Thread generation | paced stream 同页多次变化 |
+| Turn/activity/storage | 阶段、活动摘要、保存水位、失败/取消 | turn/activity/storage notifications | 同一 ordered reducer | turn/activity/storage | Thread lease | 阶段变化和保存故障即时可见 |
+| Timeline | 流式正文、分页、正文补齐、图片/工具预览 | ChatWindow event | window reducer | timeline | current window | 不切页、不重读、不重复 |
+| Composer | 文本、attachments、preview、pending/failure | local command + admission result | composer canonical state | composer | current/new project | paste/local/remove/submit race |
+| Product settings | providers/routes/catalog/settings | typed topic baseline/event + command response | product reducer | settings/provider | shell/settings tab | 保存后同页 canonical 更新 |
+| Usage/statistics/costs | quota、model performance、session costs | scoped product topics | scoped reducers | usage/statistics/costs | visible tab/root lease | 隐藏释放、重进基线 |
+| Resources | MCP/LSP/Skills/Profiles/updater/persistence/recovery | scoped topic/command | resource reducers | resource projections | current page/shell | 连接、失败、恢复即时可见 |
+| Lifecycle | startup/shutdown/subscription diagnostics | startup/exit progress | lifecycle coordinator | startup/exit views | process owner | cancel/release/no stale frame |
+
+每个领域至少要有一个真实事件到同页 UI 变化的判据，记录变化前后最小脱敏 snapshot、event
+revision、lease/generation 及失败恢复结果。不得用延迟等待、切页、重进或前端轮询替代事件证据。
+Thread runtime 的 paced stream 应在同一 attempt 完成前观察多次 live 变化并在完成后收敛
+authoritative；无法提供 partial token 的能力显示 unknown，不得显示以字符数或字节数计算的假值。
+
+Driver snapshot 只暴露必要 typed 诊断，不暴露图片 bytes、凭据、raw payload 或内部数据库。
+粘贴回归使用 Driver-only `ClipboardImageReader` override：先断言当前 composer 出现准入 draft
+metadata，再断言同一 draft 的 preview-ready 更新，覆盖删除、失败、提交和并发切换。供应商列表
+断言不含 fixture model slug、模型胶囊或 `+N`，同时详情/编辑/选择器仍保留模型数量和能力。
+topic 弹层保持打开时须更新，隐藏后 lease 归零，重进先取新基线并拒绝旧 frame；stream lagged、
+旧 generation、topic closed、应用退出和 provider/preview 失败都必须验证 last-valid、typed
+failure 或 unknown 及资源释放。
+
+本仓库没有既有 Flutter `test/` widget 门禁，实时 UI 优先扩展现有 `test_driver`、模拟供应商和
+`manual-gui`；不为本次审计擅自建立独立测试体系。真实系统剪贴板 PNG 另在当前宿主人工验收并
+记录截图、snapshot、日志和进程回收，模拟通过不外推真实供应商兼容或跨平台通过。

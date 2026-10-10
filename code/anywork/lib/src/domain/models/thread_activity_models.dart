@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show listEquals;
+
 /// 当前执行活动的 typed 事实（后端投影的 Dart 映射）。
 ///
 /// 与 Timeline 窗口无关：活动只描述“此刻在做什么”，其身份、版本、摘要与活跃工具
@@ -66,6 +68,32 @@ class ThreadActivityToolEntry {
     final trimmed = summary.trim();
     return trimmed.isEmpty ? name : trimmed;
   }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is ThreadActivityToolEntry &&
+            callId == other.callId &&
+            taskId == other.taskId &&
+            name == other.name &&
+            summary == other.summary &&
+            arguments == other.arguments &&
+            state == other.state &&
+            ordinal == other.ordinal &&
+            startedAt == other.startedAt;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    callId,
+    taskId,
+    name,
+    summary,
+    arguments,
+    state,
+    ordinal,
+    startedAt,
+  );
 }
 
 class ThreadActivityTools {
@@ -87,6 +115,20 @@ class ThreadActivityTools {
   final ThreadActivityToolEntry? latestStarted;
 
   static const empty = ThreadActivityTools();
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is ThreadActivityTools &&
+            count == other.count &&
+            background == other.background &&
+            listEquals(active, other.active) &&
+            latestStarted == other.latestStarted;
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(count, background, Object.hashAll(active), latestStarted);
 }
 
 /// 当前执行活动的小型 typed 摘要；不携带正文。
@@ -119,6 +161,36 @@ class ThreadActivityView {
   final String summary;
   final bool summaryTruncated;
   final ThreadActivityTools tools;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is ThreadActivityView &&
+            threadId == other.threadId &&
+            identity == other.identity &&
+            revision == other.revision &&
+            turnId == other.turnId &&
+            inputId == other.inputId &&
+            attemptId == other.attemptId &&
+            kind == other.kind &&
+            summary == other.summary &&
+            summaryTruncated == other.summaryTruncated &&
+            tools == other.tools;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    threadId,
+    identity,
+    revision,
+    turnId,
+    inputId,
+    attemptId,
+    kind,
+    summary,
+    summaryTruncated,
+    tools,
+  );
 }
 
 /// 后端 typed 存储故障类别；它不是从错误文本解析推断出来的。
@@ -175,6 +247,34 @@ class ThreadStorageStateView {
   final String? lastError;
 
   bool get hasFault => fault != null;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is ThreadStorageStateView &&
+            fault == other.fault &&
+            faultGeneration == other.faultGeneration &&
+            acceptedSequence == other.acceptedSequence &&
+            durableSequence == other.durableSequence &&
+            execution == other.execution &&
+            pressurePaused == other.pressurePaused &&
+            resumeRequired == other.resumeRequired &&
+            canResume == other.canResume &&
+            lastError == other.lastError;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    fault,
+    faultGeneration,
+    acceptedSequence,
+    durableSequence,
+    execution,
+    pressurePaused,
+    resumeRequired,
+    canResume,
+    lastError,
+  );
 
   /// 保存被明确阻塞（有故障、处于压力暂停、已暂停执行，或硬故障仍闩住准入）。
   ///

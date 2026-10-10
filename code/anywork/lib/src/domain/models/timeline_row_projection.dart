@@ -117,6 +117,36 @@ class TimelineRow {
   final TimelineAgentEvent? agentEvent;
   final bool isRolledBack;
   final bool saved;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is TimelineRow &&
+            id == other.id &&
+            threadId == other.threadId &&
+            type == other.type &&
+            createdAt == other.createdAt &&
+            order == other.order &&
+            sequence == other.sequence &&
+            renderVersion == other.renderVersion &&
+            turnId == other.turnId &&
+            isRolledBack == other.isRolledBack &&
+            saved == other.saved;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    threadId,
+    type,
+    createdAt,
+    order,
+    sequence,
+    renderVersion,
+    turnId,
+    isRolledBack,
+    saved,
+  );
 }
 
 List<TimelineRow> timelineRowsFromThreadItems(

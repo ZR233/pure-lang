@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show listEquals;
+
 import 'studio_enums.dart';
 
 enum AttachmentModalityView { image, video, file }
@@ -79,6 +81,32 @@ class AttachmentDraftView {
         height: height,
         previewBytes: previewBytes ?? this.previewBytes,
       );
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is AttachmentDraftView &&
+            id == other.id &&
+            modality == other.modality &&
+            mediaType == other.mediaType &&
+            filename == other.filename &&
+            byteSize == other.byteSize &&
+            width == other.width &&
+            height == other.height &&
+            listEquals(previewBytes, other.previewBytes);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    modality,
+    mediaType,
+    filename,
+    byteSize,
+    width,
+    height,
+    previewBytes == null ? null : Object.hashAll(previewBytes!),
+  );
 }
 
 class StudioPromptInput {

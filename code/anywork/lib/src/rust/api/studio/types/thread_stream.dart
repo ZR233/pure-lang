@@ -11,7 +11,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'thread_activity.dart';
 part 'thread_stream.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// FRB mirror of the canonical prompt cache effective-usage summary.
 class BridgeCacheUsageSummary {
@@ -479,10 +479,54 @@ class BridgeThreadNotificationEnvelope {
 
 enum BridgeThreadRuntimeAvailability { active, inactive }
 
+class BridgeThreadRuntimeLiveUsage {
+  final String turnId;
+  final String attemptId;
+  final BigInt? completionTokens;
+  final BigInt? decodeMillis;
+  final BigInt? latestContextTokens;
+  final BridgeThreadRuntimeUsageState state;
+  final BigInt observationSequence;
+
+  const BridgeThreadRuntimeLiveUsage({
+    required this.turnId,
+    required this.attemptId,
+    this.completionTokens,
+    this.decodeMillis,
+    this.latestContextTokens,
+    required this.state,
+    required this.observationSequence,
+  });
+
+  @override
+  int get hashCode =>
+      turnId.hashCode ^
+      attemptId.hashCode ^
+      completionTokens.hashCode ^
+      decodeMillis.hashCode ^
+      latestContextTokens.hashCode ^
+      state.hashCode ^
+      observationSequence.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeThreadRuntimeLiveUsage &&
+          runtimeType == other.runtimeType &&
+          turnId == other.turnId &&
+          attemptId == other.attemptId &&
+          completionTokens == other.completionTokens &&
+          decodeMillis == other.decodeMillis &&
+          latestContextTokens == other.latestContextTokens &&
+          state == other.state &&
+          observationSequence == other.observationSequence;
+}
+
 class BridgeThreadRuntimeSnapshot {
   final String threadId;
   final BridgeThreadModelRouteSnapshot? modelRoute;
   final BridgeThreadRuntimeUsage usage;
+  final BridgeThreadRuntimeLiveUsage? liveUsage;
   final BigInt turnCompletionTokens;
   final BigInt turnDecodeMillis;
   final BridgeTodoListSnapshot? todo;
@@ -498,6 +542,7 @@ class BridgeThreadRuntimeSnapshot {
     required this.threadId,
     this.modelRoute,
     required this.usage,
+    this.liveUsage,
     required this.turnCompletionTokens,
     required this.turnDecodeMillis,
     this.todo,
@@ -515,6 +560,7 @@ class BridgeThreadRuntimeSnapshot {
       threadId.hashCode ^
       modelRoute.hashCode ^
       usage.hashCode ^
+      liveUsage.hashCode ^
       turnCompletionTokens.hashCode ^
       turnDecodeMillis.hashCode ^
       todo.hashCode ^
@@ -534,6 +580,7 @@ class BridgeThreadRuntimeSnapshot {
           threadId == other.threadId &&
           modelRoute == other.modelRoute &&
           usage == other.usage &&
+          liveUsage == other.liveUsage &&
           turnCompletionTokens == other.turnCompletionTokens &&
           turnDecodeMillis == other.turnDecodeMillis &&
           todo == other.todo &&
@@ -636,6 +683,8 @@ class BridgeThreadRuntimeUsage {
           prefixChangedReason == other.prefixChangedReason &&
           updatedAt == other.updatedAt;
 }
+
+enum BridgeThreadRuntimeUsageState { live, authoritative }
 
 class BridgeThreadSnapshot {
   final int schemaVersion;

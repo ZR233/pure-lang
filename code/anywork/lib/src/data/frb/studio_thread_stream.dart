@@ -868,6 +868,20 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
             available: value.modelRoute!.available,
             unavailableReason: value.modelRoute!.unavailableReason,
           ),
+    liveUsage: value.liveUsage == null
+        ? null
+        : ThreadRuntimeLiveUsageView(
+            turnId: value.liveUsage!.turnId,
+            attemptId: value.liveUsage!.attemptId,
+            completionTokens: value.liveUsage!.completionTokens?.toInt(),
+            decodeMillis: value.liveUsage!.decodeMillis?.toInt(),
+            latestContextTokens: value.liveUsage!.latestContextTokens?.toInt(),
+            state:
+                value.liveUsage!.state == frb.BridgeThreadRuntimeUsageState.live
+                ? ThreadRuntimeUsageState.live
+                : ThreadRuntimeUsageState.authoritative,
+            observationSequence: value.liveUsage!.observationSequence.toInt(),
+          ),
     contextTokens: usage.latestContextTokens.toInt(),
     contextWindow: usage.contextWindow?.toInt() ?? 0,
     totalTokens: usage.totalTokens.toInt(),

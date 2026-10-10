@@ -1203,6 +1203,18 @@ class TimelineAnchor {
   final String itemId;
   final double offset;
   final TimelineReadingIntent readingIntent;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is TimelineAnchor &&
+            itemId == other.itemId &&
+            offset == other.offset &&
+            readingIntent == other.readingIntent;
+  }
+
+  @override
+  int get hashCode => Object.hash(itemId, offset, readingIntent);
 }
 
 /// Reading-window ownership is independent from subscription ownership.
@@ -1264,6 +1276,60 @@ class ThreadHistoryWindow {
 
   /// 数据源明确无法解析该身份（真正缺席）的条目 ID；这些条目不再假装可回源。
   final Set<String> unavailableItemIds;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is ThreadHistoryWindow &&
+            hasOlder == other.hasOlder &&
+            hasNewer == other.hasNewer &&
+            canExtendLatest == other.canExtendLatest &&
+            olderCursor == other.olderCursor &&
+            newerCursor == other.newerCursor &&
+            isLoading == other.isLoading &&
+            direction == other.direction &&
+            epoch == other.epoch &&
+            errorMessage == other.errorMessage &&
+            newerError == other.newerError &&
+            detached == other.detached &&
+            anchor == other.anchor &&
+            databaseId == other.databaseId &&
+            appliedWriteSequence == other.appliedWriteSequence &&
+            _sameStringSet(previewedItemIds, other.previewedItemIds) &&
+            _sameStringSet(loadingItemIds, other.loadingItemIds) &&
+            _sameStringMap(itemBodyErrors, other.itemBodyErrors) &&
+            _sameStringSet(pendingItemBodyIds, other.pendingItemBodyIds) &&
+            _sameStringSet(unavailableItemIds, other.unavailableItemIds);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    hasOlder,
+    hasNewer,
+    canExtendLatest,
+    olderCursor,
+    newerCursor,
+    isLoading,
+    direction,
+    epoch,
+    errorMessage,
+    newerError,
+    detached,
+    anchor,
+    databaseId,
+    appliedWriteSequence,
+    Object.hashAll(previewedItemIds.toList()..sort()),
+    Object.hashAll(loadingItemIds.toList()..sort()),
+    Object.hashAll(
+      itemBodyErrors.entries
+          .map((entry) => Object.hash(entry.key, entry.value))
+          .toList()
+        ..sort(),
+    ),
+    Object.hashAll(pendingItemBodyIds.toList()..sort()),
+    Object.hashAll(unavailableItemIds.toList()..sort()),
+  );
+
   ThreadHistoryWindow copyWith({
     bool? hasOlder,
     bool? hasNewer,
@@ -1315,6 +1381,18 @@ class ThreadHistoryWindow {
     pendingItemBodyIds: pendingItemBodyIds ?? this.pendingItemBodyIds,
     unavailableItemIds: unavailableItemIds ?? this.unavailableItemIds,
   );
+}
+
+bool _sameStringSet(Set<String> left, Set<String> right) {
+  return left.length == right.length && left.containsAll(right);
+}
+
+bool _sameStringMap(Map<String, String> left, Map<String, String> right) {
+  if (left.length != right.length) return false;
+  for (final entry in left.entries) {
+    if (right[entry.key] != entry.value) return false;
+  }
+  return true;
 }
 
 const _workspaceUnset = Object();

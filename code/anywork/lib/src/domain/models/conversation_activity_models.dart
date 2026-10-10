@@ -59,6 +59,18 @@ class ConversationActivityDetail {
   final String body;
 
   bool get hasTitle => title?.trim().isNotEmpty ?? false;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is ConversationActivityDetail &&
+            id == other.id &&
+            title == other.title &&
+            body == other.body;
+  }
+
+  @override
+  int get hashCode => Object.hash(id, title, body);
 }
 
 /// 固定活动条的完整输入。
@@ -120,6 +132,49 @@ class ConversationActivityView {
       kind == ConversationActivityKind.awaitingApproval ||
       kind == ConversationActivityKind.awaitingInput ||
       kind == ConversationActivityKind.stopping;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is ConversationActivityView &&
+            identity == other.identity &&
+            kind == other.kind &&
+            summary == other.summary &&
+            activeToolCount == other.activeToolCount &&
+            backgroundToolCount == other.backgroundToolCount &&
+            errorMessage == other.errorMessage &&
+            details.length == other.details.length &&
+            _sameDetails(details, other.details) &&
+            detailsLoading == other.detailsLoading &&
+            detailsError == other.detailsError &&
+            expandable == other.expandable &&
+            storage == other.storage;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    identity,
+    kind,
+    summary,
+    activeToolCount,
+    backgroundToolCount,
+    errorMessage,
+    Object.hashAll(details),
+    detailsLoading,
+    detailsError,
+    expandable,
+    storage,
+  );
+}
+
+bool _sameDetails(
+  List<ConversationActivityDetail> left,
+  List<ConversationActivityDetail> right,
+) {
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
 }
 
 /// 从后端 typed 活动、typed 存储状态与待处理交互合成固定活动条输入。

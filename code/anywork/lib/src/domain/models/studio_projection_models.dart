@@ -11,6 +11,7 @@ import 'thread_directory_models.dart';
 import 'settings_models.dart';
 import 'studio_enums.dart';
 import 'studio_state.dart';
+import 'studio_state_snapshots.dart';
 
 part 'studio_projection_models.freezed.dart';
 
@@ -115,6 +116,60 @@ abstract class HeaderView with _$HeaderView {
       runtime: state.runtime,
       sessionCost: state.selectedSessionCost,
       pendingInteractions: state.pendingInteractions,
+    );
+  }
+}
+
+@freezed
+abstract class SettingsPageView with _$SettingsPageView {
+  const factory SettingsPageView({
+    required List<ProviderSettingsView> providers,
+    required ProviderCatalogView providerCatalog,
+    required String? defaultProviderId,
+    required List<ModeModelRouteView> modeModelRoutes,
+    required List<RoleSettingsView> roles,
+    required InstructionsSettingsView instructions,
+    required SkillsSettingsView skills,
+    required List<String> activeSkills,
+    required List<String> catalogSkills,
+    required List<SkillSummaryView> catalogSkillSummaries,
+    required int catalogRevision,
+    required String? selectedProjectId,
+    required List<McpServerSettingsView> mcpServers,
+    required McpStateSnapshot mcpState,
+    required LspStateSnapshot lspState,
+    required PermissionMode permissionMode,
+    required GeneralSettingsView general,
+    required WebSearchSettingsView webSearch,
+    required DeepSeekWebSearchSettingsView deepSeekWebSearch,
+    required bool runtimeBusy,
+  }) = _SettingsPageView;
+
+  factory SettingsPageView.fromState(StudioState state) {
+    return SettingsPageView(
+      providers: state.providers,
+      providerCatalog: state.providerCatalog,
+      defaultProviderId: state.defaultProviderId,
+      modeModelRoutes: state.modeModelRoutes,
+      roles: state.roles,
+      instructions: state.instructions,
+      skills: state.skills,
+      activeSkills: state.runtime.activeSkills,
+      catalogSkills:
+          state.skillsByProject[state.selectedProjectId]?.skills ?? const [],
+      catalogSkillSummaries:
+          state.skillsByProject[state.selectedProjectId]?.summaries ?? const [],
+      catalogRevision:
+          state.skillsByProject[state.selectedProjectId]?.catalogRevision ?? 0,
+      selectedProjectId: state.selectedProjectId,
+      mcpServers: state.mcpServers,
+      mcpState: state.mcpState,
+      lspState: state.lspState,
+      permissionMode: state.permissionMode,
+      general: state.general,
+      webSearch: state.webSearch,
+      deepSeekWebSearch: state.deepSeekWebSearch,
+      runtimeBusy: state.isBusy || state.runtime.hasActiveWorkflow,
     );
   }
 }

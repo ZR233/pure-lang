@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -17,13 +18,86 @@ typedef WorkspaceLayoutView = ({
   PlanConfirmationView? planConfirmation,
 });
 
-typedef TimelinePaneView = ({
-  List<TimelineRow> rows,
-  StudioTurnView? turn,
-  bool isLoading,
-  bool hasOlderHistory,
-  bool isLoadingOlderHistory,
-  ThreadHistoryWindow history,
+class TimelinePaneView {
+  const TimelinePaneView({
+    required this.rows,
+    required this.turn,
+    required this.isLoading,
+    required this.hasOlderHistory,
+    required this.isLoadingOlderHistory,
+    required this.history,
+  });
+
+  final List<TimelineRow> rows;
+  final StudioTurnView? turn;
+  final bool isLoading;
+  final bool hasOlderHistory;
+  final bool isLoadingOlderHistory;
+  final ThreadHistoryWindow history;
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is TimelinePaneView &&
+            listEquals(rows, other.rows) &&
+            turn == other.turn &&
+            isLoading == other.isLoading &&
+            hasOlderHistory == other.hasOlderHistory &&
+            isLoadingOlderHistory == other.isLoadingOlderHistory &&
+            history == other.history;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    Object.hashAll(rows),
+    turn,
+    isLoading,
+    hasOlderHistory,
+    isLoadingOlderHistory,
+    history,
+  );
+}
+
+typedef StartPageView = StudioStartPageProjection;
+
+/// Fine-grained projections all read the same AsyncNotifier state. None of
+/// these providers opens a second event stream or keeps a durable copy.
+final runtimeProjectionProvider = Provider<AsyncValue<StudioRuntimeProjection>>(
+  (ref) {
+    return ref.watch(
+      studioControllerProvider.select(
+        (state) => state.whenData(StudioRuntimeProjection.fromState),
+      ),
+    );
+  },
+);
+
+final contextUsageProjectionProvider =
+    Provider<AsyncValue<StudioContextProjection>>((ref) {
+      return ref.watch(
+        studioControllerProvider.select(
+          (state) => state.whenData(StudioContextProjection.fromState),
+        ),
+      );
+    });
+
+final throughputProjectionProvider =
+    Provider<AsyncValue<StudioThroughputProjection>>((ref) {
+      return ref.watch(
+        studioControllerProvider.select(
+          (state) => state.whenData(StudioThroughputProjection.fromState),
+        ),
+      );
+    });
+
+final statusProjectionProvider = Provider<AsyncValue<StudioStatusProjection>>((
+  ref,
+) {
+  return ref.watch(
+    studioControllerProvider.select(
+      (state) => state.whenData(StudioStatusProjection.fromState),
+    ),
+  );
 });
 
 /// Immutable start-session projection.
@@ -46,6 +120,7 @@ final class StartSessionViewModel {
     required this.modeModelRoutes,
     required this.modeRequiresFunctionCalling,
     required this.modelRouteMutationPending,
+    required this.targetDiagnostic,
   });
 
   factory StartSessionViewModel.fromState(StudioState state) {
@@ -81,6 +156,7 @@ final class StartSessionViewModel {
       modelRouteMutationPending:
           state.mutationPending('new-thread-route:model:${mode.id}') ||
           state.mutationPending('new-thread-route:effort:${mode.id}'),
+      targetDiagnostic: state.composerDiagnostic(projectId, null),
     );
   }
 
@@ -95,6 +171,143 @@ final class StartSessionViewModel {
   final List<ModeModelRouteView> modeModelRoutes;
   final bool modeRequiresFunctionCalling;
   final bool modelRouteMutationPending;
+  final ComposerTargetDiagnostic? targetDiagnostic;
+}
+
+final settingsProjectionProvider =
+    Provider<AsyncValue<StudioSettingsProjection>>((ref) {
+      return ref.watch(
+        studioControllerProvider.select(
+          (state) => state.whenData(StudioSettingsProjection.fromState),
+        ),
+      );
+    });
+
+final providerUsageProjectionProvider =
+    Provider<AsyncValue<StudioProviderUsageProjection>>((ref) {
+      return ref.watch(
+        studioControllerProvider.select(
+          (state) => state.whenData(StudioProviderUsageProjection.fromState),
+        ),
+      );
+    });
+
+final composerDiagnosticsProjectionProvider =
+    Provider<AsyncValue<StudioComposerDiagnosticsProjection>>((ref) {
+      return ref.watch(
+        studioControllerProvider.select(
+          (state) =>
+              state.whenData(StudioComposerDiagnosticsProjection.fromState),
+        ),
+      );
+    });
+
+final composerProjectionProvider =
+    Provider<AsyncValue<StudioComposerProjection?>>((ref) {
+      return ref.watch(
+        studioControllerProvider.select(
+          (state) => state.whenData((value) {
+            return StudioComposerProjection.fromState(value);
+          }),
+        ),
+      );
+    });
+
+final interactionProjectionProvider =
+    Provider<AsyncValue<StudioInteractionProjection>>((ref) {
+      return ref.watch(
+        studioControllerProvider.select(
+          (state) => state.whenData(StudioInteractionProjection.fromState),
+        ),
+      );
+    });
+
+final storageProjectionProvider = Provider<AsyncValue<StudioStorageProjection>>(
+  (ref) {
+    return ref.watch(
+      studioControllerProvider.select(
+        (state) => state.whenData(StudioStorageProjection.fromState),
+      ),
+    );
+  },
+);
+
+final activityProjectionProvider =
+    Provider.family<AsyncValue<StudioActivityProjection?>, String>((
+      ref,
+      threadId,
+    ) {
+      return ref.watch(
+        studioControllerProvider.select(
+          (asyncState) => asyncState.whenData((studioState) {
+            final view = _conversationActivityForState(studioState, threadId);
+            return view == null
+                ? null
+                : StudioActivityProjection(threadId: threadId, view: view);
+          }),
+        ),
+      );
+    });
+
+final timelineProjectionProvider =
+    Provider.family<AsyncValue<TimelinePaneView?>, String>((ref, threadId) {
+      return ref.watch(
+        studioControllerProvider.select(
+          (asyncState) => asyncState.whenData(
+            (studioState) => _timelinePaneForState(studioState, threadId),
+          ),
+        ),
+      );
+    });
+
+ConversationActivityView? _conversationActivityForState(
+  StudioState studioState,
+  String threadId,
+) {
+  if (studioState.selectedThreadId != threadId) return null;
+  final workspace = studioState.workspacesByThread[threadId];
+  if (workspace == null) return null;
+  final ui =
+      studioState.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
+  final interaction = studioState.activeInteraction;
+  final scoped = interaction != null && interaction.threadId == threadId
+      ? interaction
+      : null;
+  final activity = workspace.activity;
+  final detailState = ui.activityDetail;
+  final matches = activity != null && detailState.matches(activity.identity);
+  return projectConversationActivity(
+    activity: activity,
+    storage: workspace.storage,
+    interaction: scoped,
+    detail: matches ? detailState.detail : null,
+    detailsLoading: matches && detailState.loading,
+    detailsError: matches ? detailState.error : null,
+  );
+}
+
+TimelinePaneView? _timelinePaneForState(
+  StudioState studioState,
+  String threadId,
+) {
+  if (studioState.selectedThreadId != threadId) return null;
+  final workspace = studioState.workspacesByThread[threadId];
+  if (workspace == null) return null;
+  final history = studioState.workspaceUiByThread[threadId]?.history;
+  return TimelinePaneView(
+    rows: studioState.selectedTimelineRows,
+    turn: workspace.activeTurn,
+    isLoading:
+        studioState.selectedWorkspaceUi.syncState ==
+            AgentWorkspaceSyncState.loading ||
+        studioState.selectedWorkspaceUi.syncState ==
+            AgentWorkspaceSyncState.reconnecting,
+    hasOlderHistory: history?.hasOlder ?? false,
+    isLoadingOlderHistory:
+        history?.isLoading == true &&
+        history?.direction == TimelineDirection.older,
+    history: history ?? const ThreadHistoryWindow(),
+  );
 }
 
 @riverpod
@@ -134,6 +347,15 @@ AsyncValue<HeaderView> studioHeader(Ref ref) {
 }
 
 @riverpod
+AsyncValue<SettingsPageView> settingsPage(Ref ref) {
+  return ref.watch(
+    settingsProjectionProvider.select(
+      (state) => state.whenData((projection) => projection.view),
+    ),
+  );
+}
+
+@riverpod
 AsyncValue<WorkspaceLayoutView?> selectedWorkspaceLayout(Ref ref) {
   return ref.watch(
     studioControllerProvider.select(
@@ -159,13 +381,8 @@ AsyncValue<WorkspaceLayoutView?> selectedWorkspaceLayout(Ref ref) {
 @riverpod
 AsyncValue<AgentWorkspaceView?> selectedWorkspaceControls(Ref ref) {
   return ref.watch(
-    studioControllerProvider.select(
-      (state) => state.whenData(
-        (state) => state.selectedAgentWorkspace?.copyWith(
-          timelineRows: const [],
-          todo: null,
-        ),
-      ),
+    composerProjectionProvider.select(
+      (state) => state.whenData((projection) => projection?.legacyWorkspace),
     ),
   );
 }
@@ -181,44 +398,37 @@ AsyncValue<StartSessionViewModel> startPage(Ref ref) {
 
 @riverpod
 AsyncValue<StatusBarView?> statusBar(Ref ref) {
-  return ref.watch(
-    studioControllerProvider.select(
-      (state) => state.whenData((state) {
-        final workspace = state.selectedAgentWorkspace;
-        return workspace == null
-            ? null
-            : StatusBarView.fromWorkspace(workspace);
-      }),
+  final status = ref.watch(statusProjectionProvider);
+  final runtime = ref.watch(runtimeProjectionProvider);
+  return status.when(
+    loading: () => const AsyncLoading(),
+    error: (error, stackTrace) => AsyncError(error, stackTrace),
+    data: (statusProjection) => runtime.when(
+      loading: () => const AsyncLoading(),
+      error: (error, stackTrace) => AsyncError(error, stackTrace),
+      data: (runtimeProjection) {
+        final thread = statusProjection.thread;
+        if (thread == null || runtimeProjection.threadId != thread.id) {
+          return const AsyncData(null);
+        }
+        return AsyncData(
+          StatusBarView(
+            thread: thread,
+            runtime: runtimeProjection.runtime,
+            permissionMode: statusProjection.permissionMode,
+            providers: statusProjection.providers,
+            roles: statusProjection.roles,
+            isBusy: statusProjection.isBusy,
+          ),
+        );
+      },
     ),
   );
 }
 
 @riverpod
 AsyncValue<TimelinePaneView?> agentTimeline(Ref ref, String threadId) {
-  return ref.watch(
-    studioControllerProvider.select(
-      (state) => state.whenData((state) {
-        if (state.selectedThreadId != threadId) {
-          return null;
-        }
-        final workspace = state.selectedAgentWorkspace;
-        if (workspace == null) {
-          return null;
-        }
-        final history = state.workspaceUiByThread[threadId]?.history;
-        return (
-          rows: workspace.timelineRows,
-          turn: workspace.turn,
-          isLoading: workspace.isLoading,
-          hasOlderHistory: history?.hasOlder ?? false,
-          isLoadingOlderHistory:
-              history?.isLoading == true &&
-              history?.direction == TimelineDirection.older,
-          history: history ?? const ThreadHistoryWindow(),
-        );
-      }),
-    ),
-  );
+  return ref.watch(timelineProjectionProvider(threadId));
 }
 
 /// 固定活动条的唯一输入。
@@ -235,31 +445,7 @@ AsyncValue<ConversationActivityView?> conversationActivity(
   String threadId,
 ) {
   return ref.watch(
-    studioControllerProvider.select(
-      (asyncState) => asyncState.whenData((studioState) {
-        if (studioState.selectedThreadId != threadId) return null;
-        final workspace = studioState.workspacesByThread[threadId];
-        if (workspace == null) return null;
-        final ui =
-            studioState.workspaceUiByThread[threadId] ??
-            const WorkspaceUiState();
-        final interaction = studioState.activeInteraction;
-        final scoped = interaction != null && interaction.threadId == threadId
-            ? interaction
-            : null;
-        final activity = workspace.activity;
-        final detailState = ui.activityDetail;
-        final matches =
-            activity != null && detailState.matches(activity.identity);
-        return projectConversationActivity(
-          activity: activity,
-          storage: workspace.storage,
-          interaction: scoped,
-          detail: matches ? detailState.detail : null,
-          detailsLoading: matches && detailState.loading,
-          detailsError: matches ? detailState.error : null,
-        );
-      }),
-    ),
+    activityProjectionProvider(threadId)
+        .select((state) => state.whenData((projection) => projection?.view)),
   );
 }

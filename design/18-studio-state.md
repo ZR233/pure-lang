@@ -618,3 +618,18 @@ Flutter 数据层按 `StudioBridgeDataSource`、`StudioSettingsRepository`、
 `StudioThreadRepository` 和 `SessionDraftStore` 分界：FRB 只传输 typed 数据，设置与线程
 reducer 不共享 owner。`StudioNavigationCoordinator` 只维护路由可见性和有界收束，不从
 widget 的 `dispose` 推断业务状态。
+
+## 18.10 Canonical freshness invariant
+
+每个用户可见字段都必须能追溯回答七项问题：生产 owner；事件或快照来源；Dart reducer/store；
+revision 或 watermark；职责内 selector/projection；可见页面持有的 topic lease；以及失败、
+重连、隐藏和退出时的恢复与清理。Widget 不得通过一次性 `read`、切页重建或轮询取得本应由
+事件提供的事实，也不得直接读取 FRB、raw JSON、SQLite 或底层 stream。
+
+Settings、provider usage、model performance、session costs、MCP、LSP、Skills、Profiles、
+persistence、updater 与 recovery 等独立职责继续使用各自 typed topic/lease；无关领域不得进入
+彼此缓冲。订阅按“先登记接收者、再基线、后事件”建立，最后一个观察者释放时取消，重新进入
+先采用最新基线再接收事件。Thread 的 runtime、turn、interaction、workflow、activity 与
+storage 则继续共用带 `epoch/baseRevision/revision` 的单一有序流；Dart 可以细分 selector，
+但不得建立绕过同一水位的旁路流。gap、lagged、旧 generation 和关闭都必须走该领域既定的
+resync/last-valid/typed failure 语义，迟到帧不能覆盖新事实。

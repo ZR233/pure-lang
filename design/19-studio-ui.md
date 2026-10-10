@@ -678,3 +678,22 @@ projection 分为 canonical、pending、resolved、unavailable；pending 只提�
 模型选择器的可用性来自活动 Thread 的实时会话状态；持久化检查点不包含模型资源，不能用其默认
 不可用值覆盖实时路由。runtime 通知由同一投影 owner 从最新快照生成，仅状态变化时发布；
 准备请求时临时借出会话不构成模型不可用，真实失效仍须显示告警。
+
+## 19.13 实时 projection 与同页更新
+
+UI 的 canonical state 由单一 reducer/store 更新，Widget 只订阅职责内不可变、值相等的
+projection。状态栏、上下文和 throughput 只消费 runtime/context/throughput projection；
+composer 只消费 composer projection；timeline、interaction、activity、storage、settings、
+usage、statistics 与 costs 分别消费对应 projection。高频 runtime 更新不得使完整
+`AgentWorkspaceView` 驱动 timeline、composer、表单或滚动状态重建；弹层打开期间也必须随
+canonical 更新，隐藏页面释放 lease，重新进入先恢复最新基线。
+
+附件 admission 是同一 canonical composer draft 的两阶段更新：`admitAttachmentDrafts` 返回
+后先显示稳定 draft metadata，随后按相同 draft ID 异步补齐 preview bytes。补齐前必须重新读取
+最新 state 并校验 project/thread、submission revision、attachment generation；失败保留已准入
+附件并展示 typed composer failure，不建立第二份 durable 图片事实。
+
+供应商列表只呈现供应商级摘要、状态、额度、操作和模型数量/当前路由摘要，不渲染具体 model
+slug、模型胶囊或 `+N` 清单；模型详情保留在详情、编辑和模型选择器。所有用户可见实时值都应
+能沿 owner→event/snapshot→reducer→watermark→projection→visible lease 链路追踪，不能靠切页
+或重进掩盖 stale 状态。

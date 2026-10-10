@@ -19,6 +19,7 @@ import 'turn_models.dart';
 // Canonical workspace values are replaced by reducers. UI-only anchor/composer
 // changes must not rebuild all row projections; old entries are weakly held.
 final _timelineRowsByWorkspace = Expando<List<TimelineRow>>();
+final _timelineRowsByItems = Expando<List<TimelineRow>>();
 
 class _StudioStateUnset {
   const _StudioStateUnset();
@@ -60,6 +61,7 @@ class StudioState {
     this.workspaceUiByThread = const {},
     this.openedThreadIds = const {},
     this.newThreadComposerByProject = const {},
+    this.composerDiagnosticsByTarget = const {},
     this.newThreadModeByProject = const {},
     this.newThreadWorkspaceModeByProject = const {},
     this.providerCatalog = const ProviderCatalogView.empty(),
@@ -76,6 +78,11 @@ class StudioState {
   /// 只有打开过的会话才建立订阅、读取当前状态与首个历史窗口。
   final Set<String> openedThreadIds;
   final Map<String, ComposerThreadState> newThreadComposerByProject;
+
+  /// Target-scoped composer/attachment diagnostics survive workspace or
+  /// directory removal so cleanup failures remain observable without
+  /// resurrecting a destroyed composer target.
+  final Map<String, ComposerTargetDiagnostic> composerDiagnosticsByTarget;
   final Map<String, ThreadModeId> newThreadModeByProject;
 
   /// 按项目隔离的起始页工作区模式草稿；提交后仍保留，供同一项目再次创建会话。
@@ -185,6 +192,17 @@ class StudioState {
               const ComposerThreadState.idle();
   }
 
+  ComposerTargetDiagnostic? composerDiagnostic(
+    String? projectId,
+    String? threadId,
+  ) {
+    if (projectId == null) return null;
+    return composerDiagnosticsByTarget[attachmentTargetKey(
+      projectId,
+      threadId,
+    )];
+  }
+
   ThreadModeId get newThreadMode {
     final projectId = selectedProjectId;
     return projectId == null
@@ -258,9 +276,14 @@ class StudioState {
   List<TimelineRow> get selectedTimelineRows {
     final workspace = selectedWorkspace;
     if (workspace == null) return const [];
-    final cached = _timelineRowsByWorkspace[workspace];
+    // Runtime/turn/activity/storage updates replace the workspace wrapper while
+    // retaining the canonical bounded item list. Cache by that list identity so
+    // a high-frequency state update does not manufacture a new timeline
+    // projection for unchanged content.
+    final cached = _timelineRowsByItems[workspace.items];
     if (cached != null) return cached;
     final rows = timelineRowsFromThreadItems(workspace.items);
+    _timelineRowsByItems[workspace.items] = rows;
     _timelineRowsByWorkspace[workspace] = rows;
     return rows;
   }
@@ -363,6 +386,7 @@ class StudioState {
     Map<String, WorkspaceUiState>? workspaceUiByThread,
     Set<String>? openedThreadIds,
     Map<String, ComposerThreadState>? newThreadComposerByProject,
+    Map<String, ComposerTargetDiagnostic>? composerDiagnosticsByTarget,
     Map<String, ThreadModeId>? newThreadModeByProject,
     Map<String, ThreadWorkspaceMode>? newThreadWorkspaceModeByProject,
     ProviderCatalogView? providerCatalog,
@@ -393,6 +417,8 @@ class StudioState {
       openedThreadIds: openedThreadIds ?? this.openedThreadIds,
       newThreadComposerByProject:
           newThreadComposerByProject ?? this.newThreadComposerByProject,
+      composerDiagnosticsByTarget:
+          composerDiagnosticsByTarget ?? this.composerDiagnosticsByTarget,
       newThreadModeByProject:
           newThreadModeByProject ?? this.newThreadModeByProject,
       newThreadWorkspaceModeByProject:

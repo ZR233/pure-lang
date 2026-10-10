@@ -74,6 +74,7 @@ void _applyShutdownFaultOverride() {
 
 late final ProviderContainer _container;
 Future<StudioShutdownReport>? _shutdownTask;
+Future<void>? _driverFixtureClipboardImageTask;
 ProviderSubscription<ProductTopicLeaseBundle?>? _driverStatisticsScope;
 ProviderSubscription<ProductTopicLease?>? _driverQueueScope;
 bool _recordingFrames = false;
@@ -144,7 +145,23 @@ Future<String> _handleDriverData(String? message) async {
         _ => null,
       };
       if (state != null) StudioDriverState.publishState(state);
-      return StudioDriverState.snapshotJson();
+      return _driverSnapshotJson(state);
+    case 'driver-diagnostics':
+      final state = switch (_container.read(studioControllerProvider)) {
+        AsyncData(:final value) => value,
+        _ => null,
+      };
+      return jsonEncode(_driverDiagnostics(state));
+    case 'driver-fixture-clipboard-image':
+      // This is deliberately not a system clipboard operation. There is no
+      // Driver-only ClipboardImageReader override in the current app, so the
+      // deterministic fixture hook starts the same controller admission path
+      // without awaiting its preview continuation. The follow-up
+      // `driver-fixture-clipboard-image-preview` request awaits that typed
+      // Driver-only stage.
+      return _startDriverFixtureClipboardImage();
+    case 'driver-fixture-clipboard-image-preview':
+      return _finishDriverFixtureClipboardImage();
     case 'pid':
       // Acceptance locates the X11 window by `_NET_WM_PID`, so the driver must
       // expose its own process id. Product builds use lib/main.dart, so this
@@ -360,6 +377,397 @@ Map<String, Object?> _shutdownReportJson(StudioShutdownReport report) {
         },
     ],
   };
+}
+
+/// Extends the existing Driver snapshot without changing any of its legacy
+/// keys. The legacy snapshot shape is a deliberate backward-compatibility
+/// exception for existing manual-gui consumers. `driverDiagnostics` is the new
+/// acceptance-only surface and exposes only typed, de-identified fields; it is
+/// assembled in this Driver entrypoint rather than in the production snapshot
+/// owner and is not part of the production protocol.
+String _driverSnapshotJson(StudioState? state) {
+  final decoded = jsonDecode(StudioDriverState.snapshotJson());
+  if (decoded is! Map) {
+    throw const FormatException('driver snapshot must be a JSON object');
+  }
+  final snapshot = decoded.cast<String, dynamic>();
+  snapshot['driverDiagnostics'] = _driverDiagnostics(state);
+  return jsonEncode(snapshot);
+}
+
+Map<String, Object?> _driverDiagnostics(StudioState? state) {
+  final workspace = state?.selectedWorkspace;
+  final runtime = workspace?.runtime;
+  final liveUsage = runtime?.liveUsage;
+  final observedUsage =
+      liveUsage != null &&
+          liveUsage.turnId.isNotEmpty &&
+          liveUsage.attemptId.isNotEmpty &&
+          liveUsage.observationSequence >= 0
+      ? liveUsage
+      : null;
+  final usageState = observedUsage?.state.name ?? 'unknown';
+  final metricsAvailable =
+      observedUsage != null &&
+      (usageState == 'live' || usageState == 'authoritative');
+
+  // ThreadRuntimeView stores these counters as non-nullable ints, while its
+  // default constructor and FRB's unavailable context window both use zero.
+  // That schema cannot distinguish an explicit zero from the default, so a
+  // zero from those fields is conservatively unknown/null. The nullable live
+  // usage fields do carry presence provenance; their explicit zero is kept.
+  int? defaultProneCount(int? value) =>
+      !metricsAvailable || value == null || value <= 0 ? null : value;
+  int? explicitUsageCount(int? value) => metricsAvailable ? value : null;
+  final contextTokens =
+      explicitUsageCount(observedUsage?.latestContextTokens) ??
+      defaultProneCount(runtime?.contextTokens);
+  final contextWindow = defaultProneCount(runtime?.contextWindow);
+  final totalTokens = defaultProneCount(runtime?.totalTokens);
+  final inputTokens = defaultProneCount(runtime?.promptTokens);
+  final outputTokens = defaultProneCount(runtime?.completionTokens);
+  final reasoningTokens = defaultProneCount(runtime?.reasoningTokens);
+  final liveOutputTokens = explicitUsageCount(observedUsage?.completionTokens);
+  final turnOutputTokens =
+      explicitUsageCount(observedUsage?.completionTokens) ??
+      defaultProneCount(runtime?.turnCompletionTokens);
+  final decodeMillis =
+      explicitUsageCount(observedUsage?.decodeMillis) ??
+      defaultProneCount(runtime?.turnDecodeMillis);
+  // Preserve an explicitly observed decodeMillis == 0 in the source field,
+  // but never derive a non-finite throughput value from it.
+  final tokensPerSecond =
+      turnOutputTokens != null && decodeMillis != null && decodeMillis > 0
+      ? turnOutputTokens * 1000 / decodeMillis
+      : null;
+  return <String, Object?>{
+    'schemaVersion': 1,
+    'runtime': <String, Object?>{
+      'availability': workspace == null ? 'unavailable' : 'available',
+      // Null is an unknown/unavailable value. It is never replaced with a
+      // zero-valued ThreadRuntimeView default merely to make the JSON shape
+      // convenient. A usage state without a complete identity is downgraded
+      // to unknown and all usage counters remain null.
+      'usageState': usageState,
+      'turnId': metricsAvailable ? observedUsage.turnId : null,
+      'attemptId': metricsAvailable ? observedUsage.attemptId : null,
+      'observationSequence': metricsAvailable
+          ? observedUsage.observationSequence
+          : null,
+      'revision': workspace?.revision,
+      'contextTokens': contextTokens,
+      'contextWindow': contextWindow,
+      'totalTokens': totalTokens,
+      'inputTokens': inputTokens,
+      'outputTokens': outputTokens,
+      'reasoningTokens': reasoningTokens,
+      'liveOutputTokens': liveOutputTokens,
+      'turnOutputTokens': turnOutputTokens,
+      'decodeMillis': decodeMillis,
+      'tokensPerSecond': tokensPerSecond,
+      // Keep throughput as an explicit typed group only when both source
+      // counters are known; an unknown group is represented by null.
+      'throughput': tokensPerSecond == null
+          ? null
+          : <String, Object?>{
+              'outputTokens': turnOutputTokens,
+              'decodeMillis': decodeMillis,
+              'tokensPerSecond': tokensPerSecond,
+            },
+    },
+    'composer': <String, Object?>{
+      'newThread': _driverComposerDiagnostics(state?.newThreadComposer),
+      'thread': _driverComposerDiagnostics(state?.composer),
+    },
+    'providers': _driverProviderDiagnostics(state),
+    'topics': _driverTopicDiagnostics(state),
+    'seams': <String, Object?>{
+      // No production ClipboardImageReader override/fixture is present in this
+      // Driver entrypoint. The fixture request below therefore does not claim
+      // to prove a real OS paste operation.
+      'clipboardImageReaderOverride': false,
+      'pasteObservation': 'unavailable',
+      'fixtureHook': 'driver-fixture-clipboard-image',
+      'fixtureAdmissionHook': 'driver-fixture-clipboard-image',
+      'fixturePreviewHook': 'driver-fixture-clipboard-image-preview',
+      'fixturePreviewStage': 'typed-driver-only-follow-up',
+      'fixtureAwaitsPreviewInAdmissionHook': false,
+      'runtimeEventEndpoint': 'unsupported',
+      'systemClipboardTouched': false,
+    },
+  };
+}
+
+Map<String, Object?>? _driverComposerDiagnostics(
+  ComposerThreadState? composer,
+) {
+  if (composer == null) return null;
+  final attachments = composer.attachments;
+  return <String, Object?>{
+    'present': attachments.isNotEmpty,
+    'previewReady':
+        attachments.isNotEmpty &&
+        attachments.every(
+          (attachment) => attachment.previewBytes?.isNotEmpty == true,
+        ),
+    'attachmentGeneration': composer.attachmentGeneration,
+    'submissionPending': composer.isSubmissionPending,
+    // Do not expose the error text: it can contain provider/path details. The
+    // typed failure fact is sufficient for a Driver regression assertion.
+    'failed': composer.error != null,
+    'attachments': [
+      for (final attachment in attachments)
+        <String, Object?>{
+          'id': attachment.id,
+          'name': attachment.filename,
+          'filename': attachment.filename,
+          'modality': attachment.modality.name,
+          'byteSize': attachment.byteSize,
+          'previewReady': attachment.previewBytes?.isNotEmpty == true,
+        },
+    ],
+  };
+}
+
+Map<String, Object?> _driverProviderDiagnostics(StudioState? state) {
+  final settingsAvailable = state?.settingsState.state.value != null;
+  if (!settingsAvailable) {
+    return <String, Object?>{
+      'availability': 'unavailable',
+      'list': null,
+      'details': null,
+    };
+  }
+  final providers = state!.providers;
+  return <String, Object?>{
+    'availability': 'available',
+    // The list projection deliberately contains count/status metadata only.
+    // Model slugs are retained in the detail projection below.
+    'list': [
+      for (final provider in providers)
+        <String, Object?>{
+          'id': provider.id,
+          'status': provider.status,
+          'modelCount': provider.allModels.length,
+          'defaultModelConfigured': provider.defaultModel.isNotEmpty,
+        },
+    ],
+    'details': [
+      for (final provider in providers)
+        <String, Object?>{
+          'id': provider.id,
+          'models': [
+            for (final model in provider.allModels)
+              <String, Object?>{
+                'slug': model.slug,
+                'name': model.displayName,
+                'contextWindow': model.contextWindow,
+                'maxOutputTokens': model.maxOutputTokens,
+                'reasoningEfforts': model.reasoningEfforts,
+                'inputCapabilities': [
+                  for (final capability in model.inputCapabilities)
+                    capability.modality.name,
+                ],
+              },
+          ],
+        },
+    ],
+  };
+}
+
+Map<String, Object?> _driverTopicDiagnostics(StudioState? state) {
+  if (state == null) {
+    return <String, Object?>{
+      'availability': 'unavailable',
+      'registryAvailability': 'unavailable',
+      'leaseRefs': null,
+      'connections': null,
+      'projectionRevisions': null,
+    };
+  }
+
+  Map<String, int>? leaseRefs;
+  try {
+    leaseRefs = _container
+        .read(studioControllerProvider.notifier)
+        .activeTopicRefCountViews();
+  } on Object {
+    // During startup the controller can expose a canonical state before its
+    // topic registry is ready. Keep it explicitly unavailable rather than
+    // inventing zero refs for every topic.
+  }
+  final registryAvailable = leaseRefs != null;
+
+  return <String, Object?>{
+    'availability': registryAvailable ? 'available' : 'unavailable',
+    'registryAvailability': registryAvailable ? 'available' : 'unavailable',
+    'leaseRefs': registryAvailable ? _aggregateLeaseRefs(leaseRefs) : null,
+    'connections': registryAvailable
+        ? _aggregateTopicConnections(state.topicConnections)
+        : null,
+    'projectionRevisions': registryAvailable
+        ? <String, Object?>{
+            'settings': state.settingsState.revision,
+            'modelCatalog': state.settingsState.modelCatalogRevision,
+            'recovery': state.recoveryState.revision,
+            'mcp': state.mcpState.revision,
+            'lsp': state.lspState.revision,
+            'threadModeCatalog': state.threadModeCatalog.revision,
+            'providerUsage': state.providerUsageState.revision,
+            'modelPerformance': state.modelPerformance.revision,
+            'persistence': state.persistenceState.revision,
+            'persistenceQueue': state.persistenceQueueState?.revision,
+            'agentProfiles': state.agentProfilesState?.revision,
+            'threadDirectory': state.threadDirectory.revision,
+            'selectedThread': state.selectedWorkspace?.revision,
+            // New diagnostics must not expose project/root/path identifiers.
+            // Keep only aggregate scope facts; the legacy snapshot's
+            // compatibility exception does not apply to this surface.
+            'skills': {
+              'scopeCount': state.skillsByProject.length,
+              'maxRevision': _maxRevision(
+                state.skillsByProject.values.map((value) => value.revision),
+              ),
+            },
+            'sessionCosts': {
+              'scopeCount': state.sessionCostsByRoot.length,
+              'maxRevision': _maxRevision(
+                state.sessionCostsByRoot.values.map((value) => value.revision),
+              ),
+            },
+          }
+        : null,
+  };
+}
+
+Map<String, int> _aggregateLeaseRefs(Map<String, int> leaseRefs) {
+  var totalRefs = 0;
+  for (final refs in leaseRefs.values) {
+    totalRefs += refs;
+  }
+  return <String, int>{'topicCount': leaseRefs.length, 'totalRefs': totalRefs};
+}
+
+Map<String, int> _aggregateTopicConnections(
+  Map<ProductTopic, ProductTopicConnectionStateView> connections,
+) {
+  var connectedCount = 0;
+  var reconnectingCount = 0;
+  var failedCount = 0;
+  var errorCount = 0;
+  for (final connection in connections.values) {
+    switch (connection.phase) {
+      case ProductTopicConnectionPhase.connecting:
+        break;
+      case ProductTopicConnectionPhase.connected:
+        connectedCount++;
+      case ProductTopicConnectionPhase.reconnecting:
+        reconnectingCount++;
+      case ProductTopicConnectionPhase.failed:
+        failedCount++;
+    }
+    if (connection.errorMessage != null) errorCount++;
+  }
+  return <String, int>{
+    'topicCount': connections.length,
+    'connectedCount': connectedCount,
+    'reconnectingCount': reconnectingCount,
+    'failedCount': failedCount,
+    'errorCount': errorCount,
+  };
+}
+
+int? _maxRevision(Iterable<int> revisions) {
+  int? maximum;
+  for (final revision in revisions) {
+    if (maximum == null || revision > maximum) maximum = revision;
+  }
+  return maximum;
+}
+
+Future<String> _startDriverFixtureClipboardImage() async {
+  final fixtureCandidates = [
+    File('test_driver/fixtures/tool-image.png'),
+    File('code/anywork/test_driver/fixtures/tool-image.png'),
+  ];
+  File? fixture;
+  for (final candidate in fixtureCandidates) {
+    if (await candidate.exists()) {
+      fixture = candidate;
+      break;
+    }
+  }
+  if (fixture == null) {
+    return jsonEncode(<String, Object?>{
+      'ok': false,
+      'hook': 'driver-fixture-clipboard-image',
+      'pasteSeam': 'unavailable',
+      'systemClipboardTouched': false,
+      'reason': 'fixture-not-found',
+    });
+  }
+
+  final state = _readyStudioState();
+  if (state == null || state.selectedProjectId == null) {
+    return jsonEncode(<String, Object?>{
+      'ok': false,
+      'hook': 'driver-fixture-clipboard-image',
+      'pasteSeam': 'unavailable',
+      'systemClipboardTouched': false,
+      'reason': 'composer-not-ready',
+    });
+  }
+  final task = _container
+      .read(studioControllerProvider.notifier)
+      .addClipboardImage(await fixture.readAsBytes());
+  _driverFixtureClipboardImageTask = task;
+  // The admission hook is intentionally fire-and-observe: it does not await
+  // the controller's preview Future.wait. The journey observes the admitted
+  // metadata first, then invokes the typed preview hook below.
+  unawaited(
+    task.then<void>((_) {}, onError: (Object _, StackTrace stackTrace) {}),
+  );
+  return jsonEncode(<String, Object?>{
+    'ok': true,
+    'hook': 'driver-fixture-clipboard-image',
+    'stage': 'admission-started',
+    'pasteSeam': 'unavailable',
+    'systemClipboardTouched': false,
+    'previewPending': true,
+  });
+}
+
+Future<String> _finishDriverFixtureClipboardImage() async {
+  final task = _driverFixtureClipboardImageTask;
+  if (task == null) {
+    return jsonEncode(<String, Object?>{
+      'ok': false,
+      'hook': 'driver-fixture-clipboard-image-preview',
+      'stage': 'preview-unavailable',
+      'pasteSeam': 'unavailable',
+      'systemClipboardTouched': false,
+      'reason': 'admission-not-started',
+    });
+  }
+  try {
+    await task;
+    return jsonEncode(<String, Object?>{
+      'ok': true,
+      'hook': 'driver-fixture-clipboard-image-preview',
+      'stage': 'preview-complete',
+      'pasteSeam': 'unavailable',
+      'systemClipboardTouched': false,
+    });
+  } catch (_) {
+    // Do not expose raw provider/path errors through the Driver endpoint.
+    return jsonEncode(<String, Object?>{
+      'ok': false,
+      'hook': 'driver-fixture-clipboard-image-preview',
+      'stage': 'preview-failed',
+      'pasteSeam': 'unavailable',
+      'systemClipboardTouched': false,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

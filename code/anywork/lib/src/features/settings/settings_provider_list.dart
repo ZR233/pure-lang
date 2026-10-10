@@ -182,30 +182,43 @@ class ProviderListRow extends StatelessWidget {
                           icon: Icons.key_outlined,
                           label: provider.id,
                         ),
+                        if (provider.templateKind.isNotEmpty)
+                          SettingsMiniMeta(
+                            icon: Icons.tune_outlined,
+                            label:
+                                '${context.l10n.settingsTemplate}: ${provider.templateKind}',
+                          ),
                         SettingsProviderStatusChip(
                           provider: provider,
                           usage: usage,
                         ),
                       ],
                     ),
-                    if (provider.allModels.isNotEmpty) ...[
-                      const SizedBox(height: 7),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          for (final model in provider.allModels.take(4))
-                            StudioPill(
-                              tone: StudioTone.neutral,
-                              label: model.slug,
-                            ),
-                          if (provider.allModels.length > 4)
-                            StudioPill(
-                              label: '+${provider.allModels.length - 4}',
-                            ),
-                        ],
-                      ),
-                    ],
+                    const SizedBox(height: 7),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 6,
+                      children: [
+                        SettingsMiniMeta(
+                          icon: Icons.memory_outlined,
+                          label: [
+                            context.l10n.settingsProviderModelsTitle,
+                            provider.modelCount.isNotEmpty
+                                ? provider.modelCount
+                                : '${provider.allModels.length}',
+                          ].join(': '),
+                        ),
+                        SettingsMiniMeta(
+                          icon: Icons.alt_route_outlined,
+                          label: [
+                            context.l10n.settingsDefaultModel,
+                            provider.defaultModel.isEmpty
+                                ? context.l10n.settingsMissing
+                                : context.l10n.settingsConfigured,
+                          ].join(': '),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 9),
                     ProviderListUsage(
                       provider: provider,

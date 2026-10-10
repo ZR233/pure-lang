@@ -13,7 +13,6 @@ import '../../l10n/studio_l10n.dart';
 import '../../platform/clipboard_image_reader.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
-import '../../shared/studio_driver_state.dart';
 import '../../shared/studio_menu.dart';
 import '../../shared/studio_menu_label.dart';
 import '../status/session_selectors.dart';
@@ -38,15 +37,21 @@ class ComposerDock extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Driver 快照需要完整 timelineRows；controls 视图为省内存清空了行。
-    final full = switch (ref.watch(selectedAgentWorkspaceProvider)) {
-      AsyncData(:final value) => value,
-      _ => null,
-    };
-    if (full != null) {
-      StudioDriverState.publishWorkspace(full);
-    }
-    final interaction = workspace.activeInteraction;
+    final projection = ref.watch(composerProjectionProvider).value;
+    final current =
+        projection ?? StudioComposerProjection.fromWorkspace(workspace);
+    final interaction = current.activeInteraction;
+    final additionalDiagnostics =
+        ref
+            .watch(composerDiagnosticsProjectionProvider)
+            .value
+            ?.diagnostics
+            .where(
+              (diagnostic) => diagnostic.projectId == current.thread.projectId,
+            )
+            .where((diagnostic) => diagnostic != current.targetDiagnostic)
+            .toList(growable: false) ??
+        const <ComposerTargetDiagnostic>[];
     return SafeArea(
       top: false,
       child: Padding(
@@ -59,25 +64,33 @@ class ComposerDock extends ConsumerWidget {
             constraints: const BoxConstraints(
               maxWidth: StudioLayout.conversationWidth,
             ),
-            child: workspace.thread.isRetiredAgent
-                ? Text(
-                    context.l10n.agentRoleRetired,
-                    key: const ValueKey('retired-agent-notice'),
-                  )
-                : interaction == null
-                ? workspace.composerMode == AgentComposerMode.runtimeDriven
-                      ? _RuntimeDrivenAgentDock(workspace: workspace)
-                      : _PromptComposer(
-                          workspace: workspace,
-                          enabled: true,
-                          compact: compact,
-                        )
-                : _InteractionDock(
-                    workspace: workspace,
-                    interaction: interaction,
-                    // 活动交互与消息提交仅依赖内存会话。
-                    enabled: true,
-                  ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final diagnostic in additionalDiagnostics)
+                  _ComposerTargetDiagnosticView(diagnostic: diagnostic),
+                current.thread.isRetiredAgent
+                    ? Text(
+                        context.l10n.agentRoleRetired,
+                        key: const ValueKey('retired-agent-notice'),
+                      )
+                    : interaction == null
+                    ? current.composerMode == AgentComposerMode.runtimeDriven
+                          ? _RuntimeDrivenAgentDock(workspace: current)
+                          : _PromptComposer(
+                              workspace: current,
+                              enabled: true,
+                              compact: compact,
+                            )
+                    : _InteractionDock(
+                        workspace: current,
+                        interaction: interaction,
+                        // 活动交互与消息提交仅依赖内存会话。
+                        enabled: true,
+                      ),
+              ],
+            ),
           ),
         ),
       ),
@@ -93,6 +106,13 @@ class StartPageComposerDock extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(studioControllerProvider.notifier);
+    final diagnostics = ref
+        .watch(composerDiagnosticsProjectionProvider)
+        .value
+        ?.diagnostics
+        .where((diagnostic) => diagnostic.projectId == view.project?.id)
+        .where((diagnostic) => diagnostic != view.targetDiagnostic)
+        .toList(growable: false);
     final canonicalRoute = modeRouteFor(view.modeModelRoutes, view.mode);
     final modelMutation = ref.watch(
       studioControllerProvider.select(
@@ -142,6 +162,8 @@ class StartPageComposerDock extends ConsumerWidget {
             ),
             child: _PromptComposerPanel(
               composer: view.composer,
+              targetDiagnostic: view.targetDiagnostic,
+              additionalDiagnostics: diagnostics ?? const [],
               permissionMode: view.permissionMode,
               enabled: view.canSubmit,
               isBusy: false,
@@ -208,7 +230,7 @@ class StartPageComposerDock extends ConsumerWidget {
 class _RuntimeDrivenAgentDock extends StatelessWidget {
   const _RuntimeDrivenAgentDock({required this.workspace});
 
-  final AgentWorkspaceView workspace;
+  final StudioComposerProjection workspace;
 
   @override
   Widget build(BuildContext context) {
@@ -246,7 +268,7 @@ class _PromptComposer extends ConsumerStatefulWidget {
     this.compact = false,
   });
 
-  final AgentWorkspaceView workspace;
+  final StudioComposerProjection workspace;
   final bool enabled;
   final bool compact;
 
@@ -262,10 +284,9 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.workspace.threadId != widget.workspace.threadId ||
         oldWidget.workspace.thread.status != widget.workspace.thread.status ||
-        oldWidget.workspace.runtime.hasActiveWorkflow !=
-            widget.workspace.runtime.hasActiveWorkflow ||
-        oldWidget.workspace.runtime.modelRoute !=
-            widget.workspace.runtime.modelRoute) {
+        oldWidget.workspace.hasActiveWorkflow !=
+            widget.workspace.hasActiveWorkflow ||
+        oldWidget.workspace.modelRoute != widget.workspace.modelRoute) {
       _modelNotice = null;
     }
   }
@@ -283,7 +304,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
             false,
       ),
     );
-    final canonicalRoute = workspace.runtime.modelRoute;
+    final canonicalRoute = workspace.modelRoute;
     final requiresFunctionCalling = ref.watch(
       studioControllerProvider.select(
         (state) =>
@@ -320,7 +341,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
         : modelForRoute(workspace.providers, route.providerId, route.model);
     final blockedReason = switch (workspace.thread.status) {
       ThreadStatusView.idle =>
-        workspace.runtime.hasActiveWorkflow
+        workspace.hasActiveWorkflow
             ? context.l10n.statusModelSwitchWhileWorkflowActive
             : null,
       ThreadStatusView.closing ||
@@ -366,6 +387,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
           ),
         _PromptComposerPanel(
           composer: workspace.composer,
+          targetDiagnostic: workspace.targetDiagnostic,
           permissionMode: workspace.permissionMode,
           enabled: widget.enabled,
           isBusy: workspace.isBusy,
@@ -380,7 +402,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                     SessionModeSelector(
                       mode: workspace.thread.mode,
                       enabled:
-                          !workspace.runtime.hasActiveWorkflow &&
+                          !workspace.hasActiveWorkflow &&
                           workspace.thread.status == ThreadStatusView.idle &&
                           workspace.activeInteraction == null,
                       onSelected: controller.setThreadMode,
@@ -458,6 +480,8 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
 class _PromptComposerPanel extends StatefulWidget {
   const _PromptComposerPanel({
     required this.composer,
+    this.targetDiagnostic,
+    this.additionalDiagnostics = const [],
     required this.permissionMode,
     required this.enabled,
     required this.isBusy,
@@ -476,6 +500,8 @@ class _PromptComposerPanel extends StatefulWidget {
   });
 
   final ComposerThreadState composer;
+  final ComposerTargetDiagnostic? targetDiagnostic;
+  final List<ComposerTargetDiagnostic> additionalDiagnostics;
   final PermissionMode permissionMode;
   final bool enabled;
   final bool isBusy;
@@ -496,6 +522,59 @@ class _PromptComposerPanel extends StatefulWidget {
 
   @override
   State<_PromptComposerPanel> createState() => _PromptComposerPanelState();
+}
+
+class _ComposerTargetDiagnosticView extends StatelessWidget {
+  const _ComposerTargetDiagnosticView({required this.diagnostic});
+
+  final ComposerTargetDiagnostic diagnostic;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 2, 8, 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(
+                Icons.warning_amber_rounded,
+                size: 17,
+                color: colors.error,
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    diagnostic.message,
+                    key: ValueKey(
+                      'composer-target-diagnostic-${diagnostic.targetKey}',
+                    ),
+                    style: Theme.of(context).textTheme.bodySmall
+                        ?.copyWith(color: colors.error),
+                  ),
+                  if (diagnostic.cleanupFailureDraftIds.isNotEmpty)
+                    Text(
+                      'Cleanup failed draft IDs: '
+                      '${diagnostic.cleanupFailureDraftIds.join(', ')}',
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: colors.error),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _PromptComposerPanelState extends State<_PromptComposerPanel> {
@@ -704,6 +783,10 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
                 ),
               ),
             ),
+          if (widget.targetDiagnostic case final diagnostic?)
+            _ComposerTargetDiagnosticView(diagnostic: diagnostic),
+          for (final diagnostic in widget.additionalDiagnostics)
+            _ComposerTargetDiagnosticView(diagnostic: diagnostic),
           Row(
             children: [
               _AttachmentMenu(
@@ -925,7 +1008,7 @@ class _InteractionDock extends StatelessWidget {
     required this.enabled,
   });
 
-  final AgentWorkspaceView workspace;
+  final StudioComposerProjection workspace;
   final PendingInteraction interaction;
   final bool enabled;
 

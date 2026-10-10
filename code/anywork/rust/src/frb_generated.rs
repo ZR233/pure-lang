@@ -9693,6 +9693,31 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
     }
 }
 
+impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_turnId = <String>::sse_decode(deserializer);
+        let mut var_attemptId = <String>::sse_decode(deserializer);
+        let mut var_completionTokens = <Option<u64>>::sse_decode(deserializer);
+        let mut var_decodeMillis = <Option<u64>>::sse_decode(deserializer);
+        let mut var_latestContextTokens = <Option<u64>>::sse_decode(deserializer);
+        let mut var_state =
+            <crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState>::sse_decode(
+                deserializer,
+            );
+        let mut var_observationSequence = <u64>::sse_decode(deserializer);
+        return crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage {
+            turn_id: var_turnId,
+            attempt_id: var_attemptId,
+            completion_tokens: var_completionTokens,
+            decode_millis: var_decodeMillis,
+            latest_context_tokens: var_latestContextTokens,
+            state: var_state,
+            observation_sequence: var_observationSequence,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntimeSnapshot {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -9704,6 +9729,9 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
             <crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsage>::sse_decode(
                 deserializer,
             );
+        let mut var_liveUsage = <Option<
+            crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage,
+        >>::sse_decode(deserializer);
         let mut var_turnCompletionTokens = <u64>::sse_decode(deserializer);
         let mut var_turnDecodeMillis = <u64>::sse_decode(deserializer);
         let mut var_todo =
@@ -9725,6 +9753,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
             thread_id: var_threadId,
             model_route: var_modelRoute,
             usage: var_usage,
+            live_usage: var_liveUsage,
             turn_completion_tokens: var_turnCompletionTokens,
             turn_decode_millis: var_turnDecodeMillis,
             todo: var_todo,
@@ -9790,6 +9819,18 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
             prompt_cache_policy: var_promptCachePolicy,
             prefix_changed_reason: var_prefixChangedReason,
             updated_at: var_updatedAt,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState::Live,
+1 => crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState::Authoritative,
+            _ => unreachable!("Invalid variant for BridgeThreadRuntimeUsageState: {}", inner),
         };
     }
 }
@@ -12459,6 +12500,17 @@ impl SseDecode
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::api::studio::types::thread_stream::BridgeThreadModelRouteSnapshot>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -19576,6 +19628,38 @@ impl
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.turn_id.into_into_dart().into_dart(),
+            self.attempt_id.into_into_dart().into_dart(),
+            self.completion_tokens.into_into_dart().into_dart(),
+            self.decode_millis.into_into_dart().into_dart(),
+            self.latest_context_tokens.into_into_dart().into_dart(),
+            self.state.into_into_dart().into_dart(),
+            self.observation_sequence.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage,
+    > for crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::thread_stream::BridgeThreadRuntimeSnapshot
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -19583,6 +19667,7 @@ impl flutter_rust_bridge::IntoDart
             self.thread_id.into_into_dart().into_dart(),
             self.model_route.into_into_dart().into_dart(),
             self.usage.into_into_dart().into_dart(),
+            self.live_usage.into_into_dart().into_dart(),
             self.turn_completion_tokens.into_into_dart().into_dart(),
             self.turn_decode_millis.into_into_dart().into_dart(),
             self.todo.into_into_dart().into_dart(),
@@ -19651,6 +19736,33 @@ impl
     > for crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsage
 {
     fn into_into_dart(self) -> crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsage {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Live => 0.into_dart(),
+            Self::Authoritative => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState,
+    > for crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState {
         self
     }
 }
@@ -26393,6 +26505,21 @@ crate::api::studio::types::thread_stream::BridgeThreadRuntimeAvailability::Inact
     }
 }
 
+impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.turn_id, serializer);
+        <String>::sse_encode(self.attempt_id, serializer);
+        <Option<u64>>::sse_encode(self.completion_tokens, serializer);
+        <Option<u64>>::sse_encode(self.decode_millis, serializer);
+        <Option<u64>>::sse_encode(self.latest_context_tokens, serializer);
+        <crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState>::sse_encode(
+            self.state, serializer,
+        );
+        <u64>::sse_encode(self.observation_sequence, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadRuntimeSnapshot {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -26401,6 +26528,7 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
         <crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsage>::sse_encode(
             self.usage, serializer,
         );
+        <Option<crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage>>::sse_encode(self.live_usage, serializer);
         <u64>::sse_encode(self.turn_completion_tokens, serializer);
         <u64>::sse_encode(self.turn_decode_millis, serializer);
         <Option<crate::api::studio::types::thread_stream::BridgeTodoListSnapshot>>::sse_encode(
@@ -26447,6 +26575,15 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
         <Option<String>>::sse_encode(self.prompt_cache_policy, serializer);
         <Option<crate::api::studio::types::thread_stream::BridgePromptPrefixChangedReason>>::sse_encode(self.prefix_changed_reason, serializer);
         <i64>::sse_encode(self.updated_at, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(match self {crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState::Live => { 0 }
+crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsageState::Authoritative => { 1 }
+ _ => { unimplemented!(""); }}, serializer);
     }
 }
 
@@ -28467,6 +28604,18 @@ impl SseEncode
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::studio::types::thread_stream::BridgeThreadModelRouteSnapshot>::sse_encode(
+                value, serializer,
+            );
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::studio::types::thread_stream::BridgeThreadRuntimeLiveUsage>::sse_encode(
                 value, serializer,
             );
         }
