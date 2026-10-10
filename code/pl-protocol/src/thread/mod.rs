@@ -185,6 +185,9 @@ pub struct ThreadRuntimeSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_route: Option<ThreadModelRouteSnapshot>,
     pub usage: ThreadRuntimeUsage,
+    /// Best-effort usage for the currently running attempt. Durable totals remain in `usage`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_usage: Option<ThreadRuntimeLiveUsage>,
     #[serde(default)]
     pub turn_completion_tokens: u64,
     #[serde(default)]
@@ -204,6 +207,34 @@ pub struct ThreadRuntimeSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<crate::WorkflowRuntimeSnapshot>,
     pub updated_at: i64,
+}
+
+/// Whether a runtime usage observation is still a preview or a terminal fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadRuntimeUsageState {
+    Live,
+    Authoritative,
+}
+
+/// Typed, non-durable usage observation for one running model attempt.
+///
+/// A missing counter is explicitly represented by `None`; it is not a zero estimate. The sequence
+/// is monotonic within the stable `(turn_id, attempt_id)` identity and lets consumers reject stale
+/// observations after best-effort coalescing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadRuntimeLiveUsage {
+    pub turn_id: String,
+    pub attempt_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decode_millis: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_context_tokens: Option<u64>,
+    pub state: ThreadRuntimeUsageState,
+    pub observation_sequence: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -107,10 +107,10 @@ pub use thread::mode::{ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadMo
 pub use thread::{
     CacheUsageSummary, THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition,
     ThreadModelRouteSnapshot, ThreadNotification, ThreadNotificationEnvelope,
-    ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot, ThreadStatus,
-    ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTurnHistory, ThreadTurnPage,
-    ThreadWorkspaceMode, TimelineItemQuery, TimelineItemRead, TimelinePage, TimelineQuery,
-    TimelineTurn,
+    ThreadRuntimeLiveUsage, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadRuntimeUsageState,
+    ThreadSnapshot, ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate,
+    ThreadTurnHistory, ThreadTurnPage, ThreadWorkspaceMode, TimelineItemQuery, TimelineItemRead,
+    TimelinePage, TimelineQuery, TimelineTurn,
 };
 mod session_entry;
 pub use session_entry::SessionEntry;

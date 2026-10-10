@@ -637,12 +637,21 @@ impl LiveOwner {
         // installed with, so a subscriber that opened before this first pass sees the authoritative
         // fact instead of an unset placeholder.
         let storage_published = persistence.map(|detail| storage_state(snapshot, detail));
+        // Seed the runtime baseline from the same snapshot and cumulative usage that the first
+        // stream pass will project. This prevents owner activation itself from emitting a duplicate
+        // runtime frame; subsequent frames still advance only when the typed projection changes.
+        let runtime_published = Some(crate::studio::thread_projection::project_runtime(
+            id,
+            snapshot,
+            thread.updated_at,
+            &usage,
+        )?);
         feed.publish_storage(storage_published.clone());
         let owner = Self {
             projection,
             activity,
             activity_published,
-            runtime_published: None,
+            runtime_published,
             storage_published,
             channel,
             chat,

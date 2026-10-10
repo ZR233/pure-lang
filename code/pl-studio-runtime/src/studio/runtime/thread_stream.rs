@@ -88,6 +88,9 @@ struct LiveSubscription {
     thread_id: String,
     /// Last activity frame already delivered to this subscriber; `None` means no activity yet.
     activity: Option<ThreadActivity>,
+    /// Last runtime snapshot already represented by this subscriber, including the authoritative
+    /// first snapshot. Identical owner frames are dropped at this boundary.
+    runtime: Option<pl_protocol::ThreadRuntimeSnapshot>,
     /// The projection owner's typed storage state, mirrored instead of recomputed per frame.
     ///
     /// The Thread's observation owner is the one place that derives the state from the owner
@@ -157,6 +160,7 @@ impl LiveSubscription {
         // (and marking it seen) means the very first frame can never disagree with the owner, and the
         // subscriber never has to recompute the state from its own copies.
         self.activity = snapshot.activity.clone();
+        self.runtime = snapshot.runtime.clone();
         self.storage = match self.storage_feed.as_mut() {
             Some(watch) => {
                 let observed = watch.borrow_and_update().clone();
@@ -366,6 +370,10 @@ impl LiveSubscription {
                 }
             }
             ThreadLiveEvent::Runtime { runtime } => {
+                if self.runtime.as_ref() == Some(runtime.as_ref()) {
+                    return;
+                }
+                self.runtime = Some((*runtime).clone());
                 self.enqueue(ThreadNotification::ThreadRuntimeUpdated {
                     runtime: Box::new((*runtime).clone()),
                 });
@@ -453,12 +461,6 @@ impl LiveSubscription {
 
     /// 把 `notification` 合并进队列尾部同类的未交付观察帧；合并成功时返回 `true`。
     fn coalesce_pending(&mut self, notification: &ThreadNotification) -> bool {
-        let identity = match notification {
-            ThreadNotification::ActivityChanged { activity } => {
-                Some(activity.as_ref().map(|activity| activity.identity.as_str()))
-            }
-            _ => return false,
-        };
         // Only the tail frame can be superseded: a later activity change replaces the previous one
         // this stream has not delivered yet, and anything older than that tail is already finalized
         // by an intervening frame. So this looks at exactly that one frame — never a loop.
@@ -467,9 +469,28 @@ impl LiveSubscription {
         else {
             return false;
         };
-        let mergeable = match (&last.notification, &identity) {
-            (ThreadNotification::ActivityChanged { activity: old }, Some(identity)) => {
-                old.as_ref().map(|old| old.identity.as_str()) == *identity
+        let mergeable = match notification {
+            ThreadNotification::ActivityChanged { activity } => {
+                matches!(
+                    &last.notification,
+                    ThreadNotification::ActivityChanged { activity: old }
+                    if old.as_ref().map(|old| old.identity.as_str())
+                        == activity.as_ref().map(|activity| activity.identity.as_str())
+                )
+            }
+            ThreadNotification::ThreadRuntimeUpdated { runtime } => {
+                let incoming_is_live = runtime
+                    .live_usage
+                    .as_ref()
+                    .is_some_and(|usage| usage.state == pl_protocol::ThreadRuntimeUsageState::Live);
+                incoming_is_live
+                    && matches!(
+                        &last.notification,
+                        ThreadNotification::ThreadRuntimeUpdated { runtime: old }
+                        if old.live_usage.as_ref().is_some_and(|usage| {
+                            usage.state == pl_protocol::ThreadRuntimeUsageState::Live
+                        })
+                    )
             }
             _ => false,
         };
@@ -497,7 +518,7 @@ impl LiveSubscription {
             });
     }
 
-    /// 未交付帧是否全部是可按显示节流合并的观察帧（活动与存储状态）。
+    /// 未交付帧是否全部是可按显示节流合并的观察帧（活动、存储状态与 live runtime）。
     ///
     /// 节流只推迟“还能被下一条覆盖”的观察帧；Turn、交互、运行时与 lagged 事实立即交付。
     fn has_only_coalescable_frames(&self) -> bool {
@@ -506,6 +527,12 @@ impl LiveSubscription {
             if matches!(
                 notification.notification,
                 ThreadNotification::ActivityChanged { .. } | ThreadNotification::StorageChanged { .. }
+            ) || matches!(
+                notification.notification,
+                ThreadNotification::ThreadRuntimeUpdated { ref runtime }
+                if runtime.live_usage.as_ref().is_some_and(|usage| {
+                    usage.state == pl_protocol::ThreadRuntimeUsageState::Live
+        })
             ))
         })
     }
@@ -659,6 +686,7 @@ impl StudioRuntime {
                 started: false,
                 thread_id: request.thread_id.clone(),
                 activity: None,
+                runtime: None,
                 storage_feed,
                 storage: None,
                 last_turn,

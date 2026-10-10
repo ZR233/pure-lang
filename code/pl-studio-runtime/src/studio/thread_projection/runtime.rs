@@ -2,7 +2,8 @@
 use super::ProjectionError;
 use pl_core::thread::{AttemptOutcome, ThreadSnapshot};
 use pl_protocol::{
-    CacheUsageSummary, InferenceAccounting, ThreadRuntimeSnapshot, ThreadRuntimeUsage, UsageReport,
+    CacheUsageSummary, InferenceAccounting, ThreadRuntimeLiveUsage, ThreadRuntimeSnapshot,
+    ThreadRuntimeUsage, ThreadRuntimeUsageState, UsageReport,
 };
 use std::sync::Arc;
 
@@ -42,6 +43,30 @@ pub(in crate::studio) fn project_runtime(
         prefix_changed_reason: None,
         updated_at,
     };
+    let live_usage = state.model_progress.as_ref().and_then(|active| {
+        let attempt = state.attempts.last()?;
+        let observation = active.progress.usage_observation()?;
+        if active.attempt_id != attempt.attempt_id
+            || observation.attempt_id != active.attempt_id
+            || observation.turn_id != attempt.turn_id
+        {
+            return None;
+        }
+        Some(ThreadRuntimeLiveUsage {
+            turn_id: observation.turn_id.clone(),
+            attempt_id: observation.attempt_id.clone(),
+            completion_tokens: observation.completion_tokens,
+            decode_millis: observation.decode_millis,
+            latest_context_tokens: observation.latest_context_tokens,
+            state: match observation.state {
+                pl_core::model::ModelUsageObservationState::Live => ThreadRuntimeUsageState::Live,
+                pl_core::model::ModelUsageObservationState::Authoritative => {
+                    ThreadRuntimeUsageState::Authoritative
+                }
+            },
+            observation_sequence: observation.observation_sequence,
+        })
+    });
     let todo = state
         .extensions
         .get("pl.tool.todo")
@@ -89,6 +114,7 @@ pub(in crate::studio) fn project_runtime(
         thread_id: thread_id.into(),
         model_route,
         usage,
+        live_usage,
         turn_completion_tokens: summary.turn_completion_tokens,
         turn_decode_millis: summary.turn_decode_millis,
         todo,

@@ -335,6 +335,7 @@ impl Owner {
         let (progress, observations) = crate::model::ModelProgressSender::channel(
             self.cold.clone(),
             &self.id,
+            &input.turn_id,
             &input.attempt_id,
             output_budget.clone(),
         );
@@ -560,6 +561,10 @@ impl Owner {
             }
         }
         self.state.attempts = attempts.into();
+        // The terminal outcome is now the only accounting authority. Do not leave the completed
+        // attempt's live receiver attached to the next snapshot, even though publish_snapshot also
+        // filters non-running attempts defensively.
+        self.model_progress = None;
         // This commit carries the answer the attempt reserved its reliable output budget for, so the
         // store transfers that reservation onto the fact instead of charging the same output twice.
         self.pending_output_claim = Some(input.attempt_id.clone());

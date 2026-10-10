@@ -104,3 +104,33 @@ fn old_v2_observations_default_to_original_generation_and_original_display_ident
     );
     assert!(next.starts_with(&presentation_prefix("attempt")));
 }
+
+#[test]
+fn live_usage_is_typed_monotonic_and_not_persisted() {
+    let sender = ModelProgressSender::detached(1024);
+    sender.publish(ModelProgress::live("turn-1", "attempt-1"));
+    sender.observe_usage(Some(12), Some(100));
+    sender.observe_decode_millis(8);
+    let first = sender.latest();
+    let usage = first.usage_observation().unwrap();
+    assert_eq!(usage.turn_id, "turn-1");
+    assert_eq!(usage.attempt_id, "attempt-1");
+    assert_eq!(usage.completion_tokens, Some(12));
+    assert_eq!(usage.latest_context_tokens, Some(100));
+    assert_eq!(usage.decode_millis, Some(8));
+    assert_eq!(usage.observation_sequence, 2);
+
+    // Unknown or smaller later reports cannot erase a confirmed live value.
+    sender.observe_usage(None, Some(90));
+    sender.observe_usage(Some(7), None);
+    sender.observe_decode_millis(4);
+    assert_eq!(sender.latest().usage_observation(), Some(usage));
+
+    let encoded = serde_json::to_value(&first).unwrap();
+    assert!(
+        !encoded.as_object().unwrap().contains_key("usage"),
+        "live usage must not cross a durable boundary"
+    );
+    let restored: ModelProgress = serde_json::from_value(encoded).unwrap();
+    assert!(restored.usage_observation().is_none());
+}

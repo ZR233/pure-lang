@@ -993,6 +993,53 @@ pub struct ModelProgress {
     parts: ModelParts,
     #[serde(default)]
     observation: ModelObservation,
+    /// Typed live accounting for the current attempt. This never crosses a durable serialization
+    /// boundary: authoritative accounting is folded from the terminal attempt outcome instead.
+    #[serde(skip)]
+    usage: Option<ModelUsageObservation>,
+}
+
+/// Whether an observed usage value is still a best-effort preview or a terminal fact.
+///
+/// Core currently exposes only `Live` through [`ModelProgress`]. `Authoritative` is retained in the
+/// type so conversion code cannot silently treat a terminal value as a preview if a future owner
+/// carries the typed state across its terminal handoff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelUsageObservationState {
+    Live,
+    Authoritative,
+}
+
+/// Non-persistent, typed usage observation for one stable model attempt.
+///
+/// Missing counters remain `None`: a provider must report a usable counter before the adapter can
+/// expose it. `observation_sequence` advances only when one of the known values or the state
+/// changes, allowing downstream projections to reject stale/coalesced observations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsageObservation {
+    pub turn_id: String,
+    pub attempt_id: String,
+    pub completion_tokens: Option<u64>,
+    pub decode_millis: Option<u64>,
+    pub latest_context_tokens: Option<u64>,
+    pub state: ModelUsageObservationState,
+    pub observation_sequence: u64,
+}
+
+impl ModelUsageObservation {
+    fn live(turn_id: &str, attempt_id: &str) -> Self {
+        Self {
+            turn_id: turn_id.to_owned(),
+            attempt_id: attempt_id.to_owned(),
+            completion_tokens: None,
+            decode_millis: None,
+            latest_context_tokens: None,
+            state: ModelUsageObservationState::Live,
+            observation_sequence: 0,
+        }
+    }
 }
 
 /// Receipt of transparent recovery inside one prepared call, never canonical model input.
@@ -1051,12 +1098,27 @@ impl From<ModelObservation> for ModelProgress {
 }
 
 impl ModelProgress {
+    /// Creates an empty live progress snapshot for one stable turn/attempt identity.
+    ///
+    /// Runtime owners normally receive this shape from [`ModelProgressSender::channel`]. The
+    /// constructor is also useful to adapters that need to seed a sender before their first event;
+    /// it does not create a durable or detached identity by itself.
+    pub fn live(turn_id: impl Into<String>, attempt_id: impl Into<String>) -> Self {
+        let turn_id = turn_id.into();
+        let attempt_id = attempt_id.into();
+        Self {
+            usage: Some(ModelUsageObservation::live(&turn_id, &attempt_id)),
+            ..Self::default()
+        }
+    }
+
     /// Snapshot of the current observations at one monotonic version.
     pub fn new(version: u64, parts: Vec<ObservedPart>) -> Self {
         Self {
             version,
             parts: ModelParts::from_vec(parts),
             observation: ModelObservation::default(),
+            usage: None,
         }
     }
 
@@ -1076,6 +1138,11 @@ impl ModelProgress {
     /// Recovery facts retained in live snapshots and final producer receipts.
     pub fn observation(&self) -> &ModelObservation {
         &self.observation
+    }
+
+    /// Current non-persistent usage observation, if this progress belongs to a live Thread attempt.
+    pub fn usage_observation(&self) -> Option<&ModelUsageObservation> {
+        self.usage.as_ref()
     }
 
     /// Reports whether no part has been observed yet.
@@ -1677,10 +1744,12 @@ impl ModelProgressSender {
     pub(crate) fn channel(
         store: Option<crate::thread::cold::ColdStoreHandle>,
         thread_id: &str,
+        turn_id: &str,
         attempt_id: &str,
         output: Arc<OutputBudget>,
     ) -> (Self, tokio::sync::watch::Receiver<ModelProgress>) {
-        let (sender, receiver) = tokio::sync::watch::channel(ModelProgress::default());
+        let (sender, receiver) =
+            tokio::sync::watch::channel(ModelProgress::live(turn_id, attempt_id));
         let reservation = store.map(|store| ModelProgressReservation {
             store,
             thread_id: thread_id.to_owned(),
@@ -1747,6 +1816,66 @@ impl ModelProgressSender {
     /// delta queue, and publishing cannot advance a Thread context or grant execution authority.
     pub fn publish(&self, progress: ModelProgress) {
         self.sender.send_replace(progress);
+    }
+
+    /// Publishes provider-confirmed partial usage without inventing missing counters.
+    ///
+    /// Known values are monotonic within the stable attempt identity: a later incomplete or smaller
+    /// provider report cannot make a live preview regress. The sequence advances only when the
+    /// preview actually changes, so a consumer can coalesce by semantic observation rather than by
+    /// every provider event.
+    pub fn observe_usage(
+        &self,
+        completion_tokens: Option<u64>,
+        latest_context_tokens: Option<u64>,
+    ) {
+        self.sender.send_if_modified(|progress| {
+            let Some(observation) = progress.usage.as_mut() else {
+                return false;
+            };
+            let mut changed = false;
+            if let Some(value) = completion_tokens
+                && observation
+                    .completion_tokens
+                    .is_none_or(|current| value > current)
+            {
+                observation.completion_tokens = Some(value);
+                changed = true;
+            }
+            if let Some(value) = latest_context_tokens
+                && observation
+                    .latest_context_tokens
+                    .is_none_or(|current| value > current)
+            {
+                observation.latest_context_tokens = Some(value);
+                changed = true;
+            }
+            if changed {
+                observation.observation_sequence =
+                    observation.observation_sequence.saturating_add(1);
+                progress.version = progress.version.saturating_add(1);
+            }
+            changed
+        });
+    }
+
+    /// Publishes elapsed decode time measured by the invocation's monotonic timer.
+    pub fn observe_decode_millis(&self, decode_millis: u64) {
+        self.sender.send_if_modified(|progress| {
+            let Some(observation) = progress.usage.as_mut() else {
+                return false;
+            };
+            if observation
+                .decode_millis
+                .is_some_and(|current| decode_millis <= current)
+            {
+                return false;
+            }
+            observation.decode_millis = Some(decode_millis);
+            observation.observation_sequence = observation.observation_sequence.saturating_add(1);
+            progress.version = progress.version.saturating_add(1);
+            true
+        });
     }
 
     /// Applies one in-place edit to the newest observation snapshot, notifying observers once.

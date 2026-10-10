@@ -32,8 +32,8 @@ use pl_core::model::{
     AggregateChannel, ModelParts, ModelProgressSender, ModelTextChannel, ObservedItemKind,
     ObservedPart, ObservedPartIdentity, ObservedPartKind, ProviderPartIdentity,
 };
-use pl_protocol::PureError;
 use pl_protocol::trace::TraceTextChannel;
+use pl_protocol::{PureError, UsageStatus};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -195,6 +195,14 @@ impl ProgressProjection {
         Ok(())
     }
 
+    /// Publishes the invocation timer's real monotonic decode elapsed time into the same live
+    /// observation channel as provider usage. No token value is inferred from this duration.
+    pub(crate) fn observe_decode_millis(&self, decode_millis: u64) {
+        if let Some(sender) = &self.sender {
+            sender.observe_decode_millis(decode_millis);
+        }
+    }
+
     pub(crate) fn observe(&mut self, event: &ModelStreamEvent) -> Result<(), PureError> {
         if self.sender.is_none() || self.terminal {
             return Ok(());
@@ -243,8 +251,17 @@ impl ProgressProjection {
             | ModelStreamEvent::ResponsesContextItem { .. }
             | ModelStreamEvent::Replay(_)
             | ModelStreamEvent::WebSearchStarted { .. }
-            | ModelStreamEvent::WebSearchCompleted { .. }
-            | ModelStreamEvent::Usage(_) => {}
+            | ModelStreamEvent::WebSearchCompleted { .. } => {}
+            ModelStreamEvent::Usage(usage) => {
+                // A provider may report only one side of accounting while a stream is still
+                // running. Preserve those confirmed fields, but reject a report whose internal
+                // relationships are invalid; `None` remains unknown instead of becoming zero.
+                if usage.status() != UsageStatus::Invalid
+                    && let Some(sender) = &self.sender
+                {
+                    sender.observe_usage(usage.output_tokens, usage.known_total_tokens());
+                }
+            }
             ModelStreamEvent::ToolInputStarted {
                 stream_id,
                 item_id,

@@ -209,6 +209,12 @@ impl InferenceTimer {
         );
     }
 
+    fn decode_millis(&self) -> Option<u64> {
+        let ttft_millis = self.first_token_millis.load(Ordering::Acquire);
+        (ttft_millis != Self::FIRST_TOKEN_UNSET)
+            .then(|| duration_millis(self.started_at.elapsed()).saturating_sub(ttft_millis))
+    }
+
     fn finish(&self) -> Option<InferenceTiming> {
         let total_millis = duration_millis(self.started_at.elapsed());
         let ttft_millis = self.first_token_millis.load(Ordering::Acquire);
@@ -317,7 +323,9 @@ impl InvocationRunner {
                 )
             })
             .clone();
-        progress.publish(pl_core::model::ModelProgress::default());
+        // A Thread-owned channel is initialized with its stable turn/attempt live marker. Do not
+        // replace it with a default snapshot here: doing so would erase the identity before the
+        // first provider event and make a reused invocation look like an unowned observation.
         let caller_cancellation = context.cancellation.take().unwrap_or_default();
         let closing = context.session.closing_token();
         let cancellation = tokio_util::sync::CancellationToken::new();
@@ -727,6 +735,9 @@ impl InvocationRunner {
                             }
                             if let Ok(event) = &event {
                                 inference_timer.observe(event);
+                                if let Some(decode_millis) = inference_timer.decode_millis() {
+                                    progress.observe_decode_millis(decode_millis);
+                            }
                                 progress.observe(event)?;
                             }
                             event
