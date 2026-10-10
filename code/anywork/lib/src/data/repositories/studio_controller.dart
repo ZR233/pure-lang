@@ -3233,9 +3233,34 @@ StudioState _resolveSelection(
       firstRootId,
     ),
   };
+  // Product snapshots do not carry the local new-session draft. Preserve it
+  // across project/topic refreshes while the same project remains selected;
+  // otherwise a settings round-trip can silently reset the mode to simple.
+  final draftProjectId = projectId;
+  final preserveDraft =
+      draftProjectId != null && previous?.selectedProjectId == draftProjectId;
+  final modeDrafts = {...incoming.newThreadModeByProject};
+  final workspaceDrafts = {...incoming.newThreadWorkspaceModeByProject};
+  final composerDrafts = {...incoming.newThreadComposerByProject};
+  if (preserveDraft) {
+    if (previous!.newThreadModeByProject[draftProjectId] case final mode?) {
+      modeDrafts[draftProjectId] = mode;
+    }
+    if (previous.newThreadWorkspaceModeByProject[draftProjectId]
+        case final mode?) {
+      workspaceDrafts[draftProjectId] = mode;
+    }
+    if (previous.newThreadComposerByProject[draftProjectId]
+        case final composer?) {
+      composerDrafts[draftProjectId] = composer;
+    }
+  }
   return incoming.copyWith(
     selectedProjectId: projectId,
     selectedThreadId: threadId,
+    newThreadModeByProject: modeDrafts,
+    newThreadWorkspaceModeByProject: workspaceDrafts,
+    newThreadComposerByProject: composerDrafts,
   );
 }
 
