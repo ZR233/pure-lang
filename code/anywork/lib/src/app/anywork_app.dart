@@ -21,10 +21,16 @@ class AnyworkApp extends StatelessWidget {
   const AnyworkApp({super.key});
 
   static final GoRouter _router = GoRouter(
+    restorationScopeId: 'anywork-router',
     routes: [
-      GoRoute(path: '/', builder: (context, state) => const StudioShell()),
+      GoRoute(
+        path: '/',
+        name: 'studio',
+        builder: (context, state) => const StudioShell(),
+      ),
       GoRoute(
         path: '/settings',
+        name: 'settings',
         builder: (context, state) => const SettingsPage(),
       ),
     ],
@@ -42,6 +48,7 @@ class AnyworkApp extends StatelessWidget {
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           routerConfig: _router,
+          restorationScopeId: 'anywork-app',
           builder: (context, child) =>
               StudioShutdownOverlay(child: child ?? const SizedBox()),
         ),

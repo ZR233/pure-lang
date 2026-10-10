@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -358,16 +356,10 @@ class _SettingsBackTile extends ConsumerWidget {
           key: StudioDriverKeys.settingsBack,
           borderRadius: BorderRadius.circular(StudioRadii.sm),
           onTap: () {
-            // Navigate first. Saving already applies the canonical snapshot to
-            // the controller; a defensive refresh must never hold the route
-            // transition hostage when the bridge is slow or reconnecting.
             if (!context.mounted) return;
-            context.go('/');
-            unawaited(
-              ref
-                  .read(studioControllerProvider.notifier)
-                  .refreshSettingsState(),
-            );
+            // Settings is a pushed child of the session shell. Pop restores
+            // the exact existing shell instead of rebuilding its projections.
+            context.pop();
           },
           child: Padding(
             padding: EdgeInsets.symmetric(

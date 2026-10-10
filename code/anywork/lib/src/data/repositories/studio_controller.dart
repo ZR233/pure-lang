@@ -2489,28 +2489,6 @@ class StudioController extends _$StudioController {
     );
   }
 
-  /// Re-adopt the backend's canonical settings before leaving the settings
-  /// route. Settings writes and topic deliveries are asynchronous; an explicit
-  /// read gives the next start-page projection one coherent provider/model
-  /// catalog after navigation.
-  Future<void> refreshSettingsState() async {
-    await _awaitSettingsWrites();
-    await _awaitModeRouteSaves();
-    SettingsStateSnapshot snapshot;
-    try {
-      snapshot = await _api.readSettingsState();
-    } catch (_) {
-      return;
-    }
-    if (!ref.mounted) return;
-    final current = state.value;
-    if (current != null) {
-      // This explicit synchronization point is authoritative even when a
-      // topic frame with the same revision was already observed locally.
-      state = AsyncData(current.copyWith(settingsState: snapshot));
-    }
-  }
-
   Future<void> saveInstructionsSettings(
     InstructionsSettingsCommand command,
   ) async {
@@ -3233,34 +3211,9 @@ StudioState _resolveSelection(
       firstRootId,
     ),
   };
-  // Product snapshots do not carry the local new-session draft. Preserve it
-  // across project/topic refreshes while the same project remains selected;
-  // otherwise a settings round-trip can silently reset the mode to simple.
-  final draftProjectId = projectId;
-  final preserveDraft =
-      draftProjectId != null && previous?.selectedProjectId == draftProjectId;
-  final modeDrafts = {...incoming.newThreadModeByProject};
-  final workspaceDrafts = {...incoming.newThreadWorkspaceModeByProject};
-  final composerDrafts = {...incoming.newThreadComposerByProject};
-  if (preserveDraft) {
-    if (previous!.newThreadModeByProject[draftProjectId] case final mode?) {
-      modeDrafts[draftProjectId] = mode;
-    }
-    if (previous.newThreadWorkspaceModeByProject[draftProjectId]
-        case final mode?) {
-      workspaceDrafts[draftProjectId] = mode;
-    }
-    if (previous.newThreadComposerByProject[draftProjectId]
-        case final composer?) {
-      composerDrafts[draftProjectId] = composer;
-    }
-  }
   return incoming.copyWith(
     selectedProjectId: projectId,
     selectedThreadId: threadId,
-    newThreadModeByProject: modeDrafts,
-    newThreadWorkspaceModeByProject: workspaceDrafts,
-    newThreadComposerByProject: composerDrafts,
   );
 }
 
