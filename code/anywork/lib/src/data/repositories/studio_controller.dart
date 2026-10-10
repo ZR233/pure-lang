@@ -3211,9 +3211,50 @@ StudioState _resolveSelection(
       firstRootId,
     ),
   };
+  // Product snapshots describe backend-owned state only; they do not carry
+  // the local new-session draft. Keep drafts for projects that still exist in
+  // the canonical directory while resolving any snapshot (topic baseline,
+  // explicit reload, or project activation). Otherwise a settings round-trip
+  // can silently replace a user's selected mode, workspace, or composer text
+  // with defaults.
+  final canonicalProjectIds = incoming.projects
+      .map((project) => project.id)
+      .toSet();
+  final modeDrafts = {
+    for (final entry in incoming.newThreadModeByProject.entries)
+      if (canonicalProjectIds.contains(entry.key)) entry.key: entry.value,
+  };
+  final workspaceDrafts = {
+    for (final entry in incoming.newThreadWorkspaceModeByProject.entries)
+      if (canonicalProjectIds.contains(entry.key)) entry.key: entry.value,
+  };
+  final composerDrafts = {
+    for (final entry in incoming.newThreadComposerByProject.entries)
+      if (canonicalProjectIds.contains(entry.key)) entry.key: entry.value,
+  };
+  if (previous != null) {
+    for (final entry in previous.newThreadModeByProject.entries) {
+      if (canonicalProjectIds.contains(entry.key)) {
+        modeDrafts[entry.key] = entry.value;
+      }
+    }
+    for (final entry in previous.newThreadWorkspaceModeByProject.entries) {
+      if (canonicalProjectIds.contains(entry.key)) {
+        workspaceDrafts[entry.key] = entry.value;
+      }
+    }
+    for (final entry in previous.newThreadComposerByProject.entries) {
+      if (canonicalProjectIds.contains(entry.key)) {
+        composerDrafts[entry.key] = entry.value;
+      }
+    }
+  }
   return incoming.copyWith(
     selectedProjectId: projectId,
     selectedThreadId: threadId,
+    newThreadModeByProject: modeDrafts,
+    newThreadWorkspaceModeByProject: workspaceDrafts,
+    newThreadComposerByProject: composerDrafts,
   );
 }
 
