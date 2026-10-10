@@ -5,6 +5,18 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.11.0](https://github.com/ZR233/pure-lang/compare/v6.10.0...v6.11.0) (2026-10-10)
+
+
+### Bug Fixes
+
+* **studio:** 保留设置往返后的会话配置草稿 ([5f47fcf](https://github.com/ZR233/pure-lang/commit/5f47fcf9d6d6d0340f39ad2a538ee7c5640670b6))
+
+
+### Refactoring
+
+* **studio:** 分离设置同步与会话展示状态 ([d7b9bb2](https://github.com/ZR233/pure-lang/commit/d7b9bb2142e5e96c009cd52be025ed5d1898f711))
+
 ## [6.10.0](https://github.com/ZR233/pure-lang/compare/v6.9.0...v6.10.0) (2026-10-10)
 
 
