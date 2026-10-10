@@ -31,6 +31,7 @@ abstract final class StudioDriverState {
   static List<ModeModelRouteView> _modeModelRoutes = const [];
   static List<RoleSettingsView> _roles = const [];
   static List<ProviderSettingsView> _providers = const [];
+  static Map<String, StudioMutationView> _mutations = const {};
   static PersistenceStateSnapshot _persistenceState =
       const PersistenceStateSnapshot.ready();
   static List<StudioRecoveryIssue> _recoveryIssues = const [];
@@ -136,6 +137,7 @@ abstract final class StudioDriverState {
     _modelCatalogRevision = state.settingsState.modelCatalogRevision;
     _modeModelRoutes = List.unmodifiable(state.modeModelRoutes);
     _providers = List.unmodifiable(state.providers);
+    _mutations = Map.unmodifiable(state.mutations);
     _roles = List.unmodifiable([
       for (final role in state.roles)
         RoleSettingsView(
@@ -450,6 +452,19 @@ abstract final class StudioDriverState {
               'providerId': route.providerId,
               'model': route.model,
               'effort': route.effort,
+            },
+        ],
+        'mutations': [
+          for (final mutation in _mutations.values)
+            {
+              'key': mutation.key,
+              'operationId': mutation.operationId,
+              'phase': mutation.phase.name,
+              'startedAt': mutation.startedAt,
+              'providerId': mutation.providerId,
+              'model': mutation.model,
+              'effort': mutation.effort,
+              'error': mutation.error,
             },
         ],
       },

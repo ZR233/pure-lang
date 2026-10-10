@@ -1,6 +1,5 @@
 import 'provider_models.dart';
 import 'settings_models.dart';
-import 'studio_enums.dart';
 
 enum ProviderSecretAction { preserve, replace, clear }
 
@@ -121,124 +120,99 @@ abstract final class ProviderSettingsCommandBuilder {
     String? renamedFrom,
     String? renamedTo,
     String? removedProviderId,
-    bool setSimpleModeDefault = false,
+    bool includeRouteMigrations = false,
   }) {
     final normalized = providers.map(normalizeProvider).toList();
     final fallback = normalized.isEmpty ? null : normalized.first;
     final providerIds = normalized.map((provider) => provider.id).toSet();
     final commands = <RoleSettingsCommand>[];
     final modeCommands = <ModeModelRouteView>[];
-    final selectedDefaultProvider = selectedProviderId == null
-        ? null
-        : _providerById(normalized, selectedProviderId);
     if (fallback != null) {
-      for (final route in modeRoutes) {
-        var providerId = route.providerId;
-        if (renamedFrom != null && providerId == renamedFrom) {
-          providerId = renamedTo ?? providerId;
+      if (includeRouteMigrations) {
+        for (final route in modeRoutes) {
+          var providerId = route.providerId;
+          if (renamedFrom != null && providerId == renamedFrom) {
+            providerId = renamedTo ?? providerId;
+          }
+          if (removedProviderId != null && providerId == removedProviderId) {
+            providerId = fallback.id;
+          }
+          final provider = _providerById(normalized, providerId);
+          final safeProvider =
+              providerIds.contains(providerId) && provider != null
+              ? provider
+              : fallback;
+          // Online observations can withdraw an existing selection. A provider
+          // field edit must keep that desired route, including its effort.
+          final preserveSelection =
+              route.providerId != removedProviderId &&
+              safeProvider.id == providerId &&
+              (safeProvider.modelCatalog.supported ||
+                  safeProvider.allModels.any(
+                    (candidate) => candidate.slug == route.model,
+                  ));
+          final model = preserveSelection
+              ? route.model
+              : safeProvider.defaultModel;
+          final selectedModel = _modelBySlug(safeProvider.allModels, model);
+          final effort = preserveSelection
+              ? route.effort
+              : selectedModel?.reasoningEfforts.contains(route.effort) == true
+              ? route.effort
+              : selectedModel?.defaultReasoningEffort.isNotEmpty == true
+              ? selectedModel!.defaultReasoningEffort
+              : selectedModel?.reasoningEfforts.firstOrNull ?? '';
+          modeCommands.add(
+            ModeModelRouteView(
+              modeId: route.modeId,
+              providerId: safeProvider.id,
+              model: model,
+              effort: effort,
+            ),
+          );
         }
-        if (removedProviderId != null && providerId == removedProviderId) {
-          providerId = fallback.id;
-        }
-        final selectAsSimpleDefault =
-            setSimpleModeDefault &&
-            route.modeId == ThreadModeId.simple &&
-            selectedDefaultProvider != null;
-        if (selectAsSimpleDefault) {
-          providerId = selectedDefaultProvider.id;
-        }
-        final provider = _providerById(normalized, providerId);
-        final safeProvider =
-            providerIds.contains(providerId) && provider != null
-            ? provider
-            : fallback;
-        // Online observations can withdraw an existing selection. A provider
-        // field edit must keep that desired route, including its effort.
-        final preserveSelection =
-            !selectAsSimpleDefault &&
-            route.providerId != removedProviderId &&
-            safeProvider.id == providerId &&
-            (safeProvider.modelCatalog.supported ||
-                safeProvider.allModels.any(
-                  (candidate) => candidate.slug == route.model,
-                ));
-        final model = preserveSelection
-            ? route.model
-            : safeProvider.defaultModel;
-        final selectedModel = _modelBySlug(safeProvider.allModels, model);
-        final effort = preserveSelection
-            ? route.effort
-            : selectedModel?.reasoningEfforts.contains(route.effort) == true
-            ? route.effort
-            : selectedModel?.defaultReasoningEffort.isNotEmpty == true
-            ? selectedModel!.defaultReasoningEffort
-            : selectedModel?.reasoningEfforts.firstOrNull ?? '';
-        modeCommands.add(
-          ModeModelRouteView(
-            modeId: route.modeId,
-            providerId: safeProvider.id,
-            model: model,
-            effort: effort,
-          ),
-        );
       }
-      if (setSimpleModeDefault &&
-          selectedDefaultProvider != null &&
-          !modeCommands.any((route) => route.modeId == ThreadModeId.simple)) {
-        final model = _modelBySlug(
-          selectedDefaultProvider.allModels,
-          selectedDefaultProvider.defaultModel,
-        );
-        modeCommands.add(
-          ModeModelRouteView(
-            modeId: ThreadModeId.simple,
-            providerId: selectedDefaultProvider.id,
-            model: selectedDefaultProvider.defaultModel,
-            effort: model?.defaultReasoningEffort.isNotEmpty == true
-                ? model!.defaultReasoningEffort
-                : model?.reasoningEfforts.firstOrNull ?? '',
-          ),
-        );
-      }
-      for (final role in roles) {
-        var providerId = role.providerId;
-        if (renamedFrom != null && providerId == renamedFrom) {
-          providerId = renamedTo ?? providerId;
+      if (includeRouteMigrations) {
+        for (final role in roles) {
+          var providerId = role.providerId;
+          if (renamedFrom != null && providerId == renamedFrom) {
+            providerId = renamedTo ?? providerId;
+          }
+          if (removedProviderId != null && providerId == removedProviderId) {
+            providerId = fallback.id;
+          }
+          final provider = _providerById(normalized, providerId);
+          final safeProvider =
+              providerIds.contains(providerId) && provider != null
+              ? provider
+              : fallback;
+          final preserveSelection =
+              role.providerId != removedProviderId &&
+              safeProvider.id == providerId &&
+              (safeProvider.modelCatalog.supported ||
+                  safeProvider.allModels.any(
+                    (candidate) => candidate.slug == role.model,
+                  ));
+          final model = preserveSelection
+              ? role.model
+              : safeProvider.defaultModel;
+          final selectedModel = _modelBySlug(safeProvider.allModels, model);
+          final effort = preserveSelection
+              ? role.effort
+              : selectedModel?.reasoningEfforts.contains(role.effort) == true
+              ? role.effort
+              : selectedModel?.defaultReasoningEffort.isNotEmpty == true
+              ? selectedModel!.defaultReasoningEffort
+              : selectedModel?.reasoningEfforts.firstOrNull ?? '';
+          commands.add(
+            RoleSettingsCommand(
+              key: role.key,
+              providerId: safeProvider.id,
+              model: model,
+              effort: effort,
+            ),
+          );
         }
-        if (removedProviderId != null && providerId == removedProviderId) {
-          providerId = fallback.id;
-        }
-        final provider = _providerById(normalized, providerId);
-        final safeProvider =
-            providerIds.contains(providerId) && provider != null
-            ? provider
-            : fallback;
-        final preserveSelection =
-            role.providerId != removedProviderId &&
-            safeProvider.id == providerId &&
-            (safeProvider.modelCatalog.supported ||
-                safeProvider.allModels.any(
-                  (candidate) => candidate.slug == role.model,
-                ));
-        final model = preserveSelection
-            ? role.model
-            : safeProvider.defaultModel;
-        final selectedModel = _modelBySlug(safeProvider.allModels, model);
-        final effort = preserveSelection
-            ? role.effort
-            : selectedModel?.reasoningEfforts.contains(role.effort) == true
-            ? role.effort
-            : selectedModel?.defaultReasoningEffort.isNotEmpty == true
-            ? selectedModel!.defaultReasoningEffort
-            : selectedModel?.reasoningEfforts.firstOrNull ?? '';
-        commands.add(
-          RoleSettingsCommand(
-            key: role.key,
-            providerId: safeProvider.id,
-            model: model,
-            effort: effort,
-          ),
-        );
       }
     }
     return ProviderSettingsCommand(

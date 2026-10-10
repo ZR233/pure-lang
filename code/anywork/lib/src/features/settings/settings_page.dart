@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -355,12 +357,7 @@ class _SettingsBackTile extends ConsumerWidget {
         child: InkWell(
           key: StudioDriverKeys.settingsBack,
           borderRadius: BorderRadius.circular(StudioRadii.sm),
-          onTap: () {
-            if (!context.mounted) return;
-            // Settings is a pushed child of the session shell. Pop restores
-            // the exact existing shell instead of rebuilding its projections.
-            context.pop();
-          },
+          onTap: () => unawaited(_popAfterFlush(context, ref)),
           child: Padding(
             padding: EdgeInsets.symmetric(
               horizontal: compact ? 10 : 10,
@@ -371,6 +368,14 @@ class _SettingsBackTile extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _popAfterFlush(BuildContext context, WidgetRef ref) async {
+    // Settings is a pushed child of the session shell. Reconcile in-flight
+    // writes first, with a bounded deadline, then pop the existing shell so
+    // its selectors observe the repository's canonical state immediately.
+    await ref.read(studioControllerProvider.notifier).flushPending();
+    if (context.mounted) context.pop();
   }
 }
 

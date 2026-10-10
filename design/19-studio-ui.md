@@ -657,6 +657,19 @@ Composer failure，保留已有草稿和附件。该入口不扩展 FRB 附件�
 Timeline 和状态提示消费 canonical 输入与执行状态，区分已受理、正在停止当前执行和继续处理中，
 保留旧输出及真实取消终态。子会话输入仍由主智能体协调，GUI 保持只读；待决审批与问答使用专用面板。
 
+## 19.12 配置 mutation 与 selector projection
+
+Provider、默认 provider、单个 Mode route、单个 Agent role、permission、general、搜索和
+其他设置使用独立 typed intent。它们共享一个 settings command lane 以满足 CAS 顺序，但
+payload 不携带其他设置的完整旧副本；provider 编辑只有在重命名或删除确实需要迁移引用时才
+携带明确的 route migration。成功结果必须来自 Bridge canonical snapshot。
+
+Model、Mode 和 reasoning selector 不保存完整 settings，也不捕获可变 `view`。回调只发送
+稳定的 project/thread/role identity 与用户意图，执行时由 repository 读取最新状态。selector
+projection 分为 canonical、pending、resolved、unavailable；pending 只提供即时展示，失败
+回滚到 canonical 并保留可重试错误。模型目录刷新按 provider 去重并使用独立 catalog 水位，
+不得触发设置页整棵重建或覆盖 route。
+
 模型选择器的可用性来自活动 Thread 的实时会话状态；持久化检查点不包含模型资源，不能用其默认
 不可用值覆盖实时路由。runtime 通知由同一投影 owner 从最新快照生成，仅状态变化时发布；
 准备请求时临时借出会话不构成模型不可用，真实失效仍须显示告警。

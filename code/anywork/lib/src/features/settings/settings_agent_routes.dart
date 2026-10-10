@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -68,6 +70,33 @@ class _AgentRouteConfiguration {
         ? option.defaultReasoningEffort
         : option.reasoningEfforts.firstOrNull;
     final selectedEffort = hasConfiguredRoute ? canonicalEffort : defaultEffort;
+    final pending = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.mutationPending('agent-role:$role') ?? false,
+      ),
+    );
+
+    Future<void> saveRole({
+      required String providerId,
+      required String model,
+      required String? effort,
+    }) async {
+      try {
+        await ref
+            .read(studioControllerProvider.notifier)
+            .setModelRole(
+              roleKey: role,
+              providerId: providerId,
+              model: model,
+              effort: effort,
+            );
+      } catch (error) {
+        if (!context.mounted) return;
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.hideCurrentSnackBar();
+        messenger.showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    }
 
     return _RoleSettingsRow(
       role: role,
@@ -78,33 +107,28 @@ class _AgentRouteConfiguration {
       efforts: efforts,
       unresolvedLabel: unresolvedLabel,
       showUnresolvedOption: routeUnavailable,
+      pending: pending,
       onModelChanged: (value) {
         // 重选当前 provider/model 不产生任何变更。
         if (value.providerId == selectedProviderId &&
             value.model == selectedModel) {
-          return;
+          return Future<void>.value();
         }
-        ref
-            .read(studioControllerProvider.notifier)
-            .setModelRole(
-              roleKey: role,
-              providerId: value.providerId,
-              model: value.model,
-              effort: value.defaultReasoningEffort.isNotEmpty
-                  ? value.defaultReasoningEffort
-                  : value.reasoningEfforts.firstOrNull,
-            );
+        return saveRole(
+          providerId: value.providerId,
+          model: value.model,
+          effort: value.defaultReasoningEffort.isNotEmpty
+              ? value.defaultReasoningEffort
+              : value.reasoningEfforts.firstOrNull,
+        );
       },
       onEffortChanged: (value) {
-        if (option == null) return;
-        ref
-            .read(studioControllerProvider.notifier)
-            .setModelRole(
-              roleKey: role,
-              providerId: option.providerId,
-              model: option.model,
-              effort: value,
-            );
+        if (option == null) return Future<void>.value();
+        return saveRole(
+          providerId: option.providerId,
+          model: option.model,
+          effort: value,
+        );
       },
     );
   }
@@ -156,6 +180,7 @@ class _RoleSettingsRow extends StatelessWidget {
     required this.efforts,
     required this.unresolvedLabel,
     required this.showUnresolvedOption,
+    this.pending = false,
     required this.onModelChanged,
     required this.onEffortChanged,
   });
@@ -168,8 +193,9 @@ class _RoleSettingsRow extends StatelessWidget {
   final List<String> efforts;
   final String? unresolvedLabel;
   final bool showUnresolvedOption;
-  final ValueChanged<ModelSelectionOption> onModelChanged;
-  final ValueChanged<String> onEffortChanged;
+  final bool pending;
+  final FutureOr<void> Function(ModelSelectionOption option) onModelChanged;
+  final FutureOr<void> Function(String effort) onEffortChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -188,7 +214,7 @@ class _RoleSettingsRow extends StatelessWidget {
             model: selectedModel,
             unresolvedLabel: unresolvedLabel,
             showUnresolvedOption: showUnresolvedOption,
-            enabled: options.isNotEmpty,
+            enabled: options.isNotEmpty && !pending,
             onSelected: onModelChanged,
             optionKeyBuilder: (option) =>
                 StudioDriverKeys.settingsRoleModelOption(
@@ -214,6 +240,7 @@ class _RoleSettingsRow extends StatelessWidget {
         labelText: context.l10n.statusReasoningEffort,
         isDense: true,
       ),
+      enabled: !pending,
       items: [
         for (final effort in efforts)
           StudioFormSelectItem<String>(
@@ -226,7 +253,8 @@ class _RoleSettingsRow extends StatelessWidget {
           ? null
           : (effort) {
               if (effort != null) {
-                onEffortChanged(effort);
+                final result = onEffortChanged(effort);
+                if (result is Future<void>) unawaited(result);
               }
             },
     );

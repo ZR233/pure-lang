@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -14,6 +16,11 @@ class SecurityTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final pending = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.mutationPending('permission-mode') ?? false,
+      ),
+    );
     return SettingsPane(
       header: SettingsHeader(
         title: context.l10n.settingsSecurityTitle,
@@ -24,10 +31,9 @@ class SecurityTab extends ConsumerWidget {
         RadioGroup<PermissionMode>(
           groupValue: mode,
           onChanged: (value) {
+            if (pending) return;
             if (value != null) {
-              ref
-                  .read(studioControllerProvider.notifier)
-                  .setPermissionMode(value);
+              unawaited(_savePermissionMode(context, ref, value));
             }
           },
           child: Column(
@@ -38,6 +44,7 @@ class SecurityTab extends ConsumerWidget {
                   child: RadioListTile<PermissionMode>(
                     key: ValueKey('permission-choice-${option.name}'),
                     value: option,
+                    enabled: !pending,
                     title: Text(context.permissionModeLabel(option)),
                     subtitle: Text(switch (option) {
                       PermissionMode.requestApproval =>
@@ -70,5 +77,20 @@ class SecurityTab extends ConsumerWidget {
         ),
       ],
     );
+  }
+}
+
+Future<void> _savePermissionMode(
+  BuildContext context,
+  WidgetRef ref,
+  PermissionMode mode,
+) async {
+  try {
+    await ref.read(studioControllerProvider.notifier).setPermissionMode(mode);
+  } catch (error) {
+    if (!context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(error.toString())));
   }
 }

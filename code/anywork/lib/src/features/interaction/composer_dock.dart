@@ -93,7 +93,24 @@ class StartPageComposerDock extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(studioControllerProvider.notifier);
-    final route = modeRouteFor(view.modeModelRoutes, view.mode);
+    final canonicalRoute = modeRouteFor(view.modeModelRoutes, view.mode);
+    final pendingMutation = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.mutation('new-thread-mode:${view.mode.id}'),
+      ),
+    );
+    final route =
+        pendingMutation != null &&
+            pendingMutation.isPending &&
+            pendingMutation.providerId != null &&
+            pendingMutation.model != null
+        ? ModeModelRouteView(
+            modeId: view.mode,
+            providerId: pendingMutation.providerId!,
+            model: pendingMutation.model!,
+            effort: pendingMutation.effort ?? canonicalRoute?.effort ?? '',
+          )
+        : canonicalRoute;
     final model = route == null
         ? null
         : modelForRoute(view.providers, route.providerId, route.model);
@@ -132,9 +149,9 @@ class StartPageComposerDock extends ConsumerWidget {
                       providerId: route.providerId,
                       model: route.model,
                       effort: route.effort,
+                      pending: view.modelRouteMutationPending,
                       onSelected: (providerId, model, effort) =>
                           controller.setModeModelRoute(
-                            mode: view.mode,
                             providerId: providerId,
                             model: model,
                             effort: effort,
@@ -145,9 +162,9 @@ class StartPageComposerDock extends ConsumerWidget {
                       providerId: route.providerId,
                       model: route.model,
                       effort: route.effort,
+                      pending: view.modelRouteMutationPending,
                       onSelected: (providerId, model, effort) =>
                           controller.setModeModelRoute(
-                            mode: view.mode,
                             providerId: providerId,
                             model: model,
                             effort: effort,
@@ -241,7 +258,37 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
   Widget build(BuildContext context) {
     final workspace = widget.workspace;
     final controller = ref.read(studioControllerProvider.notifier);
-    final route = workspace.runtime.modelRoute;
+    final threadRoutePending = ref.watch(
+      studioControllerProvider.select(
+        (state) =>
+            state.value?.mutationPending(
+              'thread-route:${workspace.threadId}',
+            ) ??
+            false,
+      ),
+    );
+    final canonicalRoute = workspace.runtime.modelRoute;
+    final pendingMutation = ref.watch(
+      studioControllerProvider.select(
+        (state) => state.value?.mutation('thread-route:${workspace.threadId}'),
+      ),
+    );
+    final route =
+        pendingMutation != null &&
+            pendingMutation.isPending &&
+            pendingMutation.providerId != null &&
+            pendingMutation.model != null
+        ? canonicalRoute == null
+              ? null
+              : ThreadModelRouteView(
+                  providerId: pendingMutation.providerId!,
+                  model: pendingMutation.model!,
+                  effort: pendingMutation.effort ?? canonicalRoute.effort,
+                  revision: canonicalRoute.revision,
+                  available: canonicalRoute.available,
+                  unavailableReason: canonicalRoute.unavailableReason,
+                )
+        : canonicalRoute;
     final model = route == null
         ? null
         : modelForRoute(workspace.providers, route.providerId, route.model);
@@ -318,6 +365,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                         providerId: route.providerId,
                         model: route.model,
                         effort: route.effort,
+                        pending: threadRoutePending,
                         available: route.available,
                         unavailableReason: route.unavailableReason,
                         blockedReason: blockedReason,
@@ -335,6 +383,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
                         providerId: route.providerId,
                         model: route.model,
                         effort: route.effort,
+                        pending: threadRoutePending,
                         blockedReason: blockedReason,
                         onExplain: (message) =>
                             setState(() => _modelNotice = message),

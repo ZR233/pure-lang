@@ -197,6 +197,38 @@ class SettingsStateData {
   final PermissionMode permissionMode;
 }
 
+enum StudioMutationPhase { pending, succeeded, superseded, failed, timeout }
+
+/// UI-safe lifecycle for a canonical mutation. The operation id is local to
+/// this process and is only used to prevent an older completion from clearing
+/// a newer intent for the same target.
+class StudioMutationView {
+  const StudioMutationView({
+    required this.operationId,
+    required this.key,
+    required this.phase,
+    required this.startedAt,
+    this.providerId,
+    this.model,
+    this.effort,
+    this.error,
+  });
+
+  final String operationId;
+  final String key;
+  final StudioMutationPhase phase;
+  final int startedAt;
+
+  /// Desired route carried by a pending typed intent. It is a presentation
+  /// projection only and is replaced by the canonical route on success.
+  final String? providerId;
+  final String? model;
+  final String? effort;
+  final String? error;
+
+  bool get isPending => phase == StudioMutationPhase.pending;
+}
+
 class SettingsStateSnapshot extends ObservedStateSnapshot<SettingsStateData> {
   SettingsStateSnapshot({
     List<ProviderSettingsView> providers = const [],

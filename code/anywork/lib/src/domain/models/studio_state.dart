@@ -54,6 +54,7 @@ class StudioState {
     this.persistenceQueueState,
     this.agentProfilesState,
     this.sessionCostsByRoot = const {},
+    this.mutations = const {},
     this.topicConnections = const {},
     this.workspacesByThread = const {},
     this.workspaceUiByThread = const {},
@@ -104,6 +105,15 @@ class StudioState {
 
   /// 按 root 会话作用域的费用状态；`cost == null` 是显式清除。
   final Map<String, SessionCostsStateView> sessionCostsByRoot;
+
+  /// Local mutation lifecycle keyed by stable target identity. It is a
+  /// presentation projection only; canonical settings remain in
+  /// [settingsState].
+  final Map<String, StudioMutationView> mutations;
+
+  StudioMutationView? mutation(String key) => mutations[key];
+
+  bool mutationPending(String key) => mutations[key]?.isPending ?? false;
 
   /// 每个已租用 topic 的局部传输连接状态（transport，不是业务 snapshot）。
   ///
@@ -374,6 +384,7 @@ class StudioState {
     Object? persistenceQueueState = _studioStateUnset,
     Object? agentProfilesState = _studioStateUnset,
     Map<String, SessionCostsStateView>? sessionCostsByRoot,
+    Map<String, StudioMutationView>? mutations,
     Map<ProductTopic, ProductTopicConnectionStateView>? topicConnections,
   }) {
     return StudioState(
@@ -414,6 +425,7 @@ class StudioState {
           ? this.agentProfilesState
           : agentProfilesState as AgentProfilesStateView?,
       sessionCostsByRoot: sessionCostsByRoot ?? this.sessionCostsByRoot,
+      mutations: mutations ?? this.mutations,
       topicConnections: topicConnections ?? this.topicConnections,
     );
   }

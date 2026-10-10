@@ -1,4 +1,5 @@
 import '../../domain/models/studio_models.dart';
+import 'studio_settings_repository.dart';
 import '../frb/studio_api.dart';
 
 class StudioReduceResult {
@@ -704,15 +705,16 @@ StudioState applySettingsState(
   SettingsStateSnapshot next,
 ) {
   final previous = current.settingsState;
-  // Both observations are monotonic. A delayed save response must not replace a newer catalog.
+  // Settings and model discovery are two independent monotonic clocks. They are
+  // transported together by the legacy Bridge envelope, but an observation may
+  // advance either clock independently (a config write can carry an older
+  // catalog revision and a catalog refresh can carry an older config revision).
+  // Comparing the pair as one version drops valid updates and was the reason a
+  // route selected after returning from Settings appeared to snap back.
   if (next.state.value != null && previous.state.value != null) {
-    if (next.revision < previous.revision ||
-        next.modelCatalogRevision < previous.modelCatalogRevision ||
-        (next.revision == previous.revision &&
-            next.modelCatalogRevision == previous.modelCatalogRevision)) {
-      return current;
-    }
-    return current.copyWith(settingsState: next);
+    final merged = mergeCanonicalSettingsSnapshots(previous, next);
+    if (merged == null) return current;
+    return current.copyWith(settingsState: merged);
   }
   return _applyObservedSnapshot(
     current,

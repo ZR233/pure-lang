@@ -424,10 +424,17 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
               for (final item in canonicalProviders)
                 item.id == current.originalId ? provider : item,
             ];
+      final makeDefault =
+          current.mode == ProviderDraftMode.create ||
+          ref.read(studioControllerProvider).asData?.value.defaultProviderId ==
+              current.originalId;
       final saved = await _saveProviders(
         providers,
-        selectedProviderId: _defaultProviderIdAfterDraftSave(current, provider),
-        setSimpleModeDefault: current.mode == ProviderDraftMode.create,
+        selectedProviderId: ref
+            .read(studioControllerProvider)
+            .asData
+            ?.value
+            .defaultProviderId,
         renamedFrom: current.originalId == provider.id
             ? null
             : current.originalId,
@@ -437,6 +444,11 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         throw StateError(
           'Provider save returned a canonical snapshot without ${provider.id}.',
         );
+      }
+      if (makeDefault) {
+        await ref
+            .read(studioControllerProvider.notifier)
+            .setDefaultProvider(provider.id);
       }
       await _waitForProviderList(provider.id);
       if (mounted) {
@@ -499,39 +511,21 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
 
   Future<void> _setDefaultProvider(ProviderSettingsView provider) async {
     setState(() => _selectedProviderId = provider.id);
-    final saved = await _saveProviders(
-      _canonicalProviders,
-      selectedProviderId: provider.id,
-      setSimpleModeDefault: true,
-    );
-    if (saved.defaultProviderId != provider.id) {
-      throw StateError(
-        'Provider default save returned ${saved.defaultProviderId}, '
-        'expected ${provider.id}.',
-      );
-    }
-    await _waitForProviderList(provider.id);
-    await _refreshUsages(providerId: provider.id);
-  }
-
-  String? _defaultProviderIdAfterDraftSave(
-    ProviderDraft draft,
-    ProviderSettingsView provider,
-  ) {
-    final currentDefaultId = ref
+    await ref
+        .read(studioControllerProvider.notifier)
+        .setDefaultProvider(provider.id);
+    final saved = ref
         .read(studioControllerProvider)
         .asData
         ?.value
-        .defaultProviderId;
-    if (draft.mode == ProviderDraftMode.create) {
-      return provider.id;
+        .settingsState;
+    if (saved == null || saved.defaultProviderId != provider.id) {
+      throw StateError(
+        'Provider default save returned ${saved?.defaultProviderId}, '
+        'expected ${provider.id}.',
+      );
     }
-    if (currentDefaultId == draft.originalId) {
-      return provider.id;
-    }
-    return currentDefaultId ??
-        _canonicalProviders.firstOrNull?.id ??
-        provider.id;
+    await _refreshUsages(providerId: provider.id);
   }
 
   Future<void> _refreshUsages({String? providerId}) async {
@@ -546,7 +540,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
     String? renamedFrom,
     String? renamedTo,
     String? removedProviderId,
-    bool setSimpleModeDefault = false,
+    bool includeRouteMigrations = false,
   }) async {
     return ref
         .read(studioControllerProvider.notifier)
@@ -559,7 +553,10 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
             renamedFrom: renamedFrom,
             renamedTo: renamedTo,
             removedProviderId: removedProviderId,
-            setSimpleModeDefault: setSimpleModeDefault,
+            includeRouteMigrations:
+                includeRouteMigrations ||
+                renamedFrom != null ||
+                removedProviderId != null,
           ),
         );
   }

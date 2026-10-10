@@ -440,3 +440,16 @@ extensions = [".purelang"]
 使用通用命令 driver（`<command> --version` 探测，无 repair 语义），运行行为与路由合同
 见 [21](./21-lsp.md)。Studio 项目激活时把该段应用进 LSP registry catalog，并纳入激活
 fingerprint。
+
+## 20.14 独立设置命令
+
+配置 mutation 按聚合边界拆分：provider 实例编辑、provider 删除/重命名迁移、默认 provider、
+单个 Mode 默认 route、单个 Agent role route 以及 permission、instructions、skills、MCP、
+general、web search 和 DeepSeek 各自有 typed command。所有 command 携带当前
+`expectedSettingsRevision`，由同一 runtime command lock 做 CAS；成功返回新的 canonical
+Settings snapshot 并发布设置事件。一个 command 不得把页面当前完整 provider、roles、mode
+routes 副本作为无条件替换值，从而避免旧页面保存覆盖并发修改。
+
+模型目录刷新属于另一个 command lane，只推进 `modelCatalogRevision`、provider catalog
+状态和有效模型描述。它不会修改 desired route，也不会阻塞配置 command。route 指向被撤下的
+模型时保留 desired 值并返回 unavailable；用户显式选择的新 route 仍需按当前有效目录校验。

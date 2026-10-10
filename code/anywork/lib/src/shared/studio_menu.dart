@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -174,7 +176,7 @@ class StudioMenu<T> extends StatefulWidget {
   final StudioMenuItemBuilder<T> itemBuilder;
 
   /// Reported with the activated row's [StudioMenuItem.value].
-  final ValueChanged<T>? onSelected;
+  final FutureOr<void> Function(T value)? onSelected;
 
   /// Quiet-label trigger content; wrapped with tooltip, semantics, hover and
   /// focus handling.
@@ -545,7 +547,24 @@ class _StudioMenuState<T> extends State<StudioMenu<T>>
   /// focus wherever it was.
   void _selectItem(StudioMenuItem<T> item) {
     _surface?.close(reason: StudioSurfaceCloseReason.selection);
-    widget.onSelected?.call(item.value as T);
+    final result = widget.onSelected?.call(item.value as T);
+    if (result is Future<void>) {
+      // A menu must close synchronously, but an async Bridge command must not
+      // become an unobserved future. The repository owns user-facing failure
+      // state; FlutterError keeps unexpected programmer errors diagnosable.
+      unawaited(
+        result.catchError((Object error, StackTrace stackTrace) {
+          FlutterError.reportError(
+            FlutterErrorDetails(
+              exception: error,
+              stack: stackTrace,
+              library: 'anywork studio menu',
+              context: ErrorDescription('dispatching a menu selection'),
+            ),
+          );
+        }),
+      );
+    }
   }
 
   void _handleOpened() {
@@ -614,7 +633,7 @@ class StudioIconMenu<T> extends StatefulWidget {
   final StudioMenuItemBuilder<T> itemBuilder;
 
   /// See [StudioMenu.onSelected].
-  final ValueChanged<T>? onSelected;
+  final FutureOr<void> Function(T value)? onSelected;
 
   /// Whether the button opens the menu and rows can be activated.
   final bool enabled;

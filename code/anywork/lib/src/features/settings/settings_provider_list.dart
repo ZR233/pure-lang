@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme/studio_tokens.dart';
@@ -147,10 +149,10 @@ class ProviderListRow extends StatelessWidget {
   final bool usageLoading;
   final String? usageError;
   final VoidCallback onOpen;
-  final VoidCallback onSetDefault;
-  final VoidCallback onRefreshUsage;
-  final VoidCallback onEdit;
-  final VoidCallback? onDelete;
+  final FutureOr<void> Function() onSetDefault;
+  final FutureOr<void> Function() onRefreshUsage;
+  final FutureOr<void> Function() onEdit;
+  final FutureOr<void> Function()? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -477,10 +479,10 @@ class _ProviderRowMenu extends StatelessWidget {
   });
 
   final bool isDefault;
-  final VoidCallback onSetDefault;
-  final VoidCallback onRefreshUsage;
-  final VoidCallback onEdit;
-  final VoidCallback? onDelete;
+  final FutureOr<void> Function() onSetDefault;
+  final FutureOr<void> Function() onRefreshUsage;
+  final FutureOr<void> Function() onEdit;
+  final FutureOr<void> Function()? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -491,13 +493,13 @@ class _ProviderRowMenu extends StatelessWidget {
       onSelected: (action) {
         switch (action) {
           case _ProviderRowAction.setDefault:
-            onSetDefault();
+            return onSetDefault();
           case _ProviderRowAction.refresh:
-            onRefreshUsage();
+            return onRefreshUsage();
           case _ProviderRowAction.edit:
-            onEdit();
+            return onEdit();
           case _ProviderRowAction.delete:
-            onDelete?.call();
+            return onDelete?.call();
         }
       },
       itemBuilder: (context) => [

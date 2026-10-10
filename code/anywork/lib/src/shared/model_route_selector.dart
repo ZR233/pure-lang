@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -95,7 +97,7 @@ class ModelRouteSelector extends StatelessWidget {
   final List<ModelSelectionOption> options;
   final String providerId;
   final String model;
-  final ValueChanged<ModelSelectionOption> onSelected;
+  final FutureOr<void> Function(ModelSelectionOption option) onSelected;
   final String fieldLabel;
   final Key selectorKey;
   final String? unresolvedLabel;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -159,7 +161,7 @@ class _WorkspaceModeItem extends StatelessWidget {
   }
 }
 
-typedef ModelRouteChanged = void Function(
+typedef ModelRouteChanged = FutureOr<void> Function(
   String providerId,
   String model,
   String? effort,
@@ -173,6 +175,7 @@ class ModelRoleSelector extends StatelessWidget {
     required this.model,
     required this.effort,
     required this.onSelected,
+    this.pending = false,
     this.available = true,
     this.unavailableReason,
     this.blockedReason,
@@ -185,6 +188,10 @@ class ModelRoleSelector extends StatelessWidget {
   final String model;
   final String? effort;
   final ModelRouteChanged onSelected;
+
+  /// Kept in the projection for status/optimistic rendering. Selection stays
+  /// enabled while pending so the coordinator can supersede an older intent.
+  final bool pending;
   final bool available;
   final String? unavailableReason;
   final String? blockedReason;
@@ -244,6 +251,9 @@ class ModelRoleSelector extends StatelessWidget {
           fieldLabel: context.l10n.statusPlannerModel,
           tooltip: selectionBlockedReason ?? context.l10n.statusPlannerModel,
           labelMaxWidth: 140,
+          // Pending is an optimistic projection, not a lock.  The controller
+          // supersedes older route intents by stable target identity, so users
+          // can select A -> B -> C without waiting for each Bridge round trip.
           enabled: selectionBlockedReason == null,
           onBlockedTap: selectionBlockedReason == null
               ? null
@@ -272,6 +282,7 @@ class ReasoningEffortSelector extends StatelessWidget {
     required this.model,
     required this.effort,
     required this.onSelected,
+    this.pending = false,
     this.blockedReason,
     this.onExplain,
     super.key,
@@ -282,6 +293,7 @@ class ReasoningEffortSelector extends StatelessWidget {
   final String model;
   final String? effort;
   final ModelRouteChanged onSelected;
+  final bool pending;
   final String? blockedReason;
   final ValueChanged<String>? onExplain;
 

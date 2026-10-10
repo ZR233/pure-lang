@@ -601,3 +601,16 @@ cmd 或 PowerShell 窗口。Windows 入口探测接受 WindowsApps 执行别名�
 SSH 选项或任意命令。缺少别名、启动失败等错误给予对应提示，不自动重试或切换目标。
 这些用户主动启动的外部应用拥有独立生命周期，不随 Studio 退出终止，也不复用 helper
 非交互通道或改变其资源回收契约。
+
+## 18.6 Settings 与 Model Catalog 的独立时钟
+
+Settings 配置事实与模型目录观察是两个资源，分别使用 `settingsRevision` 与
+`modelCatalogRevision`。Bridge 旧版 envelope 可能同时携带两个水位，但消费者必须分别比较：
+配置水位前进时只替换配置字段，目录水位前进时只替换 provider 的模型与目录状态；同一水位
+幂等丢弃，较低水位不得覆盖较新事实。direct response、topic frame 和 baseline 进入同一
+reducer merge path，页面不得按到达顺序直接替换整棵 `StudioState`。
+
+Flutter 的新会话 draft、Thread route 和 Settings canonical state 是三种不同事实。draft
+只按 project 保存在 `SessionDraftStore` 投影中，canonical snapshot 到达时不得清除或复制
+draft map。配置写入由 app 级 mutation coordinator 串行化；页面离开只释放观察者，不取消
+在途 command。返回路由可调用有界 `flushPending`，超时立即返回，后台继续完成并发布结果。
