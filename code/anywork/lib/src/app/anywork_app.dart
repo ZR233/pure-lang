@@ -27,11 +27,16 @@ class AnyworkApp extends StatelessWidget {
         path: '/',
         name: 'studio',
         builder: (context, state) => const StudioShell(),
-      ),
-      GoRoute(
-        path: '/settings',
-        name: 'settings',
-        builder: (context, state) => const SettingsPage(),
+        routes: [
+          GoRoute(
+            path: 'settings',
+            name: 'settings',
+            pageBuilder: (context, state) => const MaterialPage<void>(
+              restorationId: 'settings-page',
+              child: SettingsPage(),
+            ),
+          ),
+        ],
       ),
     ],
   );
