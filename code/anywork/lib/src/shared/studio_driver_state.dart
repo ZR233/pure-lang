@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../domain/models/studio_models.dart';
+import '../data/repositories/studio_settings_repository.dart';
 
 /// Read-only state exported through Flutter Driver in local acceptance builds.
 abstract final class StudioDriverState {
@@ -32,6 +33,7 @@ abstract final class StudioDriverState {
   static List<RoleSettingsView> _roles = const [];
   static List<ProviderSettingsView> _providers = const [];
   static Map<String, StudioMutationView> _mutations = const {};
+  static SettingsMergeDiagnostic? _settingsMerge;
   static PersistenceStateSnapshot _persistenceState =
       const PersistenceStateSnapshot.ready();
   static List<StudioRecoveryIssue> _recoveryIssues = const [];
@@ -161,6 +163,12 @@ abstract final class StudioDriverState {
     publishSidebarDirectory([
       for (final thread in state.rootThreads) thread.id,
     ], state.threadDirectory.hasMore);
+  }
+
+  /// Last settings/catalog merge decision.  This is diagnostic projection only;
+  /// canonical values remain owned by the controller/repository.
+  static void publishSettingsMerge(SettingsMergeDiagnostic? diagnostic) {
+    _settingsMerge = diagnostic;
   }
 
   static void publishProject(StudioProject? project) {
@@ -467,6 +475,7 @@ abstract final class StudioDriverState {
               'error': mutation.error,
             },
         ],
+        'lastMerge': _settingsMerge?.toJson(),
       },
       'persistence': {
         'revision': _persistenceState.revision,

@@ -44,7 +44,7 @@ class StudioShutdownProgressState extends _$StudioShutdownProgressState {
 /// 伪造终态。订阅创建/取消都有界：同步失败、取消错误或进度流错误都只累积为独立诊断，
 /// 绝不覆盖可靠的 runtime 报告，也绝不挂起退出。
 Future<StudioShutdownReport> runStudioShutdown(
-  StudioApi api,
+  StudioBridgeDataSource api,
   void Function(StudioShutdownProgress progress) onProgress, {
   required int remainingMs,
 }) async {
@@ -82,7 +82,7 @@ Future<StudioShutdownReport> runStudioShutdown(
 
   // 尽早同步封闭退出准入：一经进入关闭就封闭新的 mutation/订阅，绝不因随后的 Dart 进度
   // 订阅取消挂住而允许新的 mutation 借机进入。
-  FrbStudioApi.sealForShutdown();
+  FrbStudioBridgeDataSource.sealForShutdown();
   // 本地受控进度：bridge 关机进度流在 runtime 收束前即被取消，故不依赖它仍存活；终态
   // `Stopped` 只由协调器在可靠 Clean 之后发布。
   publish(const StoppingSubscriptionsProgress());
@@ -98,7 +98,7 @@ Future<StudioShutdownReport> runStudioShutdown(
     );
   } on Object catch (error, stackTrace) {
     // Frb core 已用同一 correlation 记录脱敏诊断时复用 memoized issue，避免重复记录。
-    final recorded = FrbStudioApi.recordedBeginExitIssue(error);
+    final recorded = FrbStudioBridgeDataSource.recordedBeginExitIssue(error);
     if (recorded != null) {
       issues.add(recorded);
     } else {
@@ -133,9 +133,10 @@ Future<StudioShutdownReport> runStudioShutdown(
   // 完整等待两者收敛，等待顺序不改变并发关系；两实现内部都已把失败收敛为 typed issue
   // （不抛出），不会互相遮蔽，也不引入 unhandled error。
   final progressIssues = <StudioShutdownIssue>[];
-  final dartSubscriptionCancel = FrbStudioApi.cancelDartSubscriptions(
-    budgetMs: _remainingBudget(remainingMs, watch),
-  );
+  final dartSubscriptionCancel =
+      FrbStudioBridgeDataSource.cancelDartSubscriptions(
+        budgetMs: _remainingBudget(remainingMs, watch),
+      );
   final progressCancel = _cancelBounded(
     subscription,
     progressIssues,

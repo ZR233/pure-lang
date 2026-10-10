@@ -15,7 +15,9 @@ import 'session_draft_store.dart';
 import 'studio_settings_repository.dart';
 import 'studio_state_reducer.dart';
 import 'studio_stream_coordinators.dart';
+import 'studio_thread_repository.dart';
 import 'studio_topic_reducer.dart';
+import '../../shared/studio_driver_state.dart';
 
 part 'studio_controller.g.dart';
 
@@ -122,10 +124,12 @@ class StudioController extends _$StudioController {
   /// All settings mutations share one write barrier.  This keeps the in-memory
   /// snapshot and the backend CAS revision ordered across independent Settings
   /// tabs, instead of letting a late save overwrite a newer one.
-  final StudioMutationCoordinator _settingsMutations =
-      StudioMutationCoordinator();
+  final SettingsMutationCoordinator _settingsMutations =
+      SettingsMutationCoordinator();
   final StudioSettingsRepository _settingsRepository =
       StudioSettingsRepository();
+  final StudioThreadRepository _threadRepository =
+      const StudioThreadRepository();
 
   /// Latest intent generation per route target. A menu callback may outlive
   /// the page that created it (for example while Settings is being popped), so
@@ -166,18 +170,23 @@ class StudioController extends _$StudioController {
   final Set<String> _archivingThreadIds = {};
   final Set<String> _renamingThreadIds = {};
 
-  StudioApi get _api => ref.read(studioApiProvider);
+  StudioBridgeDataSource get _api => ref.read(studioBridgeDataSourceProvider);
 
   StudioState _applySettingsCanonical(
     StudioState current,
     SettingsStateSnapshot incoming, {
     required String source,
+    String? operationId,
+    int pendingCount = 0,
   }) {
     final merged = _settingsRepository.applyTo(
       current.settingsState,
       incoming,
       source: source,
+      operationId: operationId,
+      pendingCount: pendingCount,
     );
+    StudioDriverState.publishSettingsMerge(_settingsRepository.lastMerge);
     return identical(merged, current.settingsState)
         ? current
         : current.copyWith(settingsState: merged);
@@ -421,6 +430,41 @@ class StudioController extends _$StudioController {
     await _api.activateProject(project.id);
     await _reloadProductState(selection: _ProjectDefaultSelection(project.id));
   }
+
+  // Settings and project dialogs use these repository methods instead of
+  // reaching through to the FRB data source.  They keep Bridge ownership in
+  // the app-level repository while allowing a dialog to be popped safely.
+  Future<List<SshServer>> listSshServers() => _api.listSshServers();
+
+  Future<SshServer> saveSshServer(SaveSshServerCommand command) =>
+      _api.saveSshServer(command);
+
+  Future<void> deleteSshServer(String alias) => _api.deleteSshServer(alias);
+
+  Future<SshConnectionView> testSshConnection(String alias) =>
+      _api.testSshConnection(alias);
+
+  Future<SshConnectionView> reconnectSshServer(String alias) =>
+      _api.reconnectSshServer(alias);
+
+  Future<RemoteDirectoryListing> browseRemoteDirectories(
+    String alias, {
+    String? path,
+  }) => _api.browseRemoteDirectories(alias, path: path);
+
+  Future<ThreadDirectoryPage> queryThreads(
+    DirectoryQuery query, {
+    String? cursor,
+    int limit = 50,
+  }) => _api.queryThreads(query, cursor: cursor, limit: limit);
+
+  Future<Uint8List> readThreadAttachment(
+    String threadId,
+    String attachmentId,
+  ) => _api.readThreadAttachment(threadId, attachmentId);
+
+  Future<Uint8List> readAttachmentDraft(String draftId) =>
+      _api.readAttachmentDraft(draftId);
 
   /// 打开远端项目的结果合同。
   ///
@@ -739,7 +783,7 @@ class StudioController extends _$StudioController {
     // 回到该会话时由新的订阅与首窗读取重建。
     final base = previousThreadId == null
         ? current
-        : releaseThreadHistoryPayload(current, previousThreadId);
+        : _threadRepository.releaseHistory(current, previousThreadId);
     if (previousThreadId != null) {
       _releaseThreadSession(previousThreadId);
     }
@@ -1348,7 +1392,7 @@ class StudioController extends _$StudioController {
         );
       } else {
         state = AsyncData(
-          applyTimelinePage(
+          _threadRepository.applyTimeline(
             latest,
             threadId,
             page,
@@ -2412,6 +2456,7 @@ class StudioController extends _$StudioController {
         latest,
         response.settings,
         source: 'thread-route-response',
+        operationId: operationId,
       );
       final latestWorkspace = next.workspacesByThread[threadId];
       if (latestWorkspace != null) {
@@ -2524,7 +2569,9 @@ class StudioController extends _$StudioController {
           if (ref.mounted) {
             final latest = state.value;
             if (latest != null) {
-              state = AsyncData(applyThreadSnapshot(latest, snapshot));
+              state = AsyncData(
+                _threadRepository.applySnapshot(latest, snapshot),
+              );
             }
           }
         } catch (_) {
@@ -2648,7 +2695,12 @@ class StudioController extends _$StudioController {
         final latest = state.value;
         final updated = latest == null
             ? null
-            : _applySettingsCanonical(latest, next, source: 'field-response');
+            : _applySettingsCanonical(
+                latest,
+                next,
+                source: 'field-response',
+                operationId: operationId,
+              );
         if (updated != null) {
           state = AsyncData(updated);
         }
@@ -2804,6 +2856,7 @@ class StudioController extends _$StudioController {
             latest,
             next,
             source: 'direct-response',
+            operationId: operationId,
           );
           state = AsyncData(updated);
           return updated.settingsState;
@@ -3177,7 +3230,7 @@ class StudioController extends _$StudioController {
   }
 
   void retryInitialization() {
-    FrbStudioApi.retryInitialization();
+    FrbStudioBridgeDataSource.retryInitialization();
     ref.invalidateSelf();
   }
 
@@ -3285,6 +3338,22 @@ class StudioController extends _$StudioController {
     }
     final previousThreadId = current.selectedThreadId;
     var next = applyProductTopicFrame(current, frame);
+    if (next.settingsState.revision != current.settingsState.revision ||
+        next.settingsState.modelCatalogRevision !=
+            current.settingsState.modelCatalogRevision) {
+      // Topic frames and direct responses must update the same app-level
+      // repository.  Otherwise a later response could compare against a
+      // repository clock that predates the topic event and resurrect an old
+      // route after returning from Settings.
+      next = next.copyWith(
+        settingsState: _settingsRepository.applyTo(
+          current.settingsState,
+          next.settingsState,
+          source: 'topic',
+        ),
+      );
+      StudioDriverState.publishSettingsMerge(_settingsRepository.lastMerge);
+    }
     if (identical(next, current)) return;
     // 归档/关闭会从 workspaces 移除该会话：立即释放它的会话级 map。
     for (final threadId in current.workspacesByThread.keys) {
@@ -3295,7 +3364,7 @@ class StudioController extends _$StudioController {
     if (previousThreadId != next.selectedThreadId) {
       if (previousThreadId != null) {
         _releaseThreadSession(previousThreadId);
-        next = releaseThreadHistoryPayload(next, previousThreadId);
+        next = _threadRepository.releaseHistory(next, previousThreadId);
       }
       // 非显式选择变化不继承“已打开”：新选中会话保持未打开，等待用户交互（§6.1）。
       next = _markThreadUnopened(next, next.selectedThreadId);
@@ -3386,7 +3455,7 @@ class StudioController extends _$StudioController {
         // (重)订阅建立表达为首个 snapshot：这里以它为界读取一次权威窗口，覆盖
         // owner 尚未激活时被跳过的首窗读取，并采纳数据库身份/水位。同一订阅世代
         // 只读一次，避免每个 snapshot 重复全窗读取。
-        state = AsyncData(applyThreadSnapshot(current, workspace));
+        state = AsyncData(_threadRepository.applySnapshot(current, workspace));
         unawaited(_reloadTimelineWindow(threadId, generation));
       case ThreadNotificationFrame(:final revision, :final update):
         final epoch = frame.epoch;
@@ -3399,7 +3468,7 @@ class StudioController extends _$StudioController {
         if (epoch != null) {
           _streamEpochByThread[threadId] = epoch;
         }
-        final reduced = applyThreadUpdate(
+        final reduced = _threadRepository.applyUpdate(
           current,
           threadId: threadId,
           revision: revision,
@@ -3494,7 +3563,7 @@ class StudioController extends _$StudioController {
     if (previousThreadId != next.selectedThreadId && previousThreadId != null) {
       // 选择切换（例如目录事件把焦点移到别的 Thread）同样释放上一个会话的历史载荷。
       _releaseThreadSession(previousThreadId);
-      next = releaseThreadHistoryPayload(next, previousThreadId);
+      next = _threadRepository.releaseHistory(next, previousThreadId);
     }
     if (previousThreadId != next.selectedThreadId) {
       // 非显式选择变化不继承“已打开”：新选中会话保持未打开，等待用户交互（§6.1）。

@@ -312,7 +312,9 @@ Future<void> _openThreadWorkspaceInVsCode(
   String? failure;
   if (project.sshAlias case final alias?) {
     try {
-      final servers = await ref.read(studioApiProvider).listSshServers();
+      final servers = await ref
+          .read(studioControllerProvider.notifier)
+          .listSshServers();
       // await 恢复后先确认 context 仍在，再继续启动或反馈 UI。
       if (!context.mounted) return;
       final server = servers
@@ -363,7 +365,9 @@ Future<void> _openThreadWorkspaceInZed(
   String? failure;
   if (project.sshAlias case final alias?) {
     try {
-      final servers = await ref.read(studioApiProvider).listSshServers();
+      final servers = await ref
+          .read(studioControllerProvider.notifier)
+          .listSshServers();
       // await 恢复后先确认 context 仍在，再继续启动或反馈 UI。
       if (!context.mounted) return;
       final server = servers
@@ -414,7 +418,9 @@ Future<void> _openThreadWorkspaceInTerminal(
   String? failure;
   if (project.sshAlias case final alias?) {
     try {
-      final servers = await ref.read(studioApiProvider).listSshServers();
+      final servers = await ref
+          .read(studioControllerProvider.notifier)
+          .listSshServers();
       // await 恢复后先确认 context 仍在，再继续启动或反馈 UI。
       if (!context.mounted) return;
       final server = servers

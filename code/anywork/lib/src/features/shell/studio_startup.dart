@@ -36,7 +36,7 @@ class _StudioStartup extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 ValueListenableBuilder<StudioStartupPhase>(
-                  valueListenable: FrbStudioApi.startupProgress,
+                  valueListenable: FrbStudioBridgeDataSource.startupProgress,
                   builder: (context, phase, _) => Semantics(
                     liveRegion: true,
                     child: Text(

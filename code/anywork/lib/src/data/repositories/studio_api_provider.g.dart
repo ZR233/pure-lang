@@ -9,43 +9,50 @@ part of 'studio_api_provider.dart';
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
 
-@ProviderFor(studioApi)
-final studioApiProvider = StudioApiProvider._();
+@ProviderFor(studioBridgeDataSource)
+final studioBridgeDataSourceProvider = StudioBridgeDataSourceProvider._();
 
-final class StudioApiProvider
-    extends $FunctionalProvider<StudioApi, StudioApi, StudioApi>
-    with $Provider<StudioApi> {
-  StudioApiProvider._()
+final class StudioBridgeDataSourceProvider
+    extends
+        $FunctionalProvider<
+          StudioBridgeDataSource,
+          StudioBridgeDataSource,
+          StudioBridgeDataSource
+        >
+    with $Provider<StudioBridgeDataSource> {
+  StudioBridgeDataSourceProvider._()
     : super(
         from: null,
         argument: null,
         retry: null,
-        name: r'studioApiProvider',
+        name: r'studioBridgeDataSourceProvider',
         isAutoDispose: false,
         dependencies: null,
         $allTransitiveDependencies: null,
       );
 
   @override
-  String debugGetCreateSourceHash() => _$studioApiHash();
+  String debugGetCreateSourceHash() => _$studioBridgeDataSourceHash();
 
   @$internal
   @override
-  $ProviderElement<StudioApi> $createElement($ProviderPointer pointer) =>
-      $ProviderElement(pointer);
+  $ProviderElement<StudioBridgeDataSource> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
 
   @override
-  StudioApi create(Ref ref) {
-    return studioApi(ref);
+  StudioBridgeDataSource create(Ref ref) {
+    return studioBridgeDataSource(ref);
   }
 
   /// {@macro riverpod.override_with_value}
-  Override overrideWithValue(StudioApi value) {
+  Override overrideWithValue(StudioBridgeDataSource value) {
     return $ProviderOverride(
       origin: this,
-      providerOverride: $SyncValueProvider<StudioApi>(value),
+      providerOverride: $SyncValueProvider<StudioBridgeDataSource>(value),
     );
   }
 }
 
-String _$studioApiHash() => r'd3fee11b85d405181cac107639c0a0df79b010d2';
+String _$studioBridgeDataSourceHash() =>
+    r'cc10337c4232ad3220374fd7dae4afe5c8f18432';

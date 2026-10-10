@@ -34,7 +34,9 @@ class _SshTabState extends ConsumerState<SshTab> {
 
   Future<void> _reload() async {
     try {
-      final servers = await ref.read(studioApiProvider).listSshServers();
+      final servers = await ref
+          .read(studioControllerProvider.notifier)
+          .listSshServers();
       if (mounted) setState(() => _servers = servers);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -118,7 +120,7 @@ class _SshTabState extends ConsumerState<SshTab> {
       _runServerOperation(server, SshServerOperation.test, () async {
         setState(() => _connections.remove(server.alias));
         final snapshot = await ref
-            .read(studioApiProvider)
+            .read(studioControllerProvider.notifier)
             .testSshConnection(server.alias);
         if (mounted) setState(() => _connections[server.alias] = snapshot);
       });
@@ -127,7 +129,7 @@ class _SshTabState extends ConsumerState<SshTab> {
       _runServerOperation(server, SshServerOperation.reconnect, () async {
         setState(() => _connections.remove(server.alias));
         final snapshot = await ref
-            .read(studioApiProvider)
+            .read(studioControllerProvider.notifier)
             .reconnectSshServer(server.alias);
         if (mounted) setState(() => _connections[server.alias] = snapshot);
       });
@@ -140,7 +142,7 @@ class _SshTabState extends ConsumerState<SshTab> {
     if (command == null || !mounted) return;
     setState(() => _error = null);
     try {
-      await ref.read(studioApiProvider).saveSshServer(command);
+      await ref.read(studioControllerProvider.notifier).saveSshServer(command);
       if (server != null && mounted) {
         setState(() => _connections.remove(server.alias));
       }
@@ -170,7 +172,9 @@ class _SshTabState extends ConsumerState<SshTab> {
           ),
         );
         if (confirmed != true || !mounted) return;
-        await ref.read(studioApiProvider).deleteSshServer(server.alias);
+        await ref
+            .read(studioControllerProvider.notifier)
+            .deleteSshServer(server.alias);
         if (mounted) setState(() => _connections.remove(server.alias));
         await _reload();
       });

@@ -87,7 +87,7 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
     });
     try {
       final listing = await ref
-          .read(studioApiProvider)
+          .read(studioControllerProvider.notifier)
           .browseRemoteDirectories(widget.server.alias, path: path);
       if (!mounted) return;
       if (!listing.path.startsWith('/')) {

@@ -26,19 +26,76 @@ typedef TimelinePaneView = ({
   ThreadHistoryWindow history,
 });
 
-typedef StartPageView = ({
-  bool isStartPage,
-  StudioProject? project,
-  ComposerThreadState composer,
-  PermissionMode permissionMode,
-  bool canSubmit,
-  ThreadModeId mode,
-  ThreadWorkspaceMode workspaceMode,
-  List<ProviderSettingsView> providers,
-  List<ModeModelRouteView> modeModelRoutes,
-  bool modeRequiresFunctionCalling,
-  bool modelRouteMutationPending,
-});
+/// Immutable start-session projection.
+///
+/// It is derived from the latest controller state at selector evaluation time;
+/// widgets never resolve a missing model by mutating the mode or by capturing
+/// an old `view` in a callback.  Pending route mutations are represented as a
+/// separate projection so an optimistic visual state cannot become canonical
+/// by accident.
+final class StartSessionViewModel {
+  const StartSessionViewModel({
+    required this.isStartPage,
+    required this.project,
+    required this.composer,
+    required this.permissionMode,
+    required this.canSubmit,
+    required this.mode,
+    required this.workspaceMode,
+    required this.providers,
+    required this.modeModelRoutes,
+    required this.modeRequiresFunctionCalling,
+    required this.modelRouteMutationPending,
+  });
+
+  factory StartSessionViewModel.fromState(StudioState state) {
+    final projectId = state.selectedProjectId;
+    final project = state.projects
+        .where((candidate) => candidate.id == projectId)
+        .firstOrNull;
+    final healthy =
+        project != null &&
+        state.recoveryIssue(
+              blockingOnly: true,
+              scope: RecoveryIssueScope.project,
+              projectId: project.id,
+            ) ==
+            null;
+    final mode = state.newThreadMode;
+    return StartSessionViewModel(
+      isStartPage: state.selectedThreadId == null,
+      project: project,
+      composer: state.newThreadComposer,
+      permissionMode: state.permissionMode,
+      canSubmit: healthy,
+      mode: mode,
+      workspaceMode: state.newThreadWorkspaceMode,
+      providers: List.unmodifiable(state.providers),
+      modeModelRoutes: List.unmodifiable(state.modeModelRoutes),
+      modeRequiresFunctionCalling:
+          state.threadModeCatalog.modes
+              .where((descriptor) => descriptor.id == mode.id)
+              .firstOrNull
+              ?.hasWorkflow ??
+          false,
+      modelRouteMutationPending:
+          state.mutationPending('new-thread-route:model:${mode.id}') ||
+          state.mutationPending('new-thread-route:effort:${mode.id}'),
+    );
+  }
+
+  final bool isStartPage;
+  final StudioProject? project;
+  final ComposerThreadState composer;
+  final PermissionMode permissionMode;
+  final bool canSubmit;
+  final ThreadModeId mode;
+  final ThreadWorkspaceMode workspaceMode;
+  final List<ProviderSettingsView> providers;
+  final List<ModeModelRouteView> modeModelRoutes;
+  final bool modeRequiresFunctionCalling;
+  final bool modelRouteMutationPending;
+}
 
 @riverpod
 AsyncValue<AgentWorkspaceView?> selectedAgentWorkspace(Ref ref) {
@@ -114,49 +171,10 @@ AsyncValue<AgentWorkspaceView?> selectedWorkspaceControls(Ref ref) {
 }
 
 @riverpod
-AsyncValue<StartPageView> startPage(Ref ref) {
+AsyncValue<StartSessionViewModel> startPage(Ref ref) {
   return ref.watch(
     studioControllerProvider.select(
-      (state) => state.whenData((state) {
-        final projectId = state.selectedProjectId;
-        final project = state.projects
-            .where((project) => project.id == projectId)
-            .firstOrNull;
-        final healthy =
-            project != null &&
-            state.recoveryIssue(
-                  blockingOnly: true,
-                  scope: RecoveryIssueScope.project,
-                  projectId: project.id,
-                ) ==
-                null;
-        return (
-          isStartPage: state.selectedThreadId == null,
-          project: project,
-          composer: state.newThreadComposer,
-          permissionMode: state.permissionMode,
-          canSubmit: healthy,
-          mode: state.newThreadMode,
-          workspaceMode: state.newThreadWorkspaceMode,
-          providers: state.providers,
-          modeModelRoutes: state.modeModelRoutes,
-          modeRequiresFunctionCalling:
-              state.threadModeCatalog.modes
-                  .where(
-                    (descriptor) => descriptor.id == state.newThreadMode.id,
-                  )
-                  .firstOrNull
-                  ?.hasWorkflow ??
-              false,
-          modelRouteMutationPending:
-              state.mutationPending(
-                'new-thread-route:model:${state.newThreadMode.id}',
-              ) ||
-              state.mutationPending(
-                'new-thread-route:effort:${state.newThreadMode.id}',
-              ),
-        );
-      }),
+      (state) => state.whenData(StartSessionViewModel.fromState),
     ),
   );
 }

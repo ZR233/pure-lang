@@ -614,3 +614,7 @@ Flutter 的新会话 draft、Thread route 和 Settings canonical state 是三种
 只按 project 保存在 `SessionDraftStore` 投影中，canonical snapshot 到达时不得清除或复制
 draft map。配置写入由 app 级 mutation coordinator 串行化；页面离开只释放观察者，不取消
 在途 command。返回路由可调用有界 `flushPending`，超时立即返回，后台继续完成并发布结果。
+Flutter 数据层按 `StudioBridgeDataSource`、`StudioSettingsRepository`、
+`StudioThreadRepository` 和 `SessionDraftStore` 分界：FRB 只传输 typed 数据，设置与线程
+reducer 不共享 owner。`StudioNavigationCoordinator` 只维护路由可见性和有界收束，不从
+widget 的 `dispose` 推断业务状态。

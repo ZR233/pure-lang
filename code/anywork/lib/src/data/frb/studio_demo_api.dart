@@ -1,12 +1,15 @@
 part of 'studio_api.dart';
 
-class DemoStudioApi
-    implements StudioApi, PersistenceQueueReader, ChatWindowReader {
+class DemoStudioBridgeDataSource
+    implements
+        StudioBridgeDataSource,
+        PersistenceQueueReader,
+        ChatWindowReader {
   @override
   Future<RecoveryStateSnapshot> retryRecovery() async =>
       (await readStudioState()).recoveryState;
 
-  DemoStudioApi({
+  DemoStudioBridgeDataSource({
     this.lspActivityLoop = false,
     this._providerCatalog = demoProviderCatalogFixture,
   });
@@ -118,8 +121,8 @@ class DemoStudioApi
 
   @override
   Future<void> beginRuntimeExit({required int remainingMs}) async {
-    // demo 无 native runtime owner：与 public StudioApi 契约一致，早期封闭是无副作用的
-    // no-op。真正的早期封闭由 FrbStudioApi 调 native `begin_runtime_exit`；这里不声称任何
+    // demo 无 native runtime owner：与 public StudioBridgeDataSource 契约一致，早期封闭是无副作用的
+    // no-op。真正的早期封闭由 FrbStudioBridgeDataSource 调 native `begin_runtime_exit`；这里不声称任何
     // raw demo 结果验证过 Rust。
   }
 
@@ -3021,7 +3024,7 @@ class DemoStudioApi
 class _DemoChatWindow implements StudioChatWindow {
   _DemoChatWindow(this._api, this._threadId);
 
-  final DemoStudioApi _api;
+  final DemoStudioBridgeDataSource _api;
   final String _threadId;
   String? _focusId;
   bool _closed = false;
@@ -3229,8 +3232,8 @@ ThreadWorkspace _demoUpdateInteraction(
 }
 
 /// Deterministic demo fixture exposed only by the dedicated Driver build.
-class DriverDemoStudioApi extends DemoStudioApi {
-  DriverDemoStudioApi({super.lspActivityLoop});
+class DriverDemoStudioBridgeDataSource extends DemoStudioBridgeDataSource {
+  DriverDemoStudioBridgeDataSource({super.lspActivityLoop});
 
   bool _retiredPlannerScenario = false;
 

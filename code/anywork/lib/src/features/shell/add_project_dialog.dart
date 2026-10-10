@@ -66,7 +66,9 @@ class _AddProjectDialogState extends ConsumerState<_AddProjectDialog> {
       _error = null;
     });
     try {
-      final servers = await ref.read(studioApiProvider).listSshServers();
+      final servers = await ref
+          .read(studioControllerProvider.notifier)
+          .listSshServers();
       if (!mounted) return;
       setState(() => _servers = servers);
     } catch (error) {
@@ -78,7 +80,7 @@ class _AddProjectDialogState extends ConsumerState<_AddProjectDialog> {
 
   Future<void> _connect(SshServer server) async {
     final connection = await ref
-        .read(studioApiProvider)
+        .read(studioControllerProvider.notifier)
         .testSshConnection(server.alias);
     if (connection.state != 'ready') {
       throw StateError(connection.errorMessage ?? connection.state);
@@ -109,7 +111,7 @@ class _AddProjectDialogState extends ConsumerState<_AddProjectDialog> {
 
   Future<void> _save(SaveSshServerCommand command) async {
     final saved = await ref
-        .read(studioApiProvider)
+        .read(studioControllerProvider.notifier)
         .saveSshServer(
           SaveSshServerCommand(
             alias: _saved?.alias ?? command.alias,

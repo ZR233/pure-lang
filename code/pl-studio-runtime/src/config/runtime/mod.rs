@@ -446,3 +446,80 @@ fn ensure_revision(expected: u64, actual: u64) -> ConfigRuntimeResult<()> {
 fn config_runtime_poisoned() -> ConfigRuntimeError {
     PureError::ConfigError("ConfigRuntime state lock is poisoned".to_string()).into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{ConfigPaths, ConfigStore};
+
+    fn runtime() -> (tempfile::TempDir, ConfigRuntime) {
+        let directory = tempfile::tempdir().expect("isolated config directory");
+        let store = ConfigStore::new(ConfigPaths::from_config_dir(directory.path()));
+        let runtime = ConfigRuntime::initialize(store).expect("default config initializes");
+        (directory, runtime)
+    }
+
+    #[test]
+    fn scalar_config_mutation_does_not_advance_catalog_clock() {
+        let (_directory, runtime) = runtime();
+        let before = runtime.read().expect("read config");
+        let catalog_before = runtime.read_catalog().expect("read catalog");
+        let next = runtime
+            .update(before.revision, |config| {
+                let mut next = config.clone();
+                next.instructions.user = "independent config field".to_string();
+                Ok(next)
+            })
+            .expect("update one field");
+
+        assert_eq!(next.revision, before.revision + 1);
+        assert_eq!(
+            runtime
+                .read()
+                .expect("read updated config")
+                .config
+                .instructions
+                .user,
+            "independent config field"
+        );
+        assert_eq!(
+            runtime
+                .read_catalog()
+                .expect("read catalog after config")
+                .revision,
+            catalog_before.revision,
+            "a scalar settings write must not be published as a catalog refresh",
+        );
+    }
+
+    #[test]
+    fn stale_config_revision_is_rejected_before_editing_canonical_state() {
+        let (_directory, runtime) = runtime();
+        let before = runtime.read().expect("read config");
+        let _next = runtime
+            .update(before.revision, |config| {
+                let mut next = config.clone();
+                next.instructions.user = "first".to_string();
+                Ok(next)
+            })
+            .expect("first update");
+
+        let error = runtime
+            .update(before.revision, |config| {
+                let mut next = config.clone();
+                next.instructions.user = "stale must not win".to_string();
+                Ok(next)
+            })
+            .expect_err("old CAS revision must fail");
+        assert!(matches!(error, ConfigRuntimeError::StaleRevision { .. }));
+        assert_eq!(
+            runtime
+                .read()
+                .expect("read canonical config")
+                .config
+                .instructions
+                .user,
+            "first",
+        );
+    }
+}

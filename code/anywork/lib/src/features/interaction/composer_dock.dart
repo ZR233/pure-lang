@@ -88,7 +88,7 @@ class ComposerDock extends ConsumerWidget {
 class StartPageComposerDock extends ConsumerWidget {
   const StartPageComposerDock({required this.view, super.key});
 
-  final StartPageView view;
+  final StartSessionViewModel view;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

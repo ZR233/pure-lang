@@ -9,7 +9,7 @@ import '../frb/studio_api.dart';
 class ThreadStreamCoordinator {
   ThreadStreamCoordinator(this._api, this._onFrame, this._onDisconnected);
 
-  final StudioApi _api;
+  final StudioBridgeDataSource _api;
   final void Function(ThreadStreamFrame frame, String threadId, int generation)
   _onFrame;
   final void Function(String threadId, int generation, Object? error)

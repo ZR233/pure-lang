@@ -306,11 +306,11 @@ final startPageProvider = StartPageProvider._();
 final class StartPageProvider
     extends
         $FunctionalProvider<
-          AsyncValue<StartPageView>,
-          AsyncValue<StartPageView>,
-          AsyncValue<StartPageView>
+          AsyncValue<StartSessionViewModel>,
+          AsyncValue<StartSessionViewModel>,
+          AsyncValue<StartSessionViewModel>
         >
-    with $Provider<AsyncValue<StartPageView>> {
+    with $Provider<AsyncValue<StartSessionViewModel>> {
   StartPageProvider._()
     : super(
         from: null,
@@ -327,25 +327,27 @@ final class StartPageProvider
 
   @$internal
   @override
-  $ProviderElement<AsyncValue<StartPageView>> $createElement(
+  $ProviderElement<AsyncValue<StartSessionViewModel>> $createElement(
     $ProviderPointer pointer,
   ) => $ProviderElement(pointer);
 
   @override
-  AsyncValue<StartPageView> create(Ref ref) {
+  AsyncValue<StartSessionViewModel> create(Ref ref) {
     return startPage(ref);
   }
 
   /// {@macro riverpod.override_with_value}
-  Override overrideWithValue(AsyncValue<StartPageView> value) {
+  Override overrideWithValue(AsyncValue<StartSessionViewModel> value) {
     return $ProviderOverride(
       origin: this,
-      providerOverride: $SyncValueProvider<AsyncValue<StartPageView>>(value),
+      providerOverride: $SyncValueProvider<AsyncValue<StartSessionViewModel>>(
+        value,
+      ),
     );
   }
 }
 
-String _$startPageHash() => r'f8e11bccec1be23309dd83303d462e0e0ce0d8d8';
+String _$startPageHash() => r'f091d96cb40f64fc96c304fd5b4a5682c1518fd7';
 
 @ProviderFor(statusBar)
 final statusBarProvider = StatusBarProvider._();

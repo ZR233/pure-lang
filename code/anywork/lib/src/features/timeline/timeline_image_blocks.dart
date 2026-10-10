@@ -87,7 +87,7 @@ class _ThreadAttachmentCardState extends ConsumerState<_ThreadAttachmentCard> {
       widget.threadId,
       widget.attachment.id,
       () => ref
-          .read(studioApiProvider)
+          .read(studioControllerProvider.notifier)
           .readThreadAttachment(widget.threadId, widget.attachment.id),
     );
   }
@@ -400,7 +400,7 @@ class _ThreadToolImageThumbnailState
     widget.threadId,
     widget.entry.attachment.id,
     () => ref
-        .read(studioApiProvider)
+        .read(studioControllerProvider.notifier)
         .readThreadAttachment(widget.threadId, widget.entry.attachment.id),
   );
   @override

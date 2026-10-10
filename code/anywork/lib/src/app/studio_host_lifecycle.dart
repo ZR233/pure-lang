@@ -155,7 +155,7 @@ class StudioExitCoordinator {
     this.shutdownOverride,
   });
 
-  final StudioApi _api;
+  final StudioBridgeDataSource _api;
   final void Function(StudioShutdownProgress progress) _onProgress;
 
   /// 失败时呈现「正在结束 / 必要诊断」；不得向已销毁的 notifier 写状态。
@@ -284,11 +284,11 @@ class StudioExitCoordinator {
     // 最终报告（含 Dart 订阅/stream 收束）不是可靠 Clean 时撤销安全 dispose，绝不
     // 在仍有订阅或事件循环占用时释放 RustLib 把正常关闭拖成 watchdog degraded。
     if (!report.allowsCleanExit) {
-      FrbStudioApi.revokeSafeDispose();
+      FrbStudioBridgeDataSource.revokeSafeDispose();
     }
     // 独立诊断收尾：不依赖 runtime 是否安装，也不依赖上面的清理是否成功。
     await _runBounded(
-      FrbStudioApi.finishShutdownDiagnostics,
+      FrbStudioBridgeDataSource.finishShutdownDiagnostics,
       _remainingDiagnosticsDuration(),
     );
     // 只有全部关闭报告（含 Dart 订阅 / 诊断清理）确认可靠后才发布终态 `Stopped`；

@@ -26,7 +26,7 @@ abstract interface class ChatWindowReader {
   Future<StudioChatWindow> openChatWindow(String threadId);
 }
 
-abstract class StudioApi {
+abstract class StudioBridgeDataSource {
   Future<SettingsStateSnapshot> refreshModelCatalog(String providerId);
   Future<RecoveryStateSnapshot> retryRecovery();
   Future<ProviderCatalogView> loadProviderCatalog();
@@ -386,7 +386,7 @@ class _DartCancelResult {
   final StackTrace? stackTrace;
 }
 
-/// 一次早期退出封闭（[StudioApi.beginRuntimeExit]）的单一 one-shot 结果。
+/// 一次早期退出封闭（[StudioBridgeDataSource.beginRuntimeExit]）的单一 one-shot 结果。
 ///
 /// 成功或「无 owner 跳过」时无 issue；失败/超时保留 typed issue、原始错误与堆栈，供调用方
 /// 作为 external issue 继续收尾。同一进程只结算一次：重复 close / dispose / driver 复用同一
@@ -451,8 +451,11 @@ frb.ProviderInput _providerInputFromCommand(ProviderCommand provider) {
   );
 }
 
-class FrbStudioApi
-    implements StudioApi, PersistenceQueueReader, ChatWindowReader {
+class FrbStudioBridgeDataSource
+    implements
+        StudioBridgeDataSource,
+        PersistenceQueueReader,
+        ChatWindowReader {
   static final startupProgress = ValueNotifier(
     StudioStartupPhase.loadingBridge,
   );
@@ -947,7 +950,7 @@ class FrbStudioApi
   /// 早期退出封闭本身的有界上限：绝不无界等待桥，也绝不延长单一 30s / 28s 期限。
   static const int _beginExitBoundMs = 2000;
 
-  /// [StudioApi.beginRuntimeExit] 的单一 one-shot 实现。
+  /// [StudioBridgeDataSource.beginRuntimeExit] 的单一 one-shot 实现。
   ///
   /// 未加载 runtime（`RustLib.init` 未完成）时确无 owner，跳过且**不**触发初始化；库已加载
   /// 即直接调用 native `begin_runtime_exit` 封闭准入并广播一次取消（令在途 start 无法再发布

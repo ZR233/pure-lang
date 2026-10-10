@@ -671,6 +671,9 @@ Model、Mode 和 reasoning selector 不保存完整 settings，也不捕获可�
 projection 分为 canonical、pending、resolved、unavailable；pending 只提供即时展示，失败
 回滚到 canonical 并保留可重试错误。模型目录刷新按 provider 去重并使用独立 catalog 水位，
 不得触发设置页整棵重建或覆盖 route。
+新会话页面消费 `StartSessionViewModel`，设置页消费按领域的 `SettingsViewModel`/selector；
+两者都只读 immutable projection。`StudioMenu` 的异步命令在关闭菜单后继续由 app 级 lane
+完成，快速 A→B→C 选择只保留目标键的最新意图。
 
 模型选择器的可用性来自活动 Thread 的实时会话状态；持久化检查点不包含模型资源，不能用其默认
 不可用值覆盖实时路由。runtime 通知由同一投影 owner 从最新快照生成，仅状态变化时发布；

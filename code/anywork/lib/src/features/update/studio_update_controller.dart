@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../data/frb/studio_api.dart' show FrbStudioApi, updaterStateFromFrb;
+import '../../data/frb/studio_api.dart'
+    show FrbStudioBridgeDataSource, updaterStateFromFrb;
 import '../../app/studio_shutdown.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
@@ -71,19 +72,19 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
 
   @override
   Future<UpdaterStateSnapshot> read() async {
-    await FrbStudioApi.ensureReady();
+    await FrbStudioBridgeDataSource.ensureReady();
     return updaterStateFromFrb(await frb.readStudioUpdateState());
   }
 
   @override
   Future<UpdaterStateSnapshot> check() async {
-    await FrbStudioApi.ensureReady();
+    await FrbStudioBridgeDataSource.ensureReady();
     return updaterStateFromFrb(await frb.checkStudioUpdate());
   }
 
   @override
   Future<void> startAutomaticUpdate() async {
-    await FrbStudioApi.ensureReady();
+    await FrbStudioBridgeDataSource.ensureReady();
     await frb.startStudioBackgroundUpdate();
   }
 
@@ -95,7 +96,7 @@ class FrbStudioUpdateApi implements StudioUpdateApi {
     required int expectedRevision,
     required String version,
   }) async {
-    await FrbStudioApi.ensureReady();
+    await FrbStudioBridgeDataSource.ensureReady();
     return _FrbStudioUpdateOperation(
       await frb.installStudioUpdate(
         expectedRevision: BigInt.from(expectedRevision),

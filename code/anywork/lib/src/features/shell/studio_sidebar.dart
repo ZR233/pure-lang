@@ -204,7 +204,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
     });
     try {
       final page = await ref
-          .read(studioApiProvider)
+          .read(studioControllerProvider.notifier)
           .queryThreads(
             DirectoryQuery(
               projectId: projectId,

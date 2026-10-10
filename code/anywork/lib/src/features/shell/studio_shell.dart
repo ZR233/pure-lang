@@ -8,7 +8,7 @@ import 'package:flutter/widget_previews.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../data/frb/studio_api.dart' show FrbStudioApi;
+import '../../data/frb/studio_api.dart' show FrbStudioBridgeDataSource;
 import '../../shared/studio_loading.dart';
 import '../../shared/recovery_check_status.dart';
 import '../../app/theme/material3_theme.dart';

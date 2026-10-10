@@ -14,6 +14,7 @@ import '../l10n/app_localizations.dart';
 import '../l10n/studio_l10n.dart';
 import '../platform/error_log.dart';
 import 'studio_host_lifecycle.dart';
+import 'studio_navigation_coordinator.dart';
 import 'studio_shutdown.dart';
 import 'theme/material3_theme.dart';
 
@@ -33,7 +34,9 @@ class _AnyworkAppState extends ConsumerState<AnyworkApp> {
     _router = GoRouter(
       restorationScopeId: 'anywork-router',
       observers: [
-        StudioRouteLifecycle(ref.read(studioControllerProvider.notifier)),
+        StudioNavigationCoordinator(
+          ref.read(studioControllerProvider.notifier),
+        ),
       ],
       routes: [
         GoRoute(
@@ -82,54 +85,6 @@ class _AnyworkAppState extends ConsumerState<AnyworkApp> {
   }
 }
 
-/// Owns conversation visibility at the navigation stack boundary.  The shell
-/// can be disposed while a settings mutation is still pending, so widget
-/// lifecycle callbacks must not be the source of this business signal.
-final class StudioRouteLifecycle extends NavigatorObserver {
-  StudioRouteLifecycle(this._controller);
-
-  final StudioController _controller;
-  bool? _visible;
-
-  bool _isSettings(Route<dynamic>? route) {
-    final name = route?.settings.name;
-    return name == 'settings' || name?.endsWith('/settings') == true;
-  }
-
-  void _sync(Route<dynamic>? route) {
-    final visible = !_isSettings(route);
-    if (_visible == visible) return;
-    _visible = visible;
-    unawaited(
-      _controller.setConversationVisible(visible).catchError((error, stack) {
-        debugPrint(
-          'route_visibility_failed visible=$visible error=$error\n$stack',
-        );
-      }),
-    );
-  }
-
-  @override
-  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    _sync(route);
-  }
-
-  @override
-  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    _sync(previousRoute);
-  }
-
-  @override
-  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    _sync(previousRoute);
-  }
-
-  @override
-  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    _sync(newRoute);
-  }
-}
-
 class StudioLifecycleCoordinator extends ConsumerStatefulWidget {
   const StudioLifecycleCoordinator({
     required this.child,
@@ -148,7 +103,7 @@ class StudioLifecycleCoordinator extends ConsumerStatefulWidget {
 class _StudioLifecycleCoordinatorState
     extends ConsumerState<StudioLifecycleCoordinator>
     with WidgetsBindingObserver {
-  late final StudioApi _api;
+  late final StudioBridgeDataSource _api;
   late final StudioShutdownProgressState _shutdownProgress;
   late final StudioExitCoordinator _coordinator;
 
@@ -157,7 +112,7 @@ class _StudioLifecycleCoordinatorState
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // dispose 后 ConsumerState.ref 不可再用，关机依赖必须在挂载期间取得。
-    _api = ref.read(studioApiProvider);
+    _api = ref.read(studioBridgeDataSourceProvider);
     _shutdownProgress = ref.read(studioShutdownProgressStateProvider.notifier);
     _coordinator = StudioExitCoordinator(
       _api,

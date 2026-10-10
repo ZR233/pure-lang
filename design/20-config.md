@@ -467,6 +467,10 @@ general 字段、web search 字段和 DeepSeek 开关各自有 typed command。�
 Settings snapshot 并发布设置事件。Bridge 与 loopback HTTP 均使用 `PUT /api/v1/settings/field`
 承载 `SettingsFieldUpdate`，FRB 只暴露同一 typed handler。一个 command 不得把页面当前完整 provider、roles、mode
 routes 或其它字段的旧副本作为无条件替换值；需要迁移引用时必须在删除命令中显式给出替换目标。
+这里的“同一 handler”只表示传输入口稳定；请求体的 `kind` 是单字段/单资源类型，服务端
+不得根据一个字段请求顺带修改其它设置。Provider 与 existing Thread route 仍是资源级原子
+接口，因为 endpoint/凭据/模型声明或 runtime route 需要联合校验；它们不会把其它 provider、
+Mode、role 的旧快照带入提交。
 
 模型目录刷新属于另一个 command lane，只推进 `modelCatalogRevision`、provider catalog
 状态和有效模型描述。它不会修改 desired route，也不会阻塞配置 command。route 指向被撤下的

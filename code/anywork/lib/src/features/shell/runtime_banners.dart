@@ -70,7 +70,7 @@ class _StartupRecoveryBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       ValueListenableBuilder<StartupRecoveryReport?>(
-        valueListenable: FrbStudioApi.startupRecovery,
+        valueListenable: FrbStudioBridgeDataSource.startupRecovery,
         builder: (context, report, _) {
           if (report == null) return const SizedBox.shrink();
           return ColoredBox(
@@ -93,7 +93,8 @@ class _StartupRecoveryBanner extends StatelessWidget {
                   ),
                   IconButton(
                     tooltip: context.l10n.recoveryArchiveDismiss,
-                    onPressed: () => FrbStudioApi.startupRecovery.value = null,
+                    onPressed: () =>
+                        FrbStudioBridgeDataSource.startupRecovery.value = null,
                     icon: const Icon(Icons.close),
                   ),
                 ],

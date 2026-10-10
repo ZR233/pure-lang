@@ -728,7 +728,11 @@ StudioState applySettingsConfigState(
 ) {
   final previous = current.settingsState;
   if (next.revision <= previous.revision) return current;
-  final merged = mergeCanonicalSettingsSnapshots(previous, next);
+  final merged = mergeCanonicalSettingsSnapshots(
+    previous,
+    next,
+    mergeCatalog: false,
+  );
   if (merged == null) return current;
   return current.copyWith(settingsState: merged);
 }
@@ -743,7 +747,11 @@ StudioState applyModelCatalogState(
   if (next.modelCatalogRevision <= previous.modelCatalogRevision) {
     return current;
   }
-  final merged = mergeCanonicalSettingsSnapshots(previous, next);
+  final merged = mergeCanonicalSettingsSnapshots(
+    previous,
+    next,
+    mergeConfig: false,
+  );
   if (merged == null) return current;
   return current.copyWith(settingsState: merged);
 }

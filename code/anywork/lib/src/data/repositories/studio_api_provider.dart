@@ -5,12 +5,12 @@ import '../frb/studio_api.dart';
 part 'studio_api_provider.g.dart';
 
 @Riverpod(keepAlive: true)
-StudioApi studioApi(Ref ref) {
+StudioBridgeDataSource studioBridgeDataSource(Ref ref) {
   if (const bool.fromEnvironment('ANYWORK_DEMO')) {
     if (const bool.fromEnvironment('ANYWORK_DRIVER')) {
-      return DriverDemoStudioApi(lspActivityLoop: true);
+      return DriverDemoStudioBridgeDataSource(lspActivityLoop: true);
     }
-    return DemoStudioApi(lspActivityLoop: true);
+    return DemoStudioBridgeDataSource(lspActivityLoop: true);
   }
-  return FrbStudioApi();
+  return FrbStudioBridgeDataSource();
 }

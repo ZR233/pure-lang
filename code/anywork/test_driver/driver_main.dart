@@ -48,7 +48,7 @@ void main() {
   // 与窗口关闭共用同一退出协调器：native -> Dart 的 requestExit 也进入该协调器。
   StudioExitCoordinator.install(
     StudioExitCoordinator(
-      _container.read(studioApiProvider),
+      _container.read(studioBridgeDataSourceProvider),
       _container.read(studioShutdownProgressStateProvider.notifier).update,
     ),
   );
@@ -57,14 +57,16 @@ void main() {
 /// Driver-only 初始化故障注入：`ANYWORK_DRIVER_SHUTDOWN_FAULT` 取值
 /// `pending-init`（初始化永久挂住）或 `bridge-load-error`（初始化显式抛错）。
 ///
-/// 复用既有 [FrbStudioApi.debugOverrideInitialization]，不新增生产 fault 接口；订阅
+/// 复用既有 [FrbStudioBridgeDataSource.debugOverrideInitialization]，不新增生产 fault 接口；订阅
 /// 故障由验收侧独立 Driver 入口/装饰器提供（见 ui-handoff-r3.txt）。
 void _applyShutdownFaultOverride() {
   final fault = Platform.environment['ANYWORK_DRIVER_SHUTDOWN_FAULT'];
   if (fault == 'pending-init') {
-    FrbStudioApi.debugOverrideInitialization(() => Completer<void>().future);
+    FrbStudioBridgeDataSource.debugOverrideInitialization(
+      () => Completer<void>().future,
+    );
   } else if (fault == 'bridge-load-error') {
-    FrbStudioApi.debugOverrideInitialization(() async {
+    FrbStudioBridgeDataSource.debugOverrideInitialization(() async {
       throw StateError('driver-injected bridge load failure');
     });
   }
@@ -194,7 +196,7 @@ Future<String> _handleDriverData(String? message) async {
       final threadId = state?.selectedThreadId;
       if (threadId == null) return jsonEncode({'outputTokens': null});
       final snapshot = await _container
-          .read(studioApiProvider)
+          .read(studioBridgeDataSourceProvider)
           .readThreadSnapshot(threadId);
       return jsonEncode({
         'outputTokens': snapshot.runtime.completionTokens,
@@ -316,8 +318,8 @@ Future<String> _handleDriverData(String? message) async {
         ...diagnostics,
         'startup': {
           if (startup is Map<String, Object?>) ...startup,
-          'phase': FrbStudioApi.startupProgress.value.name,
-          'ownerPresent': FrbStudioApi.runtimeOwnerPresent,
+          'phase': FrbStudioBridgeDataSource.startupProgress.value.name,
+          'ownerPresent': FrbStudioBridgeDataSource.runtimeOwnerPresent,
         },
       });
     default:
@@ -330,7 +332,7 @@ Future<StudioShutdownReport> _runShutdown() async {
   _driverStatisticsScope = null;
   _driverQueueScope?.close();
   _driverQueueScope = null;
-  final api = _container.read(studioApiProvider);
+  final api = _container.read(studioBridgeDataSourceProvider);
   final progress = _container.read(
     studioShutdownProgressStateProvider.notifier,
   );

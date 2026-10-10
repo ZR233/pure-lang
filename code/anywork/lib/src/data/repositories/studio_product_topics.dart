@@ -373,7 +373,7 @@ class ProductTopicRegistry {
     required this.onTopicConnection,
   });
 
-  final StudioApi _api;
+  final StudioBridgeDataSource _api;
 
   /// 每有效帧一次的统一 reducer 接线（Baseline/Data/Lagged/Failure 都进入）。
   final void Function(ProductTopicFrame frame) onFrame;

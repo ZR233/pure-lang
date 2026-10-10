@@ -557,7 +557,7 @@ class _OpenThreadBanner extends ConsumerWidget {
 class _StudioStartPage extends StatelessWidget {
   const _StudioStartPage({required this.view});
 
-  final StartPageView view;
+  final StartSessionViewModel view;
 
   @override
   Widget build(BuildContext context) {
