@@ -5,6 +5,26 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.12.0](https://github.com/ZR233/pure-lang/compare/v6.11.0...v6.12.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **studio:** 拆分设置配置与模型目录协议，并按 typed mutation 重建 Studio 同步边界。
+
+### Bug Fixes
+
+* **pl-model:** 缩小模型调用失败错误 ([9312e32](https://github.com/ZR233/pure-lang/commit/9312e32c71271733c37b4256596c5cf8d826a555))
+* **studio:** 修复实时用量投影与事件 owner 新鲜度 ([dbaee49](https://github.com/ZR233/pure-lang/commit/dbaee4977b4a8d3acaff26daedb24f2779c6787d))
+* **studio:** 统一实时状态流并修复界面刷新 ([a8f4f14](https://github.com/ZR233/pure-lang/commit/a8f4f14093d85a0240efa5788bb9d66e50c20c0e))
+* **studio:** 隔离实时用量世代并修复运行时视图相等性 ([65a7aeb](https://github.com/ZR233/pure-lang/commit/65a7aeb90ce52b928c330c1c48f1f306816058d2))
+
+
+### Refactoring
+
+* **studio:** 分离设置同步与会话展示状态 ([51341c5](https://github.com/ZR233/pure-lang/commit/51341c5dfe16a8b0547f4cf10985876204fea131))
+* **studio:** 收敛设置数据层与导航生命周期 ([16b1481](https://github.com/ZR233/pure-lang/commit/16b1481ad507e98575ede765aae53aba603da970))
+
 ## [6.11.0](https://github.com/ZR233/pure-lang/compare/v6.10.0...v6.11.0) (2026-10-10)
 
 
