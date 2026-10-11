@@ -5,6 +5,13 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.13.0](https://github.com/ZR233/pure-lang/compare/v6.12.0...v6.13.0) (2026-10-11)
+
+
+### Bug Fixes
+
+* **studio:** 修复思考强度菜单打开时的页面切换 ([3433076](https://github.com/ZR233/pure-lang/commit/3433076d0fdc64d05ad5490ef3070b01ce566bf5))
+
 ## [6.12.0](https://github.com/ZR233/pure-lang/compare/v6.11.0...v6.12.0) (2026-10-11)
 
 
