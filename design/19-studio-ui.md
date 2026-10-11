@@ -151,6 +151,9 @@ Agents 页的 provider/model 选择弹层属于当前设置页；打开、选择
 当前智能体配置，不改变设置 tab、设置路由或返回聊天页。选择完成后仍展示服务端返回的 canonical
 值，不以本地草稿或弹层关闭动作推导导航状态。
 
+思考强度选择弹层遵循同一边界：打开或关闭锚定浮层只改变浮层自身的可见性，不触发设置页、
+`TabBarView` 或返回聊天路由的页面级转场；只有选择项提交才更新当前智能体配置投影。
+
 Agents 导航、配置页、preserved worktree recovery 和用户 Profile 详情中的固定界面文案必须
 跟随 Studio locale，并由统一 l10n catalog 提供。Profile ID、provider/model、effort、
 workspace mode 的持久化值，以及分支、路径、commit、worktree 状态和诊断数据保持 canonical

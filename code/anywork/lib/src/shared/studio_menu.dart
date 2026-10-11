@@ -590,12 +590,21 @@ class _StudioMenuState<T> extends State<StudioMenu<T>>
       // selection changed) by the time this frame ends still resolves to the
       // current anchor, never a context captured from a gone overlay build.
       final context = _selectedScrollKey?.currentContext;
-      if (context != null && mounted && isOpen) {
-        // Scrolls the bounded row list only, through the selected row's own
-        // constant anchor; the menu itself never moves to align the
-        // selection. A selected row without a unique identity has no anchor
-        // and simply keeps its scroll position.
-        Scrollable.ensureVisible(context, duration: Duration.zero);
+      final position = _scrollController.hasClients
+          ? _scrollController.position
+          : null;
+      final renderObject = context?.findRenderObject();
+      if (position != null &&
+          renderObject != null &&
+          renderObject.attached &&
+          mounted &&
+          isOpen) {
+        // Scroll only the menu's bounded row list. Scrollable.ensureVisible
+        // walks every ancestor scrollable as well, which would move the
+        // settings page when this overlay is opened near the edge of its
+        // outer ListView. A selected row without a unique identity has no
+        // anchor and simply keeps its scroll position.
+        position.ensureVisible(renderObject, duration: Duration.zero);
       }
     });
   }
