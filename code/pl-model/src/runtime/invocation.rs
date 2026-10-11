@@ -368,7 +368,7 @@ impl InvocationRunner {
                 };
                 progress.finish_recovery(phase);
                 let latest = progress.latest();
-                error.partial_progress = (!latest.is_empty()).then_some(latest);
+                error.partial_progress = (!latest.is_empty()).then_some(Box::new(latest));
             }
         }
         result

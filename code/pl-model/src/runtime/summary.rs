@@ -60,7 +60,7 @@ impl ModelRuntime {
                     accounting: Box::new(response.accounting),
                     model_observation: response.model_observation.map(Box::new),
                     presentation_items: response.presentation_items,
-                    partial_progress: Some(response.observation.into()),
+                    partial_progress: Some(Box::new(response.observation.into())),
                     cancelled: false,
                 });
             }
@@ -90,7 +90,7 @@ impl ModelRuntime {
                 accounting: Box::new(response.accounting),
                 model_observation: model_observation.clone().map(Box::new),
                 presentation_items: response.presentation_items,
-                partial_progress: Some(response.observation.into()),
+                partial_progress: Some(Box::new(response.observation.into())),
                 cancelled: false,
             });
         };

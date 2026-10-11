@@ -94,7 +94,7 @@ pub struct CompletionFailure {
     pub model_observation: Option<Box<InferenceModelObservation>>,
     /// All provider output items received before this invocation failed.
     pub presentation_items: Vec<CompletionPresentationItem>,
-    pub partial_progress: Option<pl_core::model::ModelProgress>,
+    pub partial_progress: Option<Box<pl_core::model::ModelProgress>>,
     pub(crate) cancelled: bool,
 }
 
