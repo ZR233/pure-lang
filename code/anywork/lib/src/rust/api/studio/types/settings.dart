@@ -10,7 +10,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'settings.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `bridge_input_source`, `bridge_modality`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`
 
 /// Provider 配置中由用户定义的模型，不复制内置 catalog 元数据。
 class BridgeCustomModelSettingsDto {
@@ -399,7 +399,6 @@ sealed class BridgeModelCatalogError with _$BridgeModelCatalogError {
       BridgeModelCatalogError_CacheWrite;
   const factory BridgeModelCatalogError.closing() =
       BridgeModelCatalogError_Closing;
-  const factory BridgeModelCatalogError.stale() = BridgeModelCatalogError_Stale;
 }
 
 /// A provider's observed model directory. This belongs to the catalog clock,
@@ -498,6 +497,7 @@ class BridgeModelConnectionSettingsDto {
 
 class BridgeModelDescriptor {
   final String id;
+  final BridgeModelOrigin origin;
   final String displayName;
   final String? description;
   final BigInt? contextWindow;
@@ -511,6 +511,7 @@ class BridgeModelDescriptor {
 
   const BridgeModelDescriptor({
     required this.id,
+    required this.origin,
     required this.displayName,
     this.description,
     this.contextWindow,
@@ -526,6 +527,7 @@ class BridgeModelDescriptor {
   @override
   int get hashCode =>
       id.hashCode ^
+      origin.hashCode ^
       displayName.hashCode ^
       description.hashCode ^
       contextWindow.hashCode ^
@@ -543,6 +545,7 @@ class BridgeModelDescriptor {
       other is BridgeModelDescriptor &&
           runtimeType == other.runtimeType &&
           id == other.id &&
+          origin == other.origin &&
           displayName == other.displayName &&
           description == other.description &&
           contextWindow == other.contextWindow &&
@@ -605,6 +608,9 @@ class BridgeModelInputCapability {
 enum BridgeModelInputSource { local, remoteUrl }
 
 enum BridgeModelModality { text, image, audio, video, file }
+
+/// Effective catalog membership origin. Names match `ModelOriginDto`.
+enum BridgeModelOrigin { bundled, online, manual }
 
 class BridgeModelPriceTier {
   final String label;

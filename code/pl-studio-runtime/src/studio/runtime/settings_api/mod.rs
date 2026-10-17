@@ -3,10 +3,10 @@
 use anyhow::{Context, Result, bail};
 use pl_protocol::ThreadModeId;
 use pl_protocol::studio::{
-    CommandEffectPoint, RemoveProviderRequest, SetDefaultProviderRequest,
-    SetThreadModelRouteRequest, SettingsCommandReply, SettingsFieldUpdate, SettingsStateResponse,
-    ThreadModelRouteCommandReply, UpdatePermissionSettingsRequest, UpdateProviderRequest,
-    UpdateSettingsFieldRequest,
+    CommandEffectPoint, RemoveProviderModelRequest, RemoveProviderRequest,
+    SetDefaultProviderRequest, SetThreadModelRouteRequest, SettingsCommandReply,
+    SettingsFieldUpdate, SettingsStateResponse, ThreadModelRouteCommandReply,
+    UpdatePermissionSettingsRequest, UpdateProviderRequest, UpdateSettingsFieldRequest,
 };
 
 use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort};
@@ -445,6 +445,40 @@ impl StudioRuntime {
             request.operation_id,
             &state,
             current.canonical_config() != state.canonical_config(),
+            CommandEffectPoint::FutureSession,
+        )
+    }
+
+    pub fn remove_provider_model(
+        &self,
+        request: RemoveProviderModelRequest,
+    ) -> Result<SettingsCommandReply> {
+        let provider_id = ProviderId::new(request.provider_id.trim())?;
+        let slug = request.slug.trim();
+        if slug.is_empty() {
+            return Err(invalid_settings_argument("Model slug must not be empty"));
+        }
+        let mut changed = false;
+        let state = self.config_runtime.update_with_effective(
+            request.expected_revision,
+            |desired, _effective| {
+                let mut next = desired.clone();
+                let provider = next.models.providers.get_mut(&provider_id).ok_or_else(|| {
+                    pl_protocol::PureError::ConfigError(format!(
+                        "provider does not exist: {provider_id}"
+                    ))
+                })?;
+                provider.remove_manual_model(slug)?;
+                next.validate_declarations()?;
+                changed = desired != &next;
+                Ok(next)
+            },
+        )?;
+        self.publish_settings_state(state.clone())?;
+        self.settings_command_reply(
+            format!("remove-provider-model:{provider_id}:{slug}"),
+            &state,
+            changed,
             CommandEffectPoint::FutureSession,
         )
     }

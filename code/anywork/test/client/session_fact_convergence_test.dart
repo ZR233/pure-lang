@@ -226,7 +226,7 @@ ProviderModelView? _modelFor(
       container.read(settingsStoreProvider).canonical?.providers ?? const [];
   for (final provider in providers) {
     if (provider.id != providerId) continue;
-    for (final candidate in provider.allModels) {
+    for (final candidate in provider.models) {
       if (candidate.slug == model) return candidate;
     }
   }

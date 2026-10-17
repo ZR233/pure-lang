@@ -55,9 +55,21 @@ pub(crate) struct ManualGuiOptions {
     /// Damage an isolated startup input, then capture recovery and its backup.
     #[arg(long, value_parser = ["config", "database", "log", "cache"])]
     pub(crate) startup_fault: Option<String>,
-    /// Add isolated OpenAI/DeepSeek instances against a loopback model-list fixture.
+    /// Add isolated OpenAI, DeepSeek and MiMo discovery instances against a loopback model-list fixture.
     #[arg(long, value_name = "URL")]
     pub(crate) model_catalog_url: Option<String>,
+    /// Named startup inventory written into the model-catalog control file (`a`, `b`, `empty`, `reject-all`, `reject-second`).
+    #[arg(long, value_name = "NAME", conflicts_with = "model_catalog_control")]
+    pub(crate) model_catalog_inventory: Option<String>,
+    /// Existing control-file path copied into the isolated environment. Mutually exclusive with `--model-catalog-inventory`.
+    #[arg(long, value_name = "PATH", conflicts_with = "model_catalog_inventory")]
+    pub(crate) model_catalog_control: Option<PathBuf>,
+    /// Same-home, same-port catalog restart journey for items 1 and 5. Requires `--scenario gui` and a control file.
+    #[arg(long)]
+    pub(crate) model_catalog_restart: bool,
+    /// Exercise the restart coordinator without launching GUI (bind, rewrite inventory, rebind same port).
+    #[arg(long)]
+    pub(crate) model_catalog_restart_check: bool,
     /// Optional web-search fault so the operator can observe an error path.
     #[arg(
         long,
@@ -183,6 +195,18 @@ struct RealtimeScenario<'a> {
     output: &'a Path,
     fixture_log: &'a Path,
     requests_file: &'a Path,
+    interrupt: &'a mpsc::Receiver<()>,
+}
+
+struct ModelCatalogRestart<'a> {
+    workspace: &'a Path,
+    home: &'a Path,
+    output: &'a Path,
+    working: &'a Path,
+    control_path: &'a Path,
+    hits_a_path: &'a Path,
+    hits_b_path: &'a Path,
+    ready: &'a FixtureReady,
     interrupt: &'a mpsc::Receiver<()>,
 }
 
@@ -340,6 +364,57 @@ impl OwnedProcess {
         Ok(self.child.try_wait()?.is_some())
     }
 
+    fn terminate(&mut self) {
+        if self.stopped {
+            return;
+        }
+        let signaled = self.kill_tree();
+        match self.child.wait() {
+            Ok(_) => self.stopped = true,
+            Err(error) if signaled => {
+                eprintln!(
+                    "process {} signaled but wait failed: {error}",
+                    self.child.id()
+                );
+                self.stopped = true;
+            }
+            Err(error) => {
+                eprintln!("failed to terminate process {}: {error}", self.child.id());
+            }
+        }
+    }
+
+    fn kill_tree(&self) -> bool {
+        #[cfg(unix)]
+        {
+            let term = Command::new("kill")
+                .arg("-TERM")
+                .arg("--")
+                .arg(format!("-{}", self.child.id()))
+                .stderr(Stdio::null())
+                .status();
+            thread::sleep(Duration::from_millis(200));
+            let kill = Command::new("kill")
+                .arg("-KILL")
+                .arg("--")
+                .arg(format!("-{}", self.child.id()))
+                .stderr(Stdio::null())
+                .status();
+            term.as_ref().is_ok_and(std::process::ExitStatus::success)
+                || kill.as_ref().is_ok_and(std::process::ExitStatus::success)
+        }
+        #[cfg(windows)]
+        {
+            Command::new("taskkill")
+                .args(["/T", "/F", "/PID"])
+                .arg(self.child.id().to_string())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        }
+    }
+
     fn stop(&mut self, report: &Path) -> Result<std::process::ExitStatus> {
         #[cfg(unix)]
         {
@@ -414,8 +489,8 @@ impl Drop for OwnedProcess {
 
 pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     ensure!(
-        !options.retain_environment || options.scenario == "tool-scroll",
-        "--retain-environment is supported by tool-scroll"
+        !options.retain_environment || matches!(options.scenario.as_str(), "gui" | "tool-scroll"),
+        "--retain-environment is supported by --scenario gui and tool-scroll"
     );
     ensure!(
         options.startup_fault.is_none() || options.scenario == "gui",
@@ -436,6 +511,31 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             || options.scenario == "web-search",
         "--web-search-providers/--web-search-models/--web-search-probe require --scenario web-search"
     );
+    ensure!(
+        (options.model_catalog_inventory.is_none() && options.model_catalog_control.is_none())
+            || options.scenario == "gui",
+        "--model-catalog-inventory/--model-catalog-control require --scenario gui"
+    );
+    ensure!(
+        options.model_catalog_url.is_none()
+            || (options.model_catalog_inventory.is_none()
+                && options.model_catalog_control.is_none()),
+        "--model-catalog-url cannot be combined with --model-catalog-inventory/--model-catalog-control"
+    );
+    ensure!(
+        !options.model_catalog_restart
+            || (options.scenario == "gui"
+                && (options.model_catalog_inventory.is_some()
+                    || options.model_catalog_control.is_some())),
+        "--model-catalog-restart requires --scenario gui and a catalog control file"
+    );
+    ensure!(
+        !options.model_catalog_restart_check
+            || (options.scenario == "gui"
+                && (options.model_catalog_inventory.is_some()
+                    || options.model_catalog_control.is_some())),
+        "--model-catalog-restart-check requires --scenario gui and a catalog control file"
+    );
     // The statistics, realtime, history and plan-recovery journeys are fully
     // driven by Flutter Driver and reviewed from captured evidence, so they do
     // not require an interactive stdin.
@@ -455,7 +555,9 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
             | "web-search"
             | "provider-usage"
             | "shutdown"
-    ) {
+    ) && !options.model_catalog_restart
+        && !options.model_catalog_restart_check
+    {
         ensure!(
             io::stdin().is_terminal(),
             "manual-gui requires an interactive terminal"
@@ -526,6 +628,25 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     let probe_finished = working.path().join("probe-finished");
     let fixture_log_path = working.path().join("fixture.log");
     let fixture_log = File::create(&fixture_log_path)?;
+    let catalog_control_path = model_catalog::default_control_path(working.path());
+    let catalog_control =
+        if options.model_catalog_inventory.is_some() || options.model_catalog_control.is_some() {
+            Some(model_catalog::materialize_control(
+                &catalog_control_path,
+                options.model_catalog_inventory.as_deref(),
+                options.model_catalog_control.as_deref(),
+            )?)
+        } else {
+            None
+        };
+    let catalog_hits_path = working.path().join("model-catalog-requests.json");
+    let catalog_hits_a_path = working.path().join("model-catalog-requests-a.json");
+    let catalog_hits_b_path = working.path().join("model-catalog-requests-b.json");
+    let fixture_hits_path = if options.model_catalog_restart {
+        catalog_hits_a_path.clone()
+    } else {
+        catalog_hits_path.clone()
+    };
     let mut fixture_command = Command::new(fixture_executable);
     fixture_command
         .current_dir(&workspace)
@@ -537,6 +658,14 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         .arg(&stress_report_file)
         .stdout(Stdio::from(fixture_log.try_clone()?))
         .stderr(Stdio::from(fixture_log));
+    if catalog_control.is_some() {
+        fixture_command
+            .arg("--model-catalog-control")
+            .arg(&catalog_control_path);
+        fixture_command
+            .arg("--model-catalog-requests")
+            .arg(&fixture_hits_path);
+    }
     if matches!(
         options.scenario.as_str(),
         "plan-recovery"
@@ -595,7 +724,20 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     );
     if let Err(error) =
         write_config(&home, &ready, options.web_search_fault.as_deref()).and_then(|()| {
-            if let Some(url) = &options.model_catalog_url {
+            if let Some(control) = catalog_control.as_ref() {
+                ensure!(
+                    options.scenario == "gui",
+                    "--model-catalog-inventory/--model-catalog-control require --scenario gui"
+                );
+                model_catalog::configure(&home, &ready.base_url)?;
+                model_catalog::write_runbook(
+                    &output,
+                    &home,
+                    &catalog_control_path,
+                    control,
+                    &ready.base_url,
+                )?;
+            } else if let Some(url) = &options.model_catalog_url {
                 ensure!(
                     options.scenario == "gui",
                     "--model-catalog-url requires --scenario gui"
@@ -612,6 +754,17 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
     }
     if let Some(fault) = &options.startup_fault {
         seed_startup_fault(&home, fault)?;
+    }
+
+    if options.model_catalog_restart_check {
+        let _ = fixture.stop(&requests_file);
+        drop(fixture);
+        model_catalog::restart_bind_check(
+            &build_fixture_executable(&workspace)?,
+            &catalog_control_path,
+        )?;
+        println!("model-catalog-restart-check: same-port rebind succeeded");
+        return Ok(());
     }
 
     if options.scenario == "provider-usage" {
@@ -839,6 +992,29 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         let vm_url = wait_for_vm(&gui_log_path, &mut gui, &mut fixture, &interrupt_rx)?;
         let mut probe = None;
         println!("Native GUI is ready. Evidence: {}", output.display());
+        if catalog_control.is_some() {
+            println!(
+                "Model catalog runbook: {}",
+                output.join("model-catalog-runbook.md").display()
+            );
+        }
+        if options.model_catalog_restart {
+            return run_model_catalog_restart(
+                &ModelCatalogRestart {
+                    workspace: &workspace,
+                    home: &home,
+                    output: &output,
+                    working: working.path(),
+                    control_path: &catalog_control_path,
+                    hits_a_path: &catalog_hits_a_path,
+                    hits_b_path: &catalog_hits_b_path,
+                    ready: &ready,
+                    interrupt: &interrupt_rx,
+                },
+                &mut gui,
+                &mut fixture,
+            );
+        }
         if options.scenario == "tool-scroll" {
             let log = File::create(output.join("tool-scroll-driver.log"))?;
             let mut command = process::path_command("dart", &[]);
@@ -1086,9 +1262,26 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         )?;
         copy_startup_evidence(&backups, &output.join("startup-backups"))?;
     }
+    if options.model_catalog_restart {
+        drop(fixture);
+        write_fixture_log(&fixture_log_path, &output.join("fixture.log"))?;
+        session?;
+        if options.retain_environment {
+            keep_isolated_environment(working, &home, &output, None)?;
+        }
+        return Ok(());
+    }
     let fixture_result = fixture.stop(&requests_file);
     drop(fixture);
     write_fixture_log(&fixture_log_path, &output.join("fixture.log"))?;
+    model_catalog::copy_hits(
+        &catalog_hits_path,
+        &output.join("model-catalog-requests.json"),
+        catalog_control.is_some(),
+    )?;
+    if options.scenario == "gui" {
+        copy_sanitized_config(&home, &output.join("config.toml"))?;
+    }
     let stress_report: Option<pl_provider_fixture::StressReport> = if stress_report_file.exists() {
         let report = serde_json::from_slice(&fs::read(&stress_report_file)?)?;
         fs::write(
@@ -1398,19 +1591,18 @@ pub(crate) fn run(options: ManualGuiOptions) -> Result<()> {
         );
     }
     if options.retain_environment {
-        let capture = fs::read_to_string(output.join("capture-stage.txt"))
-            .context("retained environment requires completed shutdown capture")?;
-        ensure!(
-            capture.trim() == "shutdown_completed",
-            "runtime shutdown did not complete"
-        );
-        let root = working.keep();
-        fs::write(
-            output.join("retained-environment.json"),
-            serde_json::to_vec_pretty(
-                &serde_json::json!({"root": root, "home": home, "project": root.join("tool-scroll-project")}),
-            )?,
-        )?;
+        let project = if options.scenario == "tool-scroll" {
+            let capture = fs::read_to_string(output.join("capture-stage.txt"))
+                .context("retained environment requires completed shutdown capture")?;
+            ensure!(
+                capture.trim() == "shutdown_completed",
+                "runtime shutdown did not complete"
+            );
+            Some(working.path().join("tool-scroll-project"))
+        } else {
+            None
+        };
+        keep_isolated_environment(working, &home, &output, project.as_deref())?;
     }
 
     Ok(())
@@ -1780,6 +1972,79 @@ fn persist_config(home: &Path, config: &StudioConfig) -> Result<()> {
     let file = home.join("config.toml");
     fs::write(&file, toml::to_string_pretty(config)?)
         .with_context(|| format!("failed to create isolated config: {}", file.display()))
+}
+
+fn keep_isolated_environment(
+    working: tempfile::TempDir,
+    home: &Path,
+    output: &Path,
+    project: Option<&Path>,
+) -> Result<()> {
+    let root = working.keep();
+    let mut evidence = serde_json::json!({"root": root, "home": home});
+    if let Some(project) = project {
+        evidence["project"] = serde_json::Value::String(project.display().to_string());
+    }
+    fs::write(
+        output.join("retained-environment.json"),
+        serde_json::to_vec_pretty(&evidence)?,
+    )?;
+    Ok(())
+}
+
+/// Copies the isolated home config into evidence after stripping credential values.
+///
+/// Field names stay so reviewers can see which secret slots existed; values that
+/// can hold keys, tokens or header/env secrets become `[redacted]`.
+fn copy_sanitized_config(home: &Path, destination: &Path) -> Result<()> {
+    let source = home.join("config.toml");
+    if !source.is_file() {
+        eprintln!(
+            "isolated config missing after GUI session: {}",
+            source.display()
+        );
+        return Ok(());
+    }
+    let mut config: toml::Table = toml::from_str(&fs::read_to_string(&source)?)
+        .with_context(|| format!("failed to parse isolated config {}", source.display()))?;
+    redact_config_secrets(&mut config);
+    fs::write(
+        destination,
+        format!("{}\n", toml::to_string_pretty(&config)?),
+    )
+    .with_context(|| format!("failed to write sanitized config {}", destination.display()))
+}
+
+fn redact_config_secrets(value: &mut toml::Table) {
+    const SECRET_KEYS: &[&str] = &["bearer_token", "bearer_token_env", "bearer_token_env_var"];
+    for (key, child) in value.iter_mut() {
+        if SECRET_KEYS.contains(&key.as_str()) {
+            if !matches!(child, toml::Value::String(text) if text == "[redacted]") {
+                *child = toml::Value::String("[redacted]".into());
+            }
+            continue;
+        }
+        match child {
+            toml::Value::Table(table) => {
+                if key == "http_headers" || key == "headers" || key == "env" {
+                    let nested_keys: Vec<_> = table.keys().cloned().collect();
+                    for nested_key in nested_keys {
+                        table.insert(nested_key, toml::Value::String("[redacted]".into()));
+                    }
+                } else {
+                    redact_config_secrets(table);
+                }
+            }
+            toml::Value::Array(items) => {
+                for item in items {
+                    if let toml::Value::Table(table) = item {
+                        redact_config_secrets(table);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn wait_for_vm(
@@ -2216,12 +2481,161 @@ fn run_statistics_scenario(
     Ok(())
 }
 
+fn run_model_catalog_restart(
+    context: &ModelCatalogRestart<'_>,
+    gui: &mut OwnedProcess,
+    fixture: &mut OwnedProcess,
+) -> Result<()> {
+    let ModelCatalogRestart {
+        workspace,
+        home,
+        output,
+        working,
+        control_path,
+        hits_a_path,
+        hits_b_path,
+        ready,
+        interrupt,
+    } = context;
+    let port = model_catalog::bind_port(&ready.base_url)?;
+    let phase_a =
+        model_catalog::wait_for_online_cache(home, model_catalog::phase_a_expectation(), None)?;
+    fs::write(
+        output.join("model-catalog-phase-a.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "checkedAt": phase_a.checked_at,
+            "present": model_catalog::phase_a_expectation().present,
+            "cachePath": phase_a.cache_path,
+        }))?,
+    )?;
+    gui.terminate();
+    let requests = working.join("requests.json");
+    fixture
+        .stop(&requests)
+        .context("phase-A fixture did not write requests-file after graceful signal")?;
+    fixture.terminate();
+    model_catalog::copy_hits(
+        hits_a_path,
+        &output.join("model-catalog-requests-a.json"),
+        true,
+    )?;
+    copy_sanitized_config(home, &output.join("config-phase-a.toml"))?;
+    model_catalog::rewrite_inventory_b(control_path)?;
+    let requests_restart = working.join("requests-restart.json");
+    let fixture_restart_log = working.join("fixture-restart.log");
+    *fixture = start_catalog_fixture(
+        workspace,
+        working,
+        control_path,
+        hits_b_path,
+        Some(port),
+        interrupt,
+    )?;
+    let phase_b_log = working.join("catalog-phase-b-gui.log");
+    *gui = start_catalog_phase_b_gui(workspace, home, &phase_b_log)?;
+    let journey = (|| -> Result<(i64, i64)> {
+        wait_for_vm(&phase_b_log, gui, fixture, interrupt)?;
+        let phase_b = model_catalog::wait_for_online_cache(
+            home,
+            model_catalog::phase_b_expectation(),
+            Some(phase_a.checked_at),
+        )?;
+        model_catalog::assert_route_preserved(home)?;
+        fs::write(
+            output.join("model-catalog-phase-b.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "checkedAt": phase_b.checked_at,
+                "present": model_catalog::phase_b_expectation().present,
+                "absent": model_catalog::phase_b_expectation().absent,
+                "samePort": port,
+                "cachePath": phase_b.cache_path,
+            }))?,
+        )?;
+        Ok((phase_a.checked_at, phase_b.checked_at))
+    })();
+    if let Err(error) = fixture.stop(&requests_restart) {
+        eprintln!("phase-B fixture stop failed: {error}");
+    }
+    fixture.terminate();
+    model_catalog::copy_hits(
+        hits_b_path,
+        &output.join("model-catalog-requests-b.json"),
+        true,
+    )?;
+    copy_sanitized_config(home, &output.join("config-phase-b.toml"))?;
+    if phase_b_log.is_file() {
+        write_sanitized_log(&phase_b_log, &output.join("catalog-phase-b-gui.log"))?;
+    }
+    if fixture_restart_log.is_file() {
+        write_fixture_log(&fixture_restart_log, &output.join("fixture-restart.log"))?;
+    }
+    if requests_restart.is_file() {
+        sanitize_requests(&requests_restart, &output.join("requests-restart.json"))?;
+    }
+    let (phase_a_checked, phase_b_checked) = journey?;
+    println!(
+        "Model catalog restart journey passed (port {port}, checkedAt {phase_a_checked} -> {phase_b_checked})"
+    );
+    Ok(())
+}
+
+fn start_catalog_fixture(
+    workspace: &Path,
+    working: &Path,
+    control_path: &Path,
+    hits_path: &Path,
+    port: Option<u16>,
+    interrupt: &mpsc::Receiver<()>,
+) -> Result<OwnedProcess> {
+    let executable = build_fixture_executable(workspace)?;
+    let ready_file = working.join("fixture-ready-restart.json");
+    let _ = fs::remove_file(&ready_file);
+    let requests_file = working.join("requests-restart.json");
+    let log_path = working.join("fixture-restart.log");
+    let log = File::create(&log_path)?;
+    let mut command = Command::new(executable);
+    command
+        .current_dir(workspace)
+        .args(["--scenario", "gui", "--ready-file"])
+        .arg(&ready_file)
+        .arg("--requests-file")
+        .arg(&requests_file)
+        .arg("--model-catalog-control")
+        .arg(control_path)
+        .arg("--model-catalog-requests")
+        .arg(hits_path)
+        .stdout(Stdio::from(log.try_clone()?))
+        .stderr(Stdio::from(log));
+    if let Some(port) = port {
+        command.arg("--bind-port").arg(port.to_string());
+    }
+    let mut fixture = OwnedProcess::start(&mut command, true)?;
+    wait_for_ready(&ready_file, &mut fixture, interrupt)?;
+    Ok(fixture)
+}
+
 fn start_statistics_gui(workspace: &Path, home: &Path, log_path: &Path) -> Result<OwnedProcess> {
     let log = File::create(log_path)?;
     let mut command = Command::new("cargo");
     command
         .current_dir(workspace)
         .args(["xtask", "run-gui", "--driver"])
+        .env("ANYWORK_HOME", home)
+        .stdout(Stdio::from(log.try_clone()?))
+        .stderr(Stdio::from(log));
+    OwnedProcess::start(&mut command, false)
+}
+
+fn start_catalog_phase_b_gui(
+    workspace: &Path,
+    home: &Path,
+    log_path: &Path,
+) -> Result<OwnedProcess> {
+    let log = File::create(log_path)?;
+    let mut command = Command::new("cargo");
+    command
+        .current_dir(workspace)
+        .args(["xtask", "run-gui", "--driver", "--log-level", "info"])
         .env("ANYWORK_HOME", home)
         .stdout(Stdio::from(log.try_clone()?))
         .stderr(Stdio::from(log));

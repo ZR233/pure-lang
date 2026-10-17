@@ -20,12 +20,11 @@ class ProviderDetails extends StatelessWidget {
     required this.onBack,
     required this.onEdit,
     required this.onRefreshUsage,
-    required this.onRefreshCatalog,
-    required this.catalogRefreshing,
     required this.autoCompactEdits,
     required this.onAutoCompactChanged,
     required this.onAutoCompactCommit,
     required this.onAutoCompactInvalid,
+    required this.onRemoveManualModel,
   });
 
   final ProviderSettingsView? provider;
@@ -35,12 +34,11 @@ class ProviderDetails extends StatelessWidget {
   final VoidCallback onBack;
   final ValueChanged<ProviderSettingsView> onEdit;
   final VoidCallback? onRefreshUsage;
-  final VoidCallback? onRefreshCatalog;
-  final bool catalogRefreshing;
   final Map<String, ModelAutoCompactEdit> autoCompactEdits;
   final void Function(String slug, int? value) onAutoCompactChanged;
   final ValueChanged<String> onAutoCompactCommit;
   final ValueChanged<String> onAutoCompactInvalid;
+  final ValueChanged<ProviderModelView> onRemoveManualModel;
 
   @override
   Widget build(BuildContext context) {
@@ -102,7 +100,7 @@ class ProviderDetails extends StatelessWidget {
             SettingsProviderStatusChip(provider: provider, usage: usage),
             SettingsInfoPill(
               icon: Icons.hub_outlined,
-              label: provider.allModels
+              label: provider.models
                   .map(
                     (model) => context.modelProtocolLabel(model.wireProtocol),
                   )
@@ -146,14 +144,58 @@ class ProviderDetails extends StatelessWidget {
           title: context.l10n.settingsProviderModelsTitle,
           children: [
             if (provider.modelCatalog.supported)
-              ModelCatalogReadout(
-                status: provider.modelCatalog,
-                refreshing: catalogRefreshing,
-                onRefresh: onRefreshCatalog,
+              ModelCatalogReadout(status: provider.modelCatalog),
+            if (provider.models.isEmpty)
+              Text(context.l10n.settingsModelCatalogEmpty)
+            else ...[
+              _originSection(
+                context,
+                title: context.l10n.settingsProviderOnlineModelsTitle,
+                emptyLabel: context.l10n.settingsNoOnlineModels,
+                models: provider.onlineModels,
+                provider: provider,
               ),
-            if (provider.allModels.isEmpty)
-              Text(context.l10n.settingsModelCatalogEmpty),
-            for (final model in provider.allModels)
+              _originSection(
+                context,
+                title: context.l10n.settingsProviderDefaultModelsTitle,
+                emptyLabel: context.l10n.settingsNoBundledModels,
+                models: provider.bundledModels,
+                provider: provider,
+              ),
+              _originSection(
+                context,
+                title: context.l10n.settingsProviderCustomModelsTitle,
+                emptyLabel: context.l10n.settingsNoCustomModels,
+                models: provider.customModels,
+                provider: provider,
+                onRemove: onRemoveManualModel,
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _originSection(
+    BuildContext context, {
+    required String title,
+    required String emptyLabel,
+    required List<ProviderModelView> models,
+    required ProviderSettingsView provider,
+    ValueChanged<ProviderModelView>? onRemove,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          if (models.isEmpty)
+            Text(emptyLabel)
+          else
+            for (final model in models)
               ProviderModelReadout(
                 key: ValueKey((provider.id, model.slug)),
                 model: model,
@@ -165,10 +207,10 @@ class ProviderDetails extends StatelessWidget {
                     onAutoCompactChanged(model.slug, value),
                 onAutoCompactCommit: () => onAutoCompactCommit(model.slug),
                 onAutoCompactInvalid: () => onAutoCompactInvalid(model.slug),
+                onDelete: onRemove == null ? null : () => onRemove(model),
               ),
-          ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

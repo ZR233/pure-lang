@@ -65,6 +65,7 @@ class ProviderModelView {
     this.supportedConnectionModes = const ['http'],
     this.defaultConnectionMode = 'http',
     this.connectionMode = 'http',
+    this.origin = ProviderModelOrigin.bundled,
   });
 
   final String slug;
@@ -89,6 +90,7 @@ class ProviderModelView {
   final List<String> supportedConnectionModes;
   final String defaultConnectionMode;
   final String connectionMode;
+  final ProviderModelOrigin origin;
 
   ProviderModelView copyWith({
     String? slug,
@@ -111,6 +113,7 @@ class ProviderModelView {
     List<String>? supportedConnectionModes,
     String? defaultConnectionMode,
     String? connectionMode,
+    ProviderModelOrigin? origin,
   }) {
     return ProviderModelView(
       slug: slug ?? this.slug,
@@ -137,6 +140,7 @@ class ProviderModelView {
       defaultConnectionMode:
           defaultConnectionMode ?? this.defaultConnectionMode,
       connectionMode: connectionMode ?? this.connectionMode,
+      origin: origin ?? this.origin,
     );
   }
 }
@@ -243,8 +247,6 @@ class ProviderSettingsView {
     this.usageQueryRevision = 0,
     required this.defaultModel,
     required this.models,
-    this.defaultModels = const [],
-    this.customModels = const [],
     this.modelConnectionModes = const {},
     this.autoCompactLimits = const {},
     required this.status,
@@ -276,8 +278,6 @@ class ProviderSettingsView {
   final int usageQueryRevision;
   final String defaultModel;
   final List<ProviderModelView> models;
-  final List<ProviderModelView> defaultModels;
-  final List<ProviderModelView> customModels;
   final Map<String, String> modelConnectionModes;
   final Map<String, ProviderModelAutoCompactView> autoCompactLimits;
   final String status;
@@ -295,17 +295,25 @@ class ProviderSettingsView {
   final bool responsesProgrammaticToolCalling;
   final String? iconKey;
 
-  List<ProviderModelView> get allModels {
-    return models;
-  }
+  List<ProviderModelView> modelsWithOrigin(ProviderModelOrigin origin) => [
+    for (final model in models)
+      if (model.origin == origin) model,
+  ];
+
+  List<ProviderModelView> get bundledModels =>
+      modelsWithOrigin(ProviderModelOrigin.bundled);
+
+  List<ProviderModelView> get onlineModels =>
+      modelsWithOrigin(ProviderModelOrigin.online);
+
+  List<ProviderModelView> get customModels =>
+      modelsWithOrigin(ProviderModelOrigin.manual);
 
   ProviderSettingsView withModelConnection(String slug, String mode) {
     ProviderModelView update(ProviderModelView model) =>
         model.slug == slug ? model.copyWith(connectionMode: mode) : model;
     return copyWith(
       models: models.map(update).toList(),
-      defaultModels: defaultModels.map(update).toList(),
-      customModels: customModels.map(update).toList(),
       modelConnectionModes: {...modelConnectionModes, slug: mode},
     );
   }
@@ -342,8 +350,6 @@ class ProviderSettingsView {
     int? usageQueryRevision,
     String? defaultModel,
     List<ProviderModelView>? models,
-    List<ProviderModelView>? defaultModels,
-    List<ProviderModelView>? customModels,
     Map<String, String>? modelConnectionModes,
     Map<String, ProviderModelAutoCompactView>? autoCompactLimits,
     String? status,
@@ -375,8 +381,6 @@ class ProviderSettingsView {
       usageQueryRevision: usageQueryRevision ?? this.usageQueryRevision,
       defaultModel: defaultModel ?? this.defaultModel,
       models: models ?? this.models,
-      defaultModels: defaultModels ?? this.defaultModels,
-      customModels: customModels ?? this.customModels,
       modelConnectionModes: modelConnectionModes ?? this.modelConnectionModes,
       autoCompactLimits: autoCompactLimits ?? this.autoCompactLimits,
       status: status ?? this.status,
@@ -488,9 +492,12 @@ class ProviderPresetView {
       hasBearerToken: false,
       usageQueryRevision: 0,
       defaultModel: suggestedModel,
-      models: models,
-      defaultModels: models,
-      customModels: const [],
+      models: [
+        for (final model in models)
+          model.origin == ProviderModelOrigin.bundled
+              ? model
+              : model.copyWith(origin: ProviderModelOrigin.bundled),
+      ],
       status: credentialEnv.isEmpty ? 'ready' : 'missingCredential',
       credentialRequired: credentialEnv.isNotEmpty,
       usageLabel: '${models.length} models',
@@ -531,19 +538,6 @@ ProviderSettingsView providerWithCatalogMetadata(
             provider.modelConnectionModes[model.slug] ??
             model.defaultConnectionMode,
       );
-  final customSlugs = provider.customModels.map((model) => model.slug).toSet();
-  final defaultModels = provider.models
-      .where((model) => !customSlugs.contains(model.slug))
-      .map(applyConnectionMode)
-      .toList();
-  final customModels = provider.customModels.map((model) {
-    final metadata = provider.models
-        .where((candidate) => candidate.slug == model.slug)
-        .firstOrNull;
-    return applyConnectionMode(
-      model.copyWith(autoCompactTokenLimit: metadata?.autoCompactTokenLimit),
-    );
-  }).toList();
   final effectiveModels = provider.models.map(applyConnectionMode).toList();
   return provider.copyWith(
     subtitle: provider.subtitle.isEmpty && preset != null
@@ -553,8 +547,6 @@ ProviderSettingsView providerWithCatalogMetadata(
     credentialLabel: preset?.credentialLabel ?? provider.credentialLabel,
     credentialEnv: preset?.credentialEnv ?? provider.credentialEnv,
     iconKey: preset?.iconKey ?? provider.iconKey,
-    defaultModels: defaultModels,
-    customModels: customModels,
     models: effectiveModels,
     modelCount: '${effectiveModels.length}',
     usageLabel: effectiveModels.isEmpty

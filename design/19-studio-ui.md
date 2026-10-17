@@ -385,6 +385,10 @@ SSH 服务器行常驻"重新连接"入口，无需先测试连接；说明重�
 
 供应商详情卡的模型列表是上下文压缩阈值的唯一编辑入口，内置与自定义模型共用精确正整数
 tokens 输入、Material 滑块和恢复默认操作；不需要进入供应商编辑页，也没有阈值保存按钮。
+该列表按目录来源分组：在线名单（来源 `online`）、尚未同步的内置默认定义（`bundled`）与
+用户手动模型（`manual`）分别成节，模型行显示来源徽标；手动模型行额外提供删除操作，
+经二次确认后调用删除命令，成功以 canonical snapshot 替换列表并收回该模型的覆盖值。
+删除不可撤销，但只影响目录声明，不改写历史调用、账单或会话费用。
 输入完成后自动提交，滑块拖动结束和恢复默认及时提交；输入期间可短暂防抖，未提交的无效值
 保留原文并显示局部校验，不写入配置。默认与覆盖分层展示，实际生效值和安全上限只消费
 canonical 投影；默认可能来自模型预设或上下文 90%，未知以 `—` 展示并说明不自动压缩。
@@ -449,8 +453,9 @@ preset 共用同一草稿工厂，以 catalog preset 一次性替换完整的不
 标记失败，并在列表与详情显示该服务商的具体错误。查询失败不能覆盖其他服务商的结果，
 也不能把用量接口成功等同于模型推理能力验证通过。
 不在事件处理器中逐字段拼接供应商默认值。展示 provider
-effective models（默认/成功缓存/在线声明与手工模型由服务端统一解析）；允许追加用户自定义模型，
-冲突 slug 直接拒绝，Flutter 不自行实现合并规则。模型列表展示上下文窗口、最大输出
+effective models（默认/成功缓存/在线声明与手工模型由服务端统一解析，并携带每个模型的来源），
+详情卡与编辑页都按该来源分组，不用 slug 差集或 preset 自行推导分组；允许追加用户自定义模型，
+与在线 slug 冲突时显式提示而不是静默遮蔽，Flutter 不自行实现合并规则。模型列表展示上下文窗口、最大输出
 token、自动压缩阈值、temperature、effort 候选值、capabilities、输入模态和截断策略等
 关键参数。provider 编辑页不提供 provider 级协议或连接方式控件：每个模型行展示协议、
 支持模式和当前模式，只有支持多个模式的模型提供 HTTP/WS 选择并保存为该模型的
@@ -459,8 +464,9 @@ connection override；自定义模型编辑器必须显式选择协议、支持�
 API key 时空输入表示保留现有 secret；provider key 重命名必须携带 originalId，以便服务端
 保留 secret、headers、catalog metadata 和模型能力。设置页不展示 raw TOML 编辑器。
 
-支持在线探测的 provider 详情提供“刷新模型”，展示独立加载状态、当前来源（默认/成功缓存/在线）、
-成功/检查时间与错误。程序启动各实例独立探测一次，失败时模型列表继续展示 last-known 或首次
+支持在线探测的 provider 详情只读展示目录状态：当前来源（默认/成功缓存/在线）、成功/检查时间
+与类型化错误，并提示“重启应用可重新同步”；不提供刷新按钮、不显示加载中轮转，也没有刷新
+pending 状态。程序启动各实例独立并行探测一次，失败时模型列表继续展示 last-known 或首次
 默认定义，不把一家失败扩散到其他家，也不把额度检查等同模型发现。打开/读取设置不额外探测，
 不新增定时轮询。具体网络、缓存与不可用语义见 [06](./06-model.md)、[20](./20-config.md)。
 
@@ -816,8 +822,8 @@ settings/default 资源，Thread route 仍由自己的 owner frame 观察。
 Model、Mode 和 reasoning selector 不保存完整 settings，也不捕获可变 `view`。回调只发送
 稳定的 project/thread/role identity、expected revision 与用户意图，提交前由 Client 固定目标。selector
 projection 分为 canonical、pending、resolved、unavailable；pending 只提供即时展示，失败
-回滚到 canonical 并保留可重试错误。模型目录刷新按 provider 去重并使用独立 catalog 水位，
-不得触发设置页整棵重建或覆盖 route。
+回滚到 canonical 并保留可重试错误。启动期目录观察使用独立 catalog 水位，
+不得触发设置页整棵重建或覆盖 route；界面不为目录同步引入额外命令或乐观 pending 状态。
 新会话页面消费 Client 的 StartDraftStore 与起始页 projection，设置页消费按领域的只读观察；
 两者都只读 immutable projection。选择器菜单关闭后命令仍由 Client 完成。快速 A→B→C 选择的
 旧 operation 只能更新自己的真实结果，不能清除 C 的 latest intent 或 pending overlay；回执与

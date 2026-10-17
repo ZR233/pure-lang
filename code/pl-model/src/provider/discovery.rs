@@ -3,7 +3,7 @@ mod decode;
 
 pub(crate) use decode::enrich_unknown_model_fallback;
 
-use super::{ProviderAdapterKind, ProviderEndpoint};
+use super::ProviderEndpoint;
 use crate::{
     config::{ProviderConfig, ProviderModelCatalogConfig},
     model::ModelInfo,
@@ -79,6 +79,7 @@ pub struct ModelCatalogQuery {
     headers: reqwest::header::HeaderMap,
     identity: String,
     defaults: Vec<ModelInfo>,
+    discovery: crate::config::ModelCatalogDiscovery,
 }
 
 impl std::fmt::Debug for ModelCatalogQuery {
@@ -98,10 +99,21 @@ impl ModelCatalogQuery {
         let ProviderModelCatalogConfig::Bundled { catalog, .. } = &provider.catalog else {
             return Err(ModelCatalogQueryError::Unsupported);
         };
-        if !provider.supports_model_discovery() {
+        let Some(discovery) = provider
+            .discovery_profile()
+            .map_err(|_| ModelCatalogQueryError::Configuration)?
+        else {
             return Err(ModelCatalogQueryError::Unsupported);
-        }
-        let defaults = crate::model::bundled_model_definition(catalog.as_str())?.models;
+        };
+        let defaults = match crate::model::bundled_model_definition(catalog.as_str()) {
+            Ok(definition) => definition.models,
+            Err(crate::model::ModelDefinitionError::Unsupported) => {
+                crate::config::builtin_model_catalog(catalog)
+                    .map_err(|_| ModelCatalogQueryError::Configuration)?
+                    .models
+            }
+            Err(error) => return Err(error.into()),
+        };
         let endpoint = provider
             .to_endpoint()
             .map_err(|_| ModelCatalogQueryError::Configuration)?;
@@ -132,14 +144,7 @@ impl ModelCatalogQuery {
         };
         part(b"model-catalog-query-v1");
         part(catalog.as_str().as_bytes());
-        part(match endpoint.adapter {
-            ProviderAdapterKind::OpenAi => b"openai",
-            ProviderAdapterKind::Xai => b"xai",
-            ProviderAdapterKind::DeepSeek => b"deepseek",
-            ProviderAdapterKind::Zhipu
-            | ProviderAdapterKind::MiMo
-            | ProviderAdapterKind::OpenAiCompatible => b"unsupported",
-        });
+        part(discovery_transport_id(&discovery.transport).as_bytes());
         part(url.as_str().as_bytes());
         let mut sorted = headers.iter().collect::<Vec<_>>();
         sorted.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
@@ -154,6 +159,7 @@ impl ModelCatalogQuery {
             headers,
             identity,
             defaults,
+            discovery,
         })
     }
 
@@ -180,7 +186,10 @@ impl ModelCatalogQuery {
                 .map_err(|_| ModelCatalogQueryError::Protocol)?;
             if cache.models.iter().any(|model| {
                 !matches!(model.pricing, crate::model::ModelPricing::Unknown)
-                    || !valid_discovery_transport(&model.binding.transport, self.endpoint.adapter)
+                    || !valid_discovery_transport(
+                        &model.binding.transport,
+                        &self.discovery.transport,
+                    )
             }) {
                 return Err(ModelCatalogQueryError::Protocol);
             }
@@ -251,6 +260,7 @@ impl ModelCatalogQuery {
         }
         let models = decode::models(
             &bytes,
+            &self.discovery,
             self.endpoint.adapter,
             previous.map(|p| p.models.as_slice()),
             &self.defaults,
@@ -263,23 +273,10 @@ impl ModelCatalogQuery {
     }
 }
 
-pub(crate) fn discovery_transport(
-    adapter: ProviderAdapterKind,
-) -> crate::model::ModelTransportProfile {
-    if adapter == ProviderAdapterKind::OpenAi {
-        crate::model::ModelTransportProfile::responses_websocket()
-    } else {
-        // DeepSeek and xAI both publish Responses over HTTP. Unsupported adapters
-        // never reach this profile because discovery is rejected earlier.
-        crate::model::ModelTransportProfile::responses_http()
-    }
-}
-
 pub(crate) fn valid_discovery_transport(
     profile: &crate::model::ModelTransportProfile,
-    adapter: ProviderAdapterKind,
+    expected: &crate::model::ModelTransportProfile,
 ) -> bool {
-    let expected = discovery_transport(adapter);
     profile.protocol == expected.protocol
         && profile.default_connection_mode == expected.default_connection_mode
         && profile
@@ -293,6 +290,34 @@ pub(crate) fn valid_discovery_transport(
                 expected.supported_connection_modes.contains(mode)
                     && !profile.supported_connection_modes[..index].contains(mode)
             })
+}
+
+fn discovery_transport_id(profile: &crate::model::ModelTransportProfile) -> &'static str {
+    match (
+        profile.protocol,
+        profile.default_connection_mode,
+        profile.supported_connection_modes.as_slice(),
+    ) {
+        (
+            crate::provider::ProviderWireProtocol::Responses,
+            crate::provider::ProviderConnectionMode::WebSocket,
+            [
+                crate::provider::ProviderConnectionMode::WebSocket,
+                crate::provider::ProviderConnectionMode::Http,
+            ],
+        ) => "responses-websocket",
+        (
+            crate::provider::ProviderWireProtocol::Responses,
+            crate::provider::ProviderConnectionMode::Http,
+            [crate::provider::ProviderConnectionMode::Http],
+        ) => "responses-http",
+        (
+            crate::provider::ProviderWireProtocol::ChatCompletions,
+            crate::provider::ProviderConnectionMode::Http,
+            [crate::provider::ProviderConnectionMode::Http],
+        ) => "chat-completions-http",
+        _ => "unsupported",
+    }
 }
 
 fn query_transport_error(error: reqwest::Error) -> ModelCatalogQueryError {

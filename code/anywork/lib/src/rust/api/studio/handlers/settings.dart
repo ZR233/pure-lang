@@ -36,10 +36,14 @@ Future<BridgeSettingsCommandReply> applySettingsField({
 Future<BridgeSettingsStateResponse> readSettingsState() =>
     RustLib.instance.api.crateApiStudioHandlersSettingsReadSettingsState();
 
-Future<BridgeModelCatalogSnapshotDto> refreshModelCatalog({
+Future<BridgeSettingsCommandReply> removeProviderModel({
+  required BigInt expectedSettingsRevision,
   required String providerId,
-}) => RustLib.instance.api.crateApiStudioHandlersSettingsRefreshModelCatalog(
+  required String slug,
+}) => RustLib.instance.api.crateApiStudioHandlersSettingsRemoveProviderModel(
+  expectedSettingsRevision: expectedSettingsRevision,
   providerId: providerId,
+  slug: slug,
 );
 
 Future<BridgeSettingsStateResponse> reloadSettingsFromDisk({

@@ -94,13 +94,12 @@ abstract final class ModelRouteQueries {
   static ProviderModelView? model(
     List<ProviderSettingsView> providers,
     String providerId,
-    String modelId, {
-    bool includeAllModels = false,
-  }) {
+    String modelId,
+  ) {
     final provider = providers
         .where((candidate) => candidate.id == providerId)
         .firstOrNull;
-    final models = includeAllModels ? provider?.allModels : provider?.models;
+    final models = provider?.models;
     return models?.where((candidate) => candidate.slug == modelId).firstOrNull;
   }
 
@@ -246,7 +245,7 @@ abstract final class ModelRouteQueries {
     List<ProviderSettingsView> providers,
   ) {
     final provider = providers.firstOrNull;
-    final descriptor = provider?.allModels.firstOrNull;
+    final descriptor = provider?.models.firstOrNull;
     return RoleRouteQuery(
       providerId: provider?.id ?? '',
       model: descriptor?.slug ?? '',

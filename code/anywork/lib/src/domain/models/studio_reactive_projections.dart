@@ -587,16 +587,6 @@ bool _providerEquals(ProviderSettingsView left, ProviderSettingsView right) {
       left.credentialRequired == right.credentialRequired &&
       left.defaultModel == right.defaultModel &&
       _listEqualsBy(left.models, right.models, _providerModelEquals) &&
-      _listEqualsBy(
-        left.defaultModels,
-        right.defaultModels,
-        _providerModelEquals,
-      ) &&
-      _listEqualsBy(
-        left.customModels,
-        right.customModels,
-        _providerModelEquals,
-      ) &&
       _stringMapEquals(left.modelConnectionModes, right.modelConnectionModes) &&
       _autoCompactMapEquals(left.autoCompactLimits, right.autoCompactLimits) &&
       left.status == right.status &&
@@ -630,8 +620,6 @@ int _providerHash(ProviderSettingsView provider) => Object.hashAll([
   provider.credentialRequired,
   provider.defaultModel,
   Object.hashAll(provider.models.map(_providerModelHash)),
-  Object.hashAll(provider.defaultModels.map(_providerModelHash)),
-  Object.hashAll(provider.customModels.map(_providerModelHash)),
   _stringMapHash(provider.modelConnectionModes),
   _autoCompactMapHash(provider.autoCompactLimits),
   provider.status,
@@ -674,9 +662,10 @@ bool _providerModelEquals(ProviderModelView left, ProviderModelView right) =>
     left.wireProtocol == right.wireProtocol &&
     listEquals(left.supportedConnectionModes, right.supportedConnectionModes) &&
     left.defaultConnectionMode == right.defaultConnectionMode &&
-    left.connectionMode == right.connectionMode;
+    left.connectionMode == right.connectionMode &&
+    left.origin == right.origin;
 
-int _providerModelHash(ProviderModelView model) => Object.hash(
+int _providerModelHash(ProviderModelView model) => Object.hashAll([
   model.slug,
   model.displayName,
   Object.hashAll(model.reasoningEfforts),
@@ -697,7 +686,8 @@ int _providerModelHash(ProviderModelView model) => Object.hash(
   Object.hashAll(model.supportedConnectionModes),
   model.defaultConnectionMode,
   model.connectionMode,
-);
+  model.origin,
+]);
 
 bool _inputCapabilityEquals(
   ModelInputCapabilityView left,

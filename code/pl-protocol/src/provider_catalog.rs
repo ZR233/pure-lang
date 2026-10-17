@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// Provider/模型目录跨产品传输协议版本。
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 11;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 12;
 
 /// 无敏感信息、可供 Web 与桌面端直接渲染的 Provider 目录快照。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
@@ -79,10 +79,20 @@ pub struct ModelCatalogDescriptor {
     pub models: Vec<ModelDescriptor>,
 }
 
+/// 有效目录成员的来源，供 GUI 区分内置、在线与手动模型。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ModelOriginDto {
+    Bundled,
+    Online,
+    Manual,
+}
+
 /// UI 和外部宿主需要的模型元数据投影。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
 pub struct ModelDescriptor {
     pub id: String,
+    pub origin: ModelOriginDto,
     pub display_name: String,
     pub description: Option<String>,
     pub context_window: Option<u64>,

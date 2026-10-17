@@ -9,6 +9,7 @@ use pl_protocol::{
 };
 
 use super::{ModelCatalogId, ModelDescriptor, ProviderConfig, ProviderPresetId};
+use super::{ProviderModelEntry, ProviderModelOrigin};
 use crate::model::{
     ModelInfo, ModelModality, bundled_model_definition, default_models, mimo_default_model_slugs,
     zhipu_default_model_slugs, zhipu_responses_default_model_slugs, zhipu_responses_models,
@@ -21,11 +22,26 @@ use crate::provider::{
 const MIMO_API_BASE_URL: &str = "https://api.xiaomimimo.com/v1";
 const MIMO_TOKEN_PLAN_BASE_URL: &str = "https://token-plan-cn.xiaomimimo.com/v1";
 
+const MIMO_DISCOVERY_EXCLUDED_SLUGS: &[&str] = &[
+    "mimo-v2.5-asr",
+    "mimo-v2.5-tts",
+    "mimo-v2.5-tts-voiceclone",
+    "mimo-v2.5-tts-voicedesign",
+];
+
+/// 目录声明的在线探测能力；未声明时该 catalog 保持静态或显式语义。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelCatalogDiscovery {
+    pub transport: crate::model::ModelTransportProfile,
+    pub excluded_slugs: Vec<String>,
+}
+
 /// 一组由 PL 维护且对产品只读的模型定义。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModelCatalog {
     pub id: ModelCatalogId,
     pub models: Vec<ModelInfo>,
+    pub discovery: Option<ModelCatalogDiscovery>,
 }
 
 /// 可由宿主直接实例化的内置 Provider 预设。
@@ -60,18 +76,30 @@ impl ProviderCatalogRegistry {
             ModelCatalog {
                 id: ModelCatalogId::new("openai")?,
                 models: openai.models,
+                discovery: Some(ModelCatalogDiscovery {
+                    transport: crate::model::ModelTransportProfile::responses_websocket(),
+                    excluded_slugs: Vec::new(),
+                }),
             },
             ModelCatalog {
                 id: ModelCatalogId::new("deepseek")?,
                 models: deepseek.models,
+                discovery: Some(ModelCatalogDiscovery {
+                    transport: crate::model::ModelTransportProfile::responses_http(),
+                    excluded_slugs: Vec::new(),
+                }),
             },
             ModelCatalog {
                 id: ModelCatalogId::new("xai")?,
                 models: xai.models,
+                discovery: Some(ModelCatalogDiscovery {
+                    transport: crate::model::ModelTransportProfile::responses_http(),
+                    excluded_slugs: Vec::new(),
+                }),
             },
             model_catalog("zhipu", zhipu_default_model_slugs())?,
             zhipu_responses_catalog(),
-            model_catalog("mimo", mimo_default_model_slugs())?,
+            mimo_catalog()?,
             model_catalog("openai-compatible", &[])?,
         ]
         .into_iter()
@@ -232,7 +260,16 @@ impl ProviderCatalogRegistry {
                     id.to_string(),
                     ModelCatalogDescriptor {
                         id: id.to_string(),
-                        models: catalog.models.iter().map(model_descriptor).collect(),
+                        models: catalog
+                            .models
+                            .iter()
+                            .map(|model| {
+                                model_descriptor(&ProviderModelEntry {
+                                    model: model.clone(),
+                                    origin: ProviderModelOrigin::Bundled,
+                                })
+                            })
+                            .collect(),
                     },
                 )
             })
@@ -285,7 +322,20 @@ fn model_catalog(id: &str, slugs: &[&str]) -> Result<ModelCatalog> {
     Ok(ModelCatalog {
         id: ModelCatalogId::new(id).expect("static model catalog id is valid"),
         models,
+        discovery: None,
     })
+}
+
+fn mimo_catalog() -> Result<ModelCatalog> {
+    let mut catalog = model_catalog("mimo", mimo_default_model_slugs())?;
+    catalog.discovery = Some(ModelCatalogDiscovery {
+        transport: crate::model::ModelTransportProfile::chat_completions_http(),
+        excluded_slugs: MIMO_DISCOVERY_EXCLUDED_SLUGS
+            .iter()
+            .map(|slug| (*slug).to_string())
+            .collect(),
+    });
+    Ok(catalog)
 }
 
 /// Coding Plan 的 Responses 目录与通用 Chat 目录共用模型 slug，因此独立构造而不是按 slug 过滤。
@@ -298,6 +348,7 @@ fn zhipu_responses_catalog() -> ModelCatalog {
     ModelCatalog {
         id: ModelCatalogId::new("zhipu-responses").expect("static model catalog id is valid"),
         models,
+        discovery: None,
     }
 }
 
@@ -391,7 +442,8 @@ fn connection_mode_label(mode: ProviderConnectionMode) -> &'static str {
 ///
 /// This projection must not be used to resolve routes or write configuration: it omits
 /// runtime binding details. Unknown budgets and pricing remain `None`.
-pub fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
+pub fn model_descriptor(entry: &ProviderModelEntry) -> ModelDescriptor {
+    let model = &entry.model;
     let capabilities = &model.capabilities;
     let reasoning = model
         .effort_parameter()
@@ -407,6 +459,11 @@ pub fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
     let pricing = model.pricing.catalog_pricing();
     ModelDescriptor {
         id: model.slug.clone(),
+        origin: match entry.origin {
+            ProviderModelOrigin::Bundled => pl_protocol::ModelOriginDto::Bundled,
+            ProviderModelOrigin::Online => pl_protocol::ModelOriginDto::Online,
+            ProviderModelOrigin::Manual => pl_protocol::ModelOriginDto::Manual,
+        },
         display_name: model.display_name.clone(),
         description: model.description.clone(),
         context_window: model.context_window,

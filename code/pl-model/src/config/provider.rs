@@ -47,6 +47,21 @@ pub enum ProviderCapabilitySelection {
     Explicit(ProviderServiceCapabilities),
 }
 
+/// 有效目录成员的来源。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderModelOrigin {
+    Bundled,
+    Online,
+    Manual,
+}
+
+/// 唯一有效目录中的一条成员，携带来源供投影与 GUI 区分。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderModelEntry {
+    pub model: ModelInfo,
+    pub origin: ProviderModelOrigin,
+}
+
 /// 可由产品配置文件组合使用的 Provider 值对象。
 ///
 /// 具体默认模型不属于 Provider；调用方必须通过角色路由选择模型。
@@ -200,16 +215,24 @@ impl ProviderConfig {
     /// 远程目录撤下的旧连接 override 保留在配置中，不注入当前声明；展示可继续发布，
     /// 实际请求必须经过 `AgentModelConfig::resolve_route` 的严格连接选择校验。
     pub fn effective_models(&self) -> Result<Vec<ModelInfo>> {
+        Ok(self
+            .effective_catalog()?
+            .into_iter()
+            .map(|entry| entry.model)
+            .collect())
+    }
+
+    /// 唯一有效目录合成入口。每条成员携带来源，不从默认定义补回在线名单缺失的模型。
+    pub fn effective_catalog(&self) -> Result<Vec<ProviderModelEntry>> {
         apply_connection_overrides(
-            self.declared_models()?,
+            self.catalog_membership()?,
             self.connection_overrides(),
-            self.supports_model_discovery(),
+            self.discovery_profile()?.is_some(),
             self.editable_models(),
         )
     }
 
-    /// 返回模型目录声明，不应用 provider 实例的当前连接方式 override。
-    pub fn declared_models(&self) -> Result<Vec<ModelInfo>> {
+    fn catalog_membership(&self) -> Result<Vec<ProviderModelEntry>> {
         match &self.catalog {
             ProviderModelCatalogConfig::Bundled {
                 catalog,
@@ -230,39 +253,73 @@ impl ProviderConfig {
                         )));
                     }
                 }
-                let mut models = if let Some(overlay) = &self.model_catalog_overlay {
-                    let mut models = overlay.clone();
-                    for model in &mut models {
-                        if let Some(local) =
-                            bundled.models.iter().find(|local| local.slug == model.slug)
-                        {
-                            if let Some(enriched) =
-                                crate::provider::discovery::enrich_unknown_model_fallback(
-                                    model,
-                                    local,
-                                    self.adapter,
-                                )
+                let mut entries = if let Some(overlay) = &self.model_catalog_overlay {
+                    // Overlay publication already required a catalog discovery declaration.
+                    let discovery_transport = &bundled
+                        .discovery
+                        .as_ref()
+                        .ok_or_else(|| {
+                            PureError::Protocol("model catalog observation is unsupported".into())
+                        })?
+                        .transport;
+                    overlay
+                        .iter()
+                        .filter(|model| {
+                            !additional_models
+                                .iter()
+                                .any(|manual| manual.slug == model.slug)
+                        })
+                        .map(|model| {
+                            let mut model = model.clone();
+                            if let Some(local) =
+                                bundled.models.iter().find(|local| local.slug == model.slug)
+                                && let Some(enriched) =
+                                    crate::provider::discovery::enrich_unknown_model_fallback(
+                                        &model,
+                                        local,
+                                        discovery_transport,
+                                        self.adapter,
+                                    )
                             {
-                                *model = enriched;
+                                model = enriched;
                             }
-                            model.pricing = local.pricing.clone();
-                        } else {
-                            model.pricing = crate::model::ModelPricing::Unknown;
-                        }
-                    }
-                    models.retain(|model| {
-                        !additional_models
-                            .iter()
-                            .any(|manual| manual.slug == model.slug)
-                    });
-                    models
+                            join_bundled_pricing(&mut model, &bundled.models);
+                            ProviderModelEntry {
+                                model,
+                                origin: ProviderModelOrigin::Online,
+                            }
+                        })
+                        .collect::<Vec<_>>()
                 } else {
-                    bundled.models
+                    bundled
+                        .models
+                        .iter()
+                        .cloned()
+                        .map(|model| ProviderModelEntry {
+                            model,
+                            origin: ProviderModelOrigin::Bundled,
+                        })
+                        .collect()
                 };
-                models.extend(additional_models.iter().cloned());
-                Ok(models)
+                entries.extend(
+                    additional_models
+                        .iter()
+                        .cloned()
+                        .map(|model| ProviderModelEntry {
+                            model,
+                            origin: ProviderModelOrigin::Manual,
+                        }),
+                );
+                Ok(entries)
             }
-            ProviderModelCatalogConfig::Explicit { models, .. } => Ok(models.clone()),
+            ProviderModelCatalogConfig::Explicit { models, .. } => Ok(models
+                .iter()
+                .cloned()
+                .map(|model| ProviderModelEntry {
+                    model,
+                    origin: ProviderModelOrigin::Manual,
+                })
+                .collect()),
         }
     }
 
@@ -271,11 +328,11 @@ impl ProviderConfig {
     /// # Errors
     /// Explicit/unsupported catalogs or any invalid declaration reject the whole observation.
     pub fn set_model_catalog_overlay(&mut self, mut models: Vec<ModelInfo>) -> Result<()> {
-        if !self.supports_model_discovery() {
+        let Some(discovery) = self.discovery_profile()? else {
             return Err(PureError::Protocol(
                 "model catalog observation is unsupported".into(),
             ));
-        }
+        };
         for model in &mut models {
             model.pricing = crate::model::ModelPricing::Unknown;
         }
@@ -284,7 +341,7 @@ impl ProviderConfig {
         if models.iter().any(|model| {
             !crate::provider::discovery::valid_discovery_transport(
                 &model.binding.transport,
-                self.adapter,
+                &discovery.transport,
             )
         }) {
             return Err(PureError::Protocol(
@@ -300,21 +357,12 @@ impl ProviderConfig {
     }
 
     /// Pure capability check, independent of credential resolution or network availability.
-    pub fn supports_model_discovery(&self) -> bool {
-        match (&self.catalog, self.adapter) {
-            (
-                ProviderModelCatalogConfig::Bundled { catalog, .. },
-                crate::provider::ProviderAdapterKind::OpenAi,
-            ) => catalog.as_str() == "openai",
-            (
-                ProviderModelCatalogConfig::Bundled { catalog, .. },
-                crate::provider::ProviderAdapterKind::DeepSeek,
-            ) => catalog.as_str() == "deepseek",
-            (
-                ProviderModelCatalogConfig::Bundled { catalog, .. },
-                crate::provider::ProviderAdapterKind::Xai,
-            ) => catalog.as_str() == "xai",
-            _ => false,
+    pub fn discovery_profile(&self) -> Result<Option<super::ModelCatalogDiscovery>> {
+        match &self.catalog {
+            ProviderModelCatalogConfig::Bundled { catalog, .. } => {
+                Ok(builtin_model_catalog(catalog)?.discovery)
+            }
+            ProviderModelCatalogConfig::Explicit { .. } => Ok(None),
         }
     }
 
@@ -378,16 +426,60 @@ impl ProviderConfig {
         }
     }
 
+    /// 删除一个手动模型（`additional_models` / `Explicit.models`）。
+    ///
+    /// 同时删除该 slug 的 connection override 与 auto-compact override。
+    /// 非手动条目（在线或内置模型）与不存在的 slug 返回类型化配置错误，不改变任何状态。
+    ///
+    /// # Errors
+    ///
+    /// 仅接受 `Bundled.additional_models` 或 `Explicit.models` 中的精确 slug。成功时删除该
+    /// 手动条目及其 `connection_overrides`、`auto_compact_overrides`，不修改 overlay 与
+    /// 角色路由选择。非手动或不存在的 slug 返回 `PureError::ConfigError`，且状态零修改。
+    pub fn remove_manual_model(&mut self, slug: &str) -> Result<()> {
+        if !self
+            .editable_models()
+            .iter()
+            .any(|model| model.slug == slug)
+        {
+            return Err(PureError::ConfigError(format!("unknown model: {slug}")));
+        }
+        match &mut self.catalog {
+            ProviderModelCatalogConfig::Bundled {
+                additional_models,
+                connection_overrides,
+                auto_compact_overrides,
+                ..
+            } => {
+                additional_models.retain(|model| model.slug != slug);
+                connection_overrides.remove(slug);
+                auto_compact_overrides.remove(slug);
+            }
+            ProviderModelCatalogConfig::Explicit {
+                models,
+                connection_overrides,
+                auto_compact_overrides,
+                ..
+            } => {
+                models.retain(|model| model.slug != slug);
+                connection_overrides.remove(slug);
+                auto_compact_overrides.remove(slug);
+            }
+        }
+        Ok(())
+    }
+
     /// 为 provider 实例中的某个模型选择连接方式。
     pub fn set_model_connection_mode(
         &mut self,
         model: &str,
         mode: ProviderConnectionMode,
     ) -> Result<()> {
-        let models = self.declared_models()?;
-        let selected = models
+        let catalog = self.catalog_membership()?;
+        let selected = catalog
             .iter()
-            .find(|candidate| candidate.slug == model)
+            .find(|candidate| candidate.model.slug == model)
+            .map(|candidate| &candidate.model)
             .ok_or_else(|| PureError::ConfigError(format!("unknown model: {model}")))?;
         if !selected
             .binding
@@ -430,10 +522,11 @@ impl ProviderConfig {
         model: &str,
         limit: Option<u64>,
     ) -> Result<()> {
-        let models = self.declared_models()?;
-        let selected = models
+        let catalog = self.catalog_membership()?;
+        let selected = catalog
             .iter()
-            .find(|candidate| candidate.slug == model)
+            .find(|candidate| candidate.model.slug == model)
+            .map(|candidate| &candidate.model)
             .ok_or_else(|| PureError::ConfigError(format!("unknown model: {model}")))?;
         let restore_default = match limit {
             None => true,
@@ -527,11 +620,14 @@ impl ProviderConfig {
         }
         self.validate_preset_binding(provider_id)?;
         let models = apply_connection_overrides(
-            self.declared_models()?,
+            self.catalog_membership()?,
             self.connection_overrides(),
-            !strict_availability && self.supports_model_discovery(),
+            !strict_availability && self.discovery_profile()?.is_some(),
             self.editable_models(),
-        )?;
+        )?
+        .into_iter()
+        .map(|entry| entry.model)
+        .collect::<Vec<_>>();
         if models.is_empty() && (strict_availability || self.model_catalog_overlay.is_none()) {
             return Err(PureError::ConfigError(format!(
                 "provider {provider_id} must define at least one model"
@@ -564,7 +660,7 @@ impl ProviderConfig {
                 )));
             }
             if !slugs.contains(slug.as_str())
-                && (strict_availability || !self.supports_model_discovery())
+                && (strict_availability || self.discovery_profile()?.is_none())
             {
                 return Err(PureError::ConfigError(format!(
                     "provider {provider_id} auto compact override references unknown model: {slug}"
@@ -615,17 +711,18 @@ impl ProviderConfig {
 }
 
 fn apply_connection_overrides(
-    mut models: Vec<ModelInfo>,
+    mut entries: Vec<ProviderModelEntry>,
     overrides: &BTreeMap<String, ProviderConnectionMode>,
     allow_unavailable: bool,
     editable_models: &[ModelInfo],
-) -> Result<Vec<ModelInfo>> {
-    for model in &models {
+) -> Result<Vec<ProviderModelEntry>> {
+    for entry in &entries {
         // A user override must never repair an invalid declared transport profile.
-        model
+        entry
+            .model
             .binding
             .transport
-            .validate(&model.slug)
+            .validate(&entry.model.slug)
             .map_err(|error| PureError::ConfigError(error.to_string()))?;
     }
     for (slug, mode) in overrides {
@@ -634,7 +731,7 @@ fn apply_connection_overrides(
                 "connection override has empty model".into(),
             ));
         }
-        let Some(model) = models.iter_mut().find(|model| model.slug == *slug) else {
+        let Some(entry) = entries.iter_mut().find(|entry| entry.model.slug == *slug) else {
             if allow_unavailable {
                 continue;
             }
@@ -642,7 +739,8 @@ fn apply_connection_overrides(
                 "connection override references unknown model: {slug}"
             )));
         };
-        if !model
+        if !entry
+            .model
             .binding
             .transport
             .supported_connection_modes
@@ -657,7 +755,15 @@ fn apply_connection_overrides(
                 "model {slug} does not support connection mode {mode:?}"
             )));
         }
-        model.binding.transport.default_connection_mode = *mode;
+        entry.model.binding.transport.default_connection_mode = *mode;
     }
-    Ok(models)
+    Ok(entries)
+}
+
+pub(crate) fn join_bundled_pricing(model: &mut ModelInfo, bundled: &[ModelInfo]) {
+    model.pricing = bundled
+        .iter()
+        .find(|local| local.slug == model.slug)
+        .map(|local| local.pricing.clone())
+        .unwrap_or(crate::model::ModelPricing::Unknown);
 }

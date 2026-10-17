@@ -435,7 +435,6 @@ pub enum BridgeModelCatalogError {
     UnexpectedNotModified,
     CacheWrite,
     Closing,
-    Stale,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -445,6 +444,25 @@ pub enum BridgeModelCatalogCacheWarning {
     Schema,
     Identity,
     Declaration,
+}
+
+/// Effective catalog membership origin. Names match `ModelOriginDto`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeModelOrigin {
+    Bundled,
+    Online,
+    Manual,
+}
+
+impl From<pl_protocol::ModelOriginDto> for BridgeModelOrigin {
+    fn from(origin: pl_protocol::ModelOriginDto) -> Self {
+        match origin {
+            pl_protocol::ModelOriginDto::Bundled => Self::Bundled,
+            pl_protocol::ModelOriginDto::Online => Self::Online,
+            pl_protocol::ModelOriginDto::Manual => Self::Manual,
+        }
+    }
 }
 
 impl From<pl_protocol::studio::StudioModelCatalogStatus> for BridgeModelCatalogStatusDto {
@@ -477,7 +495,6 @@ impl From<pl_protocol::studio::StudioModelCatalogStatus> for BridgeModelCatalogS
                 Error::UnexpectedNotModified => BridgeModelCatalogError::UnexpectedNotModified,
                 Error::CacheWrite => BridgeModelCatalogError::CacheWrite,
                 Error::Closing => BridgeModelCatalogError::Closing,
-                Error::Stale => BridgeModelCatalogError::Stale,
             }),
             cache_warning: status.cache_warning.map(|warning| match warning {
                 Warning::Read => BridgeModelCatalogCacheWarning::Read,
@@ -669,6 +686,7 @@ pub struct BridgeModelCatalogDescriptor {
 #[serde(rename_all = "camelCase")]
 pub struct BridgeModelDescriptor {
     pub id: String,
+    pub origin: BridgeModelOrigin,
     pub display_name: String,
     pub description: Option<String>,
     pub context_window: Option<u64>,
@@ -811,6 +829,7 @@ impl From<pl_protocol::ModelDescriptor> for BridgeModelDescriptor {
     fn from(model: pl_protocol::ModelDescriptor) -> Self {
         Self {
             id: model.id,
+            origin: model.origin.into(),
             display_name: model.display_name,
             description: model.description,
             context_window: model.context_window,

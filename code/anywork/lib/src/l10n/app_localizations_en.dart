@@ -1385,10 +1385,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsProviderConnectionTitle => 'Connection';
 
   @override
-  String get settingsProviderDefaultModelsTitle => 'Default models';
+  String get settingsProviderDefaultModelsTitle =>
+      'Default catalog (not yet synced)';
 
   @override
-  String get settingsProviderCustomModelsTitle => 'Custom models';
+  String get settingsProviderCustomModelsTitle => 'Manual models';
+
+  @override
+  String get settingsProviderOnlineModelsTitle => 'Online models';
 
   @override
   String get settingsNewProvider => 'New provider';
@@ -1449,7 +1453,44 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsRemoveModel => 'Remove model';
 
   @override
-  String get settingsNoCustomModels => 'No custom models';
+  String get settingsNoCustomModels => 'No manual models';
+
+  @override
+  String get settingsNoOnlineModels => 'No online models';
+
+  @override
+  String get settingsNoBundledModels => 'No bundled models';
+
+  @override
+  String get settingsModelOriginOnline => 'Online';
+
+  @override
+  String get settingsModelOriginBundled => 'Bundled';
+
+  @override
+  String get settingsModelOriginManual => 'Manual';
+
+  @override
+  String get settingsUnverifiedOnlineModel => 'Unverified model';
+
+  @override
+  String get settingsRemoveManualModelConfirmTitle =>
+      'Delete this manual model?';
+
+  @override
+  String get settingsRemoveManualModelConfirmBody =>
+      'This cannot be undone. The model leaves the catalog, and its connection and compact overrides are cleared. History, bills, and session costs stay unchanged.';
+
+  @override
+  String get settingsRemoveManualModelConfirmAction => 'Delete';
+
+  @override
+  String get settingsRemoveManualModelFailed =>
+      'Could not delete this manual model.';
+
+  @override
+  String get settingsManualModelSlugConflict =>
+      'A model with this slug already exists in the online or bundled catalog.';
 
   @override
   String settingsBundledModels(int count) {
@@ -2745,9 +2786,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Unrecoverable data was backed up and initial settings restored. Backup location:';
 
   @override
-  String get settingsModelCatalogRefresh => 'Refresh models';
-
-  @override
   String get settingsModelCatalogDefault => 'Bundled models';
 
   @override
@@ -2761,14 +2799,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsModelCatalogFailed =>
-      'Could not refresh models. The previous list is still available.';
+      'Startup model sync failed. The current list is still available.';
 
   @override
   String get settingsModelCatalogCacheWarning =>
       'The saved model list could not be loaded. Showing bundled models.';
 
   @override
-  String get settingsModelCatalogEmpty => 'This provider returned no models.';
+  String get settingsModelCatalogEmpty => 'This provider has no models.';
+
+  @override
+  String get settingsModelCatalogRestartHint =>
+      'Restart the app to sync again.';
 
   @override
   String get timelineActivityTitle => 'Thinking and tools';

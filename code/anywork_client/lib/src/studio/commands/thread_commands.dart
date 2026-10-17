@@ -641,7 +641,7 @@ class ThreadCommands extends ReadModel<ThreadCommandBoard> {
     final providers = _client.settings.state.canonical?.providers ?? const [];
     for (final provider in providers) {
       if (provider.id != providerId) continue;
-      for (final candidate in provider.allModels) {
+      for (final candidate in provider.models) {
         if (candidate.slug == model) return candidate;
       }
     }

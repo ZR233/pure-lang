@@ -30,7 +30,6 @@ final _provider = ProviderSettingsView(
   status: 'ready',
   usageLabel: '',
   models: const [_alpha, _beta],
-  defaultModels: const [_alpha, _beta],
   autoCompactLimits: {
     'alpha': ProviderModelAutoCompactView.forModel(_alpha),
     'beta': ProviderModelAutoCompactView.forModel(_beta).withOverride(250),
@@ -309,22 +308,22 @@ void main() {
     expect(_provider.autoCompactLimits['alpha']?.overrideLimit, isNull);
     final joined = providerWithCatalogMetadata(
       _provider.copyWith(
-        customModels: const [
-          ProviderModelView(
-            slug: 'alpha',
-            displayName: 'Alpha',
-            reasoningEfforts: [],
+        models: [
+          _alpha.copyWith(
+            origin: ProviderModelOrigin.manual,
             contextWindow: 1000,
           ),
+          _beta,
         ],
       ),
       const ProviderCatalogView.empty(),
     );
+    expect(joined.customModels.map((model) => model.slug), ['alpha']);
+    expect(joined.onlineModels, isEmpty);
     expect(
-      ProviderModelAutoCompactView.forModel(joined.customModels.single)
-          .defaultLimit,
-      200,
-      reason: 'editable model views retain the catalog preset',
+      joined.customModels.single.autoCompactTokenLimit,
+      _alpha.autoCompactTokenLimit,
+      reason: 'origin grouping does not drop catalog token presets',
     );
   });
 

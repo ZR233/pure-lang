@@ -96,8 +96,10 @@ abstract final class ProviderDraftFactory {
       templateKind: 'openai-compatible',
       pricingEnabled: false,
       catalogId: '',
-      defaultModels: const [],
-      models: current.customModels,
+      models: [
+        for (final model in current.customModels)
+          model.copyWith(origin: ProviderModelOrigin.manual),
+      ],
       defaultModel: ModelRouteQueries.defaultModelForCustomProvider(current),
       credentialLabel: 'API Key',
       credentialRequired: true,

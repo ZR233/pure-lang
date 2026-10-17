@@ -116,9 +116,11 @@ function/custom 工具、programmatic caller、hosted search、thinking 与工�
 完整。具体模型和 endpoint 的显式能力决定优化，不按 slug 或 URL 猜测。
 
 每个 provider 实例保存 preset 身份、endpoint override、凭证、headers、tool wire policy、服务
-能力和 catalog binding；具体模型由角色 route 选择，不保存第二份 provider 默认模型。模型目录由
-provider 配置及其非持久目录观察解析（默认、成功缓存、在线声明与手工模型），不从全局列表兜底；目录可按 slug 保存当前
-连接方式 override。reasoning/thinking/effort 的 wire 规则由模型 parameters 声明驱动（见 6.8）。
+能力和 catalog binding；具体模型由角色 route 选择，不保存第二份 provider 默认模型。唯一有效目录
+由一个解析入口产出：每条成员携带来源（`bundled` 默认定义、`online` 在线名单、`manual` 用户手动
+模型），成员资格与来源不分散到投影或界面自行推导；不从全局列表兜底，也不从默认定义补回在线名单
+缺失的模型。目录可按 slug 保存当前连接方式 override。reasoning/thinking/effort 的 wire 规则由
+模型 parameters 声明驱动（见 6.8）。
 
 OpenAI-compatible 自定义模型必须显式提供完整 transport profile：Chat 模型只能声明
 ChatCompletions + HTTP；Responses 模型可以声明 Responses + HTTP，或同时支持 HTTP/WS 并指定默认
@@ -342,7 +344,12 @@ Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 
 OpenAI、DeepSeek 与 xAI 的默认模型目录由各自版本化 `model.json` 定义随二进制发布，复用完整
 ModelInfo 声明与既有模型字段序列化契约，统一提供模型集合、推荐模型/effort 与已记录价格。
 默认定义不在 Rust 名单或 preset 中重复维护；装配失败属于程序内部定义错误，不是用户配置损坏。
-其他未声明在线探测能力的目录保持既有静态或显式语义。
+在线探测能力由目录自身声明，而不是由适配器白名单推断：声明包含该目录发现使用的 transport
+profile 与明确排除的非对话模型 slug（来自厂商文档的静态事实，精确匹配）。当前 OpenAI 使用
+Responses + WebSocket 发现，DeepSeek 与 xAI 使用 Responses + HTTP，MiMo 使用 Chat Completions +
+HTTP 发现并排除其 TTS/ASR 语音模型；智谱（通用 API 与 Coding Plan）不提供公开模型列表接口、
+openai-compatible 由用户完全自定义，因此都不声明发现能力并保持既有静态或显式语义。新增或撤销
+某目录的发现能力只改目录声明，不新增 adapter 分支。
 
 在线查询由 endpoint 的窄能力执行，不要求先选择模型，且始终在当前 `base_url` 的路径前缀后
 追加 `/models`，保留既有查询参数与 provider 鉴权/header 规则。不得插入额外 `/v1`、固定请求
@@ -370,6 +377,10 @@ provider 的唯一有效目录按本次在线成功、同查询身份最后成�
 替换上一份 API 名单，不累计历史模型，也不从默认定义补回 API 未列出的 ID。手工附加模型保留
 完整声明及优先权，原有 bundled slug 冲突规则不变；完全 explicit 目录不自动转为在线目录。
 在线声明只进入非持久 overlay，不写入 `additional_models`，所有路由与展示复用同一解析入口。
+使用默认定义（尚无成功观察）时来源标记为 `bundled`，由目录状态表达“尚未同步”，不能伪装成
+在线名单；手工模型与在线名单同名时手工条目优先，在线条目不出现在有效目录中。被移除的模型
+不再出现在有效目录，其按 slug 保存的压缩阈值与连接覆盖仍保留但不生效，用户选择以不可用状态
+保留（见 [20](./20-config.md)）。
 
 API 价格字段不可信为本地计价事实。价格只按该 provider 绑定目录/手工记录的大小写敏感精确 ID
 关联，不按前缀、别名或其他供应商同名项匹配。在线成功缓存保存 Unknown 价格，解析时关联当前
@@ -649,6 +660,9 @@ token。这是本地模型 token 费用估算，不是供应商账单，不包�
 关闭计价、价格/用量不足、已估算与零费用分别表示；历史只读取冻结账单，不按现价重算。Core、
 Studio、Flutter 仅归属、累计和展示，不再次解释供应商 usage 或价格。具体单价、时段定义与
 退役模型以代码中的模型目录为唯一事实源，设计文档不保存价格快照。
+价格回填与成员资格是两个正交事实：有效目录只在模型 ID 与当前内置目录大小写敏感精确命中时
+继承其价格定义，未命中的在线模型保持未知价格；模型从在线名单消失、来源切换或手动模型被删除
+都不改写已保存的冻结账单，也不触发历史费用重算。
 
 普通 API 预设默认计价；Coding Plan、Token Plan 和自定义兼容预设默认不计价，用户选择只影响
 之后的调用。账户余额和套餐配额保持独立查询。

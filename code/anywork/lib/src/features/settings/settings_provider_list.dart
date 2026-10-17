@@ -209,7 +209,7 @@ class ProviderListRow extends StatelessWidget {
                             context.l10n.settingsProviderModelsTitle,
                             provider.modelCount.isNotEmpty
                                 ? provider.modelCount
-                                : '${provider.allModels.length}',
+                                : '${provider.models.length}',
                           ].join(': '),
                         ),
                         SettingsMiniMeta(

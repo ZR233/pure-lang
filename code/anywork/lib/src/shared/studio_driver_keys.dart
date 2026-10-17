@@ -59,7 +59,6 @@ abstract final class StudioDriverKeys {
     StudioDriverKeyValues.reasoningEffortLabel,
   );
   static const providerUsageCheck = ValueKey<String>('provider-usage-check');
-  static const modelCatalogRefresh = ValueKey<String>('model-catalog-refresh');
   static const skillsDiscover = ValueKey<String>('skills-discover');
   static const mcpRefresh = ValueKey<String>('mcp-refresh');
   static const mcpResetAll = ValueKey<String>('mcp-reset-all');
@@ -186,6 +185,13 @@ abstract final class StudioDriverKeys {
   static const providerBaseUrl = ValueKey<String>('provider-base-url');
   static const providerApiKey = ValueKey<String>('provider-api-key');
   static const providerModelAdd = ValueKey<String>('provider-model-add');
+  static ValueKey<String> providerManualModelDelete(
+    String providerId,
+    String slug,
+  ) => ValueKey<String>('settings.provider.$providerId.model.$slug.delete');
+  static const providerManualModelDeleteConfirm = ValueKey<String>(
+    'settings.provider.model.delete.confirm',
+  );
   static ValueKey<String> customModelId(int index) =>
       ValueKey<String>('provider-model-$index-id');
   static ValueKey<String> customModelAdvanced(int index) =>

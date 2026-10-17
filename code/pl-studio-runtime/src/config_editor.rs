@@ -187,7 +187,7 @@ impl ProviderEdit {
             }
         };
         let previous_limits = config.auto_compact_overrides().clone();
-        let declared = config.declared_models()?;
+        let declared = config.effective_models()?;
         let mut limits = BTreeMap::new();
         for (slug, limit) in &self.model_auto_compact_limits {
             if *limit == 0 {
@@ -199,7 +199,8 @@ impl ProviderEdit {
                 if Some(*limit) != model.default_auto_compact_token_limit() {
                     limits.insert(slug.clone(), *limit);
                 }
-            } else if config.supports_model_discovery() && previous_limits.get(slug) == Some(limit)
+            } else if config.discovery_profile()?.is_some()
+                && previous_limits.get(slug) == Some(limit)
             {
                 limits.insert(slug.clone(), *limit);
             } else {
@@ -226,7 +227,7 @@ impl ProviderEdit {
         config.base_url = base_url;
         config.bearer_token = bearer_token;
         let models = config.effective_models()?;
-        if !config.supports_model_discovery() {
+        if config.discovery_profile()?.is_none() {
             validate_models(&provider_key, &default_model, &models)?;
         }
 

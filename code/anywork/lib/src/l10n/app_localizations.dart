@@ -2456,14 +2456,20 @@ abstract class AppLocalizations {
   /// No description provided for @settingsProviderDefaultModelsTitle.
   ///
   /// In en, this message translates to:
-  /// **'Default models'**
+  /// **'Default catalog (not yet synced)'**
   String get settingsProviderDefaultModelsTitle;
 
   /// No description provided for @settingsProviderCustomModelsTitle.
   ///
   /// In en, this message translates to:
-  /// **'Custom models'**
+  /// **'Manual models'**
   String get settingsProviderCustomModelsTitle;
+
+  /// No description provided for @settingsProviderOnlineModelsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Online models'**
+  String get settingsProviderOnlineModelsTitle;
 
   /// No description provided for @settingsNewProvider.
   ///
@@ -2582,8 +2588,74 @@ abstract class AppLocalizations {
   /// No description provided for @settingsNoCustomModels.
   ///
   /// In en, this message translates to:
-  /// **'No custom models'**
+  /// **'No manual models'**
   String get settingsNoCustomModels;
+
+  /// No description provided for @settingsNoOnlineModels.
+  ///
+  /// In en, this message translates to:
+  /// **'No online models'**
+  String get settingsNoOnlineModels;
+
+  /// No description provided for @settingsNoBundledModels.
+  ///
+  /// In en, this message translates to:
+  /// **'No bundled models'**
+  String get settingsNoBundledModels;
+
+  /// No description provided for @settingsModelOriginOnline.
+  ///
+  /// In en, this message translates to:
+  /// **'Online'**
+  String get settingsModelOriginOnline;
+
+  /// No description provided for @settingsModelOriginBundled.
+  ///
+  /// In en, this message translates to:
+  /// **'Bundled'**
+  String get settingsModelOriginBundled;
+
+  /// No description provided for @settingsModelOriginManual.
+  ///
+  /// In en, this message translates to:
+  /// **'Manual'**
+  String get settingsModelOriginManual;
+
+  /// No description provided for @settingsUnverifiedOnlineModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Unverified model'**
+  String get settingsUnverifiedOnlineModel;
+
+  /// No description provided for @settingsRemoveManualModelConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this manual model?'**
+  String get settingsRemoveManualModelConfirmTitle;
+
+  /// No description provided for @settingsRemoveManualModelConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This cannot be undone. The model leaves the catalog, and its connection and compact overrides are cleared. History, bills, and session costs stay unchanged.'**
+  String get settingsRemoveManualModelConfirmBody;
+
+  /// No description provided for @settingsRemoveManualModelConfirmAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get settingsRemoveManualModelConfirmAction;
+
+  /// No description provided for @settingsRemoveManualModelFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not delete this manual model.'**
+  String get settingsRemoveManualModelFailed;
+
+  /// No description provided for @settingsManualModelSlugConflict.
+  ///
+  /// In en, this message translates to:
+  /// **'A model with this slug already exists in the online or bundled catalog.'**
+  String get settingsManualModelSlugConflict;
 
   /// No description provided for @settingsBundledModels.
   ///
@@ -4907,12 +4979,6 @@ abstract class AppLocalizations {
   /// **'Unrecoverable data was backed up and initial settings restored. Backup location:'**
   String get startupRecoveredNotice;
 
-  /// No description provided for @settingsModelCatalogRefresh.
-  ///
-  /// In en, this message translates to:
-  /// **'Refresh models'**
-  String get settingsModelCatalogRefresh;
-
   /// No description provided for @settingsModelCatalogDefault.
   ///
   /// In en, this message translates to:
@@ -4940,7 +5006,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsModelCatalogFailed.
   ///
   /// In en, this message translates to:
-  /// **'Could not refresh models. The previous list is still available.'**
+  /// **'Startup model sync failed. The current list is still available.'**
   String get settingsModelCatalogFailed;
 
   /// No description provided for @settingsModelCatalogCacheWarning.
@@ -4952,8 +5018,14 @@ abstract class AppLocalizations {
   /// No description provided for @settingsModelCatalogEmpty.
   ///
   /// In en, this message translates to:
-  /// **'This provider returned no models.'**
+  /// **'This provider has no models.'**
   String get settingsModelCatalogEmpty;
+
+  /// No description provided for @settingsModelCatalogRestartHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Restart the app to sync again.'**
+  String get settingsModelCatalogRestartHint;
 
   /// No description provided for @timelineActivityTitle.
   ///

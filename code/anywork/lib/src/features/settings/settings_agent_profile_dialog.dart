@@ -307,7 +307,7 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
       widget.providers
           .where((provider) => provider.id == providerId)
           .firstOrNull
-          ?.allModels ??
+          ?.models ??
       const [];
 
   ProviderModelView? get _selectedModel =>
@@ -326,7 +326,7 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
   List<ModelSelectionOption> get _modelSelectionOptions =>
       buildModelSelectionOptions(
         widget.providers,
-        modelsForProvider: (provider) => provider.allModels,
+        modelsForProvider: (provider) => provider.models,
       );
 
   bool get _effortUnavailable => _effort != null && !_efforts.contains(_effort);

@@ -9,6 +9,7 @@ import '../../presentation/providers/provider_usage_queries.dart';
 import 'package:anywork_client/studio_client.dart';
 
 import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_driver_keys.dart';
 import 'settings_provider_details.dart';
 import 'settings_provider_draft_save.dart';
 import 'settings_provider_drafts.dart';
@@ -35,7 +36,6 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
   GlobalKey<FormState> _draftFormKey = GlobalKey<FormState>();
   bool _showDetails = false;
   String? _draftError;
-  String? _refreshingCatalog;
   final ProviderDraftSaveSession _saveSession = ProviderDraftSaveSession();
   final ProviderUsageAutoDemand _usageDemand = ProviderUsageAutoDemand();
   ProviderSubscription<bool>? _visibilitySubscription;
@@ -167,24 +167,6 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
     );
   }
 
-  Future<void> _refreshCatalog(String providerId) async {
-    setState(() => _refreshingCatalog = providerId);
-    try {
-      await ref
-          .read(anyworkClientProvider)
-          .directoryCommands
-          .refreshModelCatalog(providerId);
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.settingsModelCatalogFailed)),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _refreshingCatalog = null);
-    }
-  }
-
   @override
   void didUpdateWidget(covariant ProvidersTab oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -283,10 +265,9 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
           _changeCompact(selectedId!, slug, value),
       onAutoCompactCommit: (slug) => _commitCompact(selectedId!, slug),
       onAutoCompactInvalid: (slug) => _invalidateCompact(selectedId!, slug),
-      catalogRefreshing: selected != null && _refreshingCatalog == selected.id,
-      onRefreshCatalog: selected == null
-          ? null
-          : () => _refreshCatalog(selected.id),
+      onRemoveManualModel: selected == null
+          ? (_) {}
+          : (model) => unawaited(_removeManualModel(selected, model)),
       onRefreshUsage: selected == null
           ? null
           : () => unawaited(_refreshUsages(providerId: selected.id)),
@@ -358,10 +339,10 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         provider.name,
         provider.id,
         provider.defaultModel,
-        for (final model in provider.allModels) model.slug,
-        for (final model in provider.allModels) model.displayName,
-        for (final model in provider.allModels) model.wireProtocol,
-        for (final model in provider.allModels) model.connectionMode,
+        for (final model in provider.models) model.slug,
+        for (final model in provider.models) model.displayName,
+        for (final model in provider.models) model.wireProtocol,
+        for (final model in provider.models) model.connectionMode,
       ].join(' ').toLowerCase();
       return haystack.contains(query);
     }).toList();
@@ -457,7 +438,7 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
 
   void _addCustomModel() {
     _updateDraft((provider) {
-      final existing = provider.allModels.map((model) => model.slug).toSet();
+      final existing = provider.models.map((model) => model.slug).toSet();
       var slug = 'custom-model';
       for (var index = 2; existing.contains(slug); index += 1) {
         slug = 'custom-model-$index';
@@ -472,10 +453,10 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         supportedConnectionModes: const ['http'],
         defaultConnectionMode: 'http',
         connectionMode: 'http',
+        origin: ProviderModelOrigin.manual,
       );
       return provider.copyWith(
-        customModels: [...provider.customModels, model],
-        models: [...provider.defaultModels, ...provider.customModels, model],
+        models: [...provider.models, model],
         defaultModel: ModelRouteQueries.defaultModelAfterAddition(
           provider.defaultModel,
           slug,
@@ -486,10 +467,8 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
 
   void _updateCustomModel(int index, ProviderModelView model) {
     _updateDraft((provider) {
-      final custom = [...provider.customModels];
-      final previousModel = custom[index];
+      final previousModel = provider.customModels[index];
       final previousSlug = previousModel.slug;
-      custom[index] = model;
       final connections = {...provider.modelConnectionModes};
       if (previousSlug != model.slug ||
           previousModel.wireProtocol != model.wireProtocol) {
@@ -504,14 +483,20 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         limits.remove(previousSlug);
       }
       limits[model.slug] = recalculated;
+      final models = [
+        for (final candidate in provider.models)
+          if (candidate.slug == previousSlug)
+            model.copyWith(origin: ProviderModelOrigin.manual)
+          else
+            candidate,
+      ];
       return provider.copyWith(
-        customModels: custom,
         modelConnectionModes: connections,
         autoCompactLimits: limits,
         defaultModel: provider.defaultModel == previousSlug
             ? model.slug
             : provider.defaultModel,
-        models: [...provider.defaultModels, ...custom],
+        models: models,
       );
     });
   }
@@ -521,7 +506,10 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       final custom = [...provider.customModels];
       final removedSlug = custom[index].slug;
       custom.removeAt(index);
-      final models = [...provider.defaultModels, ...custom];
+      final models = [
+        for (final candidate in provider.models)
+          if (candidate.slug != removedSlug) candidate,
+      ];
       final limits = {...provider.autoCompactLimits}..remove(removedSlug);
       final connections = {...provider.modelConnectionModes}
         ..remove(removedSlug);
@@ -533,13 +521,48 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         remaining: models,
       );
       return provider.copyWith(
-        customModels: custom,
         modelConnectionModes: connections,
         autoCompactLimits: limits,
         models: models,
         defaultModel: defaultModel,
       );
     });
+  }
+
+  Future<void> _removeManualModel(
+    ProviderSettingsView provider,
+    ProviderModelView model,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(context.l10n.settingsRemoveManualModelConfirmTitle),
+        content: Text(context.l10n.settingsRemoveManualModelConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(context.l10n.settingsCancel),
+          ),
+          FilledButton(
+            key: StudioDriverKeys.providerManualModelDeleteConfirm,
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(context.l10n.settingsRemoveManualModelConfirmAction),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await _client.settingsCommands.removeProviderModel(
+        provider.id,
+        model.slug,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.settingsRemoveManualModelFailed)),
+      );
+    }
   }
 
   Future<void> _saveDraft() async {

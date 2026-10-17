@@ -529,7 +529,7 @@ Map<String, Object?> _driverProviderDiagnostics(StudioDriverFacts facts) {
         <String, Object?>{
           'id': provider.id,
           'status': provider.status,
-          'modelCount': provider.allModels.length,
+          'modelCount': provider.models.length,
           'defaultModelConfigured': provider.defaultModel.isNotEmpty,
         },
     ],
@@ -538,10 +538,11 @@ Map<String, Object?> _driverProviderDiagnostics(StudioDriverFacts facts) {
         <String, Object?>{
           'id': provider.id,
           'models': [
-            for (final model in provider.allModels)
+            for (final model in provider.models)
               <String, Object?>{
                 'slug': model.slug,
                 'name': model.displayName,
+                'origin': model.origin.name,
                 'contextWindow': model.contextWindow,
                 'maxOutputTokens': model.maxOutputTokens,
                 'reasoningEfforts': model.reasoningEfforts,

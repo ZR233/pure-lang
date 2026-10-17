@@ -37,21 +37,22 @@ pub(crate) fn model_catalog_snapshot(
         .providers
         .iter()
         .map(|(id, provider)| {
-            let status = catalog.catalogs.get(id).cloned().unwrap_or_else(|| {
-                pl_protocol::studio::StudioModelCatalogStatus {
-                    supported: provider.supports_model_discovery(),
+            let status = match catalog.catalogs.get(id).cloned() {
+                Some(status) => status,
+                None => pl_protocol::studio::StudioModelCatalogStatus {
+                    supported: provider.discovery_profile()?.is_some(),
                     source: pl_protocol::studio::StudioModelCatalogSource::Default,
                     probing: false,
                     last_success_at: None,
                     checked_at: None,
                     error: None,
                     cache_warning: None,
-                }
-            });
+                },
+            };
             Ok(StudioModelCatalogProvider {
                 id: id.to_string(),
                 effective_models: provider
-                    .effective_models()?
+                    .effective_catalog()?
                     .iter()
                     .map(pl_model::config::model_descriptor)
                     .collect(),
@@ -83,7 +84,11 @@ fn settings_view(state: &ConfigRuntimeSnapshot) -> Result<StudioSettings> {
         .providers
         .iter()
         .map(|(id, provider)| {
-            let models = provider.effective_models()?;
+            let models = provider
+                .effective_catalog()?
+                .into_iter()
+                .map(|entry| entry.model)
+                .collect::<Vec<_>>();
             let default_model = config
                 .models
                 .routes

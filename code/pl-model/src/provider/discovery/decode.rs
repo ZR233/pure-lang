@@ -87,6 +87,7 @@ struct Tools {
 
 pub(super) fn models(
     bytes: &[u8],
+    discovery: &crate::config::ModelCatalogDiscovery,
     adapter: ProviderAdapterKind,
     previous: Option<&[ModelInfo]>,
     defaults: &[ModelInfo],
@@ -115,30 +116,39 @@ pub(super) fn models(
         .map(|model| (model.slug.as_str(), model.clone()))
         .collect::<HashMap<_, _>>();
     for model in previous.into_iter().flatten() {
-        let enriched = metadata
-            .get(model.slug.as_str())
-            .and_then(|current| enrich_unknown_model_fallback(model, current, adapter));
+        let enriched = metadata.get(model.slug.as_str()).and_then(|current| {
+            enrich_unknown_model_fallback(model, current, &discovery.transport, adapter)
+        });
         metadata.insert(
             model.slug.as_str(),
             enriched.unwrap_or_else(|| model.clone()),
         );
     }
-    let result = records
+    let mut result = records
         .into_iter()
-        .map(|record| normalize(record, adapter, &metadata))
+        .map(|record| normalize(record, discovery, adapter, &metadata))
         .collect::<Result<Vec<_>, _>>()?;
+    result.retain(|model| {
+        !discovery
+            .excluded_slugs
+            .iter()
+            .any(|slug| slug == &model.slug)
+    });
     validate_inventory(&result).map_err(|_| ModelCatalogQueryError::Protocol)?;
     Ok(result)
 }
 
 fn normalize(
     record: Record,
+    discovery: &crate::config::ModelCatalogDiscovery,
     adapter: ProviderAdapterKind,
     metadata: &HashMap<&str, ModelInfo>,
 ) -> Result<ModelInfo, ModelCatalogQueryError> {
     let slug = record.identifier()?.to_owned();
     let known = metadata.get(slug.as_str());
-    let mut model = known.cloned().unwrap_or_else(|| minimal(&slug, adapter));
+    let mut model = known
+        .cloned()
+        .unwrap_or_else(|| minimal(&slug, &discovery.transport, adapter));
     model.pricing = ModelPricing::Unknown;
     if let Some(value) = record.display_name.or(record.name) {
         model.display_name = value;
@@ -167,15 +177,17 @@ fn normalize(
         if value.request.api_model.is_some()
             || !value.request.headers.is_empty()
             || !value.request.body.is_empty()
-            || !super::valid_discovery_transport(&value.transport, adapter)
+            || !super::valid_discovery_transport(&value.transport, &discovery.transport)
         {
             return Err(ModelCatalogQueryError::Protocol);
         }
         model.binding = value;
         // Canonicalize ordering, never restore a connection candidate the API withdrew.
-        model.binding.transport.supported_connection_modes = super::discovery_transport(adapter)
+        model.binding.transport.supported_connection_modes = discovery
+            .transport
             .supported_connection_modes
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|mode| {
                 model
                     .binding
@@ -256,7 +268,7 @@ fn normalize(
                 .capabilities
                 .supports_input_modality(ModelModality::Image)
             {
-                default_image_media(adapter)
+                default_image_media(&discovery.transport, adapter)
             } else {
                 Vec::new()
             };
@@ -331,9 +343,23 @@ fn normalize(
     Ok(model)
 }
 
-fn minimal(slug: &str, adapter: ProviderAdapterKind) -> ModelInfo {
-    // Responses streaming and text/image are discovery defaults, not a verified
+fn minimal(
+    slug: &str,
+    transport: &crate::model::ModelTransportProfile,
+    adapter: ProviderAdapterKind,
+) -> ModelInfo {
+    // Streaming and text/image are discovery defaults, not a verified
     // provider capability or a promise of tools/embedding support.
+    let request = match transport.protocol {
+        crate::provider::ProviderWireProtocol::Responses => ModelRequestProfile {
+            media: default_image_media(transport, adapter),
+            ..ModelRequestProfile::responses()
+        },
+        crate::provider::ProviderWireProtocol::ChatCompletions => ModelRequestProfile {
+            media: default_image_media(transport, adapter),
+            ..ModelRequestProfile::default()
+        },
+    };
     ModelInfo {
         slug: slug.into(),
         display_name: slug.into(),
@@ -346,11 +372,8 @@ fn minimal(slug: &str, adapter: ProviderAdapterKind) -> ModelInfo {
         pricing: ModelPricing::Unknown,
         parameters: Vec::new(),
         binding: ModelBinding {
-            transport: super::discovery_transport(adapter),
-            request: ModelRequestProfile {
-                media: default_image_media(adapter),
-                ..ModelRequestProfile::responses()
-            },
+            transport: transport.clone(),
+            request,
         },
         capabilities: ModelCapabilities {
             streaming: true,
@@ -387,9 +410,16 @@ fn input_capabilities(modalities: Vec<ModelModality>) -> Vec<ModelInputCapabilit
         .collect()
 }
 
-fn default_image_media(adapter: ProviderAdapterKind) -> Vec<ModelMediaInputProfile> {
+fn default_image_media(
+    transport: &crate::model::ModelTransportProfile,
+    adapter: ProviderAdapterKind,
+) -> Vec<ModelMediaInputProfile> {
+    let wire = match transport.protocol {
+        crate::provider::ProviderWireProtocol::Responses => MediaWireFormat::ResponsesInputImage,
+        crate::provider::ProviderWireProtocol::ChatCompletions => MediaWireFormat::ChatImageUrl,
+    };
     image_media_profiles(
-        MediaWireFormat::ResponsesInputImage,
+        wire,
         if adapter == ProviderAdapterKind::DeepSeek {
             MediaSendOrder::ProviderFileFirst
         } else {
@@ -402,9 +432,10 @@ fn default_image_media(adapter: ProviderAdapterKind) -> Vec<ModelMediaInputProfi
 pub(crate) fn enrich_unknown_model_fallback(
     model: &ModelInfo,
     current: &ModelInfo,
+    transport: &crate::model::ModelTransportProfile,
     adapter: ProviderAdapterKind,
 ) -> Option<ModelInfo> {
-    let mut skeleton = minimal(&model.slug, adapter);
+    let mut skeleton = minimal(&model.slug, transport, adapter);
     skeleton.display_name.clone_from(&model.display_name);
     skeleton.description.clone_from(&model.description);
     let uses_current_default = *model == skeleton;

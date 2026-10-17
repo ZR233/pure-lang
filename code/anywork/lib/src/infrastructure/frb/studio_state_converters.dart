@@ -223,15 +223,6 @@ SettingsStateSnapshot _modelCatalogStateFromFrb(
   );
 }
 
-SettingsStateSnapshot _modelCatalogSnapshotFromFrb(
-  frb.BridgeModelCatalogSnapshotDto snapshot,
-) {
-  return SettingsStateSnapshot(
-    providers: snapshot.providers.map(_providerCatalogSettingsFromFrb).toList(),
-    modelCatalogRevision: snapshot.revision.toInt(),
-  );
-}
-
 ProviderSettingsView _providerCatalogSettingsFromFrb(
   frb.BridgeModelCatalogProviderDto value,
 ) {

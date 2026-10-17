@@ -1,13 +1,13 @@
 use crate::api::studio::bridge_runtime::{active_bridge, installed_bridge};
 use crate::api::studio::convert::commands::settings_command_reply;
 use crate::api::studio::convert::settings::{
-    bridge_deepseek_web_search_settings, bridge_model_catalog_snapshot, bridge_settings_snapshot,
-    bridge_web_search_settings, provider_settings_request,
+    bridge_deepseek_web_search_settings, bridge_settings_snapshot, bridge_web_search_settings,
+    provider_settings_request,
 };
 use crate::api::studio::types::{
-    BridgeDeepSeekWebSearchSettingsDto, BridgeError, BridgeModelCatalogSnapshotDto,
-    BridgeProviderCatalogSnapshot, BridgeSettingsCommandReply, BridgeSettingsStateResponse,
-    BridgeWebSearchSettingsDto, ProviderSettingsInput, RemoveProviderInput, SettingsFieldInput,
+    BridgeDeepSeekWebSearchSettingsDto, BridgeError, BridgeProviderCatalogSnapshot,
+    BridgeSettingsCommandReply, BridgeSettingsStateResponse, BridgeWebSearchSettingsDto,
+    ProviderSettingsInput, RemoveProviderInput, SettingsFieldInput,
 };
 // ── Settings ──
 
@@ -60,15 +60,20 @@ pub async fn read_settings_state() -> Result<BridgeSettingsStateResponse, Bridge
     Ok(bridge_settings_snapshot(bridge.studio.read_settings()?))
 }
 
-pub async fn refresh_model_catalog(
+pub async fn remove_provider_model(
+    expected_settings_revision: u64,
     provider_id: String,
-) -> Result<BridgeModelCatalogSnapshotDto, BridgeError> {
+    slug: String,
+) -> Result<BridgeSettingsCommandReply, BridgeError> {
     let bridge = active_bridge().await?;
-    Ok(bridge_model_catalog_snapshot(
+    Ok(settings_command_reply(
         bridge
             .studio
-            .refresh_model_catalog(pl_protocol::studio::RefreshModelCatalogRequest { provider_id })
-            .await?,
+            .remove_provider_model(pl_protocol::studio::RemoveProviderModelRequest {
+                expected_revision: expected_settings_revision,
+                provider_id,
+                slug,
+            })?,
     ))
 }
 

@@ -54,6 +54,18 @@ struct Args {
     /// Coordination file the stdio peer records its pids into.
     #[arg(long, value_name = "PATH")]
     coord_file: Option<PathBuf>,
+    /// Startup-cached model-list control file. Read once; later edits need a restart.
+    #[arg(long, value_name = "PATH")]
+    model_catalog_control: Option<PathBuf>,
+    /// Probe the four `/models` endpoints and exit. Requires `--model-catalog-control`.
+    #[arg(long)]
+    model_catalog_check: bool,
+    /// Bind the HTTP listener to this loopback port so a restart can reuse `config.toml`.
+    #[arg(long, value_name = "PORT")]
+    bind_port: Option<u16>,
+    /// Catalog GET evidence written on shutdown; never mixed into `--requests-file`.
+    #[arg(long, value_name = "PATH")]
+    model_catalog_requests: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -93,6 +105,36 @@ async fn main() -> Result<()> {
             coord_file,
         });
     }
+    let model_catalog = args
+        .model_catalog_control
+        .as_ref()
+        .map(pl_provider_fixture::ModelCatalogControl::load)
+        .transpose()?;
+    if args.model_catalog_check {
+        let control =
+            model_catalog.context("--model-catalog-check requires --model-catalog-control")?;
+        let fixture = FixtureServer::start_with_options(
+            Vec::new(),
+            FixtureOptions {
+                model_catalog: Some(control.clone()),
+                bind_port: args.bind_port,
+                ..FixtureOptions::default()
+            },
+        )
+        .await?;
+        pl_provider_fixture::model_catalog_self_check(fixture.address(), &control).await?;
+        let hang_probes =
+            pl_provider_fixture::model_catalog_kick_hang_probes(fixture.address(), &control).await;
+        wait_for_hang_hits(&fixture, &control).await?;
+        let report = fixture.shutdown().await?;
+        for probe in hang_probes {
+            let _ = probe.await;
+        }
+        if let Some(path) = args.model_catalog_requests.as_ref() {
+            write_json(path, &report.catalog_hits)?;
+        }
+        return Ok(());
+    }
     let scenario = args
         .scenario
         .as_deref()
@@ -131,6 +173,8 @@ async fn main() -> Result<()> {
     let options = FixtureOptions {
         web_search: (scenario == "web-search").then_some(WebSearchOptions { fault }),
         provider_usage: scenario == "provider-usage",
+        model_catalog,
+        bind_port: args.bind_port,
     };
     let fixture = Arc::new(FixtureServer::start_with_options(steps, options).await?);
     // The status watcher is a plain reader of the same script state the strict
@@ -191,6 +235,9 @@ async fn main() -> Result<()> {
     if let Some(path) = args.requests_file.as_ref() {
         write_json(path, &report.requests)?;
     }
+    if let Some(path) = args.model_catalog_requests.as_ref() {
+        write_json(path, &report.catalog_hits)?;
+    }
     if let Some(path) = args.report_file.as_ref() {
         write_json(path, &report.stress)?;
     }
@@ -204,6 +251,35 @@ async fn main() -> Result<()> {
     // outermost reason the coordinator records.
     report.verify()?;
     Ok(())
+}
+
+async fn wait_for_hang_hits(
+    fixture: &pl_provider_fixture::FixtureServer,
+    control: &pl_provider_fixture::ModelCatalogControl,
+) -> Result<()> {
+    if !(control.openai.hang
+        || control.openai_second.hang
+        || control.deepseek.hang
+        || control.mimo.hang)
+    {
+        return Ok(());
+    }
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let hits = fixture.model_catalog_hits();
+        if (!control.openai.hang || hits.openai.hits > 0)
+            && (!control.openai_second.hang || hits.openai_second.hits > 0)
+            && (!control.deepseek.hang || hits.deepseek.hits > 0)
+            && (!control.mimo.hang || hits.mimo.hits > 0)
+        {
+            return Ok(());
+        }
+        ensure!(
+            tokio::time::Instant::now() < deadline,
+            "hang catalog probes did not register before shutdown"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }
 
 /// The owned status watcher handle; it is never detached, and its `Ok(())`

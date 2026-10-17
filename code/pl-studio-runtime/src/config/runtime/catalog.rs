@@ -3,19 +3,6 @@ use crate::config::model_catalog::{CatalogProbe, SuccessCache};
 use pl_protocol::studio::{StudioModelCatalogError, StudioModelCatalogSource};
 
 impl ConfigRuntime {
-    pub(crate) fn model_catalog_generation(
-        &self,
-        provider: &ProviderId,
-    ) -> ConfigRuntimeResult<u64> {
-        let state = self.state.read().map_err(|_| config_runtime_poisoned())?;
-        state
-            .observations
-            .get(provider)
-            .map(|observation| observation.generation)
-            .ok_or_else(|| {
-                PureError::ConfigError("model catalog provider no longer exists".into()).into()
-            })
-    }
     pub(crate) fn subscribe_model_catalogs(
         &self,
     ) -> tokio::sync::broadcast::Receiver<CatalogChange> {
@@ -43,7 +30,7 @@ impl ConfigRuntime {
             .ok_or_else(|| {
                 PureError::ConfigError("model catalog provider no longer exists".into())
             })?;
-        if !provider.supports_model_discovery() {
+        if provider.discovery_profile()?.is_none() {
             return Ok(None);
         }
         let query = match pl_model::provider::discovery::ModelCatalogQuery::for_provider(provider) {

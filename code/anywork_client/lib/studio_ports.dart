@@ -76,7 +76,6 @@ abstract class StudioTransport
     required int budgetMs,
   }) async => const [];
 
-  Future<SettingsStateSnapshot> refreshModelCatalog(String providerId);
   Future<RecoveryStateSnapshot> retryRecovery();
   Future<ProviderCatalogView> loadProviderCatalog();
 
@@ -263,6 +262,11 @@ abstract class StudioTransport
     required OperationId operationId,
     String? replacementProviderId,
   });
+  Future<SettingsCommandReply> removeProviderModel(
+    int expectedSettingsRevision,
+    String providerId,
+    String slug,
+  );
   Future<SettingsCommandReply> applySettingsField(
     int expectedSettingsRevision,
     SettingsFieldCommand command, {

@@ -65,7 +65,17 @@ Tokens never live in `config.toml`. Saving from Settings clears any inline token
 
 The four built-in Zhipu MCP servers only borrow a usable key from `preset = "zhipu-coding-plan"`. With multiple instances, the first usable key in stable provider-ID order wins. Ordinary `zhipu` presets and matching endpoint hosts are not credential fallbacks. A missing/blank key does not connect, discover or register callable tools; an explicit builtin disable remains disabled. They use the same generic MCP runtime and published-generation leases as user MCP servers, with no provider-specific Thread.
 
-The Providers tab automatically checks each instance when its page state first becomes visible, without waiting for all instances. Retained tab switches do not repeat completed attempts; new or query-changed instances are checked when visible, and manual per-instance/all refresh remains available. Saves do not wait for those checks. Failures are local to an instance and do not trigger polling or automatic retries. The read-only `usageQueryRevision` is a non-secret, runtime-owned query identity, not a TOML setting or secret fingerprint.
+## Model catalog sources
+
+A provider catalog either bundles a built-in model list or declares only user models. `additional_models` entries are user-authored and the only entries a user may add or delete; a `Bundled` catalog without an observation still resolves to its built-in list.
+
+Online discovery is declared per catalog, never per adapter: a catalog that supports it records the discovery transport and any excluded non-chat slugs. Once during startup the runtime queries every instance whose catalog declares discovery, one independent task per instance with its own query identity, timeout and cache file. A successful response replaces that instance's observed list as a whole, and a valid empty list is an accepted replacement. A failed query only records that instance's typed error and falls back to its built-in list; other instances and the first screen are unaffected, and no global revision or reset is triggered.
+
+The effective model list is the observed online list union user models when an observation exists, otherwise the built-in list union user models; a user model with the same slug wins and hides the other entry. Snapshots mark every entry's origin (`bundled`, `online`, `manual`) so the UI groups them instead of inferring from slug differences.
+
+There is no manual or periodic refresh: the directory is synchronized once per launch, its status is read-only, and restarting the app is the only way to resynchronize. Deleting a user model requires an expected settings revision, is rejected for non-user entries, and also removes that slug's connection and compaction overrides. Model prices are inherited from the built-in catalog by exact, case-sensitive slug only; a slug without a price stays unpriced rather than zero, and a catalog change never recomputes recorded costs.
+
+The Providers tab reads the catalog snapshot produced by that startup synchronization; it does not poll instances or retrigger queries when the tab becomes visible. The read-only `usageQueryRevision` is a non-secret, runtime-owned query identity, not a TOML setting or secret fingerprint.
 
 ## Minimal Working Example
 

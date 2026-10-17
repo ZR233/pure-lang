@@ -128,7 +128,7 @@ impl AgentModelConfig {
         provider.validate_declarations(&route.provider)?;
         let models = provider.effective_models()?;
         let Some(model) = models.iter().find(|model| model.slug == route.model) else {
-            if !provider.supports_model_discovery() {
+            if provider.discovery_profile()?.is_none() {
                 return Err(PureError::ConfigError(format!(
                     "model route references missing model: {}",
                     route.model
@@ -161,7 +161,7 @@ impl AgentModelConfig {
         if !valid {
             // Hand-written models are authoritative desired declarations, not external
             // observations. Their invalid choices remain strict even on an online provider.
-            if !provider.supports_model_discovery()
+            if provider.discovery_profile()?.is_none()
                 || provider
                     .editable_models()
                     .iter()

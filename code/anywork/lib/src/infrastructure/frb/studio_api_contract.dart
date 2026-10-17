@@ -1912,14 +1912,6 @@ class FrbStudioTransport
   }
 
   @override
-  Future<SettingsStateSnapshot> refreshModelCatalog(String providerId) async {
-    await _ensureReady();
-    return _modelCatalogSnapshotFromFrb(
-      await _bridgeCall(() => frb.refreshModelCatalog(providerId: providerId)),
-    );
-  }
-
-  @override
   Future<SettingsCommandReply> saveRuntimePermissionMode(
     int expectedSettingsRevision,
     PermissionMode mode, {
@@ -1970,6 +1962,24 @@ class FrbStudioTransport
           operationId: operationId.value,
           expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
           providerId: providerId,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<SettingsCommandReply> removeProviderModel(
+    int expectedSettingsRevision,
+    String providerId,
+    String slug,
+  ) async {
+    await _ensureReady();
+    return _settingsCommandReplyFromFrb(
+      await _bridgeCall(
+        () => frb.removeProviderModel(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
+          providerId: providerId,
+          slug: slug,
         ),
       ),
     );

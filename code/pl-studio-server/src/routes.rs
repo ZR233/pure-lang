@@ -12,9 +12,9 @@ use pl_protocol::ThreadActivityDetailQuery;
 use pl_protocol::ThreadModeId;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, CreateThreadRequest,
-    ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest,
-    ModelCatalogSnapshot, OpenProjectRequest, RefreshModelCatalogRequest, RemoveProviderRequest,
-    RenameThreadRequest, ResolveInteractionRequest, SearchSkillsRequest, SetDefaultProviderRequest,
+    ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest, OpenProjectRequest,
+    RemoveProviderModelRequest, RemoveProviderRequest, RenameThreadRequest,
+    ResolveInteractionRequest, SearchSkillsRequest, SetDefaultProviderRequest,
     SetThreadModeRequest, SetThreadModelRouteRequest, SettingsCommandReply, SettingsStateResponse,
     StudioAttachmentAdmissionContext, StudioAttachmentDraftSource, StudioCommandRequest,
     StudioError, SubmitPromptRequest, ThreadModelRouteCommandReply, ThreadPageQuery,
@@ -221,7 +221,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(provider_catalog))
         .routes(routes!(read_settings))
         .routes(routes!(reload_settings))
-        .routes(routes!(refresh_model_catalog))
+        .routes(routes!(remove_provider_model))
         .routes(routes!(save_permission_settings))
         .routes(routes!(save_provider))
         .routes(routes!(set_default_provider))
@@ -843,16 +843,15 @@ async fn reload_settings(
     ))
 }
 
-#[utoipa::path(post, path = "/api/v1/settings/model-catalog/refresh", operation_id = "settings.refreshModelCatalog", request_body = RefreshModelCatalogRequest, responses(StudioApiErrors, (status = 200, body = ModelCatalogSnapshot)))]
-async fn refresh_model_catalog(
+#[utoipa::path(delete, path = "/api/v1/settings/provider-models", operation_id = "settings.removeProviderModel", request_body = RemoveProviderModelRequest, responses(StudioApiErrors, (status = 200, body = SettingsCommandReply)))]
+async fn remove_provider_model(
     State(state): State<AppState>,
-    ApiJson(request): ApiJson<RefreshModelCatalogRequest>,
-) -> Result<Json<ModelCatalogSnapshot>, ApiError> {
+    ApiJson(request): ApiJson<RemoveProviderModelRequest>,
+) -> Result<Json<SettingsCommandReply>, ApiError> {
     Ok(Json(
         state
             .runtime
-            .refresh_model_catalog(request)
-            .await
+            .remove_provider_model(request)
             .map_err(ApiError::from)?,
     ))
 }

@@ -43,7 +43,7 @@ class ProviderEditor extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = draft.provider;
-    final models = provider.allModels;
+    final models = provider.models;
     return Form(
       key: formKey,
       child: Column(
@@ -229,25 +229,61 @@ class ProviderEditor extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 SettingsSectionPanel(
+                  title: context.l10n.settingsProviderOnlineModelsTitle,
+                  children: [
+                    if (provider.onlineModels.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(context.l10n.settingsNoOnlineModels),
+                      )
+                    else
+                      for (final model in provider.onlineModels)
+                        ProviderModelReadout(
+                          model: model,
+                          providerId: provider.id,
+                          onConnectionModeChanged:
+                              saving ||
+                                  model.supportedConnectionModes.length <= 1
+                              ? null
+                              : (mode) => onUpdate(
+                                  (item) => item.withModelConnection(
+                                    model.slug,
+                                    mode,
+                                  ),
+                                ),
+                        ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                SettingsSectionPanel(
                   title: context.l10n.settingsProviderDefaultModelsTitle,
                   trailing: Text(
                     context.l10n.settingsBundledModels(
-                      provider.defaultModels.length,
+                      provider.bundledModels.length,
                     ),
                   ),
                   children: [
-                    for (final model in provider.defaultModels)
-                      ProviderModelReadout(
-                        model: model,
-                        providerId: provider.id,
-                        onConnectionModeChanged:
-                            saving || model.supportedConnectionModes.length <= 1
-                            ? null
-                            : (mode) => onUpdate(
-                                (item) =>
-                                    item.withModelConnection(model.slug, mode),
-                              ),
-                      ),
+                    if (provider.bundledModels.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(context.l10n.settingsNoBundledModels),
+                      )
+                    else
+                      for (final model in provider.bundledModels)
+                        ProviderModelReadout(
+                          model: model,
+                          providerId: provider.id,
+                          onConnectionModeChanged:
+                              saving ||
+                                  model.supportedConnectionModes.length <= 1
+                              ? null
+                              : (mode) => onUpdate(
+                                  (item) => item.withModelConnection(
+                                    model.slug,
+                                    mode,
+                                  ),
+                                ),
+                        ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -275,6 +311,13 @@ class ProviderEditor extends StatelessWidget {
                           index: index,
                           model: provider.customModels[index],
                           enabled: !saving,
+                          conflictingSlug: provider.models.any(
+                            (candidate) =>
+                                candidate.origin !=
+                                    ProviderModelOrigin.manual &&
+                                candidate.slug ==
+                                    provider.customModels[index].slug,
+                          ),
                           onChanged: (model) =>
                               onUpdateCustomModel(index, model),
                           onRemove: () => onRemoveCustomModel(index),
@@ -319,12 +362,14 @@ class _CustomModelEditor extends StatelessWidget {
     required this.index,
     required this.model,
     required this.enabled,
+    required this.conflictingSlug,
     required this.onChanged,
     required this.onRemove,
   });
   final int index;
   final ProviderModelView model;
   final bool enabled;
+  final bool conflictingSlug;
   final ValueChanged<ProviderModelView> onChanged;
   final VoidCallback onRemove;
 
@@ -345,6 +390,7 @@ class _CustomModelEditor extends StatelessWidget {
                   onChanged: (value) => onChanged(
                     model.copyWith(
                       slug: value,
+                      origin: ProviderModelOrigin.manual,
                       displayName:
                           model.displayName == model.slug ||
                               model.displayName == 'Custom model'
@@ -361,6 +407,14 @@ class _CustomModelEditor extends StatelessWidget {
               ),
             ],
           ),
+          if (conflictingSlug)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                context.l10n.settingsManualModelSlugConflict,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
           ExpansionTile(
             key: StudioDriverKeys.customModelAdvanced(index),
             title: Text(context.l10n.settingsModelAdvanced),

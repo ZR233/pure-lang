@@ -2,22 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
-import '../../shared/studio_driver_keys.dart';
 
 class ModelCatalogReadout extends StatelessWidget {
-  const ModelCatalogReadout({
-    super.key,
-    required this.status,
-    required this.refreshing,
-    required this.onRefresh,
-  });
+  const ModelCatalogReadout({super.key, required this.status});
   final ModelCatalogStatusView status;
-  final bool refreshing;
-  final VoidCallback? onRefresh;
 
   @override
   Widget build(BuildContext context) {
-    final busy = refreshing || status.probing;
     final source = switch (status.source) {
       ModelCatalogSource.defaultDefinition =>
         context.l10n.settingsModelCatalogDefault,
@@ -27,30 +18,15 @@ class ModelCatalogReadout extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(source),
-            TextButton.icon(
-              key: StudioDriverKeys.modelCatalogRefresh,
-              onPressed: busy ? null : onRefresh,
-              icon: busy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.refresh),
-              label: Text(context.l10n.settingsModelCatalogRefresh),
-            ),
-          ],
-        ),
+        Text(source),
+        Text(context.l10n.settingsModelCatalogRestartHint),
+        if (status.lastSuccessAt case final lastSuccessAt?
+            when lastSuccessAt != status.checkedAt)
+          Text(_formatCatalogTime(lastSuccessAt)),
         if (status.checkedAt case final checkedAt?)
           Text(
             '${context.l10n.settingsModelCatalogChecked}: '
-            '${DateTime.fromMillisecondsSinceEpoch(checkedAt * 1000).toLocal()}',
+            '${_formatCatalogTime(checkedAt)}',
           ),
         if (status.error != null)
           Text(
@@ -63,3 +39,8 @@ class ModelCatalogReadout extends StatelessWidget {
     );
   }
 }
+
+String _formatCatalogTime(int unixSeconds) =>
+    DateTime.fromMillisecondsSinceEpoch(unixSeconds * 1000)
+        .toLocal()
+        .toString();

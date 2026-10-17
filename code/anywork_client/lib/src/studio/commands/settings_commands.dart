@@ -57,7 +57,7 @@ class SettingsCommands {
         final provider = _client.settings.state.canonical?.providers
             .where((provider) => provider.id == providerId)
             .firstOrNull;
-        final model = provider?.allModels
+        final model = provider?.models
             .where((model) => model.slug == slug)
             .firstOrNull;
         if (provider == null || model == null) {
@@ -78,6 +78,17 @@ class SettingsCommands {
         );
         return _api.saveProvider(revision, command, operationId: operationId);
       },
+    );
+  }
+
+  Future<SettingsStateSnapshot> removeProviderModel(
+    String providerId,
+    String slug,
+  ) {
+    return _run(
+      'provider-model:${providerId.length}:$providerId:$slug',
+      target: CommandTarget(providerId: providerId, model: slug),
+      (revision, _) => _api.removeProviderModel(revision, providerId, slug),
     );
   }
 

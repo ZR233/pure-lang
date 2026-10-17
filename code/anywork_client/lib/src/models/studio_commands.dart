@@ -154,7 +154,7 @@ abstract final class ProviderCommandBuilder {
   }
 
   static ProviderSettingsView normalizeProvider(ProviderSettingsView provider) {
-    final models = provider.allModels
+    final models = provider.models
         .where((model) => model.slug.trim().isNotEmpty)
         .toList();
     // canonical defaultModel 非空时始终保留（含当前无法解析的 slug），只有
@@ -168,9 +168,6 @@ abstract final class ProviderCommandBuilder {
       baseUrl: provider.baseUrl.trim(),
       defaultModel: defaultModel.trim(),
       models: models,
-      customModels: provider.customModels
-          .where((model) => model.slug.trim().isNotEmpty)
-          .toList(),
     );
   }
 }

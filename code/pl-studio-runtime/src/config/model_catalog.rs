@@ -119,7 +119,8 @@ pub(super) fn reconcile(
 ) -> Result<BTreeMap<ProviderId, Observation>> {
     let mut next = BTreeMap::new();
     for (id, provider) in &desired.models.providers {
-        let query = if provider.supports_model_discovery() {
+        let supported = provider.discovery_profile()?.is_some();
+        let query = if supported {
             match ModelCatalogQuery::for_provider(provider) {
                 Ok(query) => Some(query),
                 Err(ModelCatalogQueryError::Definition(error)) => return Err(error.into()),
@@ -131,7 +132,7 @@ pub(super) fn reconcile(
         let identity = query.as_ref().map(|query| query.identity().to_owned());
         if let Some(previous) = old.get(id)
             && previous.identity == identity
-            && previous.status.supported == provider.supports_model_discovery()
+            && previous.status.supported == supported
         {
             next.insert(id.clone(), previous.clone());
             continue;
@@ -144,7 +145,7 @@ pub(super) fn reconcile(
             cancellation: CancellationToken::new(),
             cache: None,
             status: Status {
-                supported: provider.supports_model_discovery(),
+                supported,
                 source: Source::Default,
                 probing: false,
                 last_success_at: None,

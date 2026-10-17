@@ -56,7 +56,7 @@ extension BridgeModelCatalogErrorPatterns on BridgeModelCatalogError {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeModelCatalogError_Unsupported value)?  unsupported,TResult Function( BridgeModelCatalogError_Configuration value)?  configuration,TResult Function( BridgeModelCatalogError_Timeout value)?  timeout,TResult Function( BridgeModelCatalogError_Transport value)?  transport,TResult Function( BridgeModelCatalogError_Http value)?  http,TResult Function( BridgeModelCatalogError_TooLarge value)?  tooLarge,TResult Function( BridgeModelCatalogError_Protocol value)?  protocol,TResult Function( BridgeModelCatalogError_CacheIdentity value)?  cacheIdentity,TResult Function( BridgeModelCatalogError_UnexpectedNotModified value)?  unexpectedNotModified,TResult Function( BridgeModelCatalogError_CacheWrite value)?  cacheWrite,TResult Function( BridgeModelCatalogError_Closing value)?  closing,TResult Function( BridgeModelCatalogError_Stale value)?  stale,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeModelCatalogError_Unsupported value)?  unsupported,TResult Function( BridgeModelCatalogError_Configuration value)?  configuration,TResult Function( BridgeModelCatalogError_Timeout value)?  timeout,TResult Function( BridgeModelCatalogError_Transport value)?  transport,TResult Function( BridgeModelCatalogError_Http value)?  http,TResult Function( BridgeModelCatalogError_TooLarge value)?  tooLarge,TResult Function( BridgeModelCatalogError_Protocol value)?  protocol,TResult Function( BridgeModelCatalogError_CacheIdentity value)?  cacheIdentity,TResult Function( BridgeModelCatalogError_UnexpectedNotModified value)?  unexpectedNotModified,TResult Function( BridgeModelCatalogError_CacheWrite value)?  cacheWrite,TResult Function( BridgeModelCatalogError_Closing value)?  closing,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case BridgeModelCatalogError_Unsupported() when unsupported != null:
@@ -70,8 +70,7 @@ return protocol(_that);case BridgeModelCatalogError_CacheIdentity() when cacheId
 return cacheIdentity(_that);case BridgeModelCatalogError_UnexpectedNotModified() when unexpectedNotModified != null:
 return unexpectedNotModified(_that);case BridgeModelCatalogError_CacheWrite() when cacheWrite != null:
 return cacheWrite(_that);case BridgeModelCatalogError_Closing() when closing != null:
-return closing(_that);case BridgeModelCatalogError_Stale() when stale != null:
-return stale(_that);case _:
+return closing(_that);case _:
   return orElse();
 
 }
@@ -89,7 +88,7 @@ return stale(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeModelCatalogError_Unsupported value)  unsupported,required TResult Function( BridgeModelCatalogError_Configuration value)  configuration,required TResult Function( BridgeModelCatalogError_Timeout value)  timeout,required TResult Function( BridgeModelCatalogError_Transport value)  transport,required TResult Function( BridgeModelCatalogError_Http value)  http,required TResult Function( BridgeModelCatalogError_TooLarge value)  tooLarge,required TResult Function( BridgeModelCatalogError_Protocol value)  protocol,required TResult Function( BridgeModelCatalogError_CacheIdentity value)  cacheIdentity,required TResult Function( BridgeModelCatalogError_UnexpectedNotModified value)  unexpectedNotModified,required TResult Function( BridgeModelCatalogError_CacheWrite value)  cacheWrite,required TResult Function( BridgeModelCatalogError_Closing value)  closing,required TResult Function( BridgeModelCatalogError_Stale value)  stale,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeModelCatalogError_Unsupported value)  unsupported,required TResult Function( BridgeModelCatalogError_Configuration value)  configuration,required TResult Function( BridgeModelCatalogError_Timeout value)  timeout,required TResult Function( BridgeModelCatalogError_Transport value)  transport,required TResult Function( BridgeModelCatalogError_Http value)  http,required TResult Function( BridgeModelCatalogError_TooLarge value)  tooLarge,required TResult Function( BridgeModelCatalogError_Protocol value)  protocol,required TResult Function( BridgeModelCatalogError_CacheIdentity value)  cacheIdentity,required TResult Function( BridgeModelCatalogError_UnexpectedNotModified value)  unexpectedNotModified,required TResult Function( BridgeModelCatalogError_CacheWrite value)  cacheWrite,required TResult Function( BridgeModelCatalogError_Closing value)  closing,}){
 final _that = this;
 switch (_that) {
 case BridgeModelCatalogError_Unsupported():
@@ -103,8 +102,7 @@ return protocol(_that);case BridgeModelCatalogError_CacheIdentity():
 return cacheIdentity(_that);case BridgeModelCatalogError_UnexpectedNotModified():
 return unexpectedNotModified(_that);case BridgeModelCatalogError_CacheWrite():
 return cacheWrite(_that);case BridgeModelCatalogError_Closing():
-return closing(_that);case BridgeModelCatalogError_Stale():
-return stale(_that);}
+return closing(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
 ///
@@ -118,7 +116,7 @@ return stale(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeModelCatalogError_Unsupported value)?  unsupported,TResult? Function( BridgeModelCatalogError_Configuration value)?  configuration,TResult? Function( BridgeModelCatalogError_Timeout value)?  timeout,TResult? Function( BridgeModelCatalogError_Transport value)?  transport,TResult? Function( BridgeModelCatalogError_Http value)?  http,TResult? Function( BridgeModelCatalogError_TooLarge value)?  tooLarge,TResult? Function( BridgeModelCatalogError_Protocol value)?  protocol,TResult? Function( BridgeModelCatalogError_CacheIdentity value)?  cacheIdentity,TResult? Function( BridgeModelCatalogError_UnexpectedNotModified value)?  unexpectedNotModified,TResult? Function( BridgeModelCatalogError_CacheWrite value)?  cacheWrite,TResult? Function( BridgeModelCatalogError_Closing value)?  closing,TResult? Function( BridgeModelCatalogError_Stale value)?  stale,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeModelCatalogError_Unsupported value)?  unsupported,TResult? Function( BridgeModelCatalogError_Configuration value)?  configuration,TResult? Function( BridgeModelCatalogError_Timeout value)?  timeout,TResult? Function( BridgeModelCatalogError_Transport value)?  transport,TResult? Function( BridgeModelCatalogError_Http value)?  http,TResult? Function( BridgeModelCatalogError_TooLarge value)?  tooLarge,TResult? Function( BridgeModelCatalogError_Protocol value)?  protocol,TResult? Function( BridgeModelCatalogError_CacheIdentity value)?  cacheIdentity,TResult? Function( BridgeModelCatalogError_UnexpectedNotModified value)?  unexpectedNotModified,TResult? Function( BridgeModelCatalogError_CacheWrite value)?  cacheWrite,TResult? Function( BridgeModelCatalogError_Closing value)?  closing,}){
 final _that = this;
 switch (_that) {
 case BridgeModelCatalogError_Unsupported() when unsupported != null:
@@ -132,8 +130,7 @@ return protocol(_that);case BridgeModelCatalogError_CacheIdentity() when cacheId
 return cacheIdentity(_that);case BridgeModelCatalogError_UnexpectedNotModified() when unexpectedNotModified != null:
 return unexpectedNotModified(_that);case BridgeModelCatalogError_CacheWrite() when cacheWrite != null:
 return cacheWrite(_that);case BridgeModelCatalogError_Closing() when closing != null:
-return closing(_that);case BridgeModelCatalogError_Stale() when stale != null:
-return stale(_that);case _:
+return closing(_that);case _:
   return null;
 
 }
@@ -150,7 +147,7 @@ return stale(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  unsupported,TResult Function()?  configuration,TResult Function()?  timeout,TResult Function( int? httpStatus)?  transport,TResult Function( int status)?  http,TResult Function()?  tooLarge,TResult Function()?  protocol,TResult Function()?  cacheIdentity,TResult Function()?  unexpectedNotModified,TResult Function()?  cacheWrite,TResult Function()?  closing,TResult Function()?  stale,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  unsupported,TResult Function()?  configuration,TResult Function()?  timeout,TResult Function( int? httpStatus)?  transport,TResult Function( int status)?  http,TResult Function()?  tooLarge,TResult Function()?  protocol,TResult Function()?  cacheIdentity,TResult Function()?  unexpectedNotModified,TResult Function()?  cacheWrite,TResult Function()?  closing,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeModelCatalogError_Unsupported() when unsupported != null:
 return unsupported();case BridgeModelCatalogError_Configuration() when configuration != null:
@@ -163,8 +160,7 @@ return protocol();case BridgeModelCatalogError_CacheIdentity() when cacheIdentit
 return cacheIdentity();case BridgeModelCatalogError_UnexpectedNotModified() when unexpectedNotModified != null:
 return unexpectedNotModified();case BridgeModelCatalogError_CacheWrite() when cacheWrite != null:
 return cacheWrite();case BridgeModelCatalogError_Closing() when closing != null:
-return closing();case BridgeModelCatalogError_Stale() when stale != null:
-return stale();case _:
+return closing();case _:
   return orElse();
 
 }
@@ -182,7 +178,7 @@ return stale();case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  unsupported,required TResult Function()  configuration,required TResult Function()  timeout,required TResult Function( int? httpStatus)  transport,required TResult Function( int status)  http,required TResult Function()  tooLarge,required TResult Function()  protocol,required TResult Function()  cacheIdentity,required TResult Function()  unexpectedNotModified,required TResult Function()  cacheWrite,required TResult Function()  closing,required TResult Function()  stale,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  unsupported,required TResult Function()  configuration,required TResult Function()  timeout,required TResult Function( int? httpStatus)  transport,required TResult Function( int status)  http,required TResult Function()  tooLarge,required TResult Function()  protocol,required TResult Function()  cacheIdentity,required TResult Function()  unexpectedNotModified,required TResult Function()  cacheWrite,required TResult Function()  closing,}) {final _that = this;
 switch (_that) {
 case BridgeModelCatalogError_Unsupported():
 return unsupported();case BridgeModelCatalogError_Configuration():
@@ -195,8 +191,7 @@ return protocol();case BridgeModelCatalogError_CacheIdentity():
 return cacheIdentity();case BridgeModelCatalogError_UnexpectedNotModified():
 return unexpectedNotModified();case BridgeModelCatalogError_CacheWrite():
 return cacheWrite();case BridgeModelCatalogError_Closing():
-return closing();case BridgeModelCatalogError_Stale():
-return stale();}
+return closing();}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -210,7 +205,7 @@ return stale();}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  unsupported,TResult? Function()?  configuration,TResult? Function()?  timeout,TResult? Function( int? httpStatus)?  transport,TResult? Function( int status)?  http,TResult? Function()?  tooLarge,TResult? Function()?  protocol,TResult? Function()?  cacheIdentity,TResult? Function()?  unexpectedNotModified,TResult? Function()?  cacheWrite,TResult? Function()?  closing,TResult? Function()?  stale,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  unsupported,TResult? Function()?  configuration,TResult? Function()?  timeout,TResult? Function( int? httpStatus)?  transport,TResult? Function( int status)?  http,TResult? Function()?  tooLarge,TResult? Function()?  protocol,TResult? Function()?  cacheIdentity,TResult? Function()?  unexpectedNotModified,TResult? Function()?  cacheWrite,TResult? Function()?  closing,}) {final _that = this;
 switch (_that) {
 case BridgeModelCatalogError_Unsupported() when unsupported != null:
 return unsupported();case BridgeModelCatalogError_Configuration() when configuration != null:
@@ -223,8 +218,7 @@ return protocol();case BridgeModelCatalogError_CacheIdentity() when cacheIdentit
 return cacheIdentity();case BridgeModelCatalogError_UnexpectedNotModified() when unexpectedNotModified != null:
 return unexpectedNotModified();case BridgeModelCatalogError_CacheWrite() when cacheWrite != null:
 return cacheWrite();case BridgeModelCatalogError_Closing() when closing != null:
-return closing();case BridgeModelCatalogError_Stale() when stale != null:
-return stale();case _:
+return closing();case _:
   return null;
 
 }
@@ -648,38 +642,6 @@ int get hashCode => runtimeType.hashCode;
 @override
 String toString() {
     return 'BridgeModelCatalogError.closing()';
-}
-
-
-}
-
-
-
-
-/// @nodoc
-
-
-class BridgeModelCatalogError_Stale extends BridgeModelCatalogError {
-  const BridgeModelCatalogError_Stale(): super._();
-
-
-
-
-
-
-
-@override
-bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeModelCatalogError_Stale);
-}
-
-
-@override
-int get hashCode => runtimeType.hashCode;
-
-@override
-String toString() {
-    return 'BridgeModelCatalogError.stale()';
 }
 
 

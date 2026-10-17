@@ -20,6 +20,7 @@ class ProviderModelReadout extends StatelessWidget {
     this.onAutoCompactChanged,
     this.onAutoCompactCommit,
     this.onAutoCompactInvalid,
+    this.onDelete,
   });
 
   final ProviderModelView model;
@@ -36,6 +37,7 @@ class ProviderModelReadout extends StatelessWidget {
   final ModelAutoCompactEdit? autoCompactEdit;
   final VoidCallback? onAutoCompactCommit;
   final VoidCallback? onAutoCompactInvalid;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -61,13 +63,28 @@ class ProviderModelReadout extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  model.displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.text.labelLarge?.copyWith(
-                    color: context.colors.onSurface,
-                  ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      model.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.text.labelLarge?.copyWith(
+                        color: context.colors.onSurface,
+                      ),
+                    ),
+                    _originBadge(context),
+                    if (_unverifiedOnline)
+                      Text(
+                        context.l10n.settingsUnverifiedOnlineModel,
+                        style: context.text.labelSmall?.copyWith(
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
                 ),
                 Text(
                   model.slug,
@@ -122,6 +139,17 @@ class ProviderModelReadout extends StatelessWidget {
               ],
             ),
           ),
+          if (onDelete != null) ...[
+            IconButton(
+              key: StudioDriverKeys.providerManualModelDelete(
+                providerId,
+                model.slug,
+              ),
+              tooltip: context.l10n.settingsRemoveManualModelConfirmTitle,
+              icon: const Icon(Icons.delete_outline),
+              onPressed: onDelete,
+            ),
+          ],
           if (price.isNotEmpty) ...[
             const SizedBox(width: 10),
             Tooltip(
@@ -207,5 +235,17 @@ class ProviderModelReadout extends StatelessWidget {
         child: content,
       ),
     );
+  }
+
+  bool get _unverifiedOnline =>
+      model.origin == ProviderModelOrigin.online && model.priceTiers.isEmpty;
+
+  Widget _originBadge(BuildContext context) {
+    final label = switch (model.origin) {
+      ProviderModelOrigin.online => context.l10n.settingsModelOriginOnline,
+      ProviderModelOrigin.bundled => context.l10n.settingsModelOriginBundled,
+      ProviderModelOrigin.manual => context.l10n.settingsModelOriginManual,
+    };
+    return Chip(visualDensity: VisualDensity.compact, label: Text(label));
   }
 }

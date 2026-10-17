@@ -122,7 +122,6 @@ pub enum StudioModelCatalogError {
     UnexpectedNotModified,
     CacheWrite,
     Closing,
-    Stale,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -134,10 +133,13 @@ pub enum StudioModelCatalogCacheWarning {
     Declaration,
 }
 
+/// 删除手动模型的配置命令。只接受 `additional_models` 或 Explicit 目录中的 slug。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RefreshModelCatalogRequest {
+pub struct RemoveProviderModelRequest {
+    pub expected_revision: u64,
     pub provider_id: String,
+    pub slug: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]

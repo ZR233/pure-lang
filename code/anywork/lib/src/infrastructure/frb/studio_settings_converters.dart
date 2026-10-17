@@ -136,9 +136,6 @@ ModelCatalogStatusView _modelCatalogStatusFromFrb(
     frb.BridgeModelCatalogError_Closing() => const ModelCatalogErrorView(
       ModelCatalogFailure.closing,
     ),
-    frb.BridgeModelCatalogError_Stale() => const ModelCatalogErrorView(
-      ModelCatalogFailure.stale,
-    ),
   },
   cacheWarning: switch (status.cacheWarning) {
     null => null,
@@ -156,9 +153,6 @@ ProviderSettingsView _providerSettingsFromFrb(
   frb.BridgeProviderSettingsDto value, {
   frb.BridgeModelCatalogProviderDto? catalog,
 }) {
-  final customModels = value.customModels
-      .map(_customModelSettingsFromFrb)
-      .toList();
   final connectionModes = {
     for (final mode in value.modelConnectionModes)
       mode.slug: mode.connectionMode,
@@ -194,7 +188,6 @@ ProviderSettingsView _providerSettingsFromFrb(
     usageQueryRevision: value.usageQueryRevision.toInt(),
     defaultModel: value.defaultModel,
     models: models,
-    customModels: customModels,
     modelConnectionModes: connectionModes,
     autoCompactLimits: autoCompactLimits,
     status: value.hasBearerToken || !value.credentialRequired
@@ -210,26 +203,6 @@ ProviderSettingsView _providerSettingsFromFrb(
     standaloneWebSearch: value.standaloneWebSearch ?? '',
     promptCacheDialect: value.promptCacheDialect,
     responsesProgrammaticToolCalling: value.responsesProgrammaticToolCalling,
-  );
-}
-
-ProviderModelView _customModelSettingsFromFrb(
-  frb.BridgeCustomModelSettingsDto value,
-) {
-  return ProviderModelView(
-    inputCapabilities: value.inputCapabilities
-        .map(_modelInputCapabilityFromFrb)
-        .toList(),
-    contextWindow: value.contextWindow.toInt(),
-    maxOutputTokens: value.maxOutputTokens.toInt(),
-    slug: value.slug,
-    displayName: value.displayName,
-    baseInstructions: value.baseInstructions,
-    reasoningEfforts: value.reasoningEfforts,
-    wireProtocol: value.wireProtocol,
-    supportedConnectionModes: value.supportedConnectionModes,
-    defaultConnectionMode: value.defaultConnectionMode,
-    connectionMode: value.defaultConnectionMode,
   );
 }
 

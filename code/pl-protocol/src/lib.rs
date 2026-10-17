@@ -92,8 +92,8 @@ pub use observed_state::{
 pub use permission::PermissionLevel;
 pub use provider_catalog::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
-    ModelInputCapabilityDto, ModelInputSourceDto, ModelModalityDto, ModelPriceTierDto,
-    ModelPricingDto, ModelReasoningDescriptor, ModelTransportDescriptor,
+    ModelInputCapabilityDto, ModelInputSourceDto, ModelModalityDto, ModelOriginDto,
+    ModelPriceTierDto, ModelPricingDto, ModelReasoningDescriptor, ModelTransportDescriptor,
     PROVIDER_CATALOG_SCHEMA_VERSION, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
     ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor,
     WebSearchProviderCapabilitiesDescriptor, WebSearchResolutionDescriptor,

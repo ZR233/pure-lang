@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import '../../../models.dart';
 import '../../../studio_ports.dart';
 import '../../../anywork_client.dart' show ReadModel;
@@ -10,7 +8,6 @@ class DirectoryCommands extends ReadModel<DirectoryCommandState> {
   DirectoryCommands(this._client) : super(const DirectoryCommandState());
   final AnyworkClient _client;
   final CommandLane _lane = CommandLane();
-  final Map<String, Future<void>> _catalogRefreshes = {};
 
   Future<void> close() {
     _lane.seal();
@@ -180,18 +177,6 @@ class DirectoryCommands extends ReadModel<DirectoryCommandState> {
     });
   }
 
-  Future<void> refreshModelCatalog(String providerId) => _lane.run(() async {
-    final existing = _catalogRefreshes[providerId];
-    if (existing != null) return existing;
-    final operation = _refreshModelCatalog(providerId);
-    _catalogRefreshes[providerId] = operation;
-    return operation.whenComplete(() {
-      if (identical(_catalogRefreshes[providerId], operation)) {
-        unawaited(_catalogRefreshes.remove(providerId));
-      }
-    });
-  });
-
   Future<void> refreshSkillsState() => _lane.run(() async {
     final projectId = _client.selection.state.selectedProjectId;
     if (projectId == null) return;
@@ -284,12 +269,6 @@ class DirectoryCommands extends ReadModel<DirectoryCommandState> {
     int faultGeneration,
   ) => _lane.run(() async {
     return _api.resumeThreadHistory(threadId, faultGeneration);
-  });
-
-  Future<void> _refreshModelCatalog(String providerId) => _lane.run(() async {
-    final snapshot = await _api.refreshModelCatalog(providerId);
-    if (_client.isClosed) return;
-    _client.settings.merge(snapshot);
   });
 
   Future<void> _applyMcp(Future<McpStateSnapshot> Function() command) =>

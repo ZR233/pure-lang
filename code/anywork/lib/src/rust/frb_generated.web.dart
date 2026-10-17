@@ -1071,6 +1071,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeModelModality dco_decode_bridge_model_modality(dynamic raw);
 
   @protected
+  BridgeModelOrigin dco_decode_bridge_model_origin(dynamic raw);
+
+  @protected
   BridgeModelPerformanceSample dco_decode_bridge_model_performance_sample(
     dynamic raw,
   );
@@ -3525,6 +3528,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeModelModality sse_decode_bridge_model_modality(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelOrigin sse_decode_bridge_model_origin(
     SseDeserializer deserializer,
   );
 
@@ -6490,6 +6498,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_model_modality(
     BridgeModelModality self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_origin(
+    BridgeModelOrigin self,
     SseSerializer serializer,
   );
 

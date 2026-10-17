@@ -88,6 +88,11 @@ ProviderModelView _providerModelFromCatalog(frb.BridgeModelDescriptor model) {
     ],
     defaultConnectionMode: model.transport.defaultConnectionMode,
     connectionMode: model.transport.defaultConnectionMode,
+    origin: switch (model.origin) {
+      frb.BridgeModelOrigin.bundled => ProviderModelOrigin.bundled,
+      frb.BridgeModelOrigin.online => ProviderModelOrigin.online,
+      frb.BridgeModelOrigin.manual => ProviderModelOrigin.manual,
+    },
   );
 }
 

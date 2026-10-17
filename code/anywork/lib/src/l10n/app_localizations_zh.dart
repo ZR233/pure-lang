@@ -1309,10 +1309,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsProviderConnectionTitle => '连接';
 
   @override
-  String get settingsProviderDefaultModelsTitle => '默认模型';
+  String get settingsProviderDefaultModelsTitle => '默认目录（尚未同步）';
 
   @override
-  String get settingsProviderCustomModelsTitle => '自定义模型';
+  String get settingsProviderCustomModelsTitle => '手动模型';
+
+  @override
+  String get settingsProviderOnlineModelsTitle => '在线模型';
 
   @override
   String get settingsNewProvider => '新建模型服务商';
@@ -1372,7 +1375,41 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsRemoveModel => '移除模型';
 
   @override
-  String get settingsNoCustomModels => '没有自定义模型';
+  String get settingsNoCustomModels => '没有手动模型';
+
+  @override
+  String get settingsNoOnlineModels => '没有在线模型';
+
+  @override
+  String get settingsNoBundledModels => '没有内置模型';
+
+  @override
+  String get settingsModelOriginOnline => '在线';
+
+  @override
+  String get settingsModelOriginBundled => '内置';
+
+  @override
+  String get settingsModelOriginManual => '手动';
+
+  @override
+  String get settingsUnverifiedOnlineModel => '未校验模型';
+
+  @override
+  String get settingsRemoveManualModelConfirmTitle => '删除此手动模型？';
+
+  @override
+  String get settingsRemoveManualModelConfirmBody =>
+      '此操作不可撤销。模型会离开有效目录，其连接方式和压缩阈值覆盖会被清除。历史调用、账单和会话费用保持不变。';
+
+  @override
+  String get settingsRemoveManualModelConfirmAction => '删除';
+
+  @override
+  String get settingsRemoveManualModelFailed => '无法删除此手动模型。';
+
+  @override
+  String get settingsManualModelSlugConflict => '该标识已存在于在线或内置目录中。';
 
   @override
   String settingsBundledModels(int count) {
@@ -2613,9 +2650,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get startupRecoveredNotice => '已备份无法恢复的数据，并恢复初始配置。备份位置：';
 
   @override
-  String get settingsModelCatalogRefresh => '刷新模型';
-
-  @override
   String get settingsModelCatalogDefault => '内置模型列表';
 
   @override
@@ -2628,13 +2662,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsModelCatalogChecked => '上次检查';
 
   @override
-  String get settingsModelCatalogFailed => '模型刷新失败，继续使用原有列表。';
+  String get settingsModelCatalogFailed => '启动时模型同步失败，继续使用当前列表。';
 
   @override
   String get settingsModelCatalogCacheWarning => '无法加载已保存的模型列表，当前使用内置列表。';
 
   @override
-  String get settingsModelCatalogEmpty => '供应商未返回任何模型。';
+  String get settingsModelCatalogEmpty => '当前没有可用模型。';
+
+  @override
+  String get settingsModelCatalogRestartHint => '重启应用可重新同步。';
 
   @override
   String get timelineActivityTitle => '思考与工具';

@@ -398,9 +398,9 @@ abstract final class StudioDriverState {
               'pricingEnabled': provider.pricingEnabled,
               'hasBearerToken': provider.hasBearerToken,
               'status': provider.status,
-              'models': [for (final model in provider.allModels) model.slug],
+              'models': [for (final model in provider.models) model.slug],
               'modelDetails': [
-                for (final model in provider.allModels)
+                for (final model in provider.models)
                   {
                     'slug': model.slug,
                     'contextWindow': model.contextWindow,
@@ -421,7 +421,7 @@ abstract final class StudioDriverState {
               // 压缩阈值四层视图：slug → {default, override, effective, safe}。
               // 缺失值保持 null，便于 Driver 断言未知容量与覆盖归一化。
               'autoCompactLimits': [
-                for (final model in provider.allModels)
+                for (final model in provider.models)
                   {
                     'slug': model.slug,
                     'default': provider.autoCompactLimitFor(model).defaultLimit,
@@ -758,7 +758,7 @@ abstract final class StudioDriverState {
 
   static List<String> _modelCapabilities(AgentWorkspaceView workspace) {
     for (final provider in workspace.providers) {
-      for (final model in provider.allModels) {
+      for (final model in provider.models) {
         if (model.slug == workspace.runtime.model) {
           return [
             for (final capability in model.inputCapabilities)
@@ -772,7 +772,7 @@ abstract final class StudioDriverState {
 
   static Map<String, Object?>? _modelProvider(AgentWorkspaceView workspace) {
     for (final provider in workspace.providers) {
-      if (provider.allModels.any(
+      if (provider.models.any(
         (model) => model.slug == workspace.runtime.model,
       )) {
         return {

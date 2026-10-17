@@ -61,6 +61,7 @@ const demoProviderCatalogFixture = ProviderCatalogView(
         supportedConnectionModes: ['http'],
         defaultConnectionMode: 'http',
         connectionMode: 'http',
+        origin: ProviderModelOrigin.bundled,
       ),
       ProviderModelView(
         slug: 'future-text',
@@ -79,6 +80,7 @@ const demoProviderCatalogFixture = ProviderCatalogView(
         supportedConnectionModes: ['http'],
         defaultConnectionMode: 'http',
         connectionMode: 'http',
+        origin: ProviderModelOrigin.bundled,
       ),
       ProviderModelView(
         slug: 'future-vision',
@@ -104,6 +106,7 @@ const demoProviderCatalogFixture = ProviderCatalogView(
         supportedConnectionModes: ['http'],
         defaultConnectionMode: 'http',
         connectionMode: 'http',
+        origin: ProviderModelOrigin.bundled,
       ),
     ],
   },
@@ -141,11 +144,11 @@ List<ProviderSettingsView> _providersFromCommands(
             reasoningEfforts: const [],
             contextWindow: model.contextWindow,
             maxOutputTokens: model.maxOutputTokens,
-
             wireProtocol: model.wireProtocol,
             supportedConnectionModes: const ['http'],
             defaultConnectionMode: 'http',
             connectionMode: 'http',
+            origin: ProviderModelOrigin.manual,
           ),
         )
         .where((model) => model.slug.isNotEmpty)
@@ -161,12 +164,20 @@ List<ProviderSettingsView> _providersFromCommands(
           connectionMode:
               connectionModes[model.slug] ?? model.defaultConnectionMode,
         );
-    final defaultModels = catalog
-        .modelsFor(template.modelCatalogId)
+    final previousProvider = previous
+        .where((item) => item.id == (provider.originalId ?? provider.id))
+        .firstOrNull;
+    final observed = [
+      for (final model
+          in previousProvider?.models ?? const <ProviderModelView>[])
+        if (model.origin != ProviderModelOrigin.manual) model,
+    ];
+    final catalogModels = catalog.modelsFor(template.modelCatalogId);
+    final observedModels = (observed.isNotEmpty ? observed : catalogModels)
         .map(withCurrentConnection)
         .toList();
     final models = [
-      ...defaultModels,
+      ...observedModels,
       ...customModels.map(withCurrentConnection),
     ];
     final autoCompactOverrides = {
@@ -180,9 +191,6 @@ List<ProviderSettingsView> _providersFromCommands(
           override: autoCompactOverrides[model.slug],
         ),
     };
-    final previousProvider = previous
-        .where((item) => item.id == (provider.originalId ?? provider.id))
-        .firstOrNull;
     final hasToken = switch (provider.secret.action) {
       ProviderSecretAction.preserve =>
         previousProvider?.hasBearerToken ?? false,
@@ -202,8 +210,6 @@ List<ProviderSettingsView> _providersFromCommands(
           ? template.suggestedModel
           : provider.defaultModel,
       models: models,
-      defaultModels: defaultModels,
-      customModels: customModels.map(withCurrentConnection).toList(),
       autoCompactLimits: autoCompactLimits,
       status: hasToken || template.credentialEnv.isEmpty
           ? 'ready'

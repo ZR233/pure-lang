@@ -317,7 +317,7 @@ class DemoStudioTransport extends StudioTransport
 
   SettingsStateSnapshot _demoSettingsState() {
     final defaultProvider = _demoDefaultProvider();
-    final defaultModel = defaultProvider.allModels
+    final defaultModel = defaultProvider.models
         .where((model) => model.slug == defaultProvider.defaultModel)
         .firstOrNull;
     final effort = defaultModel?.defaultReasoningEffort;
@@ -1984,7 +1984,7 @@ class DemoStudioTransport extends StudioTransport
     }
     final selected = current.providers
         .firstWhere((provider) => provider.id == providerId)
-        .allModels
+        .models
         .firstWhere((candidate) => candidate.slug == model);
     final selectedEffort = selected.reasoningEfforts.contains(effort)
         ? effort
@@ -3001,11 +3001,6 @@ class DemoStudioTransport extends StudioTransport
   }
 
   @override
-  Future<SettingsStateSnapshot> refreshModelCatalog(String providerId) async {
-    throw UnsupportedError('Model discovery is unavailable in demo mode');
-  }
-
-  @override
   Future<SettingsCommandReply> saveRuntimePermissionMode(
     int expectedSettingsRevision,
     PermissionMode mode, {
@@ -3056,6 +3051,35 @@ class DemoStudioTransport extends StudioTransport
     _defaultProviderId = providerId;
     _settingsRevision += 1;
     return _demoSettingsReply(operationId, before);
+  }
+
+  @override
+  Future<SettingsCommandReply> removeProviderModel(
+    int expectedSettingsRevision,
+    String providerId,
+    String slug,
+  ) async {
+    final before = _demoSettingsState();
+    _checkSettingsRevision(expectedSettingsRevision);
+    if (slug.trim().isEmpty) {
+      throw StateError('Model slug must not be empty');
+    }
+    final providers = [
+      for (final provider in before.providers)
+        if (provider.id == providerId)
+          _demoRemoveManualModel(provider, slug)
+        else
+          provider,
+    ];
+    if (!providers.any((provider) => provider.id == providerId)) {
+      throw StateError('unknown demo provider: $providerId');
+    }
+    _providers = providers;
+    _settingsRevision += 1;
+    return _demoSettingsReply(
+      OperationId('remove-provider-model:$providerId:$slug'),
+      before,
+    );
   }
 
   @override
@@ -3258,6 +3282,33 @@ class DemoStudioTransport extends StudioTransport
     }
   }
 
+  ProviderSettingsView _demoRemoveManualModel(
+    ProviderSettingsView provider,
+    String slug,
+  ) {
+    final target = provider.models
+        .where((model) => model.slug == slug)
+        .firstOrNull;
+    if (target == null || target.origin != ProviderModelOrigin.manual) {
+      throw StateError('unknown demo manual model: ${provider.id} / $slug');
+    }
+    final models = [
+      for (final model in provider.models)
+        if (model.slug != slug) model,
+    ];
+    final connections = {...provider.modelConnectionModes}..remove(slug);
+    final limits = {...provider.autoCompactLimits}..remove(slug);
+    return provider.copyWith(
+      models: models,
+      modelConnectionModes: connections,
+      autoCompactLimits: limits,
+      modelCount: '${models.length}',
+      usageLabel: models.isEmpty
+          ? provider.defaultModel
+          : '${models.length} models',
+    );
+  }
+
   ProviderModelView _findDemoModel(
     List<ProviderSettingsView> providers,
     String providerId,
@@ -3269,7 +3320,7 @@ class DemoStudioTransport extends StudioTransport
     if (provider == null) {
       throw StateError('unknown demo provider: $providerId');
     }
-    final selected = provider.allModels
+    final selected = provider.models
         .where((candidate) => candidate.slug == model)
         .firstOrNull;
     if (selected == null) {

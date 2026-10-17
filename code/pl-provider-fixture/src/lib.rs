@@ -26,6 +26,7 @@ use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 mod context_replay_recovery;
+mod model_catalog;
 mod provider_usage;
 mod web_search;
 pub use context_replay_recovery::{
@@ -55,6 +56,16 @@ pub use lsp_stdio::{LspStdioOptions, run_lsp_stdio};
 
 mod tool_peer;
 pub use tool_peer::{ToolPeerOptions, run_tool_peer};
+
+pub use model_catalog::kick_hang_probes as model_catalog_kick_hang_probes;
+pub use model_catalog::self_check as model_catalog_self_check;
+pub use model_catalog::{
+    CONTROL_FILE_NAME as MODEL_CATALOG_CONTROL_FILE_NAME,
+    DEEPSEEK_PATH as MODEL_CATALOG_DEEPSEEK_PATH, MIMO_DISCOVERY_EXCLUDED_SLUGS,
+    MIMO_PATH as MODEL_CATALOG_MIMO_PATH, ModelCatalogControl, ModelCatalogProviderControl,
+    ModelCatalogRequestReport, OPENAI_PATH as MODEL_CATALOG_OPENAI_PATH,
+    OPENAI_SECOND_PATH as MODEL_CATALOG_OPENAI_SECOND_PATH,
+};
 
 /// The GUI script accepts exactly this user prompt for its sole completion step.
 pub const GUI_PROMPT: &str = "Reply with exactly: fixture ready";
@@ -1129,6 +1140,7 @@ pub struct FixtureReport {
     pub expected_steps: usize,
     pub remaining_optional: bool,
     pub stress: Option<StressReport>,
+    pub catalog_hits: model_catalog::ModelCatalogRequestReport,
     expected_stress_events: Option<usize>,
 }
 
@@ -1381,6 +1393,8 @@ struct AppState {
     stress: Arc<Mutex<StressProgress>>,
     web_search: Arc<Mutex<web_search::WebSearchState>>,
     provider_usage: provider_usage::ProviderUsageGates,
+    model_catalog: Option<Arc<model_catalog::ModelCatalogControl>>,
+    model_catalog_hits: model_catalog::ModelCatalogHits,
 }
 
 /// Optional fixture behaviours layered on top of the strict step script.
@@ -1391,6 +1405,10 @@ pub struct FixtureOptions {
     pub web_search: Option<WebSearchOptions>,
     /// Serve quota, gated MCP and loopback control endpoints for `provider-usage`.
     pub provider_usage: bool,
+    /// Startup-cached OpenAI-compatible `/models` inventories for catalog discovery.
+    pub model_catalog: Option<ModelCatalogControl>,
+    /// Bind the listener to this loopback port instead of an ephemeral one.
+    pub bind_port: Option<u16>,
 }
 
 /// A listening fixture. Drop aborts the listener; `finish` additionally verifies the script.
@@ -1408,10 +1426,17 @@ impl FixtureServer {
 
     /// Starts the fixture with optional extra services enabled.
     pub async fn start_with_options(steps: Vec<Step>, options: FixtureOptions) -> Result<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let bind = options.bind_port.map_or_else(
+            || "127.0.0.1:0".to_owned(),
+            |port| format!("127.0.0.1:{port}"),
+        );
+        let listener = TcpListener::bind(&bind)
+            .await
+            .with_context(|| format!("fixture could not bind {bind}"))?;
         let address = listener.local_addr()?;
         let web_search_enabled = options.web_search.is_some();
         let provider_usage_enabled = options.provider_usage;
+        let model_catalog_enabled = options.model_catalog.is_some();
         let state = AppState {
             script: Arc::new(Mutex::new(ScriptState {
                 steps,
@@ -1423,6 +1448,8 @@ impl FixtureServer {
                 options.web_search.unwrap_or_default(),
             ))),
             provider_usage: provider_usage::ProviderUsageGates::new(),
+            model_catalog: options.model_catalog.map(Arc::new),
+            model_catalog_hits: model_catalog::ModelCatalogHits::default(),
         };
         let responses_route = if web_search_enabled {
             post(web_search::responses)
@@ -1501,6 +1528,58 @@ impl FixtureServer {
         } else {
             app
         };
+        let app = if model_catalog_enabled {
+            app.route(
+                model_catalog::OPENAI_PATH,
+                get(model_catalog::openai_models).fallback(unexpected_route),
+            )
+            .route(
+                model_catalog::OPENAI_SECOND_PATH,
+                get(model_catalog::openai_second_models).fallback(unexpected_route),
+            )
+            .route(
+                model_catalog::DEEPSEEK_PATH,
+                get(model_catalog::deepseek_models).fallback(unexpected_route),
+            )
+            .route(
+                model_catalog::MIMO_PATH,
+                get(model_catalog::mimo_models).fallback(unexpected_route),
+            )
+            .route(
+                "/v1/openai/responses",
+                post(handle).get(websocket_route).fallback(unexpected_route),
+            )
+            .route(
+                "/v1/openai/chat/completions",
+                post(handle).fallback(unexpected_route),
+            )
+            .route(
+                "/v1/openai-second/responses",
+                post(handle).get(websocket_route).fallback(unexpected_route),
+            )
+            .route(
+                "/v1/openai-second/chat/completions",
+                post(handle).fallback(unexpected_route),
+            )
+            .route(
+                "/v1/deepseek/responses",
+                post(handle).fallback(unexpected_route),
+            )
+            .route(
+                "/v1/deepseek/chat/completions",
+                post(handle).fallback(unexpected_route),
+            )
+            .route(
+                "/v1/mimo/responses",
+                post(handle).fallback(unexpected_route),
+            )
+            .route(
+                "/v1/mimo/chat/completions",
+                post(handle).fallback(unexpected_route),
+            )
+        } else {
+            app
+        };
         let app = app.fallback(unexpected_route).with_state(state.clone());
         let (shutdown, receiver) = oneshot::channel();
         let task = tokio::spawn(async move {
@@ -1526,6 +1605,11 @@ impl FixtureServer {
     }
     pub fn ws_url(&self) -> String {
         format!("ws://{}/v1", self.address)
+    }
+
+    /// Catalog GET evidence, independent of the strict conversation script.
+    pub fn model_catalog_hits(&self) -> model_catalog::ModelCatalogRequestReport {
+        self.state.model_catalog_hits.snapshot()
     }
 
     pub fn recorded(&self) -> Vec<RecordedRequest> {
@@ -1573,6 +1657,7 @@ impl FixtureServer {
         if let Some(task) = self.task.take() {
             task.await.context("fixture listener task failed")??;
         }
+        let catalog_hits = self.state.model_catalog_hits.snapshot();
         let state = self.state.script.lock().expect("fixture state poisoned");
         let stress = self
             .state
@@ -1584,6 +1669,7 @@ impl FixtureServer {
             consumed_steps: state.cursor,
             expected_steps: state.steps.len(),
             remaining_optional: state.steps[state.cursor..].iter().all(|step| step.optional),
+            catalog_hits,
             stress: stress.started.map(|started| StressReport {
                 emitted_events: stress.emitted,
                 emitted_bytes: stress.emitted_bytes,
@@ -3050,7 +3136,7 @@ pub fn responses_tool_calls(id: &str, model: &str, calls: &[RealtimeToolCall<'_>
 }
 
 async fn handle(State(state): State<AppState>, request: axum::extract::Request) -> Response {
-    let path = request.uri().path().to_owned();
+    let path = canonical_script_path(request.uri().path());
     let method = request.method().as_str().to_owned();
     let bytes = match axum::body::to_bytes(request.into_body(), 1024 * 1024).await {
         Ok(bytes) => bytes,
@@ -3280,6 +3366,17 @@ fn record_rejected(state: &AppState, method: String, path: String, body: Value) 
             accepted: false,
             diagnostic: None,
         });
+}
+
+/// Strips a catalog provider suffix so prefixed inference routes reuse `handle`.
+fn canonical_script_path(path: &str) -> String {
+    for suffix in model_catalog::PROVIDER_SUFFIXES {
+        let prefix = format!("/v1/{suffix}/");
+        if let Some(rest) = path.strip_prefix(&prefix) {
+            return format!("/v1/{rest}");
+        }
+    }
+    path.to_owned()
 }
 
 fn match_step(state: &AppState, method: &str, path: &str, body: &Value) -> Result<Reply, ()> {

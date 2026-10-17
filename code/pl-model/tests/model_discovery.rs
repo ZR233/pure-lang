@@ -153,7 +153,7 @@ async fn current_endpoint_prefix_query_auth_and_safe_identity_are_used() {
     assert_eq!(model.pricing, ModelPricing::Unknown);
     config.set_model_catalog_overlay(models.clone()).unwrap();
     let descriptor: pl_model::config::ModelDescriptor =
-        model_descriptor(&config.effective_models().unwrap()[0]);
+        model_descriptor(&config.effective_catalog().unwrap()[0]);
     assert_eq!(descriptor.context_window, None);
     assert_eq!(descriptor.max_context_window, None);
     assert_eq!(descriptor.max_output_tokens, None);
@@ -196,8 +196,11 @@ async fn current_endpoint_prefix_query_auth_and_safe_identity_are_used() {
         ModelCatalogQuery::for_provider(&explicit),
         Err(ModelCatalogQueryError::Unsupported)
     ));
-    let mut unsupported = config.clone();
-    unsupported.adapter = ProviderAdapterKind::OpenAiCompatible;
+    let unsupported = ProviderConfig::from_bundled_catalog(
+        ProviderEndpoint::zhipu(None),
+        ModelCatalogId::new("zhipu").unwrap(),
+        Vec::new(),
+    );
     assert!(matches!(
         ModelCatalogQuery::for_provider(&unsupported),
         Err(ModelCatalogQueryError::Unsupported)
@@ -256,7 +259,7 @@ async fn rich_envelopes_drive_real_inference_wire_and_unknown_pricing_preserves_
         assert!(model.base_instructions.is_empty());
         let mut config = provider("http://127.0.0.1:1", adapter);
         config.set_model_catalog_overlay(models).unwrap();
-        let descriptor = model_descriptor(&config.effective_models().unwrap()[0]);
+        let descriptor = model_descriptor(&config.effective_catalog().unwrap()[0]);
         assert_eq!(descriptor.context_window, Some(64000));
         let preset = (adapter == ProviderAdapterKind::OpenAi).then_some(12_000);
         assert_eq!(descriptor.auto_compact_token_limit, preset);
@@ -485,7 +488,11 @@ async fn gpt61_id_only_inventory_and_old_fallback_cache_enable_real_image_input(
     assert_eq!(model.description, description);
     assert_eq!(model.context_window, Some(1_050_000));
     assert_eq!(
-        model_descriptor(&model).auto_compact_token_limit,
+        model_descriptor(&pl_model::config::ProviderModelEntry {
+            model: model.clone(),
+            origin: pl_model::config::ProviderModelOrigin::Online,
+        })
+        .auto_compact_token_limit,
         Some(475_000)
     );
     assert_eq!(model.resolved_auto_compact_limit(), Some(475_000));
@@ -494,7 +501,14 @@ async fn gpt61_id_only_inventory_and_old_fallback_cache_enable_real_image_input(
         model.supported_efforts(),
         ["low", "medium", "high", "xhigh", "max"]
     );
-    assert!(model_descriptor(&model).pricing.is_some());
+    assert!(
+        model_descriptor(&pl_model::config::ProviderModelEntry {
+            model: model.clone(),
+            origin: pl_model::config::ProviderModelOrigin::Online,
+        })
+        .pricing
+        .is_some()
+    );
     let explicit = updated(query.execute(None).await.unwrap());
     config.set_model_catalog_overlay(explicit).unwrap();
     let explicit = config.effective_models().unwrap().remove(0);
@@ -619,7 +633,7 @@ async fn overlay_replaces_inventory_manual_wins_and_prices_join_only_local_exact
     {
         additional_models.push(known.clone());
     }
-    assert!(config.declared_models().is_err());
+    assert!(config.effective_catalog().is_err());
     let empty = discover(json!({"data":[]}), ProviderAdapterKind::DeepSeek).await;
     assert!(empty.is_empty());
     let mut fresh = provider("http://127.0.0.1:1", ProviderAdapterKind::DeepSeek);
@@ -707,7 +721,7 @@ async fn availability_preserves_removed_choice_without_weakening_strict_edits_or
         .set_model_catalog_overlay(observed)
         .unwrap();
     connection_provider.validate_declarations(&id).unwrap();
-    let display = model_descriptor(&connection_provider.effective_models().unwrap()[0]);
+    let display = model_descriptor(&connection_provider.effective_catalog().unwrap()[0]);
     assert_eq!(display.context_window, Some(64000));
     assert_eq!(display.transport.default_connection_mode, "web_socket");
     assert_eq!(display.transport.connection_modes.len(), 1);
@@ -796,7 +810,15 @@ async fn availability_preserves_removed_choice_without_weakening_strict_edits_or
     assert!(explicit.effective_models().is_err());
     assert!(explicit.validate_declarations(&id).is_err());
     let mut non_discovery = connection_config.clone();
-    non_discovery.providers.get_mut(&id).unwrap().adapter = ProviderAdapterKind::OpenAiCompatible;
+    let provider = non_discovery.providers.get_mut(&id).unwrap();
+    let connection_overrides = provider.connection_overrides().clone();
+    let auto_compact_overrides = provider.auto_compact_overrides().clone();
+    provider.catalog = pl_model::config::ProviderModelCatalogConfig::Bundled {
+        catalog: ModelCatalogId::new("zhipu").unwrap(),
+        additional_models: Vec::new(),
+        connection_overrides,
+        auto_compact_overrides,
+    };
     assert!(non_discovery.validate_declarations().is_err());
     let mut bad_profile = manual_config.clone();
     if let pl_model::config::ProviderModelCatalogConfig::Bundled {
@@ -1063,7 +1085,7 @@ async fn discovery_profile_validity_is_independent_of_connection_mode_order() {
     let inherited = updated(query.execute(Some(&cache)).await.unwrap());
     assert_eq!(inherited[0].binding.transport, model.binding.transport);
     config.set_model_catalog_overlay(inherited.clone()).unwrap();
-    let descriptor = model_descriptor(&config.effective_models().unwrap()[0]);
+    let descriptor = model_descriptor(&config.effective_catalog().unwrap()[0]);
     assert_eq!(descriptor.transport.connection_modes.len(), 1);
     assert_eq!(descriptor.transport.connection_modes[0].id, "web_socket");
     for modes in [
@@ -1086,7 +1108,7 @@ async fn discovery_profile_validity_is_independent_of_connection_mode_order() {
             ModelCatalogQueryError::Protocol
         );
     }
-    assert_eq!(config.declared_models().unwrap(), inherited);
+    assert_eq!(config.effective_models().unwrap(), inherited);
     let requests = server.finish().await;
     assert_eq!(requests.len(), 3);
     assert!(

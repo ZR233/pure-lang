@@ -95,7 +95,7 @@ fn overrides_clamp_restore_and_remain_isolated_without_mutating_model_presets() 
     first
         .set_model_auto_compact_override("first", Some(500_000))
         .unwrap();
-    let declared = first.declared_models().unwrap();
+    let declared = first.effective_models().unwrap();
     assert_eq!(declared[0].auto_compact_token_limit, Some(150_000));
     assert_eq!(
         first.resolved_auto_compact_limit(&declared[0]),
