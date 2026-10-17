@@ -5,6 +5,17 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [6.19.0](https://github.com/ZR233/anywork/compare/v6.18.0...v6.19.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **studio:** 用官方 Search & Fetch 接口重构 DeepSeek 联网搜索
+
+### Refactoring
+
+* **studio:** 用官方 Search & Fetch 接口重构 DeepSeek 联网搜索 ([55e22f9](https://github.com/ZR233/anywork/commit/55e22f9da51ffccf7496a6519aa86a2c71823f66))
+
 ## [6.18.0](https://github.com/ZR233/anywork/compare/v6.17.0...v6.18.0) (2026-10-17)
 
 
